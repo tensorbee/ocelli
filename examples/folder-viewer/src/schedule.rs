@@ -18,7 +18,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use super::{Workspace, bump_peak, lock_mutex, workspace_bytes};
+use super::{GreyClaim, GreyGate, ReturnedGrey, Workspace, bump_peak, lock_mutex, workspace_bytes};
 
 /// Workers. This is `P` in the resident formula.
 const WORKERS: usize = 2;
@@ -54,6 +54,8 @@ struct Inner {
     body_peak: AtomicUsize,
     accounted: Vec<AtomicUsize>,
     threads: Mutex<HashSet<ThreadId>>,
+    /// The grey cap. Each worker's returned grey buffer counts inside it.
+    gate: Arc<GreyGate>,
 }
 
 /// The two workers and the threads they own.
@@ -77,7 +79,7 @@ pub(crate) struct DecodePermit {
 }
 
 impl Scheduler {
-    pub(super) fn start() -> Self {
+    pub(super) fn start(gate: Arc<GreyGate>) -> Self {
         let mut txs = Vec::with_capacity(WORKERS);
         let mut rxs = Vec::with_capacity(WORKERS);
         let mut retire_txs = Vec::with_capacity(WORKERS);
@@ -102,6 +104,7 @@ impl Scheduler {
             body_peak: AtomicUsize::new(0),
             accounted: (0..WORKERS).map(|_| AtomicUsize::new(0)).collect(),
             threads: Mutex::new(HashSet::new()),
+            gate,
         });
         let mut joins = Vec::with_capacity(WORKERS);
         // `start` returns once both workers are registered, so a census read
@@ -200,6 +203,47 @@ impl Scheduler {
     }
 }
 
+#[cfg(test)]
+impl Scheduler {
+    /// Stop both worker threads without marking the scheduler shut, so a
+    /// slot is still granted and the job sent to it is dropped unsent.
+    pub(super) fn stop_workers(&self) {
+        for tx in &self.inner.txs {
+            let _ = tx.send(Job::Stop);
+        }
+        let joins = {
+            let mut guard = lock_mutex(&self.joins);
+            std::mem::take(&mut *guard)
+        };
+        for handle in joins {
+            let _ = handle.join();
+        }
+    }
+
+    /// Mark the scheduler shut, so every later slot request is refused.
+    pub(super) fn shut(&self) {
+        self.inner.shut.store(true, Ordering::Release);
+        self.inner.body_ready.notify_all();
+        self.inner.decode_ready.notify_all();
+    }
+
+    /// Give `worker` a returned grey buffer of `bytes`, counted by the gate.
+    pub(super) fn park_grey(&self, worker: usize, bytes: usize) -> bool {
+        let gate = Arc::clone(&self.inner.gate);
+        call_worker(&self.inner, worker, move || {
+            let old = with_decode_workspace(|workspace| std::mem::take(&mut workspace.grey));
+            gate.release_returned(old.capacity());
+            drop(old);
+            if !gate.count_returned(bytes) {
+                return false;
+            }
+            with_decode_workspace(|workspace| workspace.grey = Vec::with_capacity(bytes));
+            true
+        })
+        .unwrap_or(false)
+    }
+}
+
 impl Drop for Scheduler {
     fn drop(&mut self) {
         self.inner.shut.store(true, Ordering::Release);
@@ -262,42 +306,79 @@ impl DecodePermit {
     ///
     /// A decode permit ends with the decode. The grey bytes are ready, so
     /// the slot is free again before the reply is written, and a client that
-    /// stops reading holds no permit.
-    pub(crate) fn finish(self) -> GreyHome {
+    /// stops reading holds no permit. `claim` is the reply's grey under the
+    /// cap, and it travels with the reply until the write.
+    pub(crate) fn finish(self, claim: GreyClaim) -> GreyHome {
         let home = GreyHome {
             inner: Arc::clone(&self.inner),
             worker: self.worker,
+            claim,
         };
         drop(self);
         home
     }
 }
 
-/// The worker that allocated a finished decode's grey reply.
+/// The worker that allocated a finished decode's grey reply, and the reply's
+/// grey bytes under the cap.
 ///
-/// The permit has ended. This value only carries the worker, so the reply
-/// can be returned after it is written.
+/// The permit has ended. Dropping this value unused releases the claim.
 pub(crate) struct GreyHome {
     inner: Arc<Inner>,
     worker: usize,
+    claim: GreyClaim,
 }
 
 impl GreyHome {
-    /// Put the grey reply back on the worker that allocated it.
+    /// Put the written grey reply back on the worker that allocated it.
     ///
     /// The job is queued and not awaited, so the connection thread never
-    /// blocks on a worker that is busy decoding. If that worker is gone the
-    /// grey is dropped here, as [`retire_bytes`] does for a dead worker.
+    /// blocks on a worker that is busy decoding. When no request waits for
+    /// grey room the worker keeps the buffer as its returned grey, in place
+    /// of any it held, and the count moves with it. When one waits the
+    /// worker frees the buffer and the claim is released after the free. If
+    /// the worker is gone the job is dropped unsent, the grey is freed here
+    /// as [`retire_bytes`] does for a dead worker, and its count is released.
     pub(crate) fn restore_grey(self, grey: Vec<u8>) {
+        let Self {
+            inner,
+            worker,
+            claim,
+        } = self;
         let capacity = grey.capacity();
-        // The closure owns the grey. If the worker is gone the job is
-        // dropped unsent and the grey is dropped with it.
-        let _ = post_job(&self.inner, self.worker, move || {
-            with_decode_workspace(|workspace| workspace.grey = grey);
+        let returned = inner.gate.return_reply(claim);
+        let gate = Arc::clone(&inner.gate);
+        let _ = post_job(&inner, worker, move || {
             reattach_grey(capacity);
+            match returned {
+                ReturnedGrey::Keep(kept) => {
+                    let old = with_decode_workspace(|workspace| {
+                        std::mem::replace(&mut workspace.grey, grey)
+                    });
+                    kept.place();
+                    let old_bytes = old.capacity();
+                    drop(old);
+                    gate.release_returned(old_bytes);
+                }
+                ReturnedGrey::Free(claim) => {
+                    drop(grey);
+                    drop(claim);
+                }
+            }
         });
-        drop(self);
     }
+}
+
+/// Free this worker's returned grey buffer while a request waits for room.
+fn trim_returned(gate: &GreyGate) -> bool {
+    if !gate.has_waiters() {
+        return false;
+    }
+    let grey = with_decode_workspace(|workspace| std::mem::take(&mut workspace.grey));
+    let bytes = grey.capacity();
+    drop(grey);
+    gate.release_returned(bytes);
+    bytes > 0
 }
 
 impl Drop for DecodePermit {
@@ -411,15 +492,26 @@ fn worker_loop(
         drain_retired(&retire_rx);
         match rx.recv_timeout(WAIT) {
             Ok(Job::Stop) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Timeout) => {
+                if trim_returned(&inner.gate) {
+                    publish(inner, index);
+                }
+            }
             Ok(Job::Run(job)) => {
                 job();
+                trim_returned(&inner.gate);
                 publish(inner, index);
                 drain_retired(&retire_rx);
             }
         }
     }
     drain_retired(&retire_rx);
+    // The thread's workspace goes with the thread, so its returned grey
+    // stops counting here.
+    let grey = with_decode_workspace(|workspace| std::mem::take(&mut workspace.grey));
+    let bytes = grey.capacity();
+    drop(grey);
+    inner.gate.release_returned(bytes);
 }
 
 fn drain_retired(rx: &Receiver<Vec<u8>>) {
@@ -465,9 +557,13 @@ pub(crate) fn retire_bytes(tx: &Sender<Vec<u8>>, bytes: Vec<u8>) {
 mod tests {
     use super::*;
 
+    fn test_gate() -> Arc<GreyGate> {
+        Arc::new(GreyGate::new(super::super::GREY_CAP))
+    }
+
     #[test]
     fn four_body_slots_and_two_workers() -> Result<(), String> {
-        let scheduler = Scheduler::start();
+        let scheduler = Scheduler::start(test_gate());
         let mut held = Vec::new();
         for _ in 0..BODY_SLOTS {
             held.push(
@@ -531,7 +627,7 @@ mod tests {
 
     #[test]
     fn decodes_stay_on_the_home_worker() -> Result<(), String> {
-        let scheduler = Scheduler::start();
+        let scheduler = Scheduler::start(test_gate());
         let first = scheduler
             .acquire_decode(Some(0), &mut || true)
             .ok_or("worker 0 was not granted")?;
@@ -586,7 +682,7 @@ mod tests {
 
     #[test]
     fn a_busy_home_worker_hands_the_job_to_the_other_worker() -> Result<(), String> {
-        let scheduler = Scheduler::start();
+        let scheduler = Scheduler::start(test_gate());
         let first = scheduler
             .acquire_decode(Some(0), &mut || true)
             .ok_or("worker 0 was not granted")?;
@@ -626,7 +722,7 @@ mod tests {
     /// no home sleeps a whole `WAIT` beside a free slot.
     #[test]
     fn a_returned_slot_reaches_a_waiter_that_accepts_it() -> Result<(), String> {
-        let scheduler = Scheduler::start();
+        let scheduler = Scheduler::start(test_gate());
         let on_zero = scheduler
             .acquire_decode(Some(0), &mut || true)
             .ok_or("worker 0 was not granted")?;
@@ -686,7 +782,7 @@ mod tests {
     /// Shutdown wakes a waiter that would otherwise wait for its home.
     #[test]
     fn a_waiting_decode_ends_at_shutdown() -> Result<(), String> {
-        let scheduler = Scheduler::start();
+        let scheduler = Scheduler::start(test_gate());
         let on_zero = scheduler
             .acquire_decode(Some(0), &mut || true)
             .ok_or("worker 0 was not granted")?;
@@ -709,6 +805,36 @@ mod tests {
         }
         drop(on_zero);
         drop(on_one);
+        Ok(())
+    }
+
+    /// A written reply kept by a worker that already keeps a buffer replaces
+    /// it, and the replaced buffer stops counting.
+    #[test]
+    fn a_kept_reply_replaces_the_buffer_its_worker_kept() -> Result<(), String> {
+        let gate = test_gate();
+        let scheduler = Scheduler::start(Arc::clone(&gate));
+        if !scheduler.park_grey(0, 1000) {
+            return Err("the worker kept no grey".to_owned());
+        }
+        let permit = scheduler
+            .acquire_decode(Some(0), &mut || true)
+            .ok_or("no decode slot")?;
+        let claim = gate.reserve(5000).ok_or("no grey room")?;
+        let home = permit.finish(claim);
+        home.restore_grey(Vec::with_capacity(5000));
+        let started = std::time::Instant::now();
+        while gate.held() != (0, 5000) {
+            if started.elapsed() > Duration::from_secs(5) {
+                return Err(format!("the gate held {:?}", gate.held()));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(scheduler);
+        // The workers are gone, and their kept buffers with them.
+        if gate.held() != (0, 0) {
+            return Err(format!("after shutdown the gate held {:?}", gate.held()));
+        }
         Ok(())
     }
 }

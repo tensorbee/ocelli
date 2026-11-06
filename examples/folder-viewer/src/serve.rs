@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use ocelli_pixel::VoiFunction;
 
 use crate::held::{
-    BodyPermit, CacheHandle, CachedFrame, FileId, GreyGate, GreyHome, PreviewSource, Viewer,
-    ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
+    BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyRefusal,
+    PreviewSource, Viewer, ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
 };
 use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
@@ -170,7 +170,7 @@ fn start_census_log(viewer: &Arc<Viewer>) {
     std::thread::spawn(move || {
         let started = Instant::now();
         let _ = file.write_all(
-            b"ms decode_threads peak_decodes decodes_now body_threads peak_bodies bodies_now used inflight grey workspace free files frames peak_used peak_inflight peak_workspace peak_files peak_frames\n",
+            b"ms decode_threads peak_decodes decodes_now body_threads peak_bodies bodies_now used inflight grey grey_replies workspace free files frames peak_used peak_inflight peak_workspace peak_files peak_frames\n",
         );
         loop {
             let memory = viewer.memory_census();
@@ -179,11 +179,12 @@ fn start_census_log(viewer: &Arc<Viewer>) {
             let (peak_used, peak_inflight, peak_workspace, peak_files, peak_frames) =
                 viewer.census_peaks();
             let line = format!(
-                "{ms} {decode_threads} {peak_decodes} {decodes_now} {body_threads} {peak_bodies} {bodies_now} {used} {inflight} {grey} {workspace} {free} {files} {frames} {peak_used} {peak_inflight} {peak_workspace} {peak_files} {peak_frames}\n",
+                "{ms} {decode_threads} {peak_decodes} {decodes_now} {body_threads} {peak_bodies} {bodies_now} {used} {inflight} {grey} {grey_replies} {workspace} {free} {files} {frames} {peak_used} {peak_inflight} {peak_workspace} {peak_files} {peak_frames}\n",
                 ms = started.elapsed().as_millis(),
                 used = memory.pressure.used,
                 inflight = memory.inflight,
                 grey = memory.grey,
+                grey_replies = memory.grey_replies,
                 workspace = memory.workspace,
                 free = memory.free,
                 files = memory.files,
@@ -331,14 +332,9 @@ fn connection_session(
         let write_started = profiling().then(Instant::now);
         let written = write_reply(&mut stream, &reply, !close);
         if let Some(home) = home {
-            let grey = std::mem::take(&mut reply.body);
-            // The reservation was `width * height`, so the release is too.
-            let reserved = reply
-                .grey
-                .as_ref()
-                .map_or(grey.len(), |shown| grey_bytes(shown.width, shown.height));
-            viewer.release_grey(reserved);
-            home.restore_grey(grey);
+            // The write is done or failed, so the grey goes home and its
+            // claim with it.
+            home.restore_grey(std::mem::take(&mut reply.body));
         } else if reply.grey.is_some() {
             viewer.recycle_grey(std::mem::take(&mut reply.body));
         }
@@ -438,7 +434,7 @@ fn held_reply(viewer: &Viewer) -> Reply {
         "release"
     };
     let body = format!(
-        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free}}}",
+        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free},\"grey\":{grey},\"grey_replies\":{grey_replies}}}",
         budget = memory.pressure.budget,
         used = memory.pressure.used,
         files = memory.files,
@@ -446,6 +442,8 @@ fn held_reply(viewer: &Viewer) -> Reply {
         inflight = memory.inflight,
         workspace = memory.workspace,
         free = memory.free,
+        grey = memory.grey,
+        grey_replies = memory.grey_replies,
     );
     bare(200, "application/json", body.into_bytes())
 }
@@ -542,42 +540,58 @@ fn preview_route(
             // body slot is kept, so at most four body-form previews wait with
             // their samples.
             drop(permit);
-            if !wait_for_grey(&gate, grey_len, stream) {
+            let Some(claim) = wait_for_grey(&gate, grey_len, stream) else {
                 settle(Some(held.samples));
                 return (grey_busy_reply(), None);
-            }
+            };
+            // From here an early return drops `claim`, which releases it.
             let Some(permit) = viewer.acquire_decode(None, &mut live) else {
-                viewer.release_grey(grey_len);
                 settle(Some(held.samples));
                 return (busy_reply(), None);
             };
             let job_gate = Arc::clone(&gate);
-            let Some((preview, held, phase)) =
-                permit.call(move || render_decoded(held, request.frame, &job_gate))
+            let Some((rendered, held, phase)) =
+                permit.call(move || render_decoded(held, request.frame, &job_gate, claim))
             else {
-                viewer.release_grey(grey_len);
+                // The job did not run. The closure, the claim and the frame
+                // inside it were dropped with it.
                 settle(None);
                 return (busy_reply(), None);
             };
             merge_worker_phases(phase);
             settle(Some(held.samples));
-            let mut reply = from_preview(preview);
-            if reply.status == 200 {
-                reply.source = Some("body");
-                let home = permit.finish();
-                return (reply, Some(home));
-            }
-            return (reply, None);
+            let Capped::Rendered(done) = rendered else {
+                // The claim already covered this grey, so the cap cannot
+                // refuse it. Nothing is held either way.
+                return (grey_busy_reply(), None);
+            };
+            let (preview, claim) = *done;
+            return reply_with_home(from_preview(preview), "body", permit, claim);
         }
     };
     merge_worker_phases(work.phase);
-    let mut reply = from_preview(work.preview);
-    if reply.status == 200 {
-        reply.source = Some("body");
-        let home = permit.finish();
-        return (reply, Some(home));
+    reply_with_home(from_preview(work.preview), "body", permit, work.claim)
+}
+
+/// A 200 reply keeps its claim with the worker's way home. Any other reply
+/// holds no grey, so a claim left over is dropped and released.
+fn reply_with_home(
+    mut reply: Reply,
+    source: &'static str,
+    permit: crate::held::DecodePermit,
+    claim: Option<GreyClaim>,
+) -> (Reply, Option<GreyHome>) {
+    if reply.status != 200 {
+        return (reply, None);
     }
-    (reply, None)
+    reply.source = Some(source);
+    match claim {
+        // The grey is ready, so the permit ends with the decode. The slot is
+        // free before the reply is written, and the grey goes back to its
+        // worker by message after the write.
+        Some(claim) => (reply, Some(permit.finish(claim))),
+        None => (reply, None),
+    }
 }
 
 /// A pooled request body inside a decode job.
@@ -610,17 +624,20 @@ impl Drop for BodyHome {
 
 /// Decode a body-form preview on a decode worker.
 ///
-/// The sample bytes are charged as in flight until the job ends. The decode
-/// takes a parked buffer of its length when there is one, and allocates
-/// otherwise. It never evicts a cached entry and never steals a cached
-/// frame, because no frame is stored. After the render the buffer returns to
-/// the free list when cached bytes plus free bytes fit the budget, and is
-/// freed otherwise.
+/// The sample bytes are charged as in flight until they are recycled. When
+/// the render runs here that is before the job ends. When the grey cap
+/// defers the render the job ends with the samples still charged, and the
+/// caller recycles them and releases the charge after its wait, on every
+/// path out of the wait. The decode takes a parked buffer of its length when
+/// there is one, and allocates otherwise. It never evicts a cached entry and
+/// never steals a cached frame, because no frame is stored. After the render
+/// the buffer returns to the free list when cached bytes plus free bytes fit
+/// the budget, and is freed otherwise.
 fn pooled_body_preview(
     body: BodyHome,
     request: FrameRequest,
     inflight: &std::sync::atomic::AtomicUsize,
-    gate: &GreyGate,
+    gate: &Arc<GreyGate>,
     cache: &CacheHandle,
 ) -> PooledOutcome {
     let mut samples = Vec::new();
@@ -638,35 +655,29 @@ fn pooled_body_preview(
             &mut |len| cache.claim_parked_buffer(len),
         )
     });
+    drop(body);
     match decoded {
         Ok(held) => {
-            let grey_len = grey_bytes(held.width, held.height);
-            if !gate.reserve(grey_len) {
-                drop(body);
-                return PooledOutcome::Congested(Box::new(CongestedWork {
-                    input: RenderInput::Decoded(Box::new(held)),
-                    sample_charge,
-                }));
-            }
-            let preview = with_decode_workspace(|workspace| {
-                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-            });
-            if preview.is_err() {
-                gate.release(grey_len);
-            }
+            let (preview, claim) = match render_capped(&held, request, gate, None) {
+                Capped::Rendered(done) => *done,
+                Capped::Full => {
+                    return PooledOutcome::Congested(Box::new(CongestedWork {
+                        input: RenderInput::Decoded(Box::new(held)),
+                        sample_charge,
+                    }));
+                }
+            };
             samples = held.samples;
             if sample_charge > 0 {
                 Viewer::release_counter(inflight, sample_charge);
             }
             cache.recycle_sample_buffer(samples);
-            detach_grey(grey_capacity(&preview));
-            let phase = phases();
-            drop(body);
             PooledOutcome::Ready(Box::new(PooledWork {
                 gone: false,
                 preview,
+                claim,
                 fresh: false,
-                phase,
+                phase: phases(),
                 decoded: None,
             }))
         }
@@ -674,10 +685,10 @@ fn pooled_body_preview(
             if sample_charge > 0 {
                 Viewer::release_counter(inflight, sample_charge);
             }
-            drop(body);
             PooledOutcome::Ready(Box::new(PooledWork {
                 gone: false,
                 preview: Err(error),
+                claim: None,
                 fresh: false,
                 phase: phases(),
                 decoded: None,
@@ -774,6 +785,8 @@ fn peer_open(stream: &TcpStream) -> bool {
 struct PooledWork {
     gone: bool,
     preview: Result<Preview, PreviewError>,
+    /// The grey reply's bytes under the cap. Only a rendered grey has one.
+    claim: Option<GreyClaim>,
     fresh: bool,
     phase: crate::preview::PhaseRecord,
     decoded: Option<DecodedWork>,
@@ -805,10 +818,12 @@ impl RenderInput {
 
 /// What one decode worker job returned.
 enum PooledOutcome {
-    /// The grey cap had room and the render ran.
+    /// The grey cap admitted the render, or refused it for good, and the
+    /// reply is ready.
     Ready(Box<PooledWork>),
-    /// The grey would exceed the cap, so nothing was rendered. The input is
-    /// returned unharmed and nothing is counted except the input's own charge.
+    /// The grey would exceed the cap now, so nothing was rendered. The input
+    /// is returned unharmed and nothing is counted except the input's own
+    /// charge. Any room the request held was released.
     Congested(Box<CongestedWork>),
 }
 
@@ -819,6 +834,15 @@ struct CongestedWork {
     sample_charge: usize,
 }
 
+/// One render under the grey cap.
+enum Capped {
+    /// The render ran, or the grey is larger than the whole cap. A grey
+    /// reply holds its claim. A refusal holds none.
+    Rendered(Box<(Result<Preview, PreviewError>, Option<GreyClaim>)>),
+    /// The cap has no room now. Nothing was rendered and nothing is held.
+    Full,
+}
+
 /// Grey bytes for one frame: one display byte per pixel.
 fn grey_bytes(width: u32, height: u32) -> usize {
     usize::try_from(width)
@@ -826,22 +850,80 @@ fn grey_bytes(width: u32, height: u32) -> usize {
         .saturating_mul(usize::try_from(height).unwrap_or(0))
 }
 
+/// Render `held` into this worker's grey buffer, under the cap.
+///
+/// The worker's returned buffer counts inside the cap, so the admission
+/// charges the larger of that buffer and the grey, and the buffer moves into
+/// the reply. A returned buffer more than twice the grey is freed first, so
+/// a small grey does not hold a large frame's room. `claim` is room the
+/// request already waited for. A refused render leaves the buffer with the
+/// worker, where it counts as returned.
+fn render_capped(
+    held: &crate::preview::HeldFrame,
+    request: FrameRequest,
+    gate: &Arc<GreyGate>,
+    claim: Option<GreyClaim>,
+) -> Capped {
+    let len = grey_bytes(held.width, held.height);
+    with_decode_workspace(|workspace| {
+        if workspace.grey.capacity() > len.saturating_mul(2) {
+            let oversized = std::mem::take(&mut workspace.grey);
+            let bytes = oversized.capacity();
+            drop(oversized);
+            gate.release_returned(bytes);
+        }
+        let kept = workspace.grey.capacity();
+        let mut claim = match gate.admit(claim, len, kept) {
+            Ok(claim) => claim,
+            Err(GreyRefusal::Full) => return Capped::Full,
+            Err(GreyRefusal::TooLarge) => {
+                return Capped::Rendered(Box::new((Err(PreviewError::TooLarge), None)));
+            }
+        };
+        let preview = render_held(held, request, &mut workspace.scratch, &mut workspace.grey);
+        let reply = grey_capacity(&preview);
+        gate.settle(&mut claim, reply, workspace.grey.capacity());
+        detach_grey(reply);
+        match preview {
+            Ok(preview) => Capped::Rendered(Box::new((Ok(preview), Some(claim)))),
+            // The claim holds nothing after the settle.
+            Err(error) => Capped::Rendered(Box::new((Err(error), None))),
+        }
+    })
+}
+
 /// Wait for grey cap room, up to the write timeout, while the client waits.
 ///
-/// `false` means the client is gone or the cap stayed full to the deadline.
-fn wait_for_grey(gate: &GreyGate, len: usize, stream: Option<&TcpStream>) -> bool {
-    let deadline = Instant::now() + WRITE_TIMEOUT;
+/// The request counts as waiting for the whole call, so the workers free
+/// their returned buffers and a written reply's buffer is freed rather than
+/// kept. `None` means the client is gone or the cap stayed full to the
+/// deadline, and nothing is held.
+fn wait_for_grey(
+    gate: &Arc<GreyGate>,
+    len: usize,
+    stream: Option<&TcpStream>,
+) -> Option<GreyClaim> {
+    wait_for_grey_until(gate, len, stream, Instant::now() + WRITE_TIMEOUT)
+}
+
+fn wait_for_grey_until(
+    gate: &Arc<GreyGate>,
+    len: usize,
+    stream: Option<&TcpStream>,
+    deadline: Instant,
+) -> Option<GreyClaim> {
+    let _waiting = gate.enter_wait();
     let live = || stream.is_none_or(peer_open);
     loop {
-        if gate.reserve(len) {
-            return true;
+        if let Some(claim) = gate.reserve(len) {
+            return Some(claim);
         }
         if !live() {
-            return false;
+            return None;
         }
         let now = Instant::now();
         if now >= deadline {
-            return false;
+            return None;
         }
         gate.wait_slice(
             deadline
@@ -853,38 +935,20 @@ fn wait_for_grey(gate: &GreyGate, len: usize, stream: Option<&TcpStream>) -> boo
 
 /// Render a body-form frame the cap delayed, on whichever worker is free.
 ///
-/// The caller already holds the grey reservation. A refused render releases
-/// it here. The frame comes back either way, so its samples are recycled.
+/// `claim` is the room the caller waited for. A refused render releases it.
+/// The frame comes back either way, so its samples are recycled.
 fn render_decoded(
     held: Box<crate::preview::HeldFrame>,
     request: FrameRequest,
-    gate: &GreyGate,
+    gate: &Arc<GreyGate>,
+    claim: GreyClaim,
 ) -> (
-    Result<Preview, PreviewError>,
+    Capped,
     Box<crate::preview::HeldFrame>,
     crate::preview::PhaseRecord,
 ) {
-    let preview = with_decode_workspace(|workspace| {
-        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-    });
-    if preview.is_err() {
-        gate.release(grey_bytes(held.width, held.height));
-    }
-    detach_grey(grey_capacity(&preview));
-    (preview, held, phases())
-}
-
-/// Use the grey reservation this request already waited for, or take one.
-///
-/// A reservation of another length is returned before the new one is tried.
-fn take_grey(gate: &GreyGate, reserved: usize, len: usize) -> bool {
-    if reserved == len {
-        return true;
-    }
-    if reserved > 0 {
-        gate.release(reserved);
-    }
-    gate.reserve(len)
+    let rendered = render_capped(&held, request, gate, Some(claim));
+    (rendered, held, phases())
 }
 
 fn grey_busy_reply() -> Reply {
@@ -909,9 +973,9 @@ fn preview_held_on_worker(
     let inflight = viewer.inflight_counter();
     let cache = viewer.cache_handle();
     let mut live = || stream.is_none_or(peer_open);
-    // Grey bytes this request already waited for, and whether any round
-    // decoded the frame.
-    let mut reserved = 0_usize;
+    // Grey room this request already waited for. Every early return drops
+    // it, which releases it.
+    let mut claim: Option<GreyClaim> = None;
     let mut decoded_here = false;
     let mut found = Some(found);
     for _ in 0..GREY_ROUNDS {
@@ -922,13 +986,9 @@ fn preview_held_on_worker(
         let home = match &found {
             PreviewSource::Hit(frame) => frame.worker(),
             PreviewSource::Shared(bytes) => bytes.worker(),
-            PreviewSource::Gone => {
-                release_reserved(&gate, reserved);
-                return (gone(), None);
-            }
+            PreviewSource::Gone => return (gone(), None),
         };
         let Some(permit) = viewer.acquire_decode(home, &mut live) else {
-            release_reserved(&gate, reserved);
             return (busy_reply(), None);
         };
         let worker = permit.worker();
@@ -936,22 +996,20 @@ fn preview_held_on_worker(
         let job_gate = Arc::clone(&gate);
         let job_cache = cache.clone();
         let job_inflight = Arc::clone(&inflight);
+        let job_claim = claim.take();
+        // A job that does not run drops its closure, and the claim in it.
         let Some(outcome) = permit.call(move || {
             pooled_preview(
                 found,
                 request,
-                reserved,
+                job_claim,
                 &job_inflight,
                 &job_gate,
                 &job_cache,
             )
         }) else {
-            // The job did not run, so the reservation is still this request's.
-            release_reserved(&gate, reserved);
             return (busy_reply(), None);
         };
-        // The job took over the reservation: it is in the reply, or released.
-        // Every path below returns or takes a new reservation.
         let work = match outcome {
             PooledOutcome::Ready(work) => work,
             PooledOutcome::Congested(congested) => {
@@ -973,10 +1031,10 @@ fn preview_held_on_worker(
                     viewer.leave_inflight(congested.sample_charge);
                 }
                 drop(permit);
-                if !wait_for_grey(&gate, grey_len, stream) {
+                let Some(waited) = wait_for_grey(&gate, grey_len, stream) else {
                     return (grey_busy_reply(), None);
-                }
-                reserved = grey_len;
+                };
+                claim = Some(waited);
                 continue;
             }
         };
@@ -998,82 +1056,59 @@ fn preview_held_on_worker(
             #[cfg(test)]
             viewer.trace_inflight("frame");
         }
-        let mut reply = from_preview(work.preview);
-        if reply.status == 200 {
-            reply.source = Some(if work.fresh || decoded_here {
-                "decoded"
-            } else {
-                "held"
-            });
-            // The grey is ready, so the permit ends with the decode. The slot
-            // is free before the reply is written, and the grey goes back to
-            // its worker by message after the write.
-            let home = permit.finish();
-            return (reply, Some(home));
-        }
-        return (reply, None);
+        let source = if work.fresh || decoded_here {
+            "decoded"
+        } else {
+            "held"
+        };
+        return reply_with_home(from_preview(work.preview), source, permit, work.claim);
     }
-    release_reserved(&gate, reserved);
     (grey_busy_reply(), None)
 }
 
-/// Rounds a held preview may wait for grey room. The second round already
-/// holds a reservation of the frame's length, so a third is not reached.
-const GREY_ROUNDS: usize = 3;
-
-fn release_reserved(gate: &GreyGate, reserved: usize) {
-    if reserved > 0 {
-        gate.release(reserved);
-    }
-}
+/// Rounds a held preview may take. The second round holds room for the
+/// frame's whole grey, which the cap always admits, so a third is not needed.
+const GREY_ROUNDS: usize = 2;
 
 /// One held preview on a decode worker.
 ///
-/// `reserved` is grey room the caller already waited for. The job takes it
-/// over: it is in the reply's grey, or released here, on every outcome.
+/// `claim` is grey room the caller already waited for. The job takes it
+/// over: it is in the reply's claim, or released here, on every outcome.
 fn pooled_preview(
     found: PreviewSource,
     request: FrameRequest,
-    reserved: usize,
+    claim: Option<GreyClaim>,
     inflight: &std::sync::atomic::AtomicUsize,
-    gate: &GreyGate,
+    gate: &Arc<GreyGate>,
     cache: &CacheHandle,
 ) -> PooledOutcome {
     let before = decode_ticks();
     match found {
         PreviewSource::Gone => {
-            release_reserved(gate, reserved);
+            drop(claim);
             PooledOutcome::Ready(Box::new(PooledWork {
                 gone: true,
                 preview: Err(PreviewError::Frame),
+                claim: None,
                 fresh: false,
                 phase: phases(),
                 decoded: None,
             }))
         }
-        PreviewSource::Hit(held) => {
-            let grey_len = grey_bytes(held.width, held.height);
-            if !take_grey(gate, reserved, grey_len) {
-                return PooledOutcome::Congested(Box::new(CongestedWork {
-                    input: RenderInput::Hit(held),
-                    sample_charge: 0,
-                }));
-            }
-            let preview = with_decode_workspace(|workspace| {
-                render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-            });
-            if preview.is_err() {
-                gate.release(grey_len);
-            }
-            detach_grey(grey_capacity(&preview));
-            PooledOutcome::Ready(Box::new(PooledWork {
+        PreviewSource::Hit(held) => match render_capped(&held, request, gate, claim) {
+            Capped::Full => PooledOutcome::Congested(Box::new(CongestedWork {
+                input: RenderInput::Hit(held),
+                sample_charge: 0,
+            })),
+            Capped::Rendered(done) => PooledOutcome::Ready(Box::new(PooledWork {
                 gone: false,
-                preview,
+                preview: done.0,
+                claim: done.1,
                 fresh: false,
                 phase: phases(),
                 decoded: None,
-            }))
-        }
+            })),
+        },
         PreviewSource::Shared(bytes) => {
             let mut samples = Vec::new();
             let mut sample_charge = 0_usize;
@@ -1092,34 +1127,28 @@ fn pooled_preview(
             });
             drop(bytes);
             match decoded {
-                Ok(held) => {
-                    let grey_len = grey_bytes(held.width, held.height);
-                    if !take_grey(gate, reserved, grey_len) {
-                        return PooledOutcome::Congested(Box::new(CongestedWork {
-                            input: RenderInput::Decoded(Box::new(held)),
-                            sample_charge,
-                        }));
+                Ok(held) => match render_capped(&held, request, gate, claim) {
+                    Capped::Full => PooledOutcome::Congested(Box::new(CongestedWork {
+                        input: RenderInput::Decoded(Box::new(held)),
+                        sample_charge,
+                    })),
+                    Capped::Rendered(done) => {
+                        let (preview, claim) = *done;
+                        PooledOutcome::Ready(Box::new(PooledWork {
+                            gone: false,
+                            preview,
+                            claim,
+                            fresh: decode_ticks() != before,
+                            phase: phases(),
+                            decoded: Some(DecodedWork {
+                                held,
+                                sample_charge,
+                            }),
+                        }))
                     }
-                    let preview = with_decode_workspace(|workspace| {
-                        render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-                    });
-                    if preview.is_err() {
-                        gate.release(grey_len);
-                    }
-                    detach_grey(grey_capacity(&preview));
-                    PooledOutcome::Ready(Box::new(PooledWork {
-                        gone: false,
-                        fresh: decode_ticks() != before,
-                        phase: phases(),
-                        decoded: Some(DecodedWork {
-                            held,
-                            sample_charge,
-                        }),
-                        preview,
-                    }))
-                }
+                },
                 Err(error) => {
-                    release_reserved(gate, reserved);
+                    drop(claim);
                     cache.recycle_sample_buffer(std::mem::take(&mut samples));
                     if sample_charge > 0 {
                         Viewer::release_counter(inflight, sample_charge);
@@ -1127,6 +1156,7 @@ fn pooled_preview(
                     PooledOutcome::Ready(Box::new(PooledWork {
                         gone: false,
                         preview: Err(error),
+                        claim: None,
                         fresh: false,
                         phase: phases(),
                         decoded: None,
@@ -1406,7 +1436,54 @@ fn log_phases() {
     );
 }
 
-fn write_reply(stream: &mut impl Write, reply: &Reply, keep_alive: bool) -> std::io::Result<()> {
+/// The most bytes one send is given.
+const WRITE_CHUNK: usize = 16 * 1024;
+
+/// A socket writer whose whole reply must be written by one deadline.
+///
+/// A socket's write timeout bounds one send only while it makes no progress.
+/// A send that moves bytes before it times out returns them, and the next
+/// send starts a new timeout, so a client that never reads could hold a reply
+/// for several timeouts. Each send here gets only the time left, and at most
+/// [`WRITE_CHUNK`] bytes.
+struct DeadlineWriter<'a> {
+    stream: &'a mut TcpStream,
+    deadline: Instant,
+}
+
+impl Write for DeadlineWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the reply was not written by its deadline",
+            ));
+        }
+        self.stream.set_write_timeout(Some(left))?;
+        // A send that keeps moving bytes keeps its timeout alive, so one
+        // large send can outlive the deadline. A bounded send cannot.
+        let chunk = bytes.get(..bytes.len().min(WRITE_CHUNK)).unwrap_or(bytes);
+        self.stream.write(chunk)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+/// Write one reply, all of it within [`WRITE_TIMEOUT`].
+fn write_reply(stream: &mut TcpStream, reply: &Reply, keep_alive: bool) -> std::io::Result<()> {
+    write_reply_by(stream, reply, keep_alive, Instant::now() + WRITE_TIMEOUT)
+}
+
+fn write_reply_by(
+    stream: &mut TcpStream,
+    reply: &Reply,
+    keep_alive: bool,
+    deadline: Instant,
+) -> std::io::Result<()> {
+    let mut stream = DeadlineWriter { stream, deadline };
     let connection = if keep_alive { "keep-alive" } else { "close" };
     let mut head = format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nCache-Control: no-store\r\nConnection: {connection}\r\n",
@@ -2012,6 +2089,7 @@ fn header_end_at(buf: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::held::{GREY_CAP, N_MAX_PIXELS};
 
     #[test]
     fn a_request_body_is_held_at_its_declared_length() -> Result<(), &'static str> {
@@ -2888,10 +2966,10 @@ mod tests {
         Ok(String::from_utf8_lossy(&reply).into_owned())
     }
 
-    /// Grey-sized bytes the two workspaces may hold beside the cap: each
-    /// keeps native bytes of two greys, four bytes of scratch per pixel and
-    /// one returned grey, and the cap is two more.
-    const WORKSPACE_GREYS: usize = 16;
+    /// Grey-sized bytes the two workspaces may hold: each keeps native bytes
+    /// of two greys and four bytes of scratch per pixel, and the cap holds
+    /// every grey besides, the returned buffers and the replies included.
+    const WORKSPACE_GREYS: usize = 14;
 
     /// Twenty clients that stop reading hold at most the cap's grey bytes,
     /// and a later preview is answered, never left waiting without end.
@@ -2906,8 +2984,12 @@ mod tests {
         if grey_len <= 8 * 1024 * 1024 {
             return Err(format!("the grey was only {grey_len} bytes"));
         }
-        // The cap is the formula's grey term: twice the largest grey.
-        let cap = 2 * grey_len;
+        // The cap is the formula's grey term, `P * N_max`, and this frame is
+        // the formula's `N_max`.
+        let cap = GREY_CAP;
+        if cap != 2 * grey_len {
+            return Err(format!("the cap {cap} is not two greys of {grey_len}"));
+        }
 
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
         let addr = listener.local_addr().map_err(|error| error.to_string())?;
@@ -2950,7 +3032,7 @@ mod tests {
             let census = viewer.memory_census();
             if census.grey > cap {
                 return Err(format!(
-                    "the replies held {} grey bytes over {cap}",
+                    "the replies and returned buffers held {} grey bytes over {cap}",
                     census.grey
                 ));
             }
@@ -3010,18 +3092,517 @@ mod tests {
                 ));
             }
         }
-        // Every reply is written or abandoned now, so no reservation is
-        // left. A reservation leaked on any path above stays counted.
-        let settled = std::time::Instant::now();
+        // Every reply is written or abandoned now, so no reply holds grey.
+        // A claim leaked on any path above stays counted.
+        replies_settle(&viewer, "the twenty stalls")?;
+        let census = viewer.memory_census();
+        if census.grey > cap {
+            return Err(format!(
+                "the returned buffers held {} over {cap}",
+                census.grey
+            ));
+        }
+        Ok(())
+    }
+
+    /// A process server on an ephemeral port, and the viewer behind it.
+    fn grey_server(cache_mib: usize) -> Result<(std::net::SocketAddr, Arc<Viewer>), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: cache_mib * 1024 * 1024,
+        }));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        Ok((addr, viewer))
+    }
+
+    fn post_id(addr: std::net::SocketAddr, file: &[u8]) -> Result<String, String> {
+        let posted = post_bytes(addr, file)?;
+        if !status_is(&posted, 200) {
+            return Err("the file was not accepted".to_owned());
+        }
+        header_value(&posted, "X-Ocelli-File").ok_or_else(|| "the file id was missing".to_owned())
+    }
+
+    fn id_preview(id: &str, extra: &str) -> String {
+        format!(
+            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\n{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    fn body_preview(file: &[u8], extra: &str) -> Vec<u8> {
+        let mut request = format!(
+            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\n{extra}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            file.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(file);
+        request
+    }
+
+    fn send_bytes(addr: std::net::SocketAddr, request: &[u8]) -> Result<TcpStream, String> {
+        let mut late = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        late.set_read_timeout(Some(Duration::from_secs(15)))
+            .map_err(|error| error.to_string())?;
+        late.write_all(request).map_err(|error| error.to_string())?;
+        Ok(late)
+    }
+
+    /// A window width of zero passes the request checks and the LUT chain
+    /// refuses it at the render, PS3.3 C.11.2.1.2 requiring a width of at
+    /// least 1.
+    const ZERO_WIDTH: &str = "X-Ocelli-Window-Center: 40\r\nX-Ocelli-Window-Width: 0\r\n";
+
+    /// Poll the census until `ready` holds, failing after `limit`.
+    fn census_until(
+        viewer: &Viewer,
+        limit: Duration,
+        what: &str,
+        ready: impl Fn(&crate::held::MemoryCensus) -> bool,
+    ) -> Result<crate::held::MemoryCensus, String> {
+        let started = std::time::Instant::now();
         loop {
-            let held = viewer.memory_census().grey;
-            if held == 0 {
-                break;
+            let census = viewer.memory_census();
+            if ready(&census) {
+                return Ok(census);
             }
-            if held > cap || settled.elapsed() > Duration::from_secs(5) {
-                return Err(format!("after every reply the gate still held {held}"));
+            if started.elapsed() > limit {
+                return Err(format!(
+                    "{what}: grey {} replies {} inflight {} after {limit:?}",
+                    census.grey, census.grey_replies, census.inflight
+                ));
             }
             std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// No reply holds grey and no request waits, within five seconds.
+    fn replies_settle(viewer: &Viewer, what: &str) -> Result<(), String> {
+        census_until(viewer, Duration::from_secs(5), what, |census| {
+            census.grey_replies == 0
+        })?;
+        let started = std::time::Instant::now();
+        while viewer.grey_gate().waiting() > 0 {
+            if started.elapsed() > Duration::from_secs(5) {
+                return Err(format!("{what}: a request still counted as waiting"));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    }
+
+    fn waiters_reach(viewer: &Viewer, count: usize) -> Result<(), String> {
+        let started = std::time::Instant::now();
+        while viewer.grey_gate().waiting() < count {
+            if started.elapsed() > Duration::from_secs(20) {
+                return Err(format!(
+                    "{} requests waited for grey room, not {count}",
+                    viewer.grey_gate().waiting()
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        Ok(())
+    }
+
+    /// Two clients that never read fill the grey cap with two 3000 by 2900
+    /// greys. A reply that size is past two socket buffers, so it blocks.
+    fn fill_grey_cap(
+        addr: std::net::SocketAddr,
+        viewer: &Viewer,
+    ) -> Result<Vec<TcpStream>, String> {
+        let file = grey_file(3000, 2900)?;
+        let id = post_id(addr, &file)?;
+        let mut stalls = Vec::new();
+        for _ in 0..2 {
+            let mut stall = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+            stall
+                .write_all(id_preview(&id, "").as_bytes())
+                .map_err(|error| error.to_string())?;
+            stalls.push(stall);
+        }
+        // The stalled replies' frame is cached and nothing is in flight.
+        census_until(
+            viewer,
+            Duration::from_secs(30),
+            "the two stalls",
+            |census| census.grey_replies == GREY_CAP && census.inflight == 0,
+        )?;
+        Ok(stalls)
+    }
+
+    fn expect_status(text: &str, status: u16, name: &str) -> Result<(), String> {
+        if status_is(text, status) {
+            return Ok(());
+        }
+        Err(format!(
+            "{name} answered {}, not {status}",
+            text.lines().next().unwrap_or("")
+        ))
+    }
+
+    /// A held preview that waited for grey room and then finds its file gone
+    /// answers 410 and gives the room back.
+    #[test]
+    fn a_frame_gone_after_the_grey_wait_releases_its_room() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let small_id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let started = std::time::Instant::now();
+        let waiter = send_late(addr, &id_preview(&small_id, ""))?;
+        waiters_reach(&viewer, 1)?;
+        let id = FileId::parse(&small_id).ok_or("the small id did not parse")?;
+        viewer.forget_file(id, 1);
+        drop(stalls);
+        let text = read_late(waiter, started, "the waiting preview")?;
+        expect_status(&text, 410, "the waiting preview")?;
+        replies_settle(&viewer, "after the gone frame")
+    }
+
+    /// A render the LUT chain refuses gives its grey back, for a fresh
+    /// decode, a cached frame and the body form.
+    #[test]
+    fn a_refused_render_releases_its_grey() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        let held = id_preview(&id, ZERO_WIDTH).into_bytes();
+        for (name, request) in [
+            ("a fresh decode", held.clone()),
+            ("a cached frame", held),
+            ("the body form", body_preview(&small, ZERO_WIDTH)),
+        ] {
+            let text = read_http(addr, &request)?;
+            expect_status(&text, 400, name)?;
+            replies_settle(&viewer, name)?;
+        }
+        Ok(())
+    }
+
+    /// A render refused after the wait for grey room gives the room back,
+    /// held and body form, and the body form's samples leave inflight.
+    #[test]
+    fn a_refused_render_after_the_grey_wait_releases_its_room() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let started = std::time::Instant::now();
+        let held = send_late(addr, &id_preview(&id, ZERO_WIDTH))?;
+        let body = send_bytes(addr, &body_preview(&small, ZERO_WIDTH))?;
+        waiters_reach(&viewer, 2)?;
+        drop(stalls);
+        expect_status(&read_late(held, started, "held")?, 400, "the held form")?;
+        expect_status(&read_late(body, started, "body")?, 400, "the body form")?;
+        replies_settle(&viewer, "after the refused renders")?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "inflight",
+            |census| census.inflight == 0,
+        )?;
+        Ok(())
+    }
+
+    /// A client that leaves while its preview waits for grey room holds
+    /// nothing afterwards: no room, no wait and, for the body form, no
+    /// decoded samples in flight.
+    #[test]
+    fn a_wait_that_fails_releases_its_samples_and_its_wait() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let held = send_late(addr, &id_preview(&id, ""))?;
+        let body = send_bytes(addr, &body_preview(&small, ""))?;
+        waiters_reach(&viewer, 2)?;
+        drop(held);
+        drop(body);
+        // Only the two stalled replies hold grey now.
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "the left waiters",
+            |census| census.inflight == 0 && census.grey_replies == GREY_CAP,
+        )?;
+        let started = std::time::Instant::now();
+        while viewer.grey_gate().waiting() > 0 {
+            if started.elapsed() > Duration::from_secs(5) {
+                return Err("a client that left still counted as waiting".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(stalls);
+        replies_settle(&viewer, "after the stalls")
+    }
+
+    /// A decode slot refused after the wait gives the room back, held and
+    /// body form.
+    #[test]
+    fn a_refused_decode_slot_after_the_grey_wait_releases_its_room() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let started = std::time::Instant::now();
+        let held = send_late(addr, &id_preview(&id, ""))?;
+        let body = send_bytes(addr, &body_preview(&small, ""))?;
+        waiters_reach(&viewer, 2)?;
+        viewer.shut_decode_workers();
+        drop(stalls);
+        expect_status(&read_late(held, started, "held")?, 503, "the held form")?;
+        expect_status(&read_late(body, started, "body")?, 503, "the body form")?;
+        replies_settle(&viewer, "after the refused slots")?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "inflight",
+            |census| census.inflight == 0,
+        )?;
+        Ok(())
+    }
+
+    /// With the decode workers gone, the stalled replies, the waiters and the
+    /// workers' returned buffers all give their grey back.
+    #[test]
+    fn dead_decode_workers_release_every_grey() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let started = std::time::Instant::now();
+        let held = send_late(addr, &id_preview(&id, ""))?;
+        let body = send_bytes(addr, &body_preview(&small, ""))?;
+        waiters_reach(&viewer, 2)?;
+        viewer.stop_decode_workers();
+        drop(stalls);
+        expect_status(&read_late(held, started, "held")?, 503, "the held form")?;
+        expect_status(&read_late(body, started, "body")?, 503, "the body form")?;
+        replies_settle(&viewer, "after the workers stopped")?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "all grey",
+            |census| census.grey == 0 && census.inflight == 0,
+        )?;
+        Ok(())
+    }
+
+    /// A reply written after its worker is gone cannot be kept, so its grey
+    /// is freed and stops counting.
+    #[test]
+    fn a_grey_returned_to_a_dead_worker_stops_counting() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let file = grey_file(3000, 2900)?;
+        let id = post_id(addr, &file)?;
+        let started = std::time::Instant::now();
+        let client = send_late(addr, &id_preview(&id, ""))?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(30),
+            "the slow reader",
+            |census| census.grey_replies == N_MAX_PIXELS,
+        )?;
+        viewer.stop_decode_workers();
+        expect_status(
+            &read_late(client, started, "the slow reader")?,
+            200,
+            "the slow reader",
+        )?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "all grey",
+            |census| census.grey == 0,
+        )?;
+        Ok(())
+    }
+
+    /// A written grey stays with its worker and counts under the cap.
+    #[test]
+    fn a_written_grey_kept_by_its_worker_counts_under_the_cap() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let file = grey_file(3000, 2900)?;
+        let id = post_id(addr, &file)?;
+        let started = std::time::Instant::now();
+        let client = send_late(addr, &id_preview(&id, ""))?;
+        expect_status(
+            &read_late(client, started, "the preview")?,
+            200,
+            "the preview",
+        )?;
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "the kept grey",
+            |census| census.grey_replies == 0 && census.grey == N_MAX_PIXELS,
+        )?;
+        Ok(())
+    }
+
+    /// Returned buffers that fill the cap are freed for a grey that waits.
+    #[test]
+    fn returned_buffers_make_room_for_a_waiting_grey() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        // 9,000,000 grey bytes: a returned 8,700,000 byte buffer is too small
+        // to reuse, and both returned buffers leave no room beside them.
+        let file = grey_file(3000, 3000)?;
+        let id = post_id(addr, &file)?;
+        for worker in 0..2 {
+            if !viewer.park_returned_grey(worker, N_MAX_PIXELS) {
+                return Err(format!("worker {worker} kept no grey"));
+            }
+        }
+        if viewer.memory_census().grey != GREY_CAP {
+            return Err("the returned buffers did not fill the cap".to_owned());
+        }
+        let started = std::time::Instant::now();
+        let client = send_late(addr, &id_preview(&id, ""))?;
+        expect_status(
+            &read_late(client, started, "the large grey")?,
+            200,
+            "the large grey",
+        )?;
+        replies_settle(&viewer, "after the large grey")?;
+        if viewer.memory_census().grey > GREY_CAP {
+            return Err("the grey went over the cap".to_owned());
+        }
+        Ok(())
+    }
+
+    /// A returned buffer more than twice a grey is freed before that grey is
+    /// rendered, so a small grey does not keep a large frame's room.
+    #[test]
+    fn a_small_grey_frees_an_oversized_returned_buffer() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let id = post_id(addr, &small)?;
+        // Two 4,000,000 byte buffers leave room beside them, so the preview
+        // never waits and no buffer is freed for a waiter.
+        for worker in 0..2 {
+            if !viewer.park_returned_grey(worker, 4_000_000) {
+                return Err(format!("worker {worker} kept no grey"));
+            }
+        }
+        expect_status(&request_preview(addr, &id)?, 200, "the small preview")?;
+        // One worker still keeps 4,000,000 bytes. The other freed its buffer
+        // and keeps the 512 by 512 grey it rendered.
+        census_until(
+            viewer.as_ref(),
+            Duration::from_secs(5),
+            "the swap",
+            |census| census.grey_replies == 0 && census.grey == 4_000_000 + 512 * 512,
+        )?;
+        Ok(())
+    }
+
+    /// A grey larger than the whole cap is refused at once, never waited for.
+    #[test]
+    fn a_grey_larger_than_the_cap_is_refused_at_once() -> Result<(), String> {
+        let (addr, viewer) = grey_server(128)?;
+        // 3000 by 5801 is 17,403,000 grey bytes, 3,000 over the cap.
+        let file = grey_file(3000, 5801)?;
+        let id = post_id(addr, &file)?;
+        let started = std::time::Instant::now();
+        for (name, request) in [
+            ("the held form", id_preview(&id, "").into_bytes()),
+            ("the body form", body_preview(&file, "")),
+        ] {
+            let text = read_late(send_bytes(addr, &request)?, started, name)?;
+            expect_status(&text, 400, name)?;
+            if header_value(&text, "X-Ocelli-Error").as_deref() != Some("too-large") {
+                return Err(format!("{name} did not say too-large"));
+            }
+        }
+        replies_settle(&viewer, "after the refusals")
+    }
+
+    /// A job that takes over a claim releases it on paths no request reaches:
+    /// the file gone inside the job, and a decode that fails after a wait.
+    #[test]
+    fn a_job_releases_a_claim_it_cannot_use() -> Result<(), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 16 * 1024 * 1024,
+        });
+        let gate = viewer.grey_gate();
+        let inflight = viewer.inflight_counter();
+        let cache = viewer.cache_handle();
+        let claim = gate.reserve(4096).ok_or("the room was not granted")?;
+        let _gone = pooled_preview(
+            PreviewSource::Gone,
+            FrameRequest::default(),
+            Some(claim),
+            &inflight,
+            &gate,
+            &cache,
+        );
+        if gate.held().0 != 0 {
+            return Err(format!("the gone job kept {}", gate.held().0));
+        }
+        let mut broken = grey_file(64, 64)?;
+        broken.truncate(broken.len() - 100);
+        let id = viewer
+            .insert_file(broken)
+            .ok_or("the broken file was not held")?;
+        let found = viewer.preview_source(id, 0);
+        if !matches!(found, PreviewSource::Shared(_)) {
+            return Err("the broken file was not a decode".to_owned());
+        }
+        let claim = gate.reserve(4096).ok_or("the room was not granted")?;
+        let outcome = pooled_preview(
+            found,
+            FrameRequest::default(),
+            Some(claim),
+            &inflight,
+            &gate,
+            &cache,
+        );
+        let PooledOutcome::Ready(work) = outcome else {
+            return Err("the broken decode was deferred".to_owned());
+        };
+        if work.preview.is_ok() {
+            return Err("the broken file decoded".to_owned());
+        }
+        if gate.held().0 != 0 {
+            return Err(format!("the failed decode kept {}", gate.held().0));
+        }
+        Ok(())
+    }
+
+    /// A client that never reads holds a reply only until its deadline, even
+    /// when each send moves a few bytes before it times out.
+    #[test]
+    fn a_reply_to_a_client_that_never_reads_ends_at_its_deadline() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let client = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let (mut server, _) = listener.accept().map_err(|error| error.to_string())?;
+        let reply = bare(
+            200,
+            "application/octet-stream",
+            vec![7_u8; 32 * 1024 * 1024],
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let deadline = started + Duration::from_secs(2);
+            let written = write_reply_by(&mut server, &reply, false, deadline);
+            let _ = tx.send((written.is_err(), started.elapsed()));
+        });
+        // The guard: a write that ignores its deadline fails here, not by hanging.
+        let (failed, took) = rx
+            .recv_timeout(Duration::from_secs(15))
+            .map_err(|_| "the write outlived its deadline by 13 s".to_owned())?;
+        drop(client);
+        if !failed {
+            return Err("a 32 MiB reply to a client that never reads was written".to_owned());
+        }
+        if took > Duration::from_secs(4) {
+            return Err(format!("the write ended {took:?} after it started"));
         }
         Ok(())
     }

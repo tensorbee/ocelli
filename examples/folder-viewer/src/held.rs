@@ -365,59 +365,279 @@ fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
-/// Grey bytes held by replies that are not yet written, under one cap.
+/// `N_max` in the resident formula, in pixels: the 3000 by 2900 frame the
+/// plan's bound of 528,194,192 bytes is computed for.
+pub(crate) const N_MAX_PIXELS: usize = 3000 * 2900;
+
+/// The grey cap in bytes, `P * N_max` at one grey byte per pixel.
+pub(crate) const GREY_CAP: usize = PERMITS * N_MAX_PIXELS;
+
+/// Every grey byte the process server holds, under one fixed cap.
 ///
-/// The cap is the resident formula's grey term, `P * N_max`: at most
-/// [`PERMITS`] times the largest grey admitted so far, where a grey is one
-/// byte per pixel. A preview whose grey would exceed the cap waits for
-/// capacity, up to the write timeout, and then answers 503. `held` never
-/// exceeds the cap.
+/// Two kinds of grey buffer count. A reply that is not yet written holds its
+/// grey from the moment its render is admitted, by capacity. Each decode
+/// worker keeps at most one returned grey buffer to render into next. Their
+/// sum never exceeds the cap, which is [`GREY_CAP`] for the server. A render
+/// whose grey would exceed it waits, and a grey larger than the whole cap is
+/// refused at once.
 pub(crate) struct GreyGate {
     state: Mutex<GreyState>,
     ready: Condvar,
+    cap: usize,
 }
 
 struct GreyState {
-    /// Grey bytes a reply holds from its reservation to its write.
-    held: usize,
-    /// The largest grey admitted so far, in bytes.
-    max: usize,
+    /// Grey bytes held by replies from admission to write, by capacity.
+    replies: usize,
+    /// Grey bytes in the decode workers' returned buffers.
+    returned: usize,
+    /// Requests waiting for room. While any waits, no returned buffer is kept.
+    waiting: usize,
+}
+
+impl GreyState {
+    fn used(&self) -> usize {
+        self.replies.saturating_add(self.returned)
+    }
+}
+
+/// Why a render was not admitted under the grey cap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GreyRefusal {
+    /// No room now. The caller may wait for room.
+    Full,
+    /// The grey alone is larger than the cap, so no wait can admit it.
+    TooLarge,
+}
+
+/// Grey bytes one request holds under the cap. Drop releases them.
+pub(crate) struct GreyClaim {
+    gate: Arc<GreyGate>,
+    bytes: usize,
+}
+
+impl GreyClaim {
+    /// Hand the bytes to the caller's accounting without releasing them.
+    fn disarm(&mut self) -> usize {
+        std::mem::take(&mut self.bytes)
+    }
+}
+
+impl Drop for GreyClaim {
+    fn drop(&mut self) {
+        let bytes = self.disarm();
+        if bytes > 0 {
+            self.gate.release_replies(bytes);
+        }
+    }
+}
+
+/// A written reply's grey on its way back to its worker.
+pub(crate) enum ReturnedGrey {
+    /// No request waits, so the worker keeps the buffer. The bytes moved from
+    /// the reply count to the returned count.
+    Keep(KeptGrey),
+    /// A request waits, so the worker frees the buffer. The bytes still count
+    /// until the claim drops after the free.
+    Free(GreyClaim),
+}
+
+/// Returned grey bytes not yet in a worker's workspace. Drop releases them
+/// unless the worker took the buffer with [`KeptGrey::place`].
+pub(crate) struct KeptGrey {
+    gate: Arc<GreyGate>,
+    bytes: usize,
+}
+
+impl KeptGrey {
+    /// The worker's workspace holds the buffer now, and the count with it.
+    pub(crate) fn place(mut self) {
+        self.bytes = 0;
+    }
+}
+
+impl Drop for KeptGrey {
+    fn drop(&mut self) {
+        let bytes = std::mem::take(&mut self.bytes);
+        self.gate.release_returned(bytes);
+    }
+}
+
+/// One request waiting for grey room. Drop ends the wait.
+pub(crate) struct GreyWaiter<'a> {
+    gate: &'a GreyGate,
+}
+
+impl Drop for GreyWaiter<'_> {
+    fn drop(&mut self) {
+        let mut state = lock_mutex(&self.gate.state);
+        state.waiting = state.waiting.saturating_sub(1);
+    }
 }
 
 impl GreyGate {
-    fn new() -> Self {
+    pub(crate) fn new(cap: usize) -> Self {
         Self {
-            state: Mutex::new(GreyState { held: 0, max: 0 }),
+            state: Mutex::new(GreyState {
+                replies: 0,
+                returned: 0,
+                waiting: 0,
+            }),
             ready: Condvar::new(),
+            cap,
         }
     }
 
-    /// Count `len` grey bytes from now until the reply is written.
+    /// Reserve `len` grey bytes for a render that has not run yet.
     ///
-    /// `false` means the cap has no room and the caller waits.
-    pub(crate) fn reserve(&self, len: usize) -> bool {
+    /// `None` means the cap has no room for them now.
+    pub(crate) fn reserve(self: &Arc<Self>, len: usize) -> Option<GreyClaim> {
         let mut state = lock_mutex(&self.state);
-        let cap = PERMITS.saturating_mul(state.max.max(len));
-        if state.held.saturating_add(len) > cap {
-            return false;
+        if state.used().saturating_add(len) > self.cap {
+            return None;
         }
-        state.held += len;
-        if len > state.max {
-            state.max = len;
-        }
-        true
+        state.replies = state.replies.saturating_add(len);
+        Some(GreyClaim {
+            gate: Arc::clone(self),
+            bytes: len,
+        })
     }
 
-    /// The reply was written or abandoned, so its grey counts no longer.
-    pub(crate) fn release(&self, len: usize) {
+    /// Admit a render of `len` grey bytes into a worker buffer of `kept`
+    /// bytes, which the returned count holds.
+    ///
+    /// The render reuses the buffer when it is large enough and replaces it
+    /// otherwise, so the reply then holds `max(kept, len)` bytes and the
+    /// buffer is no longer returned. `claim` is room this request already
+    /// waited for, and it counts toward the admission. A refusal releases it.
+    pub(crate) fn admit(
+        self: &Arc<Self>,
+        claim: Option<GreyClaim>,
+        len: usize,
+        kept: usize,
+    ) -> Result<GreyClaim, GreyRefusal> {
+        let mut claim = claim.unwrap_or(GreyClaim {
+            gate: Arc::clone(self),
+            bytes: 0,
+        });
+        if len > self.cap {
+            return Err(GreyRefusal::TooLarge);
+        }
+        let charged = kept.max(len);
         let mut state = lock_mutex(&self.state);
-        state.held = state.held.saturating_sub(len);
+        let after = state
+            .used()
+            .saturating_sub(claim.bytes)
+            .saturating_sub(kept)
+            .saturating_add(charged);
+        if after > self.cap {
+            drop(state);
+            return Err(GreyRefusal::Full);
+        }
+        let before = state.used();
+        let held = claim.disarm();
+        state.replies = state.replies.saturating_sub(held).saturating_add(charged);
+        state.returned = state.returned.saturating_sub(kept);
+        drop(state);
+        claim.bytes = charged;
+        // Reusing a buffer for a smaller grey than the room waited for
+        // frees room another request may be waiting for.
+        if after < before {
+            self.ready.notify_all();
+        }
+        Ok(claim)
+    }
+
+    /// The render finished. The reply holds `reply` bytes and the worker's
+    /// buffer is `kept` bytes, both inside what the claim was charged.
+    pub(crate) fn settle(&self, claim: &mut GreyClaim, reply: usize, kept: usize) {
+        debug_assert!(
+            reply.saturating_add(kept) <= claim.bytes,
+            "a render held more grey than it was admitted for"
+        );
+        let mut state = lock_mutex(&self.state);
+        state.replies = state
+            .replies
+            .saturating_sub(claim.bytes)
+            .saturating_add(reply);
+        state.returned = state.returned.saturating_add(kept);
+        drop(state);
+        let freed = claim.bytes > reply.saturating_add(kept);
+        claim.bytes = reply;
+        if freed {
+            self.ready.notify_all();
+        }
+    }
+
+    /// The reply was written. Keep its buffer as returned, or free it when a
+    /// request waits for room.
+    pub(crate) fn return_reply(&self, mut claim: GreyClaim) -> ReturnedGrey {
+        let mut state = lock_mutex(&self.state);
+        if state.waiting > 0 {
+            drop(state);
+            return ReturnedGrey::Free(claim);
+        }
+        let bytes = claim.disarm();
+        state.replies = state.replies.saturating_sub(bytes);
+        state.returned = state.returned.saturating_add(bytes);
+        drop(state);
+        ReturnedGrey::Keep(KeptGrey {
+            gate: Arc::clone(&claim.gate),
+            bytes,
+        })
+    }
+
+    fn release_replies(&self, bytes: usize) {
+        let mut state = lock_mutex(&self.state);
+        state.replies = state.replies.saturating_sub(bytes);
         drop(state);
         self.ready.notify_all();
     }
 
-    pub(crate) fn held(&self) -> usize {
-        lock_mutex(&self.state).held
+    /// A worker freed a returned buffer of `bytes`.
+    pub(crate) fn release_returned(&self, bytes: usize) {
+        if bytes == 0 {
+            return;
+        }
+        let mut state = lock_mutex(&self.state);
+        state.returned = state.returned.saturating_sub(bytes);
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    /// Whether a request waits for room, so returned buffers should go.
+    pub(crate) fn has_waiters(&self) -> bool {
+        lock_mutex(&self.state).waiting > 0
+    }
+
+    /// Count one request as waiting until the guard drops.
+    pub(crate) fn enter_wait(&self) -> GreyWaiter<'_> {
+        let mut state = lock_mutex(&self.state);
+        state.waiting = state.waiting.saturating_add(1);
+        GreyWaiter { gate: self }
+    }
+
+    /// Grey bytes held by unwritten replies, then by returned buffers.
+    pub(crate) fn held(&self) -> (usize, usize) {
+        let state = lock_mutex(&self.state);
+        (state.replies, state.returned)
+    }
+
+    /// Requests waiting for room now.
+    #[cfg(test)]
+    pub(crate) fn waiting(&self) -> usize {
+        lock_mutex(&self.state).waiting
+    }
+
+    /// Count a returned buffer of `bytes` a test placed, when it fits.
+    #[cfg(test)]
+    pub(crate) fn count_returned(&self, bytes: usize) -> bool {
+        let mut state = lock_mutex(&self.state);
+        if state.used().saturating_add(bytes) > self.cap {
+            return false;
+        }
+        state.returned = state.returned.saturating_add(bytes);
+        true
     }
 
     /// Sleep until a release or `slice`, whichever first.
@@ -450,8 +670,10 @@ pub(crate) struct MemoryCensus {
     pub(crate) frames: usize,
     /// Body bytes being read and decode sample bytes not yet in the cache.
     pub(crate) inflight: usize,
-    /// Grey bytes held by replies that are not yet written, under the cap.
+    /// Every grey byte under the cap: unwritten replies and returned buffers.
     pub(crate) grey: usize,
+    /// The part of `grey` held by replies that are not yet written.
+    pub(crate) grey_replies: usize,
     /// Permit scratch, native copies, grey replies and returned grey buffers.
     pub(crate) workspace: usize,
     /// Decoded sample bytes on the free list.
@@ -484,7 +706,7 @@ pub struct Viewer {
     permits: PermitPool,
     /// Bytes of a body being read, or of a decode sample buffer not yet cached.
     inflight: Arc<AtomicUsize>,
-    /// Grey bytes held by replies that are not yet written.
+    /// Every grey byte under the cap, shared with the decode workers.
     grey_gate: Arc<GreyGate>,
     connections: AtomicUsize,
     connection_cap: usize,
@@ -525,7 +747,7 @@ impl Viewer {
     #[must_use]
     pub fn server(config: ViewerConfig) -> Self {
         let mut viewer = Self::with_connection_cap(config, CONNECTION_CAP);
-        viewer.scheduler = Some(schedule::Scheduler::start());
+        viewer.scheduler = Some(schedule::Scheduler::start(Arc::clone(&viewer.grey_gate)));
         viewer
     }
 
@@ -567,7 +789,7 @@ impl Viewer {
                 out: AtomicUsize::new(0),
             },
             inflight: Arc::new(AtomicUsize::new(0)),
-            grey_gate: Arc::new(GreyGate::new()),
+            grey_gate: Arc::new(GreyGate::new(GREY_CAP)),
             connections: AtomicUsize::new(0),
             connection_cap: cap,
             bodies_now: AtomicUsize::new(0),
@@ -623,12 +845,14 @@ impl Viewer {
         if let Some(scheduler) = &self.scheduler {
             workspace = workspace.saturating_add(scheduler.workspace_bytes());
         }
+        let (grey_replies, grey_returned) = self.grey_gate.held();
         let census = MemoryCensus {
             pressure,
             files,
             frames,
             inflight: self.inflight.load(Ordering::Relaxed),
-            grey: self.grey_gate.held(),
+            grey: grey_replies.saturating_add(grey_returned),
+            grey_replies,
             workspace,
             free,
         };
@@ -715,11 +939,6 @@ impl Viewer {
     /// The grey reply cap, shared with the decode jobs.
     pub(crate) fn grey_gate(&self) -> Arc<GreyGate> {
         Arc::clone(&self.grey_gate)
-    }
-
-    /// The reply stopped holding its grey.
-    pub(crate) fn release_grey(&self, len: usize) {
-        self.grey_gate.release(len);
     }
 
     pub(crate) fn enter_inflight(&self, bytes: usize) {
@@ -911,6 +1130,42 @@ impl Viewer {
             Held::Frame(arc) => Some((arc.samples.as_ptr().addr(), arc.samples.len())),
             Held::File(_) => None,
         }
+    }
+
+    /// Remove a posted file and its cached frames, as eviction would.
+    #[cfg(test)]
+    pub(crate) fn forget_file(&self, id: FileId, frames: u32) {
+        for index in 0..frames {
+            let _ = self.evict_frame_to_free_list(id, index);
+        }
+        let mut state = self.lock_cache();
+        if state.lru.remove(&HeldKey::File(id)).is_some() {
+            state.files = state.files.saturating_sub(1);
+        }
+    }
+
+    /// Stop the decode workers. Slots are still granted and jobs go unsent.
+    #[cfg(test)]
+    pub(crate) fn stop_decode_workers(&self) {
+        if let Some(scheduler) = &self.scheduler {
+            scheduler.stop_workers();
+        }
+    }
+
+    /// Refuse every later decode and body slot.
+    #[cfg(test)]
+    pub(crate) fn shut_decode_workers(&self) {
+        if let Some(scheduler) = &self.scheduler {
+            scheduler.shut();
+        }
+    }
+
+    /// Give a decode worker a returned grey buffer of `bytes`.
+    #[cfg(test)]
+    pub(crate) fn park_returned_grey(&self, worker: usize, bytes: usize) -> bool {
+        self.scheduler
+            .as_ref()
+            .is_some_and(|scheduler| scheduler.park_grey(worker, bytes))
     }
 
     /// Move one cached frame's samples onto the free list.
@@ -1720,6 +1975,101 @@ mod tests {
         if cache_mib_to_bytes("256").map_err(|error| error.to_string())? != DEFAULT_CACHE_BYTES {
             return Err("256 MiB was not the default byte count".to_owned());
         }
+        Ok(())
+    }
+
+    fn small_gate() -> Arc<GreyGate> {
+        Arc::new(GreyGate::new(100))
+    }
+
+    #[test]
+    fn a_refused_admission_releases_the_room_it_was_given() {
+        let gate = small_gate();
+        let other = gate.reserve(80);
+        assert!(other.is_some());
+        // 80 held elsewhere, 10 waited for, and the render needs 50.
+        let waited = gate.reserve(10);
+        assert!(waited.is_some());
+        assert_eq!(gate.admit(waited, 50, 0).err(), Some(GreyRefusal::Full));
+        assert_eq!(gate.held(), (80, 0));
+        // A grey larger than the cap is refused whatever was waited for.
+        let waited = gate.reserve(10);
+        assert_eq!(
+            gate.admit(waited, 101, 0).err(),
+            Some(GreyRefusal::TooLarge)
+        );
+        assert_eq!(gate.held(), (80, 0));
+        drop(other);
+        assert_eq!(gate.held(), (0, 0));
+    }
+
+    #[test]
+    fn an_admission_moves_the_returned_buffer_into_the_reply() {
+        let gate = small_gate();
+        assert!(gate.count_returned(30));
+        // Reusing a 30 byte buffer for a 20 byte grey charges 30.
+        let claim = gate.admit(None, 20, 30);
+        assert!(claim.is_ok());
+        assert_eq!(gate.held(), (30, 0));
+        drop(claim);
+        assert_eq!(gate.held(), (0, 0));
+        // Replacing a 30 byte buffer for a 60 byte grey charges 60, and
+        // fits beside 40 held elsewhere because the 30 leave.
+        assert!(gate.count_returned(30));
+        let other = gate.reserve(40);
+        let claim = gate.admit(None, 60, 30);
+        assert!(claim.is_ok());
+        assert_eq!(gate.held(), (100, 0));
+        drop(claim);
+        drop(other);
+        assert_eq!(gate.held(), (0, 0));
+    }
+
+    #[test]
+    fn a_refused_render_settles_to_what_the_worker_kept() -> Result<(), String> {
+        let gate = small_gate();
+        let Ok(mut claim) = gate.admit(None, 60, 0) else {
+            return Err("the render was not admitted".to_owned());
+        };
+        // The refused render left a 60 byte buffer with the worker.
+        gate.settle(&mut claim, 0, 60);
+        assert_eq!(gate.held(), (0, 60));
+        drop(claim);
+        assert_eq!(gate.held(), (0, 60));
+        gate.release_returned(60);
+        assert_eq!(gate.held(), (0, 0));
+        Ok(())
+    }
+
+    #[test]
+    fn a_written_reply_is_kept_only_while_nobody_waits() -> Result<(), String> {
+        let gate = small_gate();
+        let Some(claim) = gate.reserve(40) else {
+            return Err("no room".to_owned());
+        };
+        let ReturnedGrey::Keep(kept) = gate.return_reply(claim) else {
+            return Err("the reply was not kept".to_owned());
+        };
+        assert_eq!(gate.held(), (0, 40));
+        // The worker died before it took the buffer.
+        drop(kept);
+        assert_eq!(gate.held(), (0, 0));
+
+        let Some(claim) = gate.reserve(40) else {
+            return Err("no room".to_owned());
+        };
+        let waiter = gate.enter_wait();
+        assert!(gate.has_waiters());
+        let ReturnedGrey::Free(claim) = gate.return_reply(claim) else {
+            return Err("the reply was kept while a request waited".to_owned());
+        };
+        // The bytes count until the buffer is freed and the claim drops.
+        assert_eq!(gate.held(), (40, 0));
+        drop(claim);
+        assert_eq!(gate.held(), (0, 0));
+        drop(waiter);
+        assert!(!gate.has_waiters());
+        assert_eq!(gate.waiting(), 0);
         Ok(())
     }
 }

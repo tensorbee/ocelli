@@ -498,3 +498,9 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 - **The grey cap is the formula's design term, and it holds every grey.** The cap is `P * N_max` with `N_max` the design maximum frame of the formula, not the largest grey seen. Grey bytes held by unwritten replies and each worker's returned grey buffer both count inside it, so nothing is counted twice. A worker that cannot keep its returned buffer inside the cap frees it.
 - **A client that stops reading may delay other previews, and the documents say so.** On this loopback viewer a page that abandons a request closes the connection, which releases its grey at once. A client that keeps a connection open without reading holds its grey until the write timeout. When such clients fill the cap, other previews wait up to the write timeout and then answer `503 busy`, and while body-form previews wait a `/file` post can wait as long. README.md, the Use book and `docs/lld/cache.md` state both.
 - **`GET /held` reports the grey bytes held, and every release path has a test.** Each path that releases a grey reservation, the frame gone after the wait, a refused body-form render and a body-form wait failure included, has a test that fails when its release is removed.
+
+### Operator answer after review pass 6
+
+Given by the operator on 2026-11-06, after sizing the grey cap to the design `N_max` made a frame over 3000 by 2900, a 4740 by 5928 mammogram for example, refused outright where it had been drawn.
+
+- **A frame over the design size draws alone.** Its grey is admitted only when the gate holds no other grey, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. It is never refused for size alone below the library's `MAX_PIXELS`. The documented resident bound adds that one frame's grey above the design term, and the measured workload's bound is unchanged.

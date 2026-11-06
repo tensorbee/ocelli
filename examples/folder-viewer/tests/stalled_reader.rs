@@ -1,12 +1,13 @@
-//! A client that stops reading holds no decode permit.
+//! Two clients that stop reading do not stop other previews.
 //!
-//! Two clients request the same large grey and never read it, one per
-//! decode worker: the second falls back to the other worker because the
-//! first holds its home through the stalled write. Six previews of a frame
-//! whose grey is larger still must all answer. On the tree before F-216
-//! pass 4 remediation the permit came back only after the reply was
-//! written, so with two stalled readers both workers stayed held and the
-//! six waited for the stalled writes.
+//! Each of two clients asks for a 4 MiB grey and never reads it. They hold
+//! two 4 MiB greys under the grey cap, which is `P * N_max`, 17,400,000
+//! bytes. Six previews of a 512 by 512 frame fit beside them and must all
+//! answer 200 well inside the stalled writes' own bound. On the tree before
+//! F-216 pass 4 remediation the decode permit came back only after the
+//! reply was written, so both workers stayed held and the six waited. On
+//! the pass 6 tree the cap was twice the largest grey seen, 8 MiB here, so
+//! the two stalled greys filled it and the six waited for the write timeout.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -15,14 +16,18 @@ use std::time::{Duration, Instant};
 
 use ocelli_folder_viewer::{FrameRequest, Viewer, ViewerConfig, preview_frame, serve_on};
 
-/// One stalled grey is 8.7 MB, past two socket buffers, so its write blocks.
-const STALL_ROWS: u16 = 3000;
-const STALL_COLUMNS: u16 = 2900;
-/// The six answers carry a grey twice that size. Beside the two stalled
-/// greys, one of these still fits the grey cap's second slot, and the rest
-/// follow as each written reply frees its grey.
-const SIX_ROWS: u16 = 3000;
-const SIX_COLUMNS: u16 = 5800;
+/// One stalled grey is 4 MiB.
+const STALL_ROWS: u16 = 2048;
+const STALL_COLUMNS: u16 = 2048;
+/// Each stalled client pipelines this many previews. Socket buffers may
+/// absorb the first replies whole, and the first one they cannot absorb
+/// blocks its write, so each client then holds exactly one grey.
+const PIPELINED: usize = 4;
+/// The six answers carry a 262,144 byte grey.
+const SIX_ROWS: u16 = 512;
+const SIX_COLUMNS: u16 = 512;
+/// The grey cap, `P * N_max`, with `N_max` the formula's 3000 by 2900 frame.
+const GREY_CAP: usize = 2 * 3000 * 2900;
 /// Answers must arrive well inside the stalled write's own bound.
 const DEADLINE: Duration = Duration::from_secs(5);
 
@@ -167,8 +172,28 @@ fn header_value(response: &[u8], name: &str) -> Option<String> {
         .map(|value| value.trim().to_owned())
 }
 
+/// One number from the `GET /held` census.
+fn held_number(addr: std::net::SocketAddr, key: &str) -> Result<usize, String> {
+    let reply = post(
+        addr,
+        "GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        &[],
+        "the census",
+    )?;
+    let text = String::from_utf8_lossy(&reply).into_owned();
+    let needle = format!("\"{key}\":");
+    let rest = text
+        .split_once(&needle)
+        .ok_or_else(|| format!("the census omitted {key}"))?
+        .1;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits
+        .parse()
+        .map_err(|_| format!("the census {key} was not a number"))
+}
+
 #[test]
-fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
+fn two_stalled_readers_do_not_stop_six_small_previews() -> Result<(), String> {
     let stall_file = large_part10(STALL_ROWS, STALL_COLUMNS)?;
     let six_file = large_part10(SIX_ROWS, SIX_COLUMNS)?;
     let stall_grey = preview_frame(&stall_file, FrameRequest::default())
@@ -179,19 +204,12 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
         .map_err(|error| format!("the six file did not decode: {error}"))?
         .grey
         .len();
-    // macOS autotunes one socket's buffers to about 4 MiB, so a stalled
-    // reply must be larger than two socket buffers can hold for the write
-    // to block.
-    if stall_grey <= 8 * 1024 * 1024 {
-        return Err(format!("the stall grey was only {stall_grey} bytes"));
+    if stall_grey != 4 * 1024 * 1024 || six_grey != 512 * 512 {
+        return Err(format!("the greys were {stall_grey} and {six_grey} bytes"));
     }
-
-    // The six grey must be at least twice the stalled grey, so that beside
-    // the two stalled greys one six grey still fits the cap's second slot.
-    if six_grey < 2 * stall_grey {
-        return Err(format!(
-            "the six grey was {six_grey} against a stalled grey of {stall_grey}"
-        ));
+    // Beside two stalled greys, all six fit under the cap at once.
+    if 2 * stall_grey + 6 * six_grey > GREY_CAP {
+        return Err("the six do not fit beside the stalled greys".to_owned());
     }
 
     let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
@@ -210,11 +228,12 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
             file.len()
         )
     };
-    let preview_headers = |id: &str| {
+    let preview_headers = |id: &str, close: &str| {
         format!(
-            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {id}\r\nContent-Length: 0\r\n{close}\r\n"
         )
     };
+    let close = "Connection: close\r\n";
     let posted = post(
         addr,
         &post_headers(&stall_file),
@@ -224,13 +243,8 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
     if !status_is(&posted, 200) {
         return Err("the stall file was not accepted".to_owned());
     }
-    let header_text = String::from_utf8_lossy(&posted).into_owned();
-    let stall_id = header_text
-        .split("\r\n")
-        .find_map(|line| line.strip_prefix("X-Ocelli-File: "))
-        .ok_or("the stall file id was missing")?
-        .trim()
-        .to_owned();
+    let stall_id =
+        header_value(&posted, "X-Ocelli-File: ").ok_or("the stall file id was missing")?;
     let posted_six = post(addr, &post_headers(&six_file), &six_file, "the six post")?;
     if !status_is(&posted_six, 200) {
         return Err("the six file was not accepted".to_owned());
@@ -238,35 +252,45 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
     let six_id =
         header_value(&posted_six, "X-Ocelli-File: ").ok_or("the six file id was missing")?;
 
-    // Decode the six frame once, so the six later previews are renders and
-    // not six debug decodes of a 34.8 MB frame.
-    let warm = post(
-        addr,
-        &preview_headers(&six_id),
-        &[],
-        "the six frame warm-up",
-    )?;
-    if !status_is(&warm, 200) {
-        return Err("the six frame warm-up did not answer".to_owned());
+    // Decode both frames once, so the stalls and the six are renders.
+    for (id, name) in [
+        (&stall_id, "the stall warm-up"),
+        (&six_id, "the six warm-up"),
+    ] {
+        let warm = post(addr, &preview_headers(id, close), &[], name)?;
+        if !status_is(&warm, 200) {
+            return Err(format!("{name} did not answer"));
+        }
     }
 
-    // Two clients ask for the stall grey and never read. The first decode
-    // lands on its home worker; the second falls back to the other, so one
-    // stalled write sits on each worker.
-    let stall_headers = preview_headers(&stall_id);
+    // Two clients pipeline previews of the 4 MiB grey and never read.
+    let mut pipelined = String::new();
+    for _ in 0..PIPELINED {
+        pipelined.push_str(&preview_headers(&stall_id, ""));
+    }
     let mut stalls = Vec::new();
     for _ in 0..2 {
         let mut stall = TcpStream::connect(addr).map_err(|error| error.to_string())?;
         stall
-            .write_all(stall_headers.as_bytes())
+            .write_all(pipelined.as_bytes())
             .map_err(|error| error.to_string())?;
         stalls.push(stall);
-        // The stalled sockets are never read from.
-        std::thread::sleep(Duration::from_millis(2000));
+    }
+    // Each stalled client holds exactly one grey in a blocked write.
+    let started = Instant::now();
+    loop {
+        let held = held_number(addr, "grey_replies")?;
+        if held == 2 * stall_grey {
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(20) {
+            return Err(format!("the stalled replies held {held} grey bytes"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Six previews of the larger frame must all answer within the deadline.
-    let six_headers = preview_headers(&six_id);
+    // Six previews of the small frame must all answer within the deadline.
+    let six_headers = preview_headers(&six_id, close);
     let mut readers = Vec::new();
     for index in 0..6 {
         let headers = six_headers.clone();
@@ -278,10 +302,10 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
             if !status_is(&reply, 200) {
                 return Err(format!("preview {index} was not 200"));
             }
-            if started.elapsed() > DEADLINE {
+            if took > DEADLINE {
                 return Err(format!(
                     "preview {index} answered after {:.3} s",
-                    started.elapsed().as_secs_f32()
+                    took.as_secs_f32()
                 ));
             }
             Ok(())
@@ -298,10 +322,18 @@ fn a_reader_that_stops_does_not_hold_the_decode_permit() -> Result<(), String> {
             Err(_) => failures.push(format!("preview {index} thread panicked")),
         }
     }
+    // The stalls still hold their greys, and every grey is under the cap.
+    let held = held_number(addr, "grey_replies")?;
+    let grey = held_number(addr, "grey")?;
     // The stalled clients are closed only after the others have been judged.
     drop(stalls);
     if let Some(first) = failures.first() {
         return Err(first.clone());
+    }
+    if held != 2 * stall_grey || grey > GREY_CAP {
+        return Err(format!(
+            "after the six the replies held {held} and all greys {grey}"
+        ));
     }
     Ok(())
 }

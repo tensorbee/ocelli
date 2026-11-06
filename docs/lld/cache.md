@@ -188,11 +188,35 @@ buffer handed out is owned by that decode. Its old bytes are overwritten
 before they are read. `GET /held` reports `free`, the bytes of sample buffers
 on the free list, beside `used`.
 
-Grey bytes in replies not yet written count against one cap, twice the
-largest grey so far, which is the grey term of the resident bound. A preview
-past the cap waits up to the 60 second write timeout and then answers 503
-busy. A waiting preview holds no decode permit. A held frame it decoded is
-in the cache before it waits.
+Every grey byte the folder viewer holds counts against one fixed cap of
+17,400,000 bytes. That is `P * N_max` in the resident bound, with `N_max` the
+3000 by 2900 frame the bound is stated for. A reply holds its grey, by
+capacity, from the moment its render is admitted until it is written. Each
+decode thread keeps at most one written grey to render into next. Both count
+inside the cap, so nothing is counted twice and nothing is outside it. A
+decode thread frees the grey it kept while any preview waits for room, and
+before it renders a grey less than half that size. A written reply's grey is
+freed rather than kept while a preview waits. A frame of more than 17,400,000
+pixels is refused at once with 400 `too-large`, because its grey alone is over
+the cap. A preview whose grey does not fit waits for room for up to the 60
+second write timeout, and answers 503 busy if none comes. A waiting preview
+holds no decode permit. A held frame it decoded is in the cache before it
+waits. A whole reply must be written within the write timeout, and each send
+is given at most 16 KiB and only the time left, because a send that keeps
+moving bytes keeps its own socket timeout alive. `GET /held` reports `grey`,
+every grey byte under the cap, and `grey_replies`, the part held by replies
+not yet written.
+
+A page that abandons a request closes its connection, which releases its grey
+at once, within a millisecond when measured. A client that keeps a connection
+open without reading holds its grey until the write timeout, measured at 60.0
+seconds. When such clients fill the cap, other previews wait up to the write
+timeout and then answer 503 busy. Measured with twenty such clients, five of
+six later previews answered 503 busy at 60.0 seconds and one was served at
+58.95 seconds, when a stalled write timed out. While body-form previews wait,
+a file post can wait as long, because each of up to four waiting previews
+keeps its request body slot. Measured with four waiting, a file post waited
+58.99 seconds.
 
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.
