@@ -206,3 +206,12 @@ None open.
 - Q1, rustc enforcement through crate-root attributes or the lint table. Answered: lead decision under the operator's delegation of 2026-11-06. Forbid, the recommended option, through `[workspace.lints.rust]`, decision 1 and facts 2 and 3.
 - Q2, an exception for ocelli-core and ocelli-wasm. Answered: lead decision under the operator's delegation of 2026-11-06. None today because the allowed files do not exist, and the sequence for the first one is recorded, decision 2 and fact 1.
 - Q3, keep the scanner beside the lint. Answered: lead decision under the operator's delegation of 2026-11-06. Yes, with a tokenizer and both mechanisms required, decisions 3 to 5 and fact 6.
+
+### Lead rulings after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-232-working-pass-1.md`.
+
+- **`unsafe` inside an attribute is reported.** `#[unsafe(no_mangle)]` and its `cfg_attr` forms are `unsafe` code that rustc's lint refuses, so the scanner reports them, and an unclosed `#[` is an error rather than a silent skip.
+- **Doctests are code.** The scanner reads the Rust code fences of doc comments as code and reports `unsafe` there, because no lint table reaches a doctest. The documents say exactly which targets the lint reaches and that the scanner covers doctests.
+- **A weakening attribute is found with any whitespace or comment between `#` and `[`.**
+- **The two `guards-deep` lint-policy probes are corrected here.** Their expected `#[path]` count is the one measured on the tree, because the floor and the sprint gate run them.
