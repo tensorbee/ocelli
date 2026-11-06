@@ -11,8 +11,8 @@ use ocelli_codec::{
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, WindowInput,
-    fill_padding, open_frame, parse_part10,
+    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, MetadataSet, OpenedFrame,
+    WindowInput, fill_padding, open_frame, parse_part10, read_padding,
 };
 use ocelli_pixel::{
     ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PhotometricInterpretation,
@@ -183,6 +183,55 @@ fn a_reversed_monochrome2_padding_range_is_refused() {
         unreachable!("asserted immediately above")
     };
     assert_eq!(error, FrameOpenError::PaddingOrder);
+}
+
+#[test]
+fn padding_is_read_alone_where_frame_open_refuses_a_flag() {
+    // PS3.3 C.7.5.1.1.2. Pixel Padding Value 0 and Range Limit 10, US, in
+    // MONOCHROME2 order (value at or below limit). Burned In Annotation
+    // MAYBE is outside the enumerated values YES and NO of the General
+    // Image Module, PS3.3 C.7.6.1, so `open_frame` refuses the object, and
+    // the padding range alone is still the inclusive 0 to 10.
+    let mut padded = require(image_module());
+    padded.extend(require(rescale_one()));
+    padded.extend(require(short_le(
+        (0x0028, 0x0120),
+        *b"US",
+        &0_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0121),
+        *b"US",
+        &10_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0301),
+        *b"CS",
+        &text_pad("MAYBE"),
+    )));
+    let parsed = require(parse_part10(&require(part10(padded))));
+    assert_eq!(
+        open_frame(&parsed, 0).err(),
+        Some(FrameOpenError::BurnedInCode)
+    );
+    let metadata = require(MetadataSet::from_object(parsed.object()));
+    let range = require(read_padding(
+        &metadata,
+        PhotometricInterpretation::Monochrome2,
+        false,
+    ));
+    let Some(range) = range else {
+        unreachable!("the padding value is present")
+    };
+    assert_eq!((range.value(), range.limit()), (0, Some(10)));
+    assert!(range.contains(10));
+    assert!(!range.contains(11));
+    // The same pair is out of order for MONOCHROME1, where the value is at
+    // or above the limit.
+    assert_eq!(
+        read_padding(&metadata, PhotometricInterpretation::Monochrome1, false).err(),
+        Some(FrameOpenError::PaddingOrder)
+    );
 }
 
 #[test]

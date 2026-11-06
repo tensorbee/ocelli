@@ -2951,6 +2951,147 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-232",
+      "eid": "E38.35",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-229"
+      ],
+      "notes": "Found by F-229's eighth and ninth reviews. Answered by the operator on 2026-11-06: fixed in S46, the guard made sound against every trigger.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-233",
+      "eid": "E38.36",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E4.10",
+        "E38.35"
+      ],
+      "depends_fids": [
+        "F-229",
+        "F-232"
+      ],
+      "notes": "Found by F-229's eighth review, defect D2. Answered by the operator on 2026-11-06: fixed in S46, every crate built with +simd128 for the SIMD variants and F-X013's claim rechecked.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-234",
+      "eid": "E3.9",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E3.8",
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-225",
+        "F-229"
+      ],
+      "notes": "Found by F-225's first review while fuzzing. Answered by the operator on 2026-11-06: fixed in S46 with a typed error.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-235",
+      "eid": "E6.9",
+      "phase": "P1",
+      "epic": "E6 Render core (wgpu)",
+      "epic_key": "E6",
+      "story": "VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.33"
+      ],
+      "depends_fids": [
+        "F-227"
+      ],
+      "notes": "Found by F-227's fourth and fifth reviews on Apple M4 Max under Metal. Answered by the operator on 2026-11-06: a story in S47 with a tier A fixture that fails today.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-236",
+      "eid": "E16.7",
+      "phase": "P1",
+      "epic": "E16 Public API & TypeScript shell",
+      "epic_key": "E16",
+      "story": "acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [
+        "E5.9"
+      ],
+      "depends_fids": [
+        "F-231"
+      ],
+      "notes": "Found by F-230's first review. Answered by the operator on 2026-11-06: a story in S47 honours both keys with tests.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-237",
+      "eid": "E19.6",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.30",
+        "E38.34"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-228"
+      ],
+      "notes": "Found while designing F-220. Answered by the operator on 2026-11-06: change the release rule, the module ships outside the @ocelli/core tarball and a story in S47 decides where.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-238",
+      "eid": "E19.7",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.30",
+        "E38.36"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-233"
+      ],
+      "notes": "Found by F-220's first review reading the objc2 LICENSE.md. Answered by the operator on 2026-11-06: a native build without wgpu's Metal backend, a story in S47.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",

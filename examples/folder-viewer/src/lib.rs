@@ -6,7 +6,10 @@
 
 mod preview;
 mod synthetic;
+mod value;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod held;
 #[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
@@ -15,6 +18,9 @@ pub use preview::{
     preview_first_frame, preview_frame, window_function_from_token, window_preset_from_token,
 };
 pub use synthetic::{SLICES, slice};
+pub use value::{ImagePoint, value_frame};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use serve::{handle_connection, serve};
+pub use held::{Viewer, ViewerConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use serve::{handle_connection, handle_connection_with, serve, serve_on};

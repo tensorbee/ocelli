@@ -431,6 +431,44 @@ const config = tseslint.config(
     },
   },
   {
+    // F-216's viewer workload driver. The file runs under node and takes the
+    // node globals from the bench block above. The callbacks it hands to
+    // Playwright run in Chromium against the folder viewer, so the browser
+    // globals they use, other than the bench block's timers, are named here,
+    // and `fetch` is used on both sides. It is not a wasm memory view and it
+    // does not touch the allowance list. These names cover the whole file, so
+    // the bench block's split does not catch this file's node side reaching
+    // for `document` or a page name.
+    //
+    // The second set is the page's own. `examples/folder-viewer/src/page.html`
+    // loads one classic script, so its top-level `let`, `const` and function
+    // declarations are reachable by name from a Playwright callback. The three
+    // the driver assigns are writable and the rest are read only.
+    files: ["tools/bench/src/viewer_work.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        performance: "readonly",
+        fetch: "readonly",
+        queueMicrotask: "readonly",
+        MutationObserver: "readonly",
+        KeyboardEvent: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        overrideWindow: "writable",
+        activePreset: "writable",
+        cacheBytes: "writable",
+        cache: "readonly",
+        viewIndex: "readonly",
+        showIndex: "readonly",
+        currentImage: "readonly",
+        postPreview: "readonly",
+        requestGrey: "readonly",
+        drawGrey: "readonly",
+      },
+    },
+  },
+  {
     // The cold-start page, and only it. It is granted no node global, so a
     // page file reaching for `process` is caught, which matters here more than
     // usual: the whole point of the design is that timing is taken from the

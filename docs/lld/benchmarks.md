@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216
+**Last updated:** 2026-11-06
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -92,7 +92,11 @@ pixel read-back, because decision D3 forbids one and a read-back would also
 measure something no user experiences.
 
 Adding a measurement when its story lands is a data edit plus one runner file.
-No part of the driver, the record format or the gate changes.
+A new unit is also an edit to `INCREASE_MEANS`, because a unit the table does
+not name fails the record test. F-216 added `frames_per_second`, which is
+better when it rises, and `bytes`, which is worse when it rises. The driver
+accepts subject ids as positional arguments so one command can measure a
+named subset. `--subject` still limits only the entries `--accept` writes.
 
 The driver is also guarded directly. `run_test.mjs` reaches every argument
 refusal in `parseArgs` and the refusal of one pending runner. The message
@@ -645,6 +649,36 @@ number. Its runner invokes F-004's fill-rate instrument,
 `measures_a_fill_rate_on_this_machine`, and reads the pixel rate that test
 prints.
 
+## Folder viewer measurements
+
+F-216 measures the local series viewer. The five subjects are `viewer.open`,
+`viewer.first_image`, `viewer.scroll_rate`, `viewer.window_step` and
+`viewer.resident_memory`. Their definitions are in `tools/bench/subjects.json`.
+The shared browser work lives in `tools/bench/src/viewer_work.mjs`, outside
+the runner directory, so the registry does not treat it as a subject. Each
+runner file only calls one measurement.
+
+`viewer.scroll_rate` dispatches one ArrowDown inside each
+`requestAnimationFrame` callback and counts a presented frame when the
+image index the page drew changed since the previous callback. An empty
+`setTimeout(16)` loop in the pinned headless Chromium stays below the 55
+frame budget, so the run also reports that plain timer ceiling.
+
+F-216 delivers `viewer.open`, `viewer.first_image`, `viewer.scroll_rate`,
+`viewer.window_step` and `viewer.resident_memory`. `subject_story` on each
+of those rows names F-216.
+
+The synthetic Part 10 files are written under `tools/bench/out/`, which is
+ignored. They are not staged.
+
+Playwright's `postDataBuffer` is empty for these fetch bodies. The window
+subject also records the byte length of the body the page passes to `fetch`.
+A preview body that is not empty fails the run. After the timed steps the
+same subject asks for one more id-form preview and compares sixteen canvas
+pixels with that reply. A listener started after the draw does not see the
+reply that already arrived. The restart step clears the page grey cache
+before the next key, so the stale id is sent and the file is posted again.
+
 ## What is deliberately absent
 
 **No `criterion` and no new Cargo dev-dependency.** The frame runner is a Rust
@@ -658,9 +692,11 @@ playwright at exactly the version `tools/oracle` pins, which
 from a subject id, and the two implementers a trait would need do not exist.
 
 **No pixel arithmetic in the harness.** HLD 27.2 R3 requires a hand-computed
-fixture for every function doing pixel arithmetic. The benchmark only invokes
-the production decoder and reads no sample value. The decoder's tests own the
-hand-computed lossless fixture and independent `.51` reference.
+fixture for every function doing pixel arithmetic. Decode subjects invoke the
+production decoder and read no sample value. The decoder's tests own the
+hand-computed lossless fixture and independent `.51` reference. The folder
+viewer subjects compare 16 canvas samples with the server reply and do not
+compute a window of their own.
 
 **No parity surface.** `docs/hld/B-parity-surface.md` enumerates viewport types,
 tool classes, blend modes, VOI LUT functions, transfer syntaxes, segmentation
