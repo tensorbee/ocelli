@@ -77,8 +77,9 @@ describe("F-103 event catalogue", () => {
       [RING_EVENT_KIND.pressure, "cache.pressure"],
       [RING_EVENT_KIND.budget_changed, "cache.budgetChanged"],
       [RING_EVENT_KIND.presented, "frame.presented"],
+      [RING_EVENT_KIND.released, "cache.released"],
     ]);
-    expect(expected.size).toBe(6);
+    expect(expected.size).toBe(7);
     const ringNames = [
       ...CORNERSTONE_EVENT_MAP.filter((row) => row.delivery === "ring").map(
         (row) => row.ocelli,
@@ -101,6 +102,7 @@ describe("F-103 event catalogue", () => {
       decodeNamedEvent(event(RING_EVENT_KIND.pressure, payload)),
       decodeNamedEvent(event(RING_EVENT_KIND.budget_changed, payload)),
       decodeNamedEvent(event(RING_EVENT_KIND.presented, payload)),
+      decodeNamedEvent(event(RING_EVENT_KIND.released, payload)),
     ];
     expect(decoded.map((row) => row?.name)).toEqual([
       "cache.evicted",
@@ -109,6 +111,7 @@ describe("F-103 event catalogue", () => {
       "cache.pressure",
       "cache.budgetChanged",
       "frame.presented",
+      "cache.released",
     ]);
     for (const row of decoded) {
       expect(row?.viewport).toBe(9);
@@ -119,7 +122,7 @@ describe("F-103 event catalogue", () => {
   it("refuses_unknown_kind", () => {
     const payload = new Uint8Array(32);
     expect(decodeNamedEvent(event(0, payload))).toBeNull();
-    expect(decodeNamedEvent(event(7, payload))).toBeNull();
+    expect(decodeNamedEvent(event(8, payload))).toBeNull();
   });
 
   it("decodes_fixture_payloads", () => {
@@ -192,6 +195,22 @@ describe("F-103 event catalogue", () => {
       drawnHeight: 40,
       flags: 1,
     });
+
+    // CacheEvent::Released. series 0x0102030405060708, frames 0xA0B0C0D0 and
+    // bytes 524288 = 0x00080000. A zero u32 sits at 12, so bytes stay at 16.
+    // The same wire image AC4 pins in crates/ocelli-cache/src/image.rs.
+    const released = new Uint8Array(32);
+    released.set([
+      0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
+      0xd0, 0xc0, 0xb0, 0xa0,
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ]);
+    expect(decodeNamedEvent(event(RING_EVENT_KIND.released, released))?.payload).toEqual({
+      series: 0x0102030405060708n,
+      frames: 2695938256,
+      bytes: 524288n,
+    });
   });
 
   it("refuses_a_short_or_unknown_payload", () => {
@@ -201,6 +220,7 @@ describe("F-103 event catalogue", () => {
       decodeNamedEvent(event(RING_EVENT_KIND.budget_changed, new Uint8Array(27))),
     ).toBeNull();
     expect(decodeNamedEvent(event(RING_EVENT_KIND.presented, new Uint8Array(15)))).toBeNull();
+    expect(decodeNamedEvent(event(RING_EVENT_KIND.released, new Uint8Array(23)))).toBeNull();
     const badTier = new Uint8Array(32);
     badTier[0] = 3;
     expect(decodeNamedEvent(event(RING_EVENT_KIND.pressure, badTier))).toBeNull();

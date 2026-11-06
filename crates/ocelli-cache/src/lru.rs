@@ -207,6 +207,34 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
         Some(entry.value)
     }
 
+    /// Explicit release of every live key in `range`, ascending. Not an
+    /// eviction.
+    ///
+    /// This is `remove`'s rule applied to a range: the use tick does not
+    /// move, so the survivors' eviction order is the caller's to keep, and
+    /// `used` drops by exactly the admitted bytes of what left. The pairs
+    /// come back in ascending key order and not in recency order, which is
+    /// what makes a release distinguishable from a run of evictions.
+    ///
+    /// The keys are collected before anything is removed, because the range
+    /// borrows the map. This allocates the return and the collection, which
+    /// is why it is a release call and not a render-loop call.
+    pub fn remove_range<R: core::ops::RangeBounds<K>>(&mut self, range: R) -> Vec<(K, V)> {
+        let keys: Vec<K> = self
+            .entries
+            .range(range)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut released = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.release(entry.bytes);
+                released.push((key, entry.value));
+            }
+        }
+        released
+    }
+
     /// Whether the key is live. Telemetry, not a use, so it does not change
     /// what leaves next.
     #[must_use]
@@ -591,6 +619,65 @@ mod tests {
         assert_eq!(cache.remove(&"b"), None);
         assert_eq!(cache.remove(&"z"), None);
         assert_eq!(cache.pressure().used, 200);
+    }
+
+    #[test]
+    fn remove_range_returns_the_keys_ascending_and_releases_their_bytes() {
+        // Hand-computed. Keys 1 to 9 hold 1, 2, 4, 8, 16, 32, 64, 128 and 256
+        // bytes, which is 2^9 - 1 = 511. The range 3..=6 holds 4 + 8 + 16 +
+        // 32 = 60 of those, so `used` goes 511 to 451.
+        let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 1000);
+        let sizes = [
+            (1_u8, 1_usize),
+            (2, 2),
+            (3, 4),
+            (4, 8),
+            (5, 16),
+            (6, 32),
+            (7, 64),
+            (8, 128),
+            (9, 256),
+        ];
+        for (key, bytes) in sizes {
+            let admission = cache.insert(key, Block(bytes));
+            assert!(admission.evicted.is_empty());
+        }
+        assert_eq!(cache.pressure().used, 511);
+
+        // Two reads. They lift keys 1 and 3 above the rest, so the recency
+        // order inside the range is 4, 5, 6, 3 and a release implemented as
+        // eviction would return the keys in that order instead of ascending.
+        assert_eq!(cache.get(&1), Some(&Block(1)));
+        assert_eq!(cache.get(&3), Some(&Block(4)));
+
+        assert_eq!(
+            cache.remove_range(3..=6),
+            [(3, Block(4)), (4, Block(8)), (5, Block(16)), (6, Block(32))],
+        );
+        assert_eq!(cache.pressure().used, 451);
+        assert_eq!(cache.len(), 5);
+        assert!(!cache.contains_key(&3));
+        assert!(!cache.contains_key(&4));
+        assert!(!cache.contains_key(&5));
+        assert!(!cache.contains_key(&6));
+        for key in [1_u8, 2, 7, 8, 9] {
+            assert!(cache.contains_key(&key));
+        }
+
+        // A read after the release changes no length beyond the removal. A
+        // release folded into `get` would.
+        assert_eq!(cache.get(&1), Some(&Block(1)));
+        assert_eq!(cache.len(), 5);
+
+        // The survivors' eviction order is the one the two reads left. 600
+        // bytes do not fit in the 549 that are free, so the insert evicts
+        // the least recently used survivor until they do. Key 2 leaves at
+        // 449 and key 7 at 385, where 1000 - 385 = 615 finally holds 600,
+        // and 385 + 600 = 985. A release that had moved the survivors'
+        // ticks would take key 1 first.
+        let admission = cache.insert(10, Block(600));
+        assert_eq!(admission.evicted, [(2, Block(2)), (7, Block(64))]);
+        assert_eq!(cache.pressure().used, 985);
     }
 
     #[test]

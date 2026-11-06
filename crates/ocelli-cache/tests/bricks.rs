@@ -7,7 +7,7 @@
 
 use ocelli_cache::{
     Admission, Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickSample, BrickWidth,
-    Budgeted, CacheTier, VolumeId,
+    Budgeted, CacheTier, ReleaseSummary, VolumeId,
 };
 use proptest::prelude::*;
 
@@ -403,6 +403,68 @@ fn float_bricks_take_the_sixteen_bit_edge() {
     let grid = BrickGrid::new([64, 64, 64], BrickWidth::Float32);
     assert_eq!(grid.edge, 64);
     assert_eq!(grid.grid, [1, 1, 1]);
+}
+
+#[test]
+fn release_volume_releases_every_level_and_leaves_other_volumes() {
+    // Hand-computed. Volume 2 holds 8 and 16 bytes on level 0 and 32 bytes
+    // on level 1, so the release is 3 entries and 8 + 16 + 32 = 56 bytes.
+    // Volume 3 holds 64 bytes and keeps them, 120 - 56 = 64.
+    let mut cache = BrickCache::new(200);
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(2),
+            level: 0,
+            brick: [0, 0, 0],
+        },
+        brick_bytes(8),
+    );
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(2),
+            level: 0,
+            brick: [1, 0, 0],
+        },
+        brick_bytes(16),
+    );
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(2),
+            level: 1,
+            brick: [0, 0, 0],
+        },
+        brick_bytes(32),
+    );
+    let level_zero = BrickGrid::new([64, 64, 64], BrickWidth::EightBit);
+    let _ = cache.insert(
+        BrickKey {
+            volume: VolumeId(3),
+            level: 0,
+            brick: [0, 0, 0],
+        },
+        brick_bytes(64),
+    );
+    assert_eq!(cache.pressure().used, 120);
+
+    let summary = cache.release_volume(VolumeId(2));
+    assert_eq!(
+        summary,
+        ReleaseSummary {
+            entries: 3,
+            bytes: 56
+        }
+    );
+    assert_eq!(cache.pressure().used, 64);
+
+    // A repeat releases nothing and returns zeros.
+    let summary = cache.release_volume(VolumeId(2));
+    assert_eq!(summary, ReleaseSummary::default());
+    assert_eq!(cache.pressure().used, 64);
+
+    // Volume 3 is untouched. Its one brick is still resident at level 0,
+    // and volume 2's is not.
+    assert!(cache.is_resident(VolumeId(3), &level_zero));
+    assert!(!cache.is_resident(VolumeId(2), &level_zero));
 }
 
 fn cut_filled(grid: &BrickGrid, brick: [u32; 3], sample: BrickSample) -> Brick {

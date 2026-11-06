@@ -17,7 +17,8 @@ compile_error!("the boundary wire format is little-endian");
 
 use bytemuck::{Pod, Zeroable};
 use ocelli_cache::{
-    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent,
+    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED,
+    RingEvent,
 };
 
 /// `Fit` in the packed stack channel. Kind 0 is invalid.
@@ -214,14 +215,15 @@ pub struct RingHeader {
 /// Presented frame. Not a cache kind.
 pub const KIND_PRESENTED: u32 = 6;
 
-/// The six ring kinds and the names the TypeScript catalogue publishes.
-pub const RING_EVENT_KINDS: [(&str, u32); 6] = [
+/// The seven ring kinds and the names the TypeScript catalogue publishes.
+pub const RING_EVENT_KINDS: [(&str, u32); 7] = [
     ("evicted", KIND_EVICTED),
     ("displaced", KIND_DISPLACED),
     ("refused", KIND_REFUSED),
     ("pressure", KIND_PRESSURE),
     ("budget_changed", KIND_BUDGET_CHANGED),
     ("presented", KIND_PRESENTED),
+    ("released", KIND_RELEASED),
 ];
 
 /// `RingHeader` in bytes.
@@ -315,8 +317,9 @@ mod tests {
 
     #[test]
     fn ring_kinds_are_unique() {
-        assert_eq!(RING_EVENT_KINDS.len(), 6);
+        assert_eq!(RING_EVENT_KINDS.len(), 7);
         assert_eq!(KIND_PRESENTED, 6);
+        assert_eq!(KIND_RELEASED, 7);
         for (index, (name, kind)) in RING_EVENT_KINDS.iter().enumerate() {
             for (other_name, other_kind) in RING_EVENT_KINDS.iter().skip(index + 1) {
                 assert_ne!(name, other_name);
