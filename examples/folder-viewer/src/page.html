@@ -975,6 +975,12 @@ let wheelSign = 0;
 let wheelIdle = 0;
 let wheelFrame = 0;
 let wheelCell = 0;
+// True while a pan or zoom drag lays out, because that same move places the
+// readout again straight after.
+let pointerPlaces = false;
+// The last pointer position over #wrap, so the magnifier can be drawn again
+// from a new image without a pointer event.
+let lastPointer = null;
 let pendingDelta = 0;
 let marksSig = "";
 let keyButtonOn = false;
@@ -2295,6 +2301,7 @@ function drawGrey(vp, grey) {
     const mine = vp.cell === activeCell && (draft || selected != null);
     if (mine || dom.ink.childElementCount || (drawn && drawn.length)) renderInk(vp);
   }
+  refreshMag(vp);
 }
 
 function syncStage(vp) {
@@ -2340,6 +2347,7 @@ async function paintTiles(vp) {
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
       sizeTile(node);
+      if (lastPointer && lastPointer.tile === node) refreshMag(vp);
     } catch (error) {
       if (error && error.name === "AbortError") return;
       if (token !== vp.tileToken) return;
@@ -2510,6 +2518,10 @@ function assignEdge(node, hide, value) {
 
 function showFault(vp, message) {
   const dom = vp.dom;
+  if (mag.dataset.cell === String(vp.cell)) {
+    mag.hidden = true;
+    mag.dataset.cell = "";
+  }
   dom.fault.hidden = false;
   dom.fault.textContent = message;
   dom.stage.hidden = true;
@@ -2828,7 +2840,10 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  pointReadout(event);
+  // A pan or zoom drag moves the picture under the pointer, so its readout
+  // is placed after the new layout, for the geometry it now shows.
+  const moving = Boolean(drag && drag.id === event.pointerId && (drag.mode === "pan" || drag.mode === "zoom"));
+  if (!moving) pointReadout(event);
   if (grip && grip.pointer === event.pointerId) {
     moveGrip(event);
     return;
@@ -2850,7 +2865,10 @@ function onPointerMove(event) {
   }
   if (!drag || drag.id !== event.pointerId) return;
   const travel = Math.hypot(event.clientX - drag.originX, event.clientY - drag.originY);
-  if (drag.markId && travel < 5) return;
+  if (drag.markId && travel < 5) {
+    if (moving) pointReadout(event);
+    return;
+  }
   if (drag.markId && travel >= 5) drag.markId = "";
   const mode = drag.mode;
   if (mode === "pan") {
@@ -2859,11 +2877,17 @@ function onPointerMove(event) {
     vp.panY += event.clientY - drag.y;
     drag.x = event.clientX;
     drag.y = event.clientY;
+    pointerPlaces = true;
     layoutViewport(vp);
+    pointerPlaces = false;
+    pointReadout(event);
   } else if (mode === "zoom") {
     const factor = Math.exp(-(event.clientY - drag.y) * 0.01);
     drag.y = event.clientY;
+    pointerPlaces = true;
     zoomAt(vp, drag.originX, drag.originY, factor);
+    pointerPlaces = false;
+    pointReadout(event);
   } else if (mode === "scroll") {
     drag.moved += event.clientY - drag.y;
     drag.y = event.clientY;
@@ -3073,11 +3097,13 @@ function imageToClient(vp, point) {
 function pointReadout(event) {
   const vp = viewportAt(event.clientX, event.clientY);
   if (!vp) {
+    lastPointer = null;
     hideCross();
     mag.hidden = true;
     return;
   }
   const tile = vp.tileMode ? event.target.closest(".tiles canvas") : null;
+  lastPointer = { clientX: event.clientX, clientY: event.clientY, tile };
   const point = tile ? tilePoint(tile, event) : imagePoint(vp, event);
   if (showCross && point && !vp.tileMode) {
     const local = wrap.getBoundingClientRect();
@@ -3130,6 +3156,7 @@ function leavePointer() {
 // The same, when one viewport's view geometry changes and the readout or
 // the magnifier is placed over that viewport.
 function leavePointerFor(vp) {
+  if (pointerPlaces) return;
   if (valueState.cell === vp.cell || mag.dataset.cell === String(vp.cell)) leavePointer();
 }
 
@@ -3224,6 +3251,21 @@ function hideCross() {
   document.getElementById("cross-h").hidden = true;
   document.getElementById("cross-v").hidden = true;
   document.getElementById("cross-read").hidden = true;
+}
+
+// The image in the magnifier's cell changed under a still pointer. It is
+// drawn again from the new picture at the last pointer position, or hidden
+// when there is none, so it never shows an image the cell no longer shows.
+function refreshMag(vp) {
+  if (mag.hidden || mag.dataset.cell !== String(vp.cell)) return;
+  const tile = lastPointer && vp.tileMode && lastPointer.tile && vp.dom.tiles.contains(lastPointer.tile) ? lastPointer.tile : null;
+  const point = !lastPointer ? null : (tile ? tilePoint(tile, lastPointer) : (vp.tileMode ? null : imagePoint(vp, lastPointer)));
+  if (!point) {
+    mag.hidden = true;
+    mag.dataset.cell = "";
+    return;
+  }
+  updateMag(vp, lastPointer, tile, point);
 }
 
 function updateMag(vp, event, tile, point) {

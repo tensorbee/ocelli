@@ -248,7 +248,10 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    magnifier hide when the picture moves under a still pointer, after a
    zoom, a fit, a turn or flip, Four images, a layout change, a side
    panel, full screen or a window resize, and come back with the next
-   pointer move.
+   pointer move. In Four images only the magnifier comes back, because the
+   cross is drawn in the single view only. During a pan or zoom drag they
+   stay with the pointer. When the image under a still pointer changes, by
+   a key, the wheel or Play, the magnifier shows the new image.
 9. Every number on a mark comes from the local process, and the page prints
    its text. Probe asks `POST /value`, and every other mark asks `POST
    /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from

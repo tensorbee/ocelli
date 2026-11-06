@@ -13353,8 +13353,10 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A layout change, a window resize, a zoom with `=` or a tile "
                 "toggle, made with the pointer still, that leaves the readout, "
                 "the cross or the magnifier showing, a pointer move after it "
-                "that does not show them again, and a run that observed no "
-                "change.",
+                "that does not show them again, a pan or zoom drag that hides "
+                "them on most moves, a still-pointer ArrowRight or Play that "
+                "leaves the magnifier on the previous image, and a run that "
+                "observed no change.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -13387,7 +13389,8 @@ GUARDS: tuple[Guard, ...] = (
               "stayed. The observation itself needs Chromium and a release "
               "build of the viewer, which a disposable sandbox does not have, "
               "so it is watched by the `viewer-browser` gate and its CI job. "
-              "The no-change and no-repaint branches have no probe.",
+              "The no-change, no-repaint, drag and image-step branches have "
+              "no probe.",
     ),
     Guard(
         id="bench.cold-start",

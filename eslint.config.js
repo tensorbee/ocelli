@@ -469,8 +469,10 @@ const config = tseslint.config(
     },
   },
   {
-    // F-208's browser check of the folder viewer's displayed aspect. It runs
-    // under node and hands Playwright callbacks that read the page's DOM.
+    // F-208's browser checks of the folder viewer, the displayed aspect and
+    // the pointer readout. They run under node and hand Playwright callbacks
+    // that read the page's DOM and call two of the page's own top-level
+    // functions by name.
     files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
     languageOptions: {
       globals: {
@@ -479,6 +481,8 @@ const config = tseslint.config(
         URL: "readonly",
         setTimeout: "readonly",
         document: "readonly",
+        imageToClient: "readonly",
+        activeViewport: "readonly",
       },
     },
   },
