@@ -215,6 +215,33 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     if !page.contains("Series shortened") {
         return Err("a shortened series is not labelled".to_owned());
     }
+    // F-210. The cross asks the process for the value by file id, with no
+    // body, and shows a reply only for the cell and image it was asked for.
+    let call_at = page
+        .find("fetch(\"/value\"")
+        .ok_or_else(|| "the page does not ask for the value".to_owned())?;
+    let call = page
+        .get(call_at..)
+        .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the value call does not close".to_owned())?;
+    if !call.contains("\"X-Ocelli-File\": id") || call.contains("body:") {
+        return Err(format!(
+            "the value call is not by id without a body: {call}"
+        ));
+    }
+    if !page.contains(
+        "\"toggle-cross\": \"Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT. The local process computes the value.\"",
+    ) {
+        return Err("the cross sentence does not name the value".to_owned());
+    }
+    if !page.contains("if (point && want.generation === valueState.generation &&\n      point.index_column === valueState.column && point.index_row === valueState.row) {") {
+        return Err("a value reply is shown without the stale cell check".to_owned());
+    }
+    for arithmetic in ["slope", "intercept", "Rescale"] {
+        if page.contains(arithmetic) {
+            return Err(format!("the page computes a modality value: {arithmetic}"));
+        }
+    }
     // PS3.3 10.7.1.3: the first Pixel Spacing value is the row spacing, the
     // vertical distance between rows, and the second is the column spacing.
     // The display stretches x by the column spacing and y by the row spacing.

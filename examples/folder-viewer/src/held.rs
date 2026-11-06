@@ -1816,6 +1816,7 @@ mod tests {
             recipe: Err(PreviewError::Window),
             facts: Err(PreviewError::Window),
             full_range: Err(PreviewError::Window),
+            value: Err(PreviewError::Window),
             frames: 1,
             width: columns,
             height: rows,

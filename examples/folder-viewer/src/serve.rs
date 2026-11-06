@@ -20,9 +20,10 @@ use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
     render_held, reset_phases, validate_frame_request,
 };
+use crate::value::value_json;
 use crate::{
-    FrameRequest, Preview, PreviewError, SLICES, headers_json, inspect_json, preview_frame, slice,
-    window_function_from_token, window_preset_from_token,
+    FrameRequest, ImagePoint, Preview, PreviewError, SLICES, headers_json, inspect_json,
+    preview_frame, slice, window_function_from_token, window_preset_from_token,
 };
 
 const HEADER_CAP: usize = 16 * 1024;
@@ -47,6 +48,8 @@ struct Request {
     body: Vec<u8>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    /// `X-Ocelli-Points`, read only by `/value`.
+    points: PointsHeader,
     close: bool,
     /// Capacity charged to inflight for this body.
     body_charge: usize,
@@ -371,6 +374,11 @@ fn route(
         }
         ("POST", "/preview") => preview_route(viewer, request, stream, charge),
         ("POST", "/file") => (file_route(viewer, request, charge), None),
+        ("POST", "/value") => {
+            let reply = value_route(viewer, &request, stream);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
         ("POST", "/inspect") => {
             let reply = json_or_error(inspect_json(&request.body, request.frame.frame));
             retire_request_body(charge, request.body);
@@ -1277,6 +1285,159 @@ fn preview_held(
     (reply, None)
 }
 
+/// `POST /value`: the modality value at each point of one held frame.
+///
+/// The file arrives once through `/file` and is named here by its id, with
+/// no body. A frame the process holds is read where it is. A frame it does
+/// not hold is decoded once from the held bytes, on a decode worker for the
+/// process server, and stored, so a later `/value` or `/preview` of that
+/// frame is served from it. The window headers are not read.
+fn value_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+    let Some(id) = request.file_id else {
+        return text_reply(400, Some("header"), "a value request names a file id");
+    };
+    if !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    let points = match parse_points(&request.points) {
+        Some(points) => points,
+        None => return text_reply(400, Some("points"), "the point list is not usable"),
+    };
+    let frame = request.frame.frame;
+    let (result, source) = match viewer.preview_source(id, frame) {
+        PreviewSource::Gone => return gone(),
+        PreviewSource::Hit(held) => (value_json(&held, frame, &points), "held"),
+        PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
+            Ok(Some(held)) => (value_json(&held, frame, &points), "decoded"),
+            Ok(None) => return busy_reply(),
+            Err(error) => return error_reply(error),
+        },
+    };
+    match result {
+        Ok(json) => {
+            let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
+            reply.source = Some(source);
+            reply
+        }
+        Err(error) => error_reply(error),
+    }
+}
+
+/// `x,y` pairs separated by one space, each number a finite decimal, from
+/// one to [`MAX_POINTS`] pairs. Anything else is `None`.
+fn parse_points(header: &PointsHeader) -> Option<Vec<ImagePoint>> {
+    let PointsHeader::One(text) = header else {
+        return None;
+    };
+    if text.is_empty() {
+        return None;
+    }
+    let mut points = Vec::new();
+    for pair in text.split(' ') {
+        if points.len() == MAX_POINTS {
+            return None;
+        }
+        let (x, y) = pair.split_once(',')?;
+        let x = x.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        let y = y.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        points.push(ImagePoint { x, y });
+    }
+    Some(points)
+}
+
+/// Decode one frame of a held file for `/value`, and store it.
+///
+/// The decode is the one `/preview` runs on a frame miss, with the same
+/// inflight charge and sample buffer, and no grey. The process server runs
+/// it on a decode worker. `Ok(None)` means no decode slot was free while the
+/// client waited.
+fn decode_for_value(
+    viewer: &Viewer,
+    id: FileId,
+    frame: u32,
+    bytes: Arc<crate::held::PostedBytes>,
+    stream: Option<&TcpStream>,
+) -> Result<Option<Arc<CachedFrame>>, PreviewError> {
+    let mut live = || stream.is_none_or(peer_open);
+    if viewer.schedules() {
+        let Some(permit) = viewer.acquire_decode(bytes.worker(), &mut live) else {
+            return Ok(None);
+        };
+        let worker = permit.worker();
+        let retire = permit.retire();
+        let inflight = viewer.inflight_counter();
+        let cache = viewer.cache_handle();
+        let Some((decoded, sample_charge)) = permit.call(move || {
+            let mut samples = Vec::new();
+            let mut sample_charge = 0_usize;
+            let decoded = with_decode_workspace(|workspace| {
+                decode_held(
+                    bytes.as_slice(),
+                    frame,
+                    &mut workspace.native,
+                    &mut samples,
+                    &mut |capacity| {
+                        sample_charge = capacity;
+                        inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
+                    },
+                    &mut |len| cache.claim_sample_buffer(len),
+                )
+            });
+            drop(bytes);
+            if decoded.is_err() {
+                cache.recycle_sample_buffer(std::mem::take(&mut samples));
+                if sample_charge > 0 {
+                    Viewer::release_counter(&inflight, sample_charge);
+                }
+                return (decoded, 0);
+            }
+            (decoded, sample_charge)
+        }) else {
+            return Ok(None);
+        };
+        let held = decoded?;
+        let stored = viewer.store_frame_with(id, frame, held, Some(worker), Some(retire));
+        if sample_charge > 0 {
+            viewer.leave_inflight(sample_charge);
+        }
+        return Ok(Some(stored));
+    }
+    let Some(mut loan) = viewer.loan_workspace(&mut live) else {
+        return Ok(None);
+    };
+    let mut samples = Vec::new();
+    let mut sample_charge = 0_usize;
+    let cache = viewer.cache_handle();
+    let decoded = decode_held(
+        &bytes,
+        frame,
+        &mut loan.workspace.native,
+        &mut samples,
+        &mut |capacity| {
+            sample_charge = capacity;
+            viewer.enter_inflight(capacity);
+        },
+        &mut |len| cache.claim_sample_buffer(len),
+    );
+    drop(bytes);
+    loan.note_growth();
+    let stored = match decoded {
+        Ok(held) => Ok(Some(viewer.store_frame(id, frame, held))),
+        Err(error) => {
+            viewer.recycle_sample_buffer(std::mem::take(&mut samples));
+            Err(error)
+        }
+    };
+    if sample_charge > 0 {
+        viewer.leave_inflight(sample_charge);
+    }
+    stored
+}
+
 fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) -> Reply {
     let frame = request.frame.frame;
     let body = request.body;
@@ -1702,6 +1863,7 @@ fn read_request(
         body,
         frame: parsed.frame,
         file_id: parsed.file_id,
+        points: parsed.points,
         close: parsed.close,
         body_charge: final_charge,
         body_counted: counted,
@@ -1936,8 +2098,22 @@ struct HeaderParts {
     length: Option<usize>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    points: PointsHeader,
     close: bool,
 }
+
+/// `X-Ocelli-Points` as it arrived. It is parsed by `/value` only, so a
+/// malformed list never refuses another route.
+#[derive(Debug, Default)]
+enum PointsHeader {
+    #[default]
+    Absent,
+    One(String),
+    Repeated,
+}
+
+/// Most points one `/value` request may name.
+const MAX_POINTS: usize = 64;
 
 fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut lines = header.split("\r\n");
@@ -1987,6 +2163,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_file = false;
     let mut frame = FrameRequest::default();
     let mut file_id = None;
+    let mut points = PointsHeader::Absent;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -2042,6 +2219,11 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         } else if name.eq_ignore_ascii_case("x-ocelli-window-function") {
             once(&mut seen_function)?;
             frame.window_function = Some(parse_function(text)?);
+        } else if name.eq_ignore_ascii_case("x-ocelli-points") {
+            points = match points {
+                PointsHeader::Absent => PointsHeader::One(text.to_owned()),
+                PointsHeader::One(_) | PointsHeader::Repeated => PointsHeader::Repeated,
+            };
         } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
             once(&mut seen_preset)?;
             frame.window_preset =
@@ -2054,6 +2236,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         length,
         frame,
         file_id,
+        points,
         close,
     })
 }
@@ -2192,6 +2375,7 @@ mod tests {
                 body,
                 frame: FrameRequest::default(),
                 file_id: None,
+                points: PointsHeader::Absent,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,
