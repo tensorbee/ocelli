@@ -5,7 +5,7 @@
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
 **F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216
-**Last updated:** 2026-11-05
+**Last updated:** 2026-11-06
 
 Living current-state document. It describes what the code does today.
 

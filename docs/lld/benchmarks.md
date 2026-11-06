@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216
+**Last updated:** 2026-11-06
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
