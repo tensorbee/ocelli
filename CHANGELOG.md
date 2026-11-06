@@ -542,6 +542,11 @@ Repository bootstrap. Nothing is published.
   compiled into the wasm module and the native binaries, with the Rust
   standard library's notice. The licences gate checks that it matches the
   lockfile, offline.
+- The local folder viewer posts each file once and holds it in a bounded
+  cache, keeps a decoded frame for window changes, and draws a frame larger
+  than its design size on its own. Previews that wait are admitted in the
+  order they first waited. Open, first image, scroll, window step and
+  resident memory have recorded budgets on the operator's machine.
 
 ### Changed
 

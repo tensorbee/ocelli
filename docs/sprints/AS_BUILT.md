@@ -5291,3 +5291,31 @@ this branch had not touched since the base.
 **Deviations from the design plan.** Four lead amendments, recorded in the plan: pinned texts are templates, a crate without a licence file takes its upstream file at its published commit, the gate checks that commit offline, and the binaries section stays offline with `verify-upstream` outside every gate. Nothing checks that an earlier row's commit is the parent of `cfb19922`. Implemented by an external coding agent. Nine review passes.
 
 **Notes for future sessions.** The `rust` section's `cargo deny` call from F-217 runs without `--offline` and downloads the registry on an empty `CARGO_HOME`. Whether the objc2 crates may be redistributed under Apple's SDK terms is recorded for the operator in `CURRENT_SPRINT.md`.
+
+## F-216, Folder viewer performance, completed 2026-11-06
+
+**What was built.** The local folder viewer posts each file once and the process holds it by id in one budgeted `Lru` from `ocelli-cache`, whose value is an enum over held file bytes and decoded frames, inside the `OCELLI_CACHE_MIB` budget with a 256 MiB default. A multi-frame object keeps its encoded bytes while any frame is not held, and a single-frame object drops them once frame 0 is held. A decoded frame is reused across window changes, and a window step renders from the held frame with no preview body. Two long-lived decode threads take four body slots, decoded-frame buffers are recycled from a free list inside the budget, and the viewer binary uses mimalloc. Grey output is admitted through a cap equal to the bound's grey term, counting unwritten replies and each decode thread's kept grey. Previews that wait are admitted in the order they first waited, a frame over the design size draws alone and is never kept by a worker and a reply has 60 s to be written. `ocelli-pixel` gains `stored_sample_table`. Five benchmark subjects, `viewer.open`, `viewer.first_image`, `viewer.scroll_rate`, `viewer.window_step` and `viewer.resident_memory`, have runners and a recorded baseline on the operator's machine, and `bin/ocelli.sh bench --tolerance` takes a per-subject form.
+
+**HLD sections implemented.** Section 26's benchmark subjects for the folder viewer, and section 8's cache tiers as a consumer outside the core.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-pixel`, `tools/bench`, `bin/ocelli.sh`, `ci/bench-baseline.json`, `ci/guard-probe-budget.json`, `scripts/guards/catalogue.py`, `eslint.config.js`, the workspace `Cargo.toml` and `Cargo.lock` for mimalloc 0.1.52.
+
+**Tests added.** Gate, queue and accounting unit tests in the viewer library, server tests for oversized frames, arrival order, starvation, vanished clients and every release path, a corpus pixel identity test that compares each reply with a fresh decode, bench runner and argument tests, and `stored_sample_table` tests.
+
+**Fixture provenance.** `stored_sample_table` is checked against `LutChain::apply` for every stored integer the Bits Stored and Pixel Representation allow, citing PS3.3 C.11.2.1.2 and C.11.2.1.3, so it adds no arithmetic of its own. The viewer's pixel replies are checked against a fresh decode through the existing LUT chain, with 0 differences over the corpus.
+
+**Verification.** Feature profile on the worker tree after merging sprint/s46, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree f765df5.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The folder viewer renders grey on the local process and the page draws it to a 2D canvas, which no tier owns.
+
+**LLD updated.** `docs/lld/cache.md`, `docs/lld/benchmarks.md`, `docs/lld/pixel-pipeline.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer", gives the release commands, the cache budget, the order previews are served in and the large frame rule. The Use book's "Build from source" gives the release command and the same rules. The More page's `#worker` section says the file is posted once and held by id in the local process.
+
+**Deviations from the design plan.** The operator chose mimalloc in the viewer, recycled frame buffers, and that a frame over the design size draws alone. The lead ruled that waiters are admitted in arrival order, that the resident bound is stated for frames within the design size, that a kept grey counts against the cap, and that `--tolerance` takes a per-subject form so the baseline is still written only by `--accept`. All are recorded in the plan. Implemented first by an external coding agent and then by Claude implementer agents. Fourteen review passes.
+
+**Notes for future sessions.** One client that stops reading while holding half the grey cap, with one large frame queued behind it, delays later previews until its 60 s write deadline. A per-subject tolerance for a subject the run cannot measure is dropped without a refusal, which no tracked registry row reaches today.

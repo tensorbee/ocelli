@@ -179,8 +179,10 @@ DICOM files on this machine, use the local series page below.
 image at a time. It listens on this machine only.
 
 ```bash
-cargo run -p ocelli-folder-viewer
+cargo run --release -p ocelli-folder-viewer
 ```
+
+The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
 
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless
@@ -191,7 +193,7 @@ including an empty one, stops the process with an error. Open that exact URL in
 Chrome or Edge. The Folder control is a directory picker.
 
 ```bash
-OCELLI_PORT=8742 cargo run -p ocelli-folder-viewer
+OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
 ```
 
 1. Choose Folder and pick a directory. The browser reads the files. Leave them
@@ -246,7 +248,7 @@ The page HTML is compiled into the binary. After a change under
 `examples/folder-viewer`, build again and start that new process.
 
 ```bash
-cargo build -p ocelli-folder-viewer
+cargo build --release -p ocelli-folder-viewer
 ```
 
 ## Use the library

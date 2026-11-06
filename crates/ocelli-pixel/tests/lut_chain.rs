@@ -5,9 +5,9 @@
 
 use ocelli_core::{Display, Stored};
 use ocelli_pixel::{
-    LutChain, LutDescriptor, ModalityTransform, PhotometricInterpretation, PixelError,
-    PresentationLutEvidence, PresentationLutShape, PresentationTransform, VoiFunction,
-    VoiTransform,
+    ByteOrder, LutChain, LutDescriptor, ModalityTransform, PhotometricInterpretation, PixelError,
+    PixelRepresentation, PresentationLutEvidence, PresentationLutShape, PresentationTransform,
+    StoredBits, VoiFunction, VoiTransform,
 };
 
 const TOLERANCE: f32 = 0.001;
@@ -21,6 +21,15 @@ macro_rules! require_ok {
             result.as_ref().err()
         );
         let Ok(value) = result else { return };
+        value
+    }};
+}
+
+macro_rules! require_some {
+    ($value:expr, $msg:literal) => {{
+        let result = $value;
+        assert!(result.is_some(), $msg);
+        let Some(value) = result else { return };
         value
     }};
 }
@@ -500,4 +509,280 @@ fn inverse_presentation_applied_twice_is_the_identity() {
         assert_close(16.0 + 236.0 - once, straight);
         input += 7.0;
     }
+}
+
+fn bits_of(stored: u8, signed: bool) -> Result<StoredBits, PixelError> {
+    let representation = if signed {
+        PixelRepresentation::Signed
+    } else {
+        PixelRepresentation::Unsigned
+    };
+    StoredBits::new(16, stored, stored - 1, representation)
+}
+
+/// Independent of [`StoredBits::stored_sample`], so a shared conversion bug
+/// cannot satisfy both sides. PS3.3 C.7.6.3, two's complement from the high
+/// stored bit.
+fn stored_of(bits: StoredBits, pattern: u32) -> Option<ocelli_core::Stored> {
+    let width = u32::from(bits.bits_stored());
+    let sign_bit = 1_u32 << (width - 1);
+    if bits.pixel_representation() == PixelRepresentation::Signed && pattern & sign_bit != 0 {
+        let magnitude = (1_u32 << width) - pattern;
+        let narrow = u16::try_from(magnitude).ok()?;
+        Some(ocelli_core::Stored(-f32::from(narrow)))
+    } else {
+        let narrow = u16::try_from(pattern).ok()?;
+        Some(ocelli_core::Stored(f32::from(narrow)))
+    }
+}
+
+fn assert_table_equals_apply(chain: &LutChain, bits: StoredBits) {
+    let Some(table) = chain.stored_sample_table(bits) else {
+        assert!(
+            bits.bits_stored() > 16,
+            "a table of at most 16 bits was refused"
+        );
+        return;
+    };
+    let domain = 1_u32 << u32::from(bits.bits_stored());
+    assert_eq!(table.len(), usize::try_from(domain).unwrap_or(0));
+    assert!(!table.is_empty());
+    assert_eq!(table.bits(), bits);
+    let mut pattern = 0_u32;
+    while pattern < domain {
+        let Some(stored) = stored_of(bits, pattern) else {
+            assert!(
+                pattern > 65_535,
+                "pattern {pattern} was not a stored integer"
+            );
+            return;
+        };
+        let Some(entry) = table.get(pattern) else {
+            assert!(pattern >= domain, "pattern {pattern} was missing");
+            return;
+        };
+        assert_eq!(
+            entry.0.to_bits(),
+            chain.apply(stored).0.to_bits(),
+            "pattern {pattern}"
+        );
+        pattern += 1;
+    }
+}
+
+#[test]
+fn stored_sample_table_matches_apply_for_every_stored_integer() {
+    // PS3.3 C.11.2.1.2 and C.11.2.1.3. The table is `LutChain::apply` for
+    // every bit pattern Bits Stored and Pixel Representation allow. A
+    // Modality LUT Sequence makes `rescale()` refuse the slope and intercept.
+    // The table still follows `apply`, which is the sequence, not that
+    // refused rescale. MONOCHROME1 inverts inside the same `apply`.
+    let rescale = require_ok!(identity_modality());
+    let sequence = require_ok!(LutDescriptor::new(3, 0, 8, vec![0.0, 20.0, 40.0]));
+    let lut = require_ok!(ModalityTransform::new(
+        Some(sequence),
+        Some(99.0),
+        Some(1234.0)
+    ));
+    assert!(rescale.lut().is_none());
+    assert_eq!(rescale.rescale(), Some((1.0, 0.0)));
+    assert!(lut.rescale().is_none());
+    assert!(lut.lut().is_some());
+
+    for (modality, signed) in [
+        (rescale.clone(), false),
+        (rescale.clone(), true),
+        (lut.clone(), false),
+        (lut.clone(), true),
+    ] {
+        for function in [
+            VoiFunction::Linear,
+            VoiFunction::LinearExact,
+            VoiFunction::Sigmoid,
+        ] {
+            for photometric in [
+                PhotometricInterpretation::Monochrome2,
+                PhotometricInterpretation::Monochrome1,
+            ] {
+                let chain = require_ok!(LutChain::new(
+                    modality.clone(),
+                    require_ok!(window(function, 0.0, 255.0)),
+                    photometric,
+                    PresentationLutEvidence::Absent,
+                ));
+                let bits = require_ok!(bits_of(16, signed));
+                assert_table_equals_apply(&chain, bits);
+            }
+        }
+    }
+
+    let linear = require_ok!(chain(
+        VoiFunction::Linear,
+        0.0,
+        255.0,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    ));
+    let linear_bits = require_ok!(bits_of(16, false));
+    let linear_table = require_some!(
+        linear.stored_sample_table(linear_bits),
+        "the LINEAR table was refused"
+    );
+    // PS3.3 C.11.2.1.2 at stored 40, centre 40, width 400, output 0 to 255.
+    let centre = require_some!(linear_table.get(40), "stored 40 was missing");
+    assert_close(centre.0, 127.819_55);
+
+    let exact = require_ok!(chain(
+        VoiFunction::LinearExact,
+        0.0,
+        255.0,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    ));
+    let exact_table = require_some!(
+        exact.stored_sample_table(linear_bits),
+        "the LINEAR_EXACT table was refused"
+    );
+    // PS3.3 C.11.2.1.3.2 at the same window maps the centre to 127.5.
+    let exact_centre = require_some!(exact_table.get(40), "LINEAR_EXACT stored 40 was missing");
+    assert_eq!(exact_centre.0.to_bits(), 127.5_f32.to_bits());
+
+    let inverted = require_ok!(chain(
+        VoiFunction::Linear,
+        0.0,
+        255.0,
+        PhotometricInterpretation::Monochrome1,
+        PresentationLutEvidence::Absent,
+    ));
+    let inverted_table = require_some!(
+        inverted.stored_sample_table(linear_bits),
+        "the inverted table was refused"
+    );
+    // PS3.3 C.11.6.1.2 reflects 127.81955 inside 0 to 255.
+    let inverted_centre = require_some!(inverted_table.get(40), "inverted stored 40 was missing");
+    assert_close(inverted_centre.0, 127.180_45);
+
+    let signed_bits = require_ok!(bits_of(16, true));
+    let sigmoid = require_ok!(chain(
+        VoiFunction::Sigmoid,
+        0.0,
+        255.0,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    ));
+    let sigmoid_table = require_some!(
+        sigmoid.stored_sample_table(signed_bits),
+        "the SIGMOID table was refused"
+    );
+    // PS3.3 C.11.2.1.3.1 at stored -60. The 16-bit pattern is 65536 - 60.
+    let sigmoid_row = require_some!(sigmoid_table.get(65_536 - 60), "stored -60 was missing");
+    assert_close(sigmoid_row.0, 255.0 / (1.0 + core::f32::consts::E));
+
+    let lut_chain = require_ok!(LutChain::new(
+        lut,
+        require_ok!(window(VoiFunction::Linear, 0.0, 255.0)),
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    ));
+    let lut_table = require_some!(
+        lut_chain.stored_sample_table(linear_bits),
+        "the modality LUT table was refused"
+    );
+    // PS3.3 C.11.1 selects LUT entry 1 for stored 1, which is 20.
+    // PS3.3 C.11.2.1.2 then gives
+    // ((20 - 39.5) / 399 + 0.5) * 255 = 115.03759.
+    let lut_row = require_some!(lut_table.get(1), "modality LUT stored 1 was missing");
+    assert_close(lut_row.0, 115.037_59);
+
+    let wide = require_ok!(StoredBits::new(32, 17, 16, PixelRepresentation::Unsigned));
+    assert!(linear.stored_sample_table(wide).is_none());
+}
+
+#[test]
+fn stored_sample_table_maps_each_container_through_its_pattern() {
+    let chain = require_ok!(chain(
+        VoiFunction::Linear,
+        0.0,
+        255.0,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    ));
+    let bits = require_ok!(bits_of(16, false));
+    let table = require_some!(chain.stored_sample_table(bits), "the map table was refused");
+    let mut indexed = vec![0_u8; table.len()];
+    *require_some!(indexed.get_mut(0), "index 0 was missing") = 1;
+    *require_some!(indexed.get_mut(50), "index 50 was missing") = 2;
+    *require_some!(indexed.get_mut(65_535), "index 65535 was missing") = 3;
+    let mut source = Vec::new();
+    source.extend_from_slice(&0_u16.to_le_bytes());
+    source.extend_from_slice(&50_u16.to_le_bytes());
+    source.extend_from_slice(&u16::MAX.to_le_bytes());
+    let mut destination = [0_u8; 3];
+    assert!(
+        table
+            .map_containers(ByteOrder::LittleEndian, &source, &indexed, &mut destination)
+            .is_ok()
+    );
+    assert_eq!(destination, [1, 2, 3]);
+
+    let mut big = Vec::new();
+    big.extend_from_slice(&0_u16.to_be_bytes());
+    big.extend_from_slice(&50_u16.to_be_bytes());
+    big.extend_from_slice(&u16::MAX.to_be_bytes());
+    destination = [0_u8; 3];
+    assert!(
+        table
+            .map_containers(ByteOrder::BigEndian, &big, &indexed, &mut destination)
+            .is_ok()
+    );
+    assert_eq!(destination, [1, 2, 3]);
+
+    // 12 stored bits in a 16-bit container. 0x1FFF keeps 0x0FFF.
+    let narrow = require_ok!(StoredBits::new(16, 12, 11, PixelRepresentation::Unsigned));
+    let narrow_table = require_some!(
+        chain.stored_sample_table(narrow),
+        "the 12-bit table was refused"
+    );
+    assert_eq!(narrow_table.len(), 4096);
+    assert_table_equals_apply(&chain, narrow);
+    let mut narrow_index = vec![0_u8; narrow_table.len()];
+    *require_some!(narrow_index.get_mut(0x0FFF), "index 0x0FFF was missing") = 9;
+    *require_some!(narrow_index.get_mut(5), "index 5 was missing") = 8;
+    let mut packed = Vec::new();
+    packed.extend_from_slice(&0x1FFF_u16.to_le_bytes());
+    packed.extend_from_slice(&0x0005_u16.to_le_bytes());
+    let mut packed_out = [0_u8; 2];
+    assert!(
+        narrow_table
+            .map_containers(
+                ByteOrder::LittleEndian,
+                &packed,
+                &narrow_index,
+                &mut packed_out
+            )
+            .is_ok()
+    );
+    assert_eq!(packed_out, [9, 8]);
+
+    let wide_bits = require_ok!(StoredBits::new(32, 16, 15, PixelRepresentation::Unsigned));
+    let wide_table = require_some!(
+        chain.stored_sample_table(wide_bits),
+        "16 bits in a 32-bit container were refused"
+    );
+    let wide_le = 0x0001_0032_u32.to_le_bytes();
+    let wide_be = 50_u32.to_be_bytes();
+    let mut le_out = [0_u8; 1];
+    let mut be_out = [0_u8; 1];
+    assert!(
+        wide_table
+            .map_containers(ByteOrder::LittleEndian, &wide_le, &indexed, &mut le_out)
+            .is_ok()
+    );
+    assert_eq!(le_out, [2]);
+    assert!(
+        wide_table
+            .map_containers(ByteOrder::BigEndian, &wide_be, &indexed, &mut be_out)
+            .is_ok()
+    );
+    assert_eq!(be_out, [2]);
 }

@@ -212,6 +212,42 @@ impl StoredBits {
     pub const fn pixel_representation(self) -> PixelRepresentation {
         self.pixel_representation
     }
+
+    /// Bits that carry the stored sample, PS3.3 C.7.6.3.
+    ///
+    /// High Bit is Bits Stored minus one for every value this type accepts,
+    /// so the shift is zero. The mask still drops container bits above Bits
+    /// Stored.
+    #[must_use]
+    pub fn meaningful_bits(self, raw: u32) -> u32 {
+        let shift = u32::from(self.high_bit + 1 - self.bits_stored);
+        let mask = if self.bits_stored == 32 {
+            u32::MAX
+        } else {
+            (1_u32 << u32::from(self.bits_stored)) - 1
+        };
+        (raw >> shift) & mask
+    }
+
+    /// Stored value of one container, PS3.3 C.7.6.3.
+    ///
+    /// Unsigned samples are the masked bits. Signed samples are extended from
+    /// the highest stored bit.
+    #[must_use = "a stored sample the caller drops is a pixel that was read and not used"]
+    pub fn stored_sample(self, raw: u32) -> Result<f32, PixelError> {
+        let value = self.meaningful_bits(raw);
+        if self.pixel_representation == PixelRepresentation::Signed {
+            let sign_bit = 1_u32 << u32::from(self.bits_stored - 1);
+            let signed = if value & sign_bit == 0 {
+                i64::from(value)
+            } else {
+                i64::from(value) - (1_i64 << u32::from(self.bits_stored))
+            };
+            signed_to_f32(signed)
+        } else {
+            Ok(unsigned_to_f32(value))
+        }
+    }
 }
 
 /// Validated Image Pixel evidence for one decoded frame.
@@ -291,34 +327,13 @@ impl StoredPixelDescription {
             .zip(destination.iter_mut())
         {
             let raw = read_container(container, byte_order)?;
-            *output = Stored(self.extract(raw)?);
+            *output = Stored(self.bits.stored_sample(raw)?);
         }
         Ok(())
     }
-
-    fn extract(&self, raw: u32) -> Result<f32, PixelError> {
-        let shift = u32::from(self.bits.high_bit() + 1 - self.bits.bits_stored());
-        let mask = if self.bits.bits_stored() == 32 {
-            u32::MAX
-        } else {
-            (1_u32 << u32::from(self.bits.bits_stored())) - 1
-        };
-        let value = (raw >> shift) & mask;
-        if self.bits.pixel_representation() == PixelRepresentation::Signed {
-            let sign_bit = 1_u32 << u32::from(self.bits.bits_stored() - 1);
-            let signed = if value & sign_bit == 0 {
-                i64::from(value)
-            } else {
-                i64::from(value) - (1_i64 << u32::from(self.bits.bits_stored()))
-            };
-            signed_to_f32(signed)
-        } else {
-            Ok(unsigned_to_f32(value))
-        }
-    }
 }
 
-fn read_container(container: &[u8], byte_order: ByteOrder) -> Result<u32, PixelError> {
+pub(crate) fn read_container(container: &[u8], byte_order: ByteOrder) -> Result<u32, PixelError> {
     match (container, byte_order) {
         ([a], _) => Ok(u32::from(*a)),
         ([a, b], ByteOrder::LittleEndian) => Ok(u32::from(u16::from_le_bytes([*a, *b]))),

@@ -735,7 +735,10 @@ const SVGNS = "http://www.w3.org/2000/svg";
 const FRAME_LIST_CAP = 65536;
 const FILE_CAP = 1024 * 1024 * 1024;
 const GRID_CAP = 32 * 1024 * 1024;
-const CACHE_BYTE_BUDGET = 256 * 1024 * 1024;
+const CACHE_BYTE_BUDGET = 64 * 1024 * 1024;
+// Frames at or below this size are expanded before the key that shows them.
+// A larger frame stays on the draw path so a second RGBA buffer is not held.
+const PREPARED_PIXEL_CAP = 512 * 512;
 const INKS = ["#00d1ff", "#3ee06a", "#fff04d", "#ff4fd8", "#ffffff"];
 const DRAW = ["contour", "rect", "ellipse", "text", "length"];
 const NAV = ["scroll", "pan", "zoom", "wl"];
@@ -774,8 +777,21 @@ const SENTENCE = {
   "toggle-series": "Hide or show the series list.",
   "toggle-inspector": "Hide or show the window presets, marks and key list."
 };
-const GONE = "the viewer process at this address is not answering. Run cargo run -p ocelli-folder-viewer again and open the address it prints";
-const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run cargo run -p ocelli-folder-viewer again.";
+const RELEASE_COMMAND = "cargo run --release -p ocelli-folder-viewer";
+const GONE = "the viewer process at this address is not answering. Run " + RELEASE_COMMAND + " again and open the address it prints";
+const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run " + RELEASE_COMMAND + " again.";
+const DEBUG_STATUS = "This is the slow debug build. Run " + RELEASE_COMMAND + ".";
+const FILE_GONE = "the file is no longer held by this process";
+const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+const GREY_WORD = new Uint32Array(256);
+for (let greyIndex = 0; greyIndex < 256; greyIndex += 1) {
+  const value = greyIndex;
+  GREY_WORD[greyIndex] = (0xFF000000 | (value << 16) | (value << 8) | value) >>> 0;
+}
+const preparedSlots = [];
+// Next 2 and previous 1, the prefetch window. The buffers are reused.
+const PREPARED_SLOT_CAP = 3;
+const SQUARE_ASPECT = { x: 1, y: 1 };
 const UNREADABLE = "this file could not be read from the folder. It may have been changed or moved since the folder was opened. Open the folder again";
 const ICON_PLAY = '<svg class="i"><use href="#i-play"/></svg>';
 const ICON_PAUSE = '<svg class="i"><use href="#i-pause"/></svg>';
@@ -797,6 +813,8 @@ const tiles = document.getElementById("tiles");
 const fault = document.getElementById("fault");
 const scrubber = document.getElementById("scrub");
 const counter = document.getElementById("counter");
+const gridMany = document.getElementById("grid-2");
+const keyButton = document.getElementById("key-image");
 const playButton = document.getElementById("play");
 const fpsInput = document.getElementById("fps");
 const fpsValue = document.getElementById("fps-value");
@@ -832,8 +850,19 @@ let sourceMode = "";
 const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
+const filePosts = new WeakMap();
+const posting = new Map();
+const canvasBuffers = new WeakMap();
+const thumbBitmaps = new Map();
 let cacheGeneration = 0;
 let cacheBytes = 0;
+let debugBuild = false;
+let mainBusy = false;
+let mainTail = Promise.resolve();
+let scrollDir = 1;
+let thumbAbort = new AbortController();
+let prefetchAbort = new AbortController();
+let tileAbort = new AbortController();
 const notes = new Map();
 const keyImages = new Set();
 let tool = "scroll";
@@ -882,11 +911,17 @@ let wheelFrame = 0;
 let pendingDelta = 0;
 let aspectX = 1;
 let aspectY = 1;
+let layoutDirty = true;
+let layoutStamp = "";
+let marksSig = "";
+let keyButtonOn = false;
+let presetModality = null;
+let viewContext = null;
+let inkViewBox = "";
 let liveBusy = false;
 let liveDirty = false;
 let liveToken = 0;
 let tipTimer = 0;
-const thumbs = new Map();
 let thumbGeneration = 0;
 
 for (const color of INKS) {
@@ -1019,6 +1054,7 @@ window.addEventListener("resize", relayout);
 new ResizeObserver(relayout).observe(wrap);
 
 function relayout() {
+  layoutDirty = true;
   layout();
   for (const node of tiles.querySelectorAll("canvas")) sizeTile(node);
 }
@@ -1073,6 +1109,7 @@ syncSwatches();
 syncSizes();
 syncPresetAvailability(null);
 showSentence();
+noteBuild();
 
 function liveSentence(id, text) {
   if (id === "grid-2" && isDraw(tool)) return "Drawing works in the single view.";
@@ -1110,6 +1147,91 @@ async function processAnswers() {
   } catch {
     return false;
   }
+}
+
+function withBuildNote(text) {
+  if (!debugBuild || text.indexOf(DEBUG_STATUS) !== -1) return text;
+  return text + " " + DEBUG_STATUS;
+}
+
+async function noteBuild() {
+  try {
+    const response = await fetch("/held", { cache: "no-store" });
+    if (!response.ok) return;
+    const census = await response.json();
+    debugBuild = census.build === "debug";
+    if (debugBuild) status.textContent = withBuildNote(status.textContent);
+  } catch {}
+}
+
+async function ensureFile(file) {
+  if (filePosts.has(file)) return filePosts.get(file);
+  const pending = posting.get(file);
+  if (pending) return pending;
+  const job = postFile(file).finally(() => {
+    if (posting.get(file) === job) posting.delete(file);
+  });
+  posting.set(file, job);
+  return job;
+}
+
+async function postFile(file) {
+  const response = await fetch("/file", { method: "POST", body: file });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "the file could not be held");
+  }
+  await response.json();
+  if (response.headers.get("X-Ocelli-Held") === "0") {
+    filePosts.set(file, "");
+    return "";
+  }
+  const id = response.headers.get("X-Ocelli-File") || "";
+  filePosts.set(file, id);
+  return id;
+}
+
+function sendPreview(image, headers, id, signal) {
+  const sent = {};
+  for (const key of Object.keys(headers)) sent[key] = headers[key];
+  if (id) {
+    sent["X-Ocelli-File"] = id;
+    return fetch("/preview", { method: "POST", headers: sent, body: new Uint8Array(0), signal });
+  }
+  return fetch("/preview", { method: "POST", headers: sent, body: image.file, signal });
+}
+
+async function postPreview(image, headers, signal) {
+  let id = await ensureFile(image.file);
+  let response = await sendPreview(image, headers, id, signal);
+  if (response.status === 410 && id) {
+    filePosts.delete(image.file);
+    id = await ensureFile(image.file);
+    response = await sendPreview(image, headers, id, signal);
+  }
+  return response;
+}
+
+function sendHeaders(file, id) {
+  if (id) {
+    return fetch("/headers", {
+      method: "POST",
+      headers: { "X-Ocelli-File": id },
+      body: new Uint8Array(0)
+    });
+  }
+  return fetch("/headers", { method: "POST", body: file });
+}
+
+async function postHeaders(file) {
+  let id = await ensureFile(file);
+  let response = await sendHeaders(file, id);
+  if (response.status === 410 && id) {
+    filePosts.delete(file);
+    id = await ensureFile(file);
+    response = await sendHeaders(file, id);
+  }
+  return response;
 }
 
 function togglePanel(name) {
@@ -1164,7 +1286,7 @@ function setTool(next) {
     button.classList.toggle("dim", gridMode === 2 && isDraw(name) && !leavingGrid);
   }
   if (isDraw(tool)) setGrid(1, !leavingGrid);
-  else document.getElementById("grid-2").disabled = !gridAllowed();
+  else gridMany.disabled = !gridAllowed();
   if (!leavingGrid) renderInk();
   paintMarks();
   showSentence();
@@ -1235,7 +1357,7 @@ async function readFolder(fileList) {
   activeIndex = -1;
   viewIndex = 0;
   selected = null;
-  thumbs.clear();
+  thumbBitmaps.clear();
   thumbGeneration += 1;
   clearView();
   const files = Array.from(fileList);
@@ -1258,7 +1380,7 @@ async function readFolder(fileList) {
       }
       let response;
       try {
-        response = await fetch("/inspect", { method: "POST", body: file });
+        response = await fetch("/file", { method: "POST", body: file });
       } catch {
         failed += 1;
         continue;
@@ -1271,7 +1393,10 @@ async function readFolder(fileList) {
         continue;
       }
       try {
-        found.push({ file, info: await response.json() });
+        const info = await response.json();
+        if (response.headers.get("X-Ocelli-Held") === "0") filePosts.set(file, "");
+        else filePosts.set(file, response.headers.get("X-Ocelli-File") || "");
+        found.push({ file, info });
       } catch {
         failed += 1;
       }
@@ -1286,11 +1411,11 @@ async function readFolder(fileList) {
     ? " " + oversized + (oversized === 1 ? " file is" : " files are") + " larger than this viewer will open."
     : "";
   if (!seriesList.length) {
-    status.textContent = "No DICOM series in that folder." + skipText + failText + largeText;
+    status.textContent = withBuildNote("No DICOM series in that folder." + skipText + failText + largeText);
     renderSeries();
     return;
   }
-  status.textContent = seriesList.length + (seriesList.length === 1 ? " series." : " series.") + skipText + failText + largeText;
+  status.textContent = withBuildNote(seriesList.length + (seriesList.length === 1 ? " series." : " series.") + skipText + failText + largeText);
   let best = 0;
   for (let index = 1; index < seriesList.length; index += 1) {
     if (seriesList[index].images.length > seriesList[best].images.length) best = index;
@@ -1345,6 +1470,7 @@ function renderSeries() {
   seriesList.forEach((series, index) => {
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.key = series.key;
     if (index === activeIndex) button.className = "active";
     const thumb = document.createElement("canvas");
     thumb.className = "thumb";
@@ -1382,60 +1508,81 @@ function renderSeries() {
 }
 
 function paintThumb(node, series) {
-  const grey = thumbs.get(series.key);
   const context = node.getContext("2d");
   if (!context) return;
-  context.fillStyle = "#000000";
-  context.fillRect(0, 0, node.width, node.height);
-  if (!grey) return;
-  const source = document.createElement("canvas");
-  source.width = grey.width;
-  source.height = grey.height;
-  const sourceContext = source.getContext("2d");
-  if (!sourceContext) return;
-  sourceContext.putImageData(greyImageData(sourceContext, grey), 0, 0);
+  const bitmap = thumbBitmaps.get(series.key);
+  if (!bitmap) {
+    context.fillStyle = "#000000";
+    context.fillRect(0, 0, node.width, node.height);
+    return;
+  }
+  context.drawImage(bitmap, 0, 0, node.width, node.height);
+}
+
+function paintThumbBitmap(grey) {
+  const node = document.createElement("canvas");
+  node.width = 128;
+  node.height = 128;
+  const context = node.getContext("2d");
+  if (!context || !grey || !grey.bytes || !grey.width || !grey.height) return node;
+  const image = context.createImageData(128, 128);
   const aspect = greyAspect(grey.facts);
   const width = grey.width * aspect.x;
   const height = grey.height * aspect.y;
-  const fit = Math.min(node.width / width, node.height / height);
-  const drawW = width * fit;
-  const drawH = height * fit;
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(source, (node.width - drawW) / 2, (node.height - drawH) / 2, drawW, drawH);
+  const fit = Math.min(128 / width, 128 / height);
+  const drawW = Math.max(1, Math.round(width * fit));
+  const drawH = Math.max(1, Math.round(height * fit));
+  const originX = Math.floor((128 - drawW) / 2);
+  const originY = Math.floor((128 - drawH) / 2);
+  const data = image.data;
+  const bytes = grey.bytes;
+  for (let y = 0; y < drawH; y += 1) {
+    const sourceY = Math.min(grey.height - 1, Math.floor(((y + 0.5) * grey.height) / drawH));
+    const row = sourceY * grey.width;
+    for (let x = 0; x < drawW; x += 1) {
+      const sourceX = Math.min(grey.width - 1, Math.floor(((x + 0.5) * grey.width) / drawW));
+      const value = bytes[row + sourceX];
+      const at = ((originY + y) * 128 + (originX + x)) * 4;
+      data[at] = value;
+      data[at + 1] = value;
+      data[at + 2] = value;
+      data[at + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+  return node;
 }
 
 async function loadThumbs() {
+  thumbAbort = new AbortController();
+  const signal = thumbAbort.signal;
   const generation = ++thumbGeneration;
   for (const series of seriesList.slice()) {
-    if (generation !== thumbGeneration) return;
-    if (thumbs.has(series.key)) continue;
+    if (generation !== thumbGeneration || signal.aborted) return;
+    if (thumbBitmaps.has(series.key)) continue;
     const image = series.images[Math.floor(series.images.length / 2)];
     if (!image || !image.info.monochrome) continue;
     try {
-      const grey = await requestGrey(image, { plain: true });
-      if (generation !== thumbGeneration) return;
-      thumbs.set(series.key, grey);
-      renderSeries();
+      // The thumbnail is the file window. When the main view is also on the
+      // file window, share that in-flight preview so a large frame is decoded
+      // once. A later invert or override still requests the plain file window.
+      const grey = (!invert && !overrideWindow && !activePreset)
+        ? await fetchGrey(image)
+        : await requestGrey(image, { plain: true, signal });
+      if (generation !== thumbGeneration || signal.aborted) return;
+      thumbBitmaps.set(series.key, paintThumbBitmap(grey));
+      const buttons = seriesEl.querySelectorAll("button");
+      for (const button of buttons) {
+        if (button.dataset.key !== series.key) continue;
+        const node = button.querySelector("canvas");
+        if (node) paintThumb(node, series);
+      }
     } catch {}
   }
 }
 
-function greyImageData(context, grey) {
-  const pixels = context.createImageData(grey.width, grey.height);
-  for (let index = 0; index < grey.bytes.length; index += 1) {
-    const offset = index * 4;
-    const value = grey.bytes[index];
-    pixels.data[offset] = value;
-    pixels.data[offset + 1] = value;
-    pixels.data[offset + 2] = value;
-    pixels.data[offset + 3] = 255;
-  }
-  return pixels;
-}
-
 function greyAspect(facts) {
-  if (!facts || !(facts.row > 0) || !(facts.column > 0) || facts.row === facts.column) return { x: 1, y: 1 };
+  if (!facts || !(facts.row > 0) || !(facts.column > 0) || facts.row === facts.column) return SQUARE_ASPECT;
   const least = Math.min(facts.row, facts.column);
   return { x: facts.column / least, y: facts.row / least };
 }
@@ -1444,6 +1591,7 @@ function selectSeries(index) {
   stopPlay();
   activeIndex = index;
   fitMode = true;
+  layoutDirty = true;
   overrideWindow = null;
   draftWindow = null;
   activePreset = null;
@@ -1485,9 +1633,8 @@ function setGrid(mode, silent) {
   if (mode === 2 && !gridAllowed()) mode = 1;
   gridMode = mode;
   document.getElementById("grid-1").classList.toggle("active", mode === 1);
-  const many = document.getElementById("grid-2");
-  many.classList.toggle("active", mode === 2);
-  many.disabled = !gridAllowed();
+  gridMany.classList.toggle("active", mode === 2);
+  gridMany.disabled = !gridAllowed();
   for (const name of DRAW) {
     document.getElementById("tool-" + name).classList.toggle("dim", mode === 2);
   }
@@ -1496,15 +1643,17 @@ function setGrid(mode, silent) {
   else syncStage();
 }
 
-async function showIndex(next) {
+function directionOf(previous, next, count) {
+  if (next === previous || count < 2) return scrollDir;
+  const forward = (next - previous + count) % count;
+  const backward = (previous - next + count) % count;
+  return forward <= backward ? 1 : -1;
+}
+
+function commitLabels() {
   const series = seriesList[activeIndex];
-  if (!series || !series.images.length) return;
+  if (!series) return;
   const count = series.images.length;
-  const previousKey = noteKey(currentImage());
-  viewIndex = ((next % count) + count) % count;
-  positions.set(series.key, viewIndex);
-  syncPresetAvailability(series.images[viewIndex]);
-  const image = series.images[viewIndex];
   scrubber.disabled = count <= 1;
   scrubber.max = String(Math.max(0, count - 1));
   scrubber.value = String(viewIndex);
@@ -1512,23 +1661,37 @@ async function showIndex(next) {
   counter.textContent = series.omitted
     ? (viewIndex + 1) + " / " + count + " of " + total
     : (viewIndex + 1) + " / " + count;
+  paintMarks();
+}
+
+async function showIndex(next) {
+  const series = seriesList[activeIndex];
+  if (!series || !series.images.length) return;
+  const count = series.images.length;
+  const previousKey = noteKey(currentImage());
+  const wrapped = ((next % count) + count) % count;
+  scrollDir = directionOf(viewIndex, wrapped, count);
+  viewIndex = wrapped;
+  positions.set(series.key, viewIndex);
+  syncPresetAvailability(series.images[viewIndex]);
+  const image = series.images[viewIndex];
   if (noteKey(image) !== previousKey) {
     selected = null;
     cancelDraft();
   }
   liveToken += 1;
-  paintMarks();
-  document.getElementById("grid-2").disabled = !gridAllowed();
+  const allowGrid = gridAllowed();
+  if (gridMany.disabled !== !allowGrid) gridMany.disabled = !allowGrid;
   if (gridMode === 2 && !gridAllowed()) {
     gridMode = 1;
     document.getElementById("grid-1").classList.add("active");
     document.getElementById("grid-2").classList.remove("active");
     tiles.hidden = true;
   }
-  const token = ++loadToken;
   if (!image.info.monochrome) {
     shownWindow = null;
     shownFacts = null;
+    commitLabels();
     stage.hidden = true;
     tiles.hidden = true;
     ink.replaceChildren();
@@ -1537,31 +1700,53 @@ async function showIndex(next) {
     return;
   }
   if (gridMode === 2) paintTiles();
+  schedulePrefetch();
   const hit = takeGrey(cacheKey(image));
   if (hit) {
     applyGrey(hit, image);
     return;
   }
-  shownWindow = null;
-  shownFacts = null;
-  imageWidth = 0;
-  imageHeight = 0;
-  stage.hidden = true;
-  frame.hidden = true;
-  ink.replaceChildren();
-  paintOverlays(image);
-  paintEdges();
+  return pumpMain();
+}
+
+async function pumpMain() {
+  if (mainBusy) return mainTail;
+  let resolveTail = () => {};
+  const tail = new Promise((resolve) => {
+    resolveTail = resolve;
+  });
+  mainTail = tail;
+  mainBusy = true;
+  const token = loadToken;
   try {
-    const grey = await fetchGrey(image);
-    if (token !== loadToken) return;
-    applyGrey(grey, image);
-  } catch (error) {
-    if (token !== loadToken) return;
-    shownWindow = null;
-    shownFacts = null;
-    paintOverlays(image);
-    showFault(error instanceof Error ? error.message : "the frame could not be shown");
+    while (token === loadToken) {
+      const wanted = viewIndex;
+      const open = seriesList[activeIndex];
+      const image = open && open.images[wanted];
+      if (!image || !image.info.monochrome) break;
+      try {
+        const grey = await fetchGrey(image);
+        if (token !== loadToken) break;
+        if (viewIndex !== wanted) continue;
+        applyGrey(grey, image);
+        if (viewIndex !== wanted) continue;
+        break;
+      } catch (error) {
+        if (token !== loadToken) break;
+        if (error && error.name === "AbortError") {
+          if (viewIndex !== wanted) continue;
+          break;
+        }
+        if (viewIndex !== wanted) continue;
+        showFault(error instanceof Error ? error.message : "the frame could not be shown");
+        break;
+      }
+    }
+  } finally {
+    mainBusy = false;
+    resolveTail();
   }
+  return tail;
 }
 
 function applyGrey(grey, image) {
@@ -1574,9 +1759,11 @@ function applyGrey(grey, image) {
   };
   shownFacts = grey.facts;
   drawGrey(grey);
-  paintOverlays(image);
-  paintEdges();
-  prefetch(viewIndex + 1);
+  if (image === currentImage()) {
+    commitLabels();
+    paintOverlays(image);
+    paintEdges();
+  }
   syncKey();
 }
 
@@ -1591,7 +1778,12 @@ function dropCache() {
   cacheGeneration += 1;
   cache.clear();
   inflight.clear();
+  for (let index = 0; index < preparedSlots.length; index += 1) preparedSlots[index].grey = null;
+  posting.clear();
   cacheBytes = 0;
+  thumbAbort.abort();
+  prefetchAbort.abort();
+  tileAbort.abort();
 }
 
 function greyBytes(grey) {
@@ -1613,6 +1805,7 @@ function rememberGrey(key, grey) {
   }
   cache.set(key, grey);
   cacheBytes += greyBytes(grey);
+  prepareDisplay(grey);
   while (cache.size > 1 && cacheBytes > CACHE_BYTE_BUDGET) {
     const oldest = cache.keys().next().value;
     if (oldest === undefined) break;
@@ -1638,8 +1831,37 @@ async function fetchGrey(image) {
   return job;
 }
 
+function abortError() {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) {
+      reject(abortError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function superseded(wantedView, wantedToken, signal) {
+  return (signal && signal.aborted) || viewIndex !== wantedView || loadToken !== wantedToken;
+}
+
 async function requestGrey(image, options) {
   const plain = Boolean(options && options.plain);
+  const signal = options && options.signal;
   const chosen = options && options.window ? options.window : (plain ? null : overrideWindow);
   const headers = { "X-Ocelli-Frame": String(image.frame) };
   if (invert && !plain) headers["X-Ocelli-Invert"] = "1";
@@ -1650,43 +1872,56 @@ async function requestGrey(image, options) {
   } else if (activePreset && !plain) {
     headers["X-Ocelli-Window-Preset"] = activePreset;
   }
-  let response;
-  try {
-    response = await fetch("/preview", { method: "POST", headers, body: image.file });
-  } catch {
-    if (await processAnswers()) throw new Error(UNREADABLE);
-    processGone();
-    throw new Error(GONE);
-  }
-  processBack();
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || "the frame could not be shown");
-  }
-  const width = Number(response.headers.get("X-Ocelli-Width"));
-  const height = Number(response.headers.get("X-Ocelli-Height"));
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!width || !height || bytes.length !== width * height) {
-    throw new Error("the preview response did not match the frame");
-  }
-  return {
-    width,
-    height,
-    fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
-    center: response.headers.get("X-Ocelli-Window-Center") || "",
-    widthText: response.headers.get("X-Ocelli-Window-Width") || "",
-    fn: response.headers.get("X-Ocelli-Window-Function") || "",
-    bytes,
-    facts: {
-      row: headerNumber(response, "X-Ocelli-Row-Spacing"),
-      column: headerNumber(response, "X-Ocelli-Column-Spacing"),
-      source: response.headers.get("X-Ocelli-Spacing-Source") || "",
-      left: response.headers.get("X-Ocelli-Edge-Left") || "",
-      right: response.headers.get("X-Ocelli-Edge-Right") || "",
-      top: response.headers.get("X-Ocelli-Edge-Top") || "",
-      bottom: response.headers.get("X-Ocelli-Edge-Bottom") || ""
+  const wantedView = viewIndex;
+  const wantedToken = loadToken;
+  for (;;) {
+    if (superseded(wantedView, wantedToken, signal)) throw abortError();
+    let response;
+    try {
+      response = await postPreview(image, headers, signal);
+    } catch (error) {
+      if ((error && error.name === "AbortError") || (signal && signal.aborted)) throw error;
+      if (await processAnswers()) throw new Error(UNREADABLE);
+      processGone();
+      throw new Error(GONE);
     }
-  };
+    processBack();
+    if (response.status === 410) throw new Error(FILE_GONE);
+    if (response.status === 503 && response.headers.get("X-Ocelli-Error") === "busy") {
+      await response.arrayBuffer().catch(() => {});
+      if (superseded(wantedView, wantedToken, signal)) throw abortError();
+      await sleepAbortable(40, signal);
+      continue;
+    }
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || "the frame could not be shown");
+    }
+    const width = Number(response.headers.get("X-Ocelli-Width"));
+    const height = Number(response.headers.get("X-Ocelli-Height"));
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (!width || !height || bytes.length !== width * height) {
+      throw new Error("the preview response did not match the frame");
+    }
+    return {
+      width,
+      height,
+      fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
+      center: response.headers.get("X-Ocelli-Window-Center") || "",
+      widthText: response.headers.get("X-Ocelli-Window-Width") || "",
+      fn: response.headers.get("X-Ocelli-Window-Function") || "",
+      bytes,
+      facts: {
+        row: headerNumber(response, "X-Ocelli-Row-Spacing"),
+        column: headerNumber(response, "X-Ocelli-Column-Spacing"),
+        source: response.headers.get("X-Ocelli-Spacing-Source") || "",
+        left: response.headers.get("X-Ocelli-Edge-Left") || "",
+        right: response.headers.get("X-Ocelli-Edge-Right") || "",
+        top: response.headers.get("X-Ocelli-Edge-Top") || "",
+        bottom: response.headers.get("X-Ocelli-Edge-Bottom") || ""
+      }
+    };
+  }
 }
 
 function headerNumber(response, name) {
@@ -1696,12 +1931,124 @@ function headerNumber(response, name) {
   return Number.isFinite(value) ? value : null;
 }
 
-function prefetch(index) {
+function schedulePrefetch() {
   const series = seriesList[activeIndex];
   if (!series || !series.images.length) return;
-  const image = series.images[((index % series.images.length) + series.images.length) % series.images.length];
-  if (!image || !image.info.monochrome) return;
-  fetchGrey(image).catch(() => {});
+  const count = series.images.length;
+  if (prefetchCovered(series, count)) return;
+  prefetchAbort.abort();
+  prefetchAbort = new AbortController();
+  const signal = prefetchAbort.signal;
+  const generation = cacheGeneration;
+  const offsets = [scrollDir, scrollDir * 2, -scrollDir];
+  for (const offset of offsets) {
+    const index = viewIndex + offset;
+    if (index < 0 || index >= count) continue;
+    const image = series.images[index];
+    if (!image || !image.info.monochrome) continue;
+    const key = cacheKey(image);
+    if (cache.has(key) || inflight.has(key)) continue;
+    requestGrey(image, { signal }).then((grey) => {
+      if (signal.aborted || generation !== cacheGeneration) return;
+      rememberGrey(key, grey);
+    }).catch(() => {});
+  }
+}
+
+function prefetchCovered(series, count) {
+  const offsets = [scrollDir, scrollDir * 2, -scrollDir];
+  for (const offset of offsets) {
+    const index = viewIndex + offset;
+    if (index < 0 || index >= count) continue;
+    const image = series.images[index];
+    if (!image || !image.info.monochrome) continue;
+    const key = cacheKey(image);
+    if (!cache.has(key) && !inflight.has(key)) return false;
+  }
+  return true;
+}
+
+function fillGreyImage(image, bytes) {
+  if (LITTLE) {
+    const words = new Uint32Array(image.data.buffer);
+    if (words.length === bytes.length) {
+      for (let index = 0; index < bytes.length; index += 1) words[index] = GREY_WORD[bytes[index]];
+      return;
+    }
+  }
+  const data = image.data;
+  for (let index = 0; index < bytes.length; index += 1) {
+    const offset = index * 4;
+    const value = bytes[index];
+    data[offset] = value;
+    data[offset + 1] = value;
+    data[offset + 2] = value;
+    data[offset + 3] = 255;
+  }
+}
+
+function preparedSlot(grey) {
+  for (let index = 0; index < preparedSlots.length; index += 1) {
+    if (preparedSlots[index].grey === grey) return preparedSlots[index];
+  }
+  return null;
+}
+
+function prepareDisplay(grey) {
+  if (!grey || preparedSlot(grey)) return;
+  const bytes = grey.bytes;
+  if (!grey.width || !grey.height || !bytes) return;
+  if (bytes.length !== grey.width * grey.height || bytes.length > PREPARED_PIXEL_CAP) return;
+  let slot = null;
+  for (let index = 0; index < preparedSlots.length; index += 1) {
+    if (preparedSlots[index].grey == null) {
+      slot = preparedSlots[index];
+      break;
+    }
+  }
+  if (!slot) {
+    if (preparedSlots.length < PREPARED_SLOT_CAP) {
+      slot = { grey: null, image: null };
+      preparedSlots.push(slot);
+    } else {
+      slot = preparedSlots.shift();
+      preparedSlots.push(slot);
+    }
+  }
+  if (!slot.image || slot.image.width !== grey.width || slot.image.height !== grey.height) {
+    slot.image = new ImageData(grey.width, grey.height);
+  }
+  fillGreyImage(slot.image, bytes);
+  slot.grey = grey;
+}
+
+function paintGrey(context, node, grey) {
+  const slot = preparedSlot(grey);
+  if (slot && slot.image && slot.image.width === grey.width && slot.image.height === grey.height) {
+    if (node.width !== grey.width || node.height !== grey.height) {
+      node.width = grey.width;
+      node.height = grey.height;
+    }
+    context.putImageData(slot.image, 0, 0);
+    slot.grey = null;
+    return;
+  }
+  const sizeChanged = node.width !== grey.width || node.height !== grey.height;
+  if (sizeChanged) {
+    node.width = grey.width;
+    node.height = grey.height;
+  }
+  let buffer = canvasBuffers.get(node);
+  if (sizeChanged || !buffer) {
+    const image = context.createImageData(grey.width, grey.height);
+    buffer = {
+      image,
+      words: LITTLE ? new Uint32Array(image.data.buffer) : null
+    };
+    canvasBuffers.set(node, buffer);
+  }
+  fillGreyImage(buffer.image, grey.bytes);
+  context.putImageData(buffer.image, 0, 0);
 }
 
 function drawGrey(grey) {
@@ -1710,39 +2057,36 @@ function drawGrey(grey) {
   const aspect = greyAspect(grey.facts);
   aspectX = aspect.x;
   aspectY = aspect.y;
-  canvas.width = grey.width;
-  canvas.height = grey.height;
-  const context = canvas.getContext("2d");
-  if (!context) {
+  if (!viewContext) viewContext = canvas.getContext("2d");
+  if (!viewContext) {
     showFault("this browser did not provide a canvas");
     return;
   }
-  const image = context.createImageData(grey.width, grey.height);
-  for (let index = 0; index < grey.bytes.length; index += 1) {
-    const offset = index * 4;
-    const value = grey.bytes[index];
-    image.data[offset] = value;
-    image.data[offset + 1] = value;
-    image.data[offset + 2] = value;
-    image.data[offset + 3] = 255;
+  paintGrey(viewContext, canvas, grey);
+  const viewBox = "0 0 " + grey.width + " " + grey.height;
+  if (inkViewBox !== viewBox) {
+    ink.setAttribute("viewBox", viewBox);
+    inkViewBox = viewBox;
   }
-  context.putImageData(image, 0, 0);
-  ink.setAttribute("viewBox", "0 0 " + grey.width + " " + grey.height);
   syncStage();
   if (gridMode === 1) {
     layout();
-    renderInk();
+    const drawn = notes.get(noteKey(currentImage()));
+    if (draft || selected != null || ink.childElementCount || (drawn && drawn.length)) renderInk();
   }
 }
 
 function syncStage() {
   const single = gridMode === 1 && imageWidth > 0 && !fault.textContent;
-  stage.hidden = !single;
-  tiles.hidden = gridMode !== 2;
-  frame.hidden = !single;
+  if (stage.hidden !== !single) stage.hidden = !single;
+  if (tiles.hidden !== (gridMode !== 2)) tiles.hidden = gridMode !== 2;
+  if (frame.hidden !== !single) frame.hidden = !single;
 }
 
 async function paintTiles() {
+  tileAbort.abort();
+  tileAbort = new AbortController();
+  const signal = tileAbort.signal;
   const token = ++tileToken;
   const series = seriesList[activeIndex];
   const nodes = tiles.querySelectorAll("canvas");
@@ -1759,26 +2103,21 @@ async function paintTiles() {
       continue;
     }
     try {
-      const grey = await fetchGrey(image);
-      if (token !== tileToken || gridMode !== 2) return;
+      const key = cacheKey(image);
+      let grey = takeGrey(key);
+      if (!grey) {
+        grey = await requestGrey(image, { signal });
+        if (!signal.aborted && token === tileToken) rememberGrey(key, grey);
+      }
+      if (token !== tileToken || gridMode !== 2 || signal.aborted) return;
       const context = node.getContext("2d");
       if (!context) continue;
-      node.width = grey.width;
-      node.height = grey.height;
-      const pixels = context.createImageData(grey.width, grey.height);
-      for (let offset = 0; offset < grey.bytes.length; offset += 1) {
-        const byte = offset * 4;
-        const value = grey.bytes[offset];
-        pixels.data[byte] = value;
-        pixels.data[byte + 1] = value;
-        pixels.data[byte + 2] = value;
-        pixels.data[byte + 3] = 255;
-      }
-      context.putImageData(pixels, 0, 0);
+      paintGrey(context, node, grey);
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
       sizeTile(node);
-    } catch {
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
       if (token !== tileToken) return;
       node.width = 1;
       node.height = 1;
@@ -1817,6 +2156,14 @@ function fitScale() {
 
 function layout() {
   if (!imageWidth || stage.hidden) return;
+  const stamp = imageWidth + "x" + imageHeight
+    + ":" + aspectX + ":" + aspectY
+    + ":" + (fitMode ? "fit" : String(scale) + ":" + panX + ":" + panY)
+    + ":" + rotation
+    + ":" + (flipH ? 1 : 0)
+    + ":" + (flipV ? 1 : 0)
+    + ":" + window.devicePixelRatio;
+  if (!layoutDirty && stamp === layoutStamp) return;
   if (fitMode) {
     scale = fitScale();
     panX = 0;
@@ -1846,28 +2193,39 @@ function layout() {
   paintOverlays(currentImage());
   syncTextScale();
   paintSelection();
+  layoutDirty = false;
+  layoutStamp = stamp;
 }
 
 function turnedOrFlipped() {
   return rotation !== 0 || flipH || flipV;
 }
 
+function assignText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
 function paintOverlays(image) {
   const hidden = !showCorners;
-  for (const node of Object.values(corners)) node.hidden = hidden;
+  if (corners.tl.hidden !== hidden) {
+    corners.tl.hidden = hidden;
+    corners.tr.hidden = hidden;
+    corners.bl.hidden = hidden;
+    corners.br.hidden = hidden;
+  }
   if (!image || hidden) {
-    corners.tl.textContent = "";
-    corners.tr.textContent = "";
-    corners.bl.textContent = "";
-    corners.br.textContent = "";
+    assignText(corners.tl, "");
+    assignText(corners.tr, "");
+    assignText(corners.bl, "");
+    assignText(corners.br, "");
     return;
   }
   const info = image.info || {};
   const series = seriesList[activeIndex];
   const count = series ? series.images.length : 0;
-  corners.tl.textContent = [personName(info.patientName), info.patientId, dicomDate(info.studyDate)].filter(Boolean).join("\n");
+  assignText(corners.tl, [personName(info.patientName), info.patientId, dicomDate(info.studyDate)].filter(Boolean).join("\n"));
   const head = [info.modality, info.seriesDescription].filter(Boolean).join(" ");
-  corners.tr.textContent = [head, info.studyDescription, info.accession ? "Acc " + info.accession : ""].filter(Boolean).join("\n");
+  assignText(corners.tr, [head, info.studyDescription, info.accession ? "Acc " + info.accession : ""].filter(Boolean).join("\n"));
   const last = Math.min(count, viewIndex + 4);
   const lower = [gridMode === 2 && last > viewIndex + 1
     ? "Images " + (viewIndex + 1) + " to " + last + " / " + count
@@ -1875,13 +2233,13 @@ function paintOverlays(image) {
   if (series && series.omitted) lower.push("Series shortened");
   if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
   if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
-  corners.bl.textContent = lower.join("\n");
+  assignText(corners.bl, lower.join("\n"));
   const win = draftWindow || overrideWindow || shownWindow;
   const center = win ? win.center : (info.windowCenter || "");
   const width = win ? (win.width == null ? win.widthText : win.width) : (info.windowWidth || "");
   let windowLine = "WW " + width + "  WL " + center;
   if (shownWindow && shownWindow.fullRange && !overrideWindow && !draftWindow && !activePreset) windowLine += "  full range";
-  corners.br.textContent = windowLine + "\nZoom " + zoomLabel;
+  assignText(corners.br, windowLine + "\nZoom " + zoomLabel);
 }
 
 function personName(text) {
@@ -1904,11 +2262,17 @@ function dicomDate(text) {
 function paintEdges() {
   const facts = shownFacts;
   const hide = !showLetters || !facts || gridMode !== 1 || turnedOrFlipped();
-  const values = facts ? [facts.left, facts.right, facts.top, facts.bottom] : ["", "", "", ""];
-  ["left", "right", "top", "bottom"].forEach((side, index) => {
-    edges[side].hidden = hide || !values[index];
-    edges[side].textContent = hide ? "" : values[index];
-  });
+  assignEdge(edges.left, hide, facts ? facts.left : "");
+  assignEdge(edges.right, hide, facts ? facts.right : "");
+  assignEdge(edges.top, hide, facts ? facts.top : "");
+  assignEdge(edges.bottom, hide, facts ? facts.bottom : "");
+}
+
+function assignEdge(node, hide, value) {
+  const hidden = hide || !value;
+  const text = hidden ? "" : value;
+  if (node.hidden !== hidden) node.hidden = hidden;
+  if (node.textContent !== text) node.textContent = text;
 }
 
 function showFault(message) {
@@ -1925,6 +2289,7 @@ function showFault(message) {
 }
 
 function hideFault() {
+  if (fault.hidden && fault.textContent === "") return;
   fault.hidden = true;
   fault.textContent = "";
 }
@@ -1938,6 +2303,8 @@ function clearView() {
   cancelNote();
   imageWidth = 0;
   imageHeight = 0;
+  layoutDirty = true;
+  inkViewBox = "";
   stage.hidden = true;
   frame.hidden = true;
   tiles.hidden = true;
@@ -1991,6 +2358,8 @@ function syncPresets() {
 
 function syncPresetAvailability(image) {
   const modality = image && image.info ? String(image.info.modality || "") : "";
+  if (modality === presetModality) return;
+  presetModality = modality;
   const ct = modality === "CT";
   for (const button of document.querySelectorAll("[data-preset]")) button.disabled = !ct;
   presetNote.textContent = !image || ct
@@ -2768,8 +3137,21 @@ function deleteSelected() {
   paintMarks();
 }
 
+function marksSignature(list) {
+  if (!list.length && selected == null) return "0|" + tool;
+  let sig = (noteKey(currentImage()) || "") + "|" + tool + "|" + (selected == null ? "" : String(selected));
+  for (const note of list) {
+    sig += "|" + note.id + ":" + note.type + ":" + (note.color || "") + ":" + (note.size || "") + ":" + (note.text || "");
+    if (note.type === "length") sig += ":" + lengthText(note);
+  }
+  return sig;
+}
+
 function paintMarks() {
   const list = notes.get(noteKey(currentImage())) || [];
+  const sig = marksSignature(list);
+  if (sig === marksSig) return;
+  marksSig = sig;
   marksEl.replaceChildren();
   if (!list.length) {
     const empty = document.createElement("p");
@@ -2937,7 +3319,9 @@ function toggleKey() {
 function syncKey() {
   const image = currentImage();
   const on = image ? keyImages.has(noteKey(image)) : false;
-  document.getElementById("key-image").classList.toggle("active", on);
+  if (on === keyButtonOn) return;
+  keyButtonOn = on;
+  keyButton.classList.toggle("active", on);
 }
 
 function onKey(event) {
@@ -3073,7 +3457,7 @@ async function openHeaders() {
   headerRowsEl.replaceChildren();
   let response;
   try {
-    response = await fetch("/headers", { method: "POST", body: file });
+    response = await postHeaders(file);
   } catch {
     if (token !== headerToken) return;
     showHeaderMessage("the headers could not be read");

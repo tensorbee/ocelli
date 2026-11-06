@@ -13225,6 +13225,44 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
     Guard(
+        id="bench.viewer-work",
+        file="tools/bench/src/viewer_work.mjs",
+        gate="bench",
+        spec="F-216 design, the folder viewer subjects",
+        refuses="A viewer measurement that has no samples, a Part 10 element "
+                "whose length does not match its VR, a page that does not "
+                "expose the timed hooks, a scroll that delivered too few keys "
+                "or moved the counter backwards or blanked or faulted the "
+                "stage, a window step that never drew, a canvas that does not "
+                "match the server grey, a restart that leaves the gone "
+                "sentence or does not re-post, a held preview that still "
+                "carries a body, a held report that does not name its build, "
+                "and a retained heap with no memory counter, no forced "
+                "collection, or two readings that do not agree.",
+        claims=(
+            "median needs at least one value",
+            "a short element has a bad length",
+            "a long element has a bad length",
+            "the page did not expose requestGrey and drawGrey",
+            "the viewer did not report its build",
+            "the page did not expose performance.memory",
+            "the page did not expose gc or performance.memory",
+            "retained heap readings did not agree",
+            r"scroll delivered \$ keys, which is fewer than 120",
+            "the counter went backwards during a forward scroll",
+            "the stage showed a fault during the scroll",
+            "the stage was blank during the scroll",
+            "a window step did not reach drawGrey",
+            "the canvas check failed:",
+            r"canvas check sampled \$ points",
+            r"canvas pixel \$ ,\$ was not the server grey",
+            "a restart left the gone sentence on the page",
+            "the restart did not re-post the file",
+            r"/preview carried a body \$ times while the file was held",
+        ),
+        covered_by=("tools/bench/tests/viewer_work_test.mjs",),
+    ),
+    Guard(
         id="bench.cold-start",
         file="tools/bench/src/runners/wasm_cold_start.mjs",
         gate="bench",

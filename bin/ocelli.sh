@@ -167,7 +167,8 @@ run_gate() {
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
-                   tools/bench/tests/tier_startup_test.mjs ;;
+                   tools/bench/tests/tier_startup_test.mjs \
+                   tools/bench/tests/viewer_work_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_source_provenance_check.py ;;
