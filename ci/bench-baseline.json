@@ -416,14 +416,14 @@
       },
       "subjects": {
         "viewer.open": {
-          "value": 1013,
+          "value": 1020,
           "unit": "ms",
-          "tolerance": 0.25,
-          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "tolerance": 0.0784,
+          "tolerance_provenance": "The largest value at four decimal places that keeps the recorded 1,020 ms times 1 plus the tolerance at or below the operator's answered 1,100 ms budget in the F-216 design, Open question A. Not a calibrated spread. The 0.25 first recording headroom would allow 1,275 ms.",
           "provenance": "measured",
-          "recorded": "2026-11-05",
+          "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -439,38 +439,40 @@
           },
           "conditions": {
             "load_average": [
-              9.951171875,
-              6.17236328125,
-              5.369140625
+              9.28515625,
+              7.568359375,
+              8.2744140625
             ],
-            "free_memory_bytes": 3272998912,
-            "uptime_seconds": 412586
+            "free_memory_bytes": 1342078976,
+            "uptime_seconds": 528520
           },
           "detail": {
+            "profile": "release",
             "samples_ms": [
-              1018,
-              954,
+              1033,
               1021,
-              1031,
-              1013,
+              1020,
+              1016,
               1015,
-              983,
-              960,
-              971
+              1023,
+              1020,
+              1024,
+              1019
             ],
             "threshold_ms": 1100,
             "thresholds_met": true
-          }
+          },
+          "replaced": 1013
         },
         "viewer.first_image": {
-          "value": 16.400000035762787,
+          "value": 8.800000011920929,
           "unit": "ms",
           "tolerance": 0.25,
-          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
           "provenance": "measured",
-          "recorded": "2026-11-05",
+          "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -486,52 +488,54 @@
           },
           "conditions": {
             "load_average": [
-              9.951171875,
-              6.17236328125,
-              5.369140625
+              9.28515625,
+              7.568359375,
+              8.2744140625
             ],
-            "free_memory_bytes": 3272998912,
-            "uptime_seconds": 412586
+            "free_memory_bytes": 1342078976,
+            "uptime_seconds": 528520
           },
           "detail": {
+            "profile": "release",
             "ct_ms": [
-              14.5,
-              17.5,
-              10.899999976158142,
-              16.600000023841858,
-              16.399999976158142,
-              16.400000035762787,
-              16.5,
-              19.5,
-              15.599999964237213
+              10,
+              8.200000047683716,
+              8.600000023841858,
+              8.800000011920929,
+              11.399999976158142,
+              10,
+              8.899999976158142,
+              8.799999952316284,
+              8.800000011920929
             ],
             "dx_ms": [
-              230.39999997615814,
-              221.79999995231628,
-              194.4000000357628,
-              225.39999997615814,
-              189.89999997615814,
-              191.5,
-              227.0999999642372,
-              193.19999998807907,
-              197
+              33,
+              33.19999998807907,
+              38.19999998807907,
+              30.399999976158142,
+              31.5,
+              28.69999998807907,
+              28.69999998807907,
+              28.600000023841858,
+              28.5
             ],
-            "dx_median_ms": 197,
+            "dx_median_ms": 30.399999976158142,
             "ct_threshold_ms": 20,
             "dx_threshold_ms": 250,
             "restart_recovered": true,
             "thresholds_met": true
-          }
+          },
+          "replaced": 16.400000035762787
         },
         "viewer.scroll_rate": {
-          "value": 51.282051282051285,
+          "value": 109.0305043793416,
           "unit": "frames_per_second",
           "tolerance": 0.25,
-          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
           "provenance": "measured",
-          "recorded": "2026-11-05",
+          "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -547,36 +551,42 @@
           },
           "conditions": {
             "load_average": [
-              9.951171875,
-              6.17236328125,
-              5.369140625
+              9.28515625,
+              7.568359375,
+              8.2744140625
             ],
-            "free_memory_bytes": 3272998912,
-            "uptime_seconds": 412586
+            "free_memory_bytes": 1342078976,
+            "uptime_seconds": 528520
           },
           "detail": {
+            "profile": "release",
             "rates": [
-              51.15941151485451,
-              50.83361069963145,
-              51.45122726365426,
-              51.29288235808121,
-              51.282051282051285
+              108.9588377723971,
+              109.0305043793416,
+              109.02062633971563,
+              109.0305043793416,
+              109.23174680099376
             ],
-            "keys": 847,
+            "keys": 1804,
             "blank_samples": 0,
+            "debug_blank_samples": 0,
             "threshold_frames_per_second": 55,
-            "thresholds_met": false
-          }
+            "timer_ceiling_per_second": 51.38280187396101,
+            "timer_ceiling_dispatches": 170,
+            "timer_ceiling_seconds": 3.3085,
+            "thresholds_met": true
+          },
+          "replaced": 51.282051282051285
         },
         "viewer.window_step": {
-          "value": 8.5,
+          "value": 2.5,
           "unit": "ms",
           "tolerance": 0.25,
-          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "tolerance_provenance": "Carried from the 2026-11-05 first recording as headroom, not a calibrated spread. The recorded value at this tolerance stays within the operator's answered budget in the F-216 design, Open question A.",
           "provenance": "measured",
-          "recorded": "2026-11-05",
+          "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -592,53 +602,54 @@
           },
           "conditions": {
             "load_average": [
-              3.388671875,
-              5.51220703125,
-              5.3115234375
+              9.28515625,
+              7.568359375,
+              8.2744140625
             ],
-            "free_memory_bytes": 1598357504,
-            "uptime_seconds": 412800
+            "free_memory_bytes": 1342078976,
+            "uptime_seconds": 528520
           },
           "detail": {
+            "profile": "release",
             "ct_ms": [
-              8.399999976158142,
-              8.600000023841858,
-              8.5,
-              8.599999964237213,
-              8.300000011920929,
-              8.099999964237213,
-              8.5,
-              8.400000035762787,
-              8.600000023841858
+              2.699999988079071,
+              3.100000023841858,
+              2.600000023841858,
+              2.900000035762787,
+              2.5,
+              2.5,
+              2.400000035762787,
+              2.300000011920929,
+              2.5
             ],
             "dx_ms": [
-              133.60000002384186,
-              132.80000001192093,
-              132.39999997615814,
-              131.29999995231628,
-              136.0999999642372,
-              131.60000002384186,
-              132.5,
-              127.69999998807907,
-              130.9000000357628
+              19.900000035762787,
+              20.5,
+              16.900000035762787,
+              17.5,
+              19.80000001192093,
+              19.400000035762787,
+              19.600000023841858,
+              19.5,
+              19.100000023841858
             ],
-            "dx_median_ms": 132.39999997615814,
+            "dx_median_ms": 19.5,
             "preview_bodies": 0,
             "ct_threshold_ms": 5,
             "dx_threshold_ms": 70,
-            "thresholds_met": false
+            "thresholds_met": true
           },
-          "replaced": 8.599999964237213
+          "replaced": 8.5
         },
         "viewer.resident_memory": {
-          "value": 566099968,
+          "value": 462241792,
           "unit": "bytes",
-          "tolerance": 0.25,
-          "tolerance_provenance": "first recording headroom, not a calibrated spread",
+          "tolerance": 0.1426,
+          "tolerance_provenance": "The largest value at four decimal places that keeps the recorded peak times 1 plus the tolerance at or below the 528,194,192 byte resident bound stated in the F-216 design. Not a calibrated spread. The 0.25 first recording headroom would allow 577,802,240 bytes.",
           "provenance": "measured",
-          "recorded": "2026-11-05",
+          "recorded": "2026-11-06",
           "story": "F-216",
-          "why": "F-216 first recording of the folder viewer subjects on this host. The figures are from the uncommitted working tree.",
+          "why": "F-216 re-recording of the folder viewer subjects on this host at commit 171804b, release build. It replaces the 2026-11-05 figures, which came from an older uncommitted tree.",
           "host_class": {
             "platform": "darwin",
             "release": "27.0.0",
@@ -654,28 +665,61 @@
           },
           "conditions": {
             "load_average": [
-              9.951171875,
-              6.17236328125,
-              5.369140625
+              9.28515625,
+              7.568359375,
+              8.2744140625
             ],
-            "free_memory_bytes": 3272998912,
-            "uptime_seconds": 412586
+            "free_memory_bytes": 1342078976,
+            "uptime_seconds": 528520
           },
           "detail": {
-            "peak_rss_bytes": 566099968,
-            "samples": 260,
+            "profile": "release",
+            "peak_rss_bytes": 462241792,
+            "samples": 1870,
             "held": {
               "build": "release",
               "budget": 268435456,
-              "used": 236091456,
-              "files": 121,
-              "frames": 176
+              "used": 250948688,
+              "files": 441,
+              "frames": 5,
+              "inflight": 0,
+              "workspace": 8962144,
+              "free": 0,
+              "grey": 8962144,
+              "grey_replies": 0
             },
-            "js_heap_bytes": 168451423,
+            "held_at_peak": {
+              "build": "release",
+              "budget": 268435456,
+              "used": 250948688,
+              "files": 441,
+              "frames": 5,
+              "inflight": 0,
+              "workspace": 8962144,
+              "free": 0,
+              "grey": 8962144,
+              "grey_replies": 0
+            },
+            "held_peaks": {
+              "used": 268268110,
+              "free": 0,
+              "inflight": 2099324,
+              "workspace": 17400000
+            },
+            "js_heap_bytes": 98123775,
+            "js_heap_collections": 3,
+            "js_heap_before_gc": 125011568,
+            "canvases": [
+              [
+                2900,
+                3000
+              ]
+            ],
             "rss_bound_bytes": 528194192,
-            "heap_bound_bytes": 257886080,
-            "thresholds_met": false
-          }
+            "heap_bound_bytes": 118686080,
+            "thresholds_met": true
+          },
+          "replaced": 566099968
         }
       }
     }
