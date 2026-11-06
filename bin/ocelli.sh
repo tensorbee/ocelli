@@ -208,7 +208,13 @@ run_gate() {
                  python3 scripts/pin_and_size_check.py --with-size &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_pin_and_size_check.py ;;
-    native)      "$0" native ;;
+    # The unit suite travels with the gate whose arm runs the check, the
+    # same pattern as test_bench_check.py in `bench` and
+    # test_pin_and_size_check.py in `wasm`. Chained on `&&` for the reason
+    # the backlog arm gives.
+    native)      "$0" native &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_simd_variant_check.py ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
     # F-X009. A green run of the gates is not evidence that the gates work, it
@@ -550,7 +556,7 @@ case "$command" in
     # D2 honest over time: if the core stopped being WebAssembly-agnostic,
     # this is where it shows up first.
     #
-    # Eight steps, and each one's exit code is read from the command itself
+    # Thirteen steps, and each one's exit code is read from the command itself
     # rather than from the end of a pipe. `set -e` is on, so the first failure
     # ends the arm.
     #
@@ -560,7 +566,7 @@ case "$command" in
 
     # 1. The two entry points LINK, not merely type-check. A stub that only
     #    checks would hide a missing symbol until Phase 2.
-    echo "  1/11 native entry points link"
+    echo "  1/13 native entry points link"
     cargo build -p ocelli-native --bins
 
     # 2. Every crate HLD section 4 marks `wasm: yes` builds for wasm32.
@@ -574,14 +580,14 @@ case "$command" in
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
     #    runner, which is F-101's and the oracle's ground, not this gate's.
-    echo "  2/11 eleven shared crates plus ocelli-wasm build for wasm32"
+    echo "  2/13 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown
 
     # 3. Every crate the table marks `native: yes` builds natively.
     #    --all-targets IS right here: a native build runs the test suite, so
     #    the tests have to compile.
-    echo "  3/11 the same crates build natively, tests included"
+    echo "  3/13 the same crates build natively, tests included"
     cargo check --workspace --all-targets
 
     # 4. Resolved features agree across the two targets, or the difference is
@@ -589,43 +595,68 @@ case "$command" in
     #    both targets compiling while one quietly resolved a different feature
     #    set is the sprint's stated false-portability defect, and nothing goes
     #    red on its own.
-    echo "  4/11 resolved features agree across targets"
+    echo "  4/13 resolved features agree across targets"
     python3 scripts/target_feature_check.py
 
-    # 5. The same production JPEG 2000 proof executes natively. Steps 6 and 7
+    # 5. The same production JPEG 2000 proof executes natively. Steps 6 and 9
     # run that exact source as plain and SIMD-enabled wasm under Node.
-    echo "  5/11 codec wasm runner refusals and control"
+    echo "  5/13 codec wasm runner refusals and control"
     node --test scripts/tests/test_run_codec_wasm.mjs
 
-    echo "  6/11 JPEG 2000 production decoder executes natively"
+    echo "  6/13 JPEG 2000 production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_jpeg2000
 
-    echo "  7/11 JPEG 2000 production decoder builds as plain and SIMD wasm"
+    # 7 and 8. The SIMD flag travels in
+    # CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS and not in `cargo rustc
+    # --`, which hands its arguments to the final crate only, the example,
+    # and compiles every dependency without them. F-229's review measured
+    # that shape: the "+simd128" build held jxl rlibs byte-identical to the
+    # plain build's. With an explicit --target, cargo applies a target's
+    # rustflags to the target's crates and to no build script or proc macro,
+    # which run on the host. The SIMD variants keep their own --target-dir,
+    # so the flag change never invalidates the plain or default caches.
+    # F-233.
+    echo "  7/13 JPEG 2000 production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
-    cargo rustc -p ocelli-codec --release --example verify_jpeg2000 \
-      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
-      -C target-feature=+simd128
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
+      cargo build -p ocelli-codec --release --example verify_jpeg2000 \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  8/11 plain and SIMD JPEG 2000 wasm execute under Node"
+    # The comparison refuses a SIMD variant whose listed crates are
+    # byte-identical to the plain build's, or missing from either directory.
+    # The list is F-233's: the two verification crates and, now that F-229
+    # has landed, the three jxl crates whose 50 wasm32 SIMD regions are what
+    # the flag is for.
+    echo "  8/13 the SIMD JPEG 2000 variant compiles every listed crate with the flag"
+    python3 scripts/simd_variant_check.py \
+      target/codec-wasm-plain target/codec-wasm-simd \
+      ocelli_codec openjph_core jxl_grid jxl_render jxl_modular
+
+    echo "  9/13 plain and SIMD JPEG 2000 wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
 
-    # 9 to 11 are the standing version of F-X013's central claim, that
+    # 10 to 13 are the standing version of F-X013's central claim, that
     # openjph-core produces identical samples on native, plain wasm and
     # +simd128 wasm. The spike that measured it once is deleted. D-22.
-    echo "  9/11 HTJ2K production decoder executes natively"
+    echo "  10/13 HTJ2K production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_htj2k
 
-    echo "  10/11 HTJ2K production decoder builds as plain and SIMD wasm"
+    echo "  11/13 HTJ2K production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_htj2k \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
-    cargo rustc -p ocelli-codec --release --example verify_htj2k \
-      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
-      -C target-feature=+simd128
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
+      cargo build -p ocelli-codec --release --example verify_htj2k \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  11/11 plain and SIMD HTJ2K wasm execute under Node"
+    echo "  12/13 the SIMD HTJ2K variant compiles every listed crate with the flag"
+    python3 scripts/simd_variant_check.py \
+      target/codec-wasm-plain target/codec-wasm-simd \
+      ocelli_codec openjph_core jxl_grid jxl_render jxl_modular
+
+    echo "  13/13 plain and SIMD HTJ2K wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm

@@ -253,7 +253,7 @@ re-measured rather than assumed if the digest ever moved.
 
 ### Cross-target identity is standing, not a spike result
 
-`bin/ocelli.sh gate native` steps 9 to 11 run `examples/verify_htj2k.rs` over
+`bin/ocelli.sh gate native` steps 10 to 13 run `examples/verify_htj2k.rs` over
 all three syntaxes natively, as plain wasm and as `+simd128` wasm. That is the
 standing version of F-X013's central claim, through the production adapter
 rather than the throwaway harness, which is deleted.

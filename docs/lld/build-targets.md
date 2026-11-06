@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233
+**Last updated:** 2026-11-06
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -127,7 +127,7 @@ bin/ocelli.sh native           # the proof
 bin/ocelli.sh gate native      # the same thing, as a gate, in the floor
 ```
 
-Eight steps, each exit code read from the command itself.
+Thirteen steps, each exit code read from the command itself.
 
 | Step | What it proves |
 |------|----------------|
@@ -137,10 +137,17 @@ Eight steps, each exit code read from the command itself.
 | 4 | `scripts/target_feature_check.py`. Resolved features agree across the two targets, or the difference is declared |
 | 5 | `scripts/tests/test_run_codec_wasm.mjs`. The Node executor refuses wrong arity and a module without the production entry point |
 | 6 | The production JPEG 2000 proof executes natively against exact and lossy synthetic truth |
-| 7 | The same source builds as plain and `+simd128` release wasm modules |
-| 8 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
+| 7 | The same source builds as plain and `+simd128` release wasm modules. F-233 passes the flag to every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` on the SIMD build only, so no build script or proc macro sees it and the plain cache is untouched |
+| 8 | `scripts/simd_variant_check.py` refuses a `+simd128` build whose listed crates' release rlibs are byte-identical to the plain build's, or missing from either directory. The list is `ocelli_codec`, `openjph_core`, `jxl_grid`, `jxl_render` and `jxl_modular` |
+| 9 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
+| 10 | The production HTJ2K proof executes natively against the same truth |
+| 11 | The same source builds as plain and `+simd128` release wasm modules, the flag reaching every crate |
+| 12 | `scripts/simd_variant_check.py` refuses again, over the same five crates |
+| 13 | Node executes both HTJ2K wasm modules |
 
-Steps 6 to 8 are F-026's codec-specific execution proof. `gate wasm` builds
+Steps 6 to 9 are F-026's codec-specific execution proof with F-233's rlib
+comparison, and steps 10 to 13 are the same shape for HTJ2K, the standing
+version of F-X013's claim (D-22). `gate wasm` builds
 the render module and the decode module of `ocelli-wasm`. It does not
 exercise `ocelli-codec`.
 

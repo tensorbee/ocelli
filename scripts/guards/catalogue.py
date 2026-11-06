@@ -11214,6 +11214,72 @@ GUARDS: tuple[Guard, ...] = (
               "to fetch a new dependency graph, so that branch has no probe.",
     ),
     Guard(
+        id="simd-variant",
+        file="scripts/simd_variant_check.py",
+        gate="native",
+        spec="F-233, `bin/ocelli.sh native` steps 8 and 12, and D-22's "
+             "evidence clause",
+        refuses="A SIMD verification variant whose listed crate's release "
+                "rlib is byte-identical between the plain and the SIMD target "
+                "directories, naming the crate and the rlib, and a listed "
+                "crate whose rlib is missing from either side.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "simd-variant.identical-rlib", None,
+                python_snippet(
+                    "simd_variant_check.check, identical rlibs",
+                    "import sys, tempfile\n"
+                    "from pathlib import Path\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "deps = Path('wasm32-unknown-unknown/release/deps')\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "plain = root / 'plain'\n"
+                    "simd = root / 'simd'\n"
+                    "for side in (plain, simd):\n"
+                    "    (side / deps).mkdir(parents=True)\n"
+                    "    (side / deps / 'libprobe_codec-abc123.rlib')"
+                    ".write_bytes(b'same bytes')\n"
+                    "bad = s.check(plain, simd, ['probe_codec'])\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "byte-identical",
+                level=1,
+                control=python_snippet(
+                    "simd_variant_check.check, differing rlibs",
+                    "import sys, tempfile\n"
+                    "from pathlib import Path\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "deps = Path('wasm32-unknown-unknown/release/deps')\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "plain = root / 'plain'\n"
+                    "simd = root / 'simd'\n"
+                    "for side in (plain, simd):\n"
+                    "    (side / deps).mkdir(parents=True)\n"
+                    "    name = 'libprobe_codec-abc123.rlib' if side is plain"
+                    " else 'libprobe_codec-def456.rlib'\n"
+                    "    body = b'plain bytes' if side is plain"
+                    " else b'simd bytes'\n"
+                    "    (side / deps / name).write_bytes(body)\n"
+                    "bad = s.check(plain, simd, ['probe_codec'])\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The planted layout is the one the native arm "
+                     "produces, `<target-dir>/wasm32-unknown-unknown/release/"
+                     "deps/lib<crate>-<hash>.rlib`, because both verification "
+                     "examples build with `--target wasm32-unknown-unknown "
+                     "--release`. The probe plants the state F-229's review "
+                     "measured, a `+simd128` build whose rlib matches the "
+                     "plain build's, and the control plants differing bytes "
+                     "so the refusal is shown to discriminate. The missing-"
+                     "side refusals are driven by "
+                     "`scripts/tests/test_simd_variant_check.py`, run by the "
+                     "guards gate."),
+        ),
+    ),
+    Guard(
         id="packages",
         file="scripts/package_check.py",
         gate="packages",
