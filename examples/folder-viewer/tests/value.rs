@@ -1,6 +1,8 @@
 //! Modality value at a point. Every expected value is computed by hand from
-//! PS3.3 C.7.6.3.1 (Bits Stored, High Bit, Pixel Representation) and C.11.1
-//! (output units = m * SV + b), not from a previous run of this route.
+//! PS3.5 8.1.1 (unused bits above Bits Stored are not assumed zero, and the
+//! sign bit is the High Bit), PS3.3 C.7.6.3.3 (High Bit is Bits Stored minus
+//! one) and PS3.3 C.11.1 (output units = m * SV + b), not from a previous
+//! run of this route.
 
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -8,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ocelli_folder_viewer::{
-    ImagePoint, PreviewError, Viewer, ViewerConfig, preview_first_frame, serve_on, slice,
-    value_frame,
+    FrameRequest, ImagePoint, PreviewError, Viewer, ViewerConfig, preview_first_frame,
+    preview_frame, serve_on, slice, value_frame,
 };
 
 // ---------------------------------------------------------------------------
@@ -233,10 +235,11 @@ fn signed_12_in_16() -> Result<Vec<u8>, String> {
 
 #[test]
 fn value_signed_12_bit_ct_is_minus_1025() -> Result<(), String> {
-    // PS3.3 C.7.6.3.1. The container 0x0FFF masked to Bits Stored 12 is
-    // 0xFFF. Bit 11 is set and Pixel Representation is 1, so the stored value
-    // is 0xFFF - 0x1000 = -1. PS3.3 C.11.1: -1 * 1 + (-1024) = -1025.
-    // Modality CT with no Rescale Type, so the unit is HU (C.8.2.1).
+    // PS3.5 8.1.1 and PS3.3 C.7.6.3.3. The container 0x0FFF masked to Bits
+    // Stored 12 is 0xFFF. Bit 11, the High Bit, is set and Pixel
+    // Representation is 1, so the stored value is 0xFFF - 0x1000 = -1.
+    // PS3.3 C.11.1: -1 * 1 + (-1024) = -1025. Modality CT with no Rescale
+    // Type and no Multi-energy CT Acquisition, so the unit is HU (C.8.2.1).
     let file = signed_12_in_16()?;
     expect(
         value_frame(&file, 0, &[at(0.5, 0.5)]),
@@ -248,8 +251,9 @@ fn value_signed_12_bit_ct_is_minus_1025() -> Result<(), String> {
 
 #[test]
 fn value_masks_bits_above_bits_stored() -> Result<(), String> {
-    // PS3.3 C.7.6.3.1. 0xF7FF & 0x0FFF = 0x07FF. Bit 11 is clear, so the
-    // stored value is 2047. PS3.3 C.11.1: 2047 * 1 + (-1024) = 1023.
+    // PS3.5 8.1.1: the bits above Bits Stored are not assumed to be zero.
+    // 0xF7FF & 0x0FFF = 0x07FF. Bit 11 is clear, so the stored value is
+    // 2047. PS3.3 C.11.1: 2047 * 1 + (-1024) = 1023.
     let file = signed_12_in_16()?;
     expect(
         value_frame(&file, 0, &[at(1.5, 0.5)]),
@@ -338,9 +342,11 @@ type UnitCase = (
 
 #[test]
 fn value_unit_follows_rescale_type() -> Result<(), String> {
-    // PS3.3 C.11.1.1.2 defined terms, C.8.2.1 (Rescale Type is required on
-    // CT when the unit is not HU), C.8.9.1 (Units on PET). Stored 5, slope 1,
-    // intercept 0, so every value is 5.
+    // PS3.3 C.11.1.1.2 defined terms. C.8.2.1 makes Rescale Type required on
+    // CT if it is not HU or Multi-energy CT Acquisition is YES, so an absent
+    // one on a CT that is not multi-energy is HU. C.8.9.4 states the PET
+    // unit in Units (0054,1001). Stored 5, slope 1, intercept 0, so every
+    // value is 5 (C.11.1).
     let cases: [UnitCase; 7] = [
         (
             "CT HU_MOD",
@@ -373,15 +379,321 @@ fn value_unit_follows_rescale_type() -> Result<(), String> {
     ];
     for (name, modality, rescale_type, units, unit, source) in cases {
         let got = unit_case(modality, rescale_type, units)?;
-        let want = format!(
-            "{{\"frame\":0,\"unit\":\"{unit}\",\"unit_source\":\"{source}\",\"points\":[\
-             {{\"column\":1,\"row\":1,\"index_column\":0,\"index_row\":0,\"padding\":false,\"value\":5,\"text\":\"5 {unit}\"}}]}}"
-        );
+        let want = five_with(unit, source);
         if got != want {
             return Err(format!("{name}: got {got}, wanted {want}"));
         }
     }
     Ok(())
+}
+
+/// The reply for stored 5, slope 1, intercept 0 at the one pixel.
+fn five_with(unit: &str, source: &str) -> String {
+    format!(
+        "{{\"frame\":0,\"unit\":\"{unit}\",\"unit_source\":\"{source}\",\"points\":[\
+         {{\"column\":1,\"row\":1,\"index_column\":0,\"index_row\":0,\"padding\":false,\"value\":5,\"text\":\"5 {unit}\"}}]}}"
+    )
+}
+
+#[test]
+fn value_pet_units_decide_over_rescale_type() -> Result<(), String> {
+    // PS3.3 C.8.9.4, PET Image Module, Rescale Intercept: "U = m*SV+b" with
+    // U the pixel value units "defined in Units (0054,1001)". On PT, Units
+    // names the unit whenever it is present, whatever Rescale Type says.
+    // Stored 5, slope 1, intercept 0, so 5 * 1 + 0 = 5 (PS3.3 C.11.1).
+    let cases: [UnitCase; 4] = [
+        (
+            "PT US and BQML",
+            "PT",
+            Some("US"),
+            Some("BQML"),
+            "BQML",
+            "units",
+        ),
+        (
+            "PT CNTS and BQML",
+            "PT",
+            Some("CNTS"),
+            Some("BQML"),
+            "BQML",
+            "units",
+        ),
+        (
+            "PT US alone",
+            "PT",
+            Some("US"),
+            None,
+            "unspecified",
+            "rescale-type",
+        ),
+        (
+            "PT CNTS alone",
+            "PT",
+            Some("CNTS"),
+            None,
+            "CNTS",
+            "rescale-type",
+        ),
+    ];
+    for (name, modality, rescale_type, units, unit, source) in cases {
+        let got = unit_case(modality, rescale_type, units)?;
+        let want = five_with(unit, source);
+        if got != want {
+            return Err(format!("{name}: got {got}, wanted {want}"));
+        }
+    }
+    Ok(())
+}
+
+/// Name, Multi-energy CT Acquisition, Rescale Type, expected unit, source.
+type MultiEnergyCase = (
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    &'static str,
+    &'static str,
+);
+
+#[test]
+fn value_multi_energy_ct_has_no_assumed_unit() -> Result<(), String> {
+    // PS3.3 C.8.2.1, Table C.8-3, CT Image Module. Rescale Type is "Required
+    // if the Rescale Type is not HU (Hounsfield Units), or Multi-energy CT
+    // Acquisition (0018,9361) is YES", and Rescale Intercept says the output
+    // is HU only when "Multi-energy CT Acquisition (0018,9361) is either
+    // absent or NO". So an absent Rescale Type means HU only when the
+    // attribute is absent or NO. Multi-energy CT Acquisition is a top-level
+    // Type 3 attribute in Table C.8-3 and in Table C.8-114 (C.8.15.2,
+    // Enhanced CT Image Module). Stored 5, slope 1, intercept 0, so 5.
+    let cases: [MultiEnergyCase; 4] = [
+        (
+            "YES and no Rescale Type",
+            Some("YES"),
+            None,
+            "unspecified",
+            "none",
+        ),
+        (
+            "NO and no Rescale Type",
+            Some("NO"),
+            None,
+            "HU",
+            "ct-default",
+        ),
+        ("YES and HU", Some("YES"), Some("HU"), "HU", "rescale-type"),
+        (
+            "YES and Z_EFF",
+            Some("YES"),
+            Some("Z_EFF"),
+            "Z_EFF",
+            "rescale-type",
+        ),
+    ];
+    for (name, multi_energy, rescale_type, unit, source) in cases {
+        let mut spec = Spec::mono(1, &[5]);
+        spec.modality = Some("CT");
+        spec.rescale = Some(("1", "0"));
+        if let Some(code) = multi_energy {
+            spec.extra
+                .push(text_element((0x0018, 0x9361), *b"CS", code)?);
+        }
+        if let Some(code) = rescale_type {
+            spec.extra
+                .push(text_element((0x0028, 0x1054), *b"LO", code)?);
+        }
+        let file = build(spec)?;
+        expect(
+            value_frame(&file, 0, &[at(0.5, 0.5)]),
+            &five_with(unit, source),
+            name,
+        )?;
+    }
+    // Enhanced CT. The attribute is at the top level and the frame's Pixel
+    // Value Transformation Sequence carries no Rescale Type. Stored 1040,
+    // slope 1, intercept -1024 on frame 0, so 1040 * 1 + (-1024) = 16.
+    let file = enhanced(&[], Some("YES"), &[None, None])?;
+    expect(
+        value_frame(&file, 0, &[at(0.5, 0.5)]),
+        "{\"frame\":0,\"unit\":\"unspecified\",\"unit_source\":\"none\",\"points\":[\
+         {\"column\":1,\"row\":1,\"index_column\":0,\"index_row\":0,\"padding\":false,\"value\":16,\"text\":\"16 unspecified\"}]}",
+        "enhanced multi-energy",
+    )
+}
+
+/// Enhanced CT, two frames of one pixel, both stored 1040, slope 1 and
+/// intercept -1024 at the top level and in each frame's Pixel Value
+/// Transformation Sequence. `top` adds top-level elements, `multi_energy`
+/// adds Multi-energy CT Acquisition, and `types` is each frame's Rescale Type.
+fn enhanced(
+    top: &[((u16, u16), Vec<u8>)],
+    multi_energy: Option<&str>,
+    types: &[Option<&str>; 2],
+) -> Result<Vec<u8>, String> {
+    let mut per_frame = Vec::new();
+    for rescale_type in types {
+        let mut body = [
+            short_le((0x0028, 0x1052), *b"DS", &text_pad("-1024"))?,
+            short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
+        ]
+        .concat();
+        if let Some(code) = rescale_type {
+            body.extend(short_le((0x0028, 0x1054), *b"LO", &text_pad(code))?);
+        }
+        per_frame.extend(item(&long_le((0x0028, 0x9145), *b"SQ", &item(&body)?)?)?);
+    }
+    let mut spec = Spec::mono(1, &[1040, 1040]);
+    spec.frames = Some(2);
+    spec.modality = Some("CT");
+    spec.rescale = Some(("1", "-1024"));
+    spec.extra.extend(top.iter().cloned());
+    if let Some(code) = multi_energy {
+        spec.extra
+            .push(text_element((0x0018, 0x9361), *b"CS", code)?);
+    }
+    spec.extra.push((
+        (0x5200, 0x9230),
+        long_le((0x5200, 0x9230), *b"SQ", &per_frame)?,
+    ));
+    build(spec)
+}
+
+#[test]
+fn value_reads_the_per_frame_rescale_type() -> Result<(), String> {
+    // PS3.3 C.7.6.16.2.9, Table C.7.6.16-10. In an Enhanced CT, Rescale Type
+    // is Type 1 inside each frame's Pixel Value Transformation Sequence and
+    // the frame's value wins over the top level. Frame 0 is
+    // 1040 * 1 + (-1024) = 16 (PS3.3 C.11.1), and its group names HU_MOD.
+    // With no top-level Rescale Type, a top-level read would say HU from
+    // ct-default. With a top-level HU, it would say HU from rescale-type.
+    let want = "{\"frame\":0,\"unit\":\"HU_MOD\",\"unit_source\":\"rescale-type\",\"points\":[\
+         {\"column\":1,\"row\":1,\"index_column\":0,\"index_row\":0,\"padding\":false,\"value\":16,\"text\":\"16 HU_MOD\"}]}";
+    let types = [Some("HU_MOD"), Some("HU_MOD")];
+    let bare = enhanced(&[], None, &types)?;
+    expect(value_frame(&bare, 0, &[at(0.5, 0.5)]), want, "no top level")?;
+    let top_hu = [text_element((0x0028, 0x1054), *b"LO", "HU")?];
+    let shadowed = enhanced(&top_hu, None, &types)?;
+    expect(
+        value_frame(&shadowed, 0, &[at(0.5, 0.5)]),
+        want,
+        "top level HU",
+    )
+}
+
+/// One stored sample of 5 in a 32-bit container, MR, slope 1, intercept 0.
+fn wide(bits_stored: u16, padding: bool) -> Result<Vec<u8>, String> {
+    let mut spec = Spec::mono(1, &[]);
+    spec.pixels = 5_u32.to_le_bytes().to_vec();
+    spec.bits = (32, bits_stored, bits_stored - 1, 0);
+    spec.modality = Some("MR");
+    spec.rescale = Some(("1", "0"));
+    if padding {
+        spec.extra.push((
+            (0x0028, 0x0120),
+            short_le((0x0028, 0x0120), *b"US", &0_u16.to_le_bytes())?,
+        ));
+    }
+    build(spec)
+}
+
+#[test]
+fn value_refuses_padding_above_24_stored_bits() -> Result<(), String> {
+    // `Stored` holds an `f32`, whose 24-bit significand makes every integer
+    // up to 2^24 exact (IEEE 754 binary32). Above Bits Stored 24 the padding
+    // comparison of PS3.3 C.7.5.1.1.2 could see a rounded neighbour, so a
+    // frame with Pixel Padding Value and Bits Stored 32 is refused
+    // `attribute`. Without padding there is no comparison and the value is
+    // 5 * 1 + 0 = 5 (PS3.3 C.11.1). Bits Stored 24 is still exact and is
+    // answered with padding present, because stored 5 is not padding 0.
+    expect_refusal(
+        value_frame(&wide(32, true)?, 0, &[at(0.5, 0.5)]),
+        PreviewError::Attribute,
+        "32 bits with padding",
+    )?;
+    let want = five_with("unspecified", "none");
+    expect(
+        value_frame(&wide(32, false)?, 0, &[at(0.5, 0.5)]),
+        &want,
+        "32 bits without padding",
+    )?;
+    expect(
+        value_frame(&wide(24, true)?, 0, &[at(0.5, 0.5)]),
+        &want,
+        "24 bits with padding",
+    )
+}
+
+#[test]
+fn value_ignores_attributes_stage_one_never_reads() -> Result<(), String> {
+    // PS3.3 C.11.1. The value is m * SV + b and reads no window, no
+    // presentation shape and no lossy or burned-in flag. A one-pixel CT,
+    // stored 1064, slope 1, intercept -1024, is 1064 * 1 + (-1024) = 40 in
+    // HU (C.8.2.1, no Rescale Type and no Multi-energy CT Acquisition).
+    // Each case below is non-conformant in an attribute outside stage 1.
+    // The preview, given a window override, still draws the first four.
+    let want = "{\"frame\":0,\"unit\":\"HU\",\"unit_source\":\"ct-default\",\"points\":[\
+         {\"column\":1,\"row\":1,\"index_column\":0,\"index_row\":0,\"padding\":false,\"value\":40,\"text\":\"40 HU\"}]}";
+    let center = text_element((0x0028, 0x1050), *b"DS", "40")?;
+    let cases = [
+        (
+            "Window Width 0",
+            vec![center.clone(), text_element((0x0028, 0x1051), *b"DS", "0")?],
+        ),
+        (
+            "Window Width abc",
+            vec![center, text_element((0x0028, 0x1051), *b"DS", "abc")?],
+        ),
+        (
+            "Lossy Image Compression 1",
+            vec![text_element((0x0028, 0x2110), *b"CS", "1")?],
+        ),
+        (
+            "Burned In Annotation MAYBE",
+            vec![text_element((0x0028, 0x0301), *b"CS", "MAYBE")?],
+        ),
+        (
+            "Presentation LUT Shape BOGUS",
+            vec![text_element((0x2050, 0x0020), *b"CS", "BOGUS")?],
+        ),
+    ];
+    let mut failed = Vec::new();
+    for (name, extra) in cases {
+        let mut spec = Spec::mono(1, &[1064]);
+        spec.modality = Some("CT");
+        spec.rescale = Some(("1", "-1024"));
+        spec.extra = extra;
+        let file = build(spec)?;
+        if let Err(error) = expect(value_frame(&file, 0, &[at(0.5, 0.5)]), want, name) {
+            failed.push(error);
+        }
+        let drawn = preview_frame(
+            &file,
+            FrameRequest {
+                window_center: Some(40.0),
+                window_width: Some(400.0),
+                ..FrameRequest::default()
+            },
+        );
+        // PS3.3 C.11.2.1.2.1, LINEAR, centre 40, width 400, value 40:
+        // ((40 - 39.5) / 399 + 0.5) * 255 = 127.82, nearest grey 128. The
+        // Presentation LUT Shape case is refused by the preview, which reads
+        // that shape, and not by the value, which does not.
+        let drawn = drawn
+            .map(|preview| preview.grey)
+            .map_err(|error| error.code());
+        let shape = name.starts_with("Presentation");
+        let as_expected = if shape {
+            drawn == Err("window")
+        } else {
+            drawn == Ok(vec![128])
+        };
+        if !as_expected {
+            failed.push(format!("{name}: the preview gave {drawn:?}"));
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(failed.join("\n"))
+    }
 }
 
 /// Enhanced CT, two frames of one pixel, both stored 1040. The top level says

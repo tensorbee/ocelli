@@ -226,8 +226,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    year-month-day. Edge letters show the patient direction and hide
    while the picture is flipped or rotated. The pointer cross shows the
    column, the row and the modality value of the pixel under it with its
-   unit, HU on a CT, `padding` for a padded sample, and `not held` for a
-   file the process could not hold.
+   unit, HU on a CT that names no other unit and is not multi-energy, the
+   Units attribute on a PET, `padding` for a padded sample, and `not held`
+   for a file the process could not hold.
 8. Freeform draws a freehand outline and keeps it at three or more points.
    Rectangle and ellipse draw a region and do not fill it. Text places a note.
    Click, type, and press Enter to keep it. Escape drops the draft. Leaving

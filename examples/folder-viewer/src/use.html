@@ -529,7 +529,7 @@ fn open(bytes: &amp;[u8]) -&gt; Result&lt;(), ParseError&gt; {
     Ok(())
 }</code></pre>
     <p><code>ParseError</code> is <code>#[non_exhaustive]</code> and carries no input bytes, values, UIDs or paths. Its variants name the failure class, from <code>TruncatedPart10</code> and <code>MissingDicmPrefix</code> to <code>UnknownTransferSyntax</code> and <code>InvalidDataSet</code>. A caller can log it without logging patient data.</p>
-    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9.</p>
+    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9. <code>read_padding(&amp;metadata, photometric, signed)</code> reads the Pixel Padding Value range alone, without the window and flags that <code>open_frame</code> can refuse.</p>
     <p>DICOMweb bodies parse through the same types. <code>DicomwebSource</code> implements <code>SeriesSource::consume</code>.</p>
 <pre><code>use ocelli_dicom::{DicomwebSource, SeriesSource, SourceBatch, SourceResponse, SourceResponseKind};
 

@@ -266,7 +266,7 @@ impl Budgeted for Held {
     fn bytes(&self) -> usize {
         match self {
             Self::File(bytes) => bytes.capacity(),
-            Self::Frame(frame) => frame.samples.capacity() + size_of::<HeldFrame>(),
+            Self::Frame(frame) => frame.charged_bytes(),
         }
     }
 }
@@ -1196,7 +1196,7 @@ impl Viewer {
     ) -> Arc<CachedFrame> {
         let frames = held.frames;
         let sample_len = held.samples.len();
-        let sample_cap = held.samples.capacity();
+        let charged = held.charged_bytes();
         let value = Arc::new(CachedFrame {
             inner: held,
             worker,
@@ -1206,7 +1206,7 @@ impl Viewer {
         let key = HeldKey::Frame(id, index);
         let mut state = self.lock_cache();
         state.drain_recycled();
-        state.reserve_for_insert(sample_cap.saturating_add(size_of::<HeldFrame>()));
+        state.reserve_for_insert(charged);
         let admission = state.lru.insert(key, Held::Frame(Arc::clone(&value)));
         let kept = admission.refused.is_none();
         state.absorb(key, sample_len, admission);
@@ -1473,8 +1473,14 @@ impl CacheHandle {
     }
 }
 
+/// The charge a claim makes room for before the frame is decoded.
+///
+/// The sample bytes, the struct and the boxed value facts a grey frame
+/// carries. A unit text the file supplies is the one owned byte run not
+/// known before the decode, so it is charged only when the frame is stored.
 fn frame_sample_cost(len: usize) -> usize {
     len.saturating_add(size_of::<HeldFrame>())
+        .saturating_add(size_of::<crate::value::ValueFacts>())
 }
 
 impl CacheState {
@@ -1492,7 +1498,7 @@ impl CacheState {
         self.drain_recycled();
         if let Some(buffer) = self.pop_free(len) {
             self.note_reused();
-            let cost = buffer.capacity().saturating_add(size_of::<HeldFrame>());
+            let cost = frame_sample_cost(buffer.capacity());
             self.make_room_dropping(cost);
             return buffer;
         }
@@ -1867,6 +1873,42 @@ mod tests {
         if held.bytes() != expected {
             return Err(format!(
                 "held bytes were {} and the capacity sum is {expected}",
+                held.bytes()
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn held_bytes_charge_the_value_facts() -> Result<(), String> {
+        // Synthetic slice 0 is a CT with no Rescale Type, so it holds value
+        // facts with the unit text HU. The charge is every owned buffer's
+        // capacity plus the struct: the samples, the boxed facts and the
+        // unit text, as F-216 defines `bytes()`.
+        let bytes = crate::slice(0).ok_or("no synthetic slice")?;
+        let mut native = Vec::new();
+        let mut samples = Vec::new();
+        let frame = crate::preview::decode_held(
+            &bytes,
+            0,
+            &mut native,
+            &mut samples,
+            &mut |_| {},
+            &mut |_| Vec::new(),
+        )
+        .map_err(|error| format!("slice 0 was refused: {}", error.code()))?;
+        let facts = frame
+            .value
+            .as_ref()
+            .map_err(|error| format!("slice 0 has no value facts: {}", error.code()))?;
+        let expected = frame.samples.capacity()
+            + size_of::<HeldFrame>()
+            + size_of::<crate::value::ValueFacts>()
+            + facts.unit_capacity();
+        let held = Held::Frame(Arc::new(CachedFrame::plain(frame)));
+        if held.bytes() != expected {
+            return Err(format!(
+                "held bytes were {} and the owned sum is {expected}",
                 held.bytes()
             ));
         }

@@ -230,7 +230,7 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
         ));
     }
     if !page.contains(
-        "\"toggle-cross\": \"Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT. The local process computes the value.\"",
+        "\"toggle-cross\": \"Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT that names no other unit and is not multi-energy. The local process computes the value.\"",
     ) {
         return Err("the cross sentence does not name the value".to_owned());
     }
@@ -1894,9 +1894,32 @@ fn a_voi_lut_preset_still_holds_the_frame() -> Result<(), String> {
     Ok(())
 }
 
+/// Insert Image Comments (0020,4000), `len` spaces of LT, before (0028,0002).
+///
+/// The element changes no pixel and no LUT chain input. It makes the file
+/// longer than the held frame's fixed charge, which is what a check that
+/// the held bytes are smaller than the file needs.
+fn with_image_comments(file: &[u8], len: u16) -> Result<Vec<u8>, String> {
+    let marker = [0x28, 0x00, 0x02, 0x00, b'U', b'S'];
+    let at = file
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or_else(|| "the file has no Samples per Pixel element".to_owned())?;
+    let comment = short_le((0x0020, 0x4000), *b"LT", &vec![b' '; usize::from(len)])?;
+    let mut out = Vec::with_capacity(file.len() + comment.len());
+    out.extend_from_slice(file.get(..at).ok_or("the split is outside the file")?);
+    out.extend(comment);
+    out.extend_from_slice(file.get(at..).ok_or("the split is outside the file")?);
+    Ok(out)
+}
+
 #[test]
 fn single_frame_bytes_drop_and_preview_stays() -> Result<(), String> {
-    let file = mono_frame(true)?;
+    // The held frame is charged its samples, the struct and its value facts
+    // (F-210). The one-pixel file alone is shorter than that charge, so
+    // 1024 bytes of Image Comments keep the file longer than the frame and
+    // `used < file.len()` still tells the held frame from the encoded file.
+    let file = with_image_comments(&mono_frame(true)?, 1024)?;
     let addr = viewer_on(8 * 1024 * 1024)?;
     let posted = exchange(addr, &http_post_to("/file", "", &file))?;
     let (header, _) = split_http(&posted)?;

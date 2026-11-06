@@ -1,16 +1,25 @@
 //! The modality value under a point, stage 1 of the LUT chain.
 //!
 //! PS3.3 C.11.1: output units are `m * SV + b`. The arithmetic is
-//! `ModalityTransform::apply` in `ocelli-pixel`, built by
-//! `ocelli_dicom::open_frame`. This module chooses the cell, unpacks that one
-//! stored sample with `StoredPixelDescription::unpack`, checks padding and
-//! names the unit. It does not apply a window, so the value is the same for
-//! every window, invert, rotation, flip, zoom and pan.
+//! `ModalityTransform::apply` in `ocelli-pixel`, and the transform is the
+//! held frame's own stage 1, the one the preview draws with. This module
+//! chooses the cell, unpacks that one stored sample with
+//! `StoredPixelDescription::unpack`, checks padding with
+//! `ocelli_dicom::read_padding` and names the unit. It reads no window,
+//! presentation shape, lossy flag or burned-in flag, so none of them can
+//! refuse a value, and the value is the same for every window, invert,
+//! rotation, flip, zoom and pan.
+
+use std::borrow::Cow;
 
 use dicom_core::Tag;
 use ocelli_core::{Stored, exact_f32_integer};
-use ocelli_dicom::{FrameOpenError, MultiframeMetadata, PaddingRange, ParsedDicom, open_frame};
-use ocelli_pixel::{ImageDimensions, ModalityTransform, StoredPixelDescription};
+use ocelli_dicom::{
+    DefaultDicomObject, MetadataSet, MultiframeMetadata, PaddingRange, read_padding,
+};
+use ocelli_pixel::{
+    ImageDimensions, ModalityTransform, PixelRepresentation, StoredPixelDescription,
+};
 use ocelli_viewport::view::f32_from_f64;
 
 use crate::preview::{
@@ -20,6 +29,7 @@ use crate::preview::{
 
 const RESCALE_TYPE: Tag = Tag(0x0028, 0x1054);
 const PET_UNITS: Tag = Tag(0x0054, 0x1001);
+const MULTI_ENERGY: Tag = Tag(0x0018, 0x9361);
 /// Every integer up to `2^24` is exact in `f32`, which is what `Stored` holds.
 const EXACT_STORED_BITS: u8 = 24;
 
@@ -37,79 +47,103 @@ pub struct ImagePoint {
 
 /// The request-independent inputs of a value, computed once per held frame.
 pub(crate) struct ValueFacts {
-    /// Stage 1, from `open_frame`. A Modality LUT Sequence never reaches it.
+    /// Stage 1, a copy of the held frame's recipe. A Modality LUT Sequence
+    /// never reaches it.
     pub(crate) modality: ModalityTransform,
     /// Stored padding range, PS3.3 C.7.5.1.1.2.
     padding: Option<PaddingRange>,
-    /// Unit token, such as `HU`.
-    unit: String,
+    /// Unit token, such as `HU`. Borrowed when this module's rule names it,
+    /// owned when the file's Rescale Type or Units does.
+    unit: Cow<'static, str>,
     /// Which attribute named the unit.
     unit_source: &'static str,
 }
 
+impl ValueFacts {
+    /// The heap bytes these facts own: the boxed struct and an owned unit text.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        size_of::<Self>().saturating_add(self.unit_capacity())
+    }
+
+    /// The capacity of an owned unit text, and 0 for a borrowed one.
+    pub(crate) fn unit_capacity(&self) -> usize {
+        match &self.unit {
+            Cow::Borrowed(_) => 0,
+            Cow::Owned(text) => text.capacity(),
+        }
+    }
+}
+
 /// Read the value inputs of one frame.
 ///
-/// The caller has already refused a Modality LUT Sequence.
+/// `modality` is the held frame's stage 1, built after the caller refused a
+/// Modality LUT Sequence. Only padding and the unit are read here.
 pub(crate) fn value_facts(
-    parsed: &ParsedDicom,
+    metadata: &MetadataSet,
+    object: &DefaultDicomObject,
     multi: &MultiframeMetadata<'_>,
-    frame: u32,
     frame_index: usize,
     description: &StoredPixelDescription,
+    modality: &ModalityTransform,
 ) -> Result<ValueFacts, PreviewError> {
-    let opened = open_frame(parsed, frame).map_err(open_error)?;
-    let padding = opened.padding();
+    let signed = description.bits.pixel_representation() == PixelRepresentation::Signed;
+    let padding = read_padding(
+        metadata,
+        description.layout.photometric_interpretation(),
+        signed,
+    )
+    .map_err(|_| PreviewError::Attribute)?;
     // A padded stored value is compared as an integer. `Stored` is `f32`, so
     // above 24 bits the comparison could be inexact, and it is refused.
     if padding.is_some() && description.bits.bits_stored() > EXACT_STORED_BITS {
         return Err(PreviewError::Attribute);
     }
-    let object = parsed.object();
     let rescale_type = resolved_text(multi, frame_index, PIXEL_VALUE_TRANSFORMATION, RESCALE_TYPE)?;
-    let modality = optional_text(object, MODALITY)?;
-    let units = if modality.as_deref() == Some("PT") {
-        optional_text(object, PET_UNITS)?
-    } else {
-        None
+    let modality_code = optional_text(object, MODALITY)?;
+    let (units, multi_energy) = match modality_code.as_deref() {
+        Some("PT") => (optional_text(object, PET_UNITS)?, None),
+        Some("CT") => (None, optional_text(object, MULTI_ENERGY)?),
+        _ => (None, None),
     };
     let (unit, unit_source) = modality_unit(
-        modality.as_deref(),
+        modality_code.as_deref(),
         rescale_type.as_deref(),
         units.as_deref(),
+        multi_energy.as_deref(),
     );
     Ok(ValueFacts {
-        modality: opened.modality().clone(),
+        modality: modality.clone(),
         padding,
         unit,
         unit_source,
     })
 }
 
-fn open_error(error: FrameOpenError) -> PreviewError {
-    match error {
-        FrameOpenError::FrameOutOfRange => PreviewError::Frame,
-        FrameOpenError::Chain => PreviewError::Window,
-        _ => PreviewError::Attribute,
-    }
-}
-
 /// The unit and the attribute it came from.
 ///
-/// PS3.3 C.11.1.1.2 names the Rescale Type defined terms. PS3.3 C.8.2.1
-/// makes Rescale Type required on CT only when the unit is not HU, so an
-/// absent one on CT is HU. PET states its unit in Units (0054,1001),
-/// PS3.3 C.8.9.1. Any other absent Rescale Type names no unit.
+/// PS3.3 C.11.1.1.2 names the Rescale Type defined terms. On PT, Units
+/// (0054,1001) names the unit whenever it is present, because PS3.3 C.8.9.4
+/// defines the rescaled value in those units. PS3.3 C.8.2.1 makes Rescale
+/// Type required on CT if it is not HU or Multi-energy CT Acquisition
+/// (0018,9361) is YES, and gives HU only when that attribute is absent or
+/// NO. So an absent Rescale Type on CT is HU only then. Multi-energy CT
+/// Acquisition is a top-level attribute of the CT Image Module (C.8.2.1)
+/// and of the Enhanced CT Image Module (C.8.15.2). Any other absent Rescale
+/// Type names no unit.
 fn modality_unit(
     modality: Option<&str>,
     rescale_type: Option<&str>,
     units: Option<&str>,
-) -> (String, &'static str) {
+    multi_energy: Option<&str>,
+) -> (Cow<'static, str>, &'static str) {
     match (rescale_type, modality, units) {
-        (Some("US"), _, _) => ("unspecified".to_owned(), "rescale-type"),
-        (Some(code), _, _) => (code.to_owned(), "rescale-type"),
-        (None, Some("CT"), _) => ("HU".to_owned(), "ct-default"),
-        (None, Some("PT"), Some(code)) => (code.to_owned(), "units"),
-        (None, _, _) => ("unspecified".to_owned(), "none"),
+        (_, Some("PT"), Some(code)) => (Cow::Owned(code.to_owned()), "units"),
+        (Some("US"), _, _) => (Cow::Borrowed("unspecified"), "rescale-type"),
+        (Some(code), _, _) => (Cow::Owned(code.to_owned()), "rescale-type"),
+        (None, Some("CT"), _) if matches!(multi_energy, None | Some("NO")) => {
+            (Cow::Borrowed("HU"), "ct-default")
+        }
+        (None, _, _) => (Cow::Borrowed("unspecified"), "none"),
     }
 }
 
@@ -190,7 +224,7 @@ pub(crate) fn value_json(
         } else {
             let value = facts.modality.apply(stored).0;
             if !value.is_finite() {
-                return Err(PreviewError::Window);
+                return Err(PreviewError::Attribute);
             }
             // Rust's `Display` for `f32` is the shortest text that reads
             // back as the same value, and it never uses an exponent.
@@ -228,8 +262,10 @@ fn cell_index(coordinate: f64, extent: u32) -> Option<u32> {
 
 /// Unpack the one stored sample at `(column, row)`.
 ///
-/// PS3.3 C.7.6.3.1. The same `unpack` the grey image uses, over one sample:
-/// Bits Stored are masked and a signed sample is extended from bit
+/// PS3.5 8.1.1 and PS3.3 C.7.6.3.3. The same `unpack` the grey image uses,
+/// over one sample: the bits above Bits Stored are masked, because PS3.5
+/// 8.1.1 says nothing may be assumed about them, and a signed sample is
+/// extended from its sign bit, the High Bit, which C.7.6.3.3 makes
 /// `BitsStored - 1`.
 fn stored_at(held: &HeldFrame, column: u32, row: u32) -> Result<Stored, PreviewError> {
     let width = usize::try_from(held.width).map_err(|_| PreviewError::Attribute)?;
@@ -441,6 +477,29 @@ mod tests {
                     recipe.modality.rescale()
                 ));
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_owned_unit_is_charged_and_a_rule_unit_is_not() -> Result<(), String> {
+        // A unit the file names is an owned byte run the cache must charge.
+        // HU from the CT rule is a borrowed constant and owns no heap.
+        let modality = ModalityTransform::new(None, Some(1.0), Some(0.0))
+            .map_err(|_| "identity rescale was refused".to_owned())?;
+        let facts = |unit: Cow<'static, str>| ValueFacts {
+            modality: modality.clone(),
+            padding: None,
+            unit,
+            unit_source: "rescale-type",
+        };
+        let owned = facts(Cow::Owned(String::with_capacity(40)));
+        if owned.heap_bytes() != size_of::<ValueFacts>() + 40 {
+            return Err(format!("an owned unit charged {}", owned.heap_bytes()));
+        }
+        let borrowed = facts(Cow::Borrowed("HU"));
+        if borrowed.heap_bytes() != size_of::<ValueFacts>() {
+            return Err(format!("a borrowed unit charged {}", borrowed.heap_bytes()));
         }
         Ok(())
     }

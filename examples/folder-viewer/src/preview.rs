@@ -445,7 +445,8 @@ fn note_borrowed_decode() {
 /// The samples are decoder output. Grey bytes are not stored, because a
 /// window change has to run `LutChain` again.
 pub(crate) struct HeldFrame {
-    /// Decoder output for this frame. Capacity is the accounted size.
+    /// Decoder output for this frame. Its capacity is charged in
+    /// [`HeldFrame::charged_bytes`].
     pub(crate) samples: Vec<u8>,
     /// Image Pixel evidence for [`Self::samples`].
     pub(crate) description: StoredPixelDescription,
@@ -459,8 +460,8 @@ pub(crate) struct HeldFrame {
     pub(crate) full_range: Result<(f32, f32), PreviewError>,
     /// Request-independent inputs of the value at a point, or the refusal
     /// that blocks every point. [`render_held`] does not read it. Boxed, so
-    /// the held frame's accounted size grows by one pointer and not by the
-    /// facts.
+    /// a refused frame does not carry the facts' size inline. The facts'
+    /// heap bytes are charged in [`HeldFrame::charged_bytes`].
     pub(crate) value: Result<Box<ValueFacts>, PreviewError>,
     /// Number of Frames, or 1 when that attribute is absent.
     pub(crate) frames: u32,
@@ -468,6 +469,20 @@ pub(crate) struct HeldFrame {
     pub(crate) width: u32,
     /// Rows.
     pub(crate) height: u32,
+}
+
+impl HeldFrame {
+    /// The bytes the cache charges for this frame.
+    ///
+    /// The capacity of the sample buffer, the struct itself, and the heap
+    /// bytes of the value facts when the frame has them.
+    pub(crate) fn charged_bytes(&self) -> usize {
+        let value = self.value.as_ref().map_or(0, |facts| facts.heap_bytes());
+        self.samples
+            .capacity()
+            .saturating_add(size_of::<Self>())
+            .saturating_add(value)
+    }
 }
 
 /// Chain inputs that do not depend on the request.
@@ -623,13 +638,12 @@ fn frame_parts(
 }
 
 fn held_from_samples(
-    parsed: &ocelli_dicom::ParsedDicom,
+    object: &DefaultDicomObject,
     parts: FrameParts,
     samples: Vec<u8>,
-    frame: u32,
     frame_index: usize,
 ) -> HeldFrame {
-    let prepared = prepare_held(parsed, &parts.description, &samples, frame, frame_index);
+    let prepared = prepare_held(object, &parts.description, &samples, frame_index);
     HeldFrame {
         samples,
         description: parts.description,
@@ -675,7 +689,7 @@ where
         samples,
     )?;
     let taken = std::mem::take(samples);
-    Ok(held_from_samples(parsed, parts, taken, frame, frame_index))
+    Ok(held_from_samples(object, parts, taken, frame_index))
 }
 
 /// Size the sample buffer to the decoded frame.
@@ -713,13 +727,11 @@ struct Prepared {
 }
 
 fn prepare_held(
-    parsed: &ocelli_dicom::ParsedDicom,
+    object: &DefaultDicomObject,
     description: &StoredPixelDescription,
     samples: &[u8],
-    frame: u32,
     frame_index: usize,
 ) -> Prepared {
-    let object = parsed.object();
     let photometric = description.layout.photometric_interpretation();
     let metadata = match project_metadata(object) {
         Ok(metadata) => metadata,
@@ -752,9 +764,6 @@ fn prepare_held(
             value: Err(error),
         };
     }
-    // After the Modality LUT Sequence refusal, so the value refuses one with
-    // the same code and in the same order as the preview.
-    let value = value_facts(parsed, &multi, frame, frame_index, description).map(Box::new);
     let (slope, intercept) = match rescale(&multi, frame_index) {
         Ok(pair) => pair,
         Err(error) => {
@@ -762,7 +771,7 @@ fn prepare_held(
                 recipe: Err(error),
                 facts,
                 full_range: Err(error),
-                value,
+                value: Err(error),
             };
         }
     };
@@ -773,10 +782,21 @@ fn prepare_held(
                 recipe: Err(PreviewError::Window),
                 facts,
                 full_range: Err(PreviewError::Window),
-                value,
+                value: Err(PreviewError::Window),
             };
         }
     };
+    // The value's stage 1 is this transform, so it refuses exactly when the
+    // preview's stage 1 does and never over a window or presentation input.
+    let value = value_facts(
+        &metadata,
+        object,
+        &multi,
+        frame_index,
+        description,
+        &modality,
+    )
+    .map(Box::new);
     let voi_lut = group_has(
         &multi,
         frame_index,
