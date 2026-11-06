@@ -198,3 +198,11 @@ None open.
 - Q1, how the flag reaches every crate. Answered: lead decision under the operator's delegation of 2026-11-06. A target-scoped rustflags variable on the SIMD commands, decisions 1 and 2.
 - Q2, the proof. Answered: lead decision under the operator's delegation of 2026-11-06. An rlib difference per named crate as a gate step, decision 3.
 - Q3, what happens if the recheck fails. Answered: lead decision under the operator's delegation of 2026-11-06. The story stops and reports against D-22, decision 4.
+
+### Lead rulings after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-233-working-pass-1.md`, which showed that comparing rlibs proves nothing: any flag change renames and rehashes every rlib, a build-script path leaks into metadata, and under fat LTO the code member is bitcode.
+
+- **The evidence is the final linked module.** The check disassembles the plain and SIMD variant modules and compares their instruction sets. It goes red when the SIMD module holds no SIMD instruction the plain module lacks, and when the plain module holds any SIMD instruction. The rlib comparison and the newest-rlib rule are removed.
+- **Per-crate reach is shown at the source cfg, once.** Whether a dependency's `cfg(target_feature = "simd128")` code is compiled in is measured from the build, for the crates that have such code, and the result is recorded rather than asserted.
+- **The documents state only what was measured.** D-22 and every sentence about SIMD say what the modules contain, including that no lane arithmetic appears if that is what the disassembly shows, and claim no SIMD coverage the modules do not have.
