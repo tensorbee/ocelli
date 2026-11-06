@@ -434,8 +434,11 @@ const config = tseslint.config(
     // F-216's viewer workload driver. The file runs under node and takes the
     // node globals from the bench block above. The callbacks it hands to
     // Playwright run in Chromium against the folder viewer, so the browser
-    // globals they use are named here, and `fetch` is used on both sides. It
-    // is not a wasm memory view and it does not touch the allowance list.
+    // globals they use, other than the bench block's timers, are named here,
+    // and `fetch` is used on both sides. It is not a wasm memory view and it
+    // does not touch the allowance list. These names cover the whole file, so
+    // the bench block's split does not catch this file's node side reaching
+    // for `document` or a page name.
     //
     // The second set is the page's own. `examples/folder-viewer/src/page.html`
     // loads one classic script, so its top-level `let`, `const` and function
