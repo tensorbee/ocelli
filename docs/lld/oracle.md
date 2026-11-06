@@ -573,8 +573,8 @@ produced. Strict in both directions:
 - a row an entry claims that then succeeds fails the run, so a stale claim
   cannot read as a known limit and hide a coverage gain.
 
-That is the difference between an oracle that covers 90 rows and knows it, and
-one that covers 90 and reports 92.
+That is the difference between an oracle that knows which rows it covers and
+one that reports rows it never rendered.
 
 ### What cornerstone3D 5.8.2 could not render, measured
 
