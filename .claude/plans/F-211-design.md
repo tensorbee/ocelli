@@ -319,3 +319,9 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 - Q7. Answered by the operator, by the cross-story decision: `/measure` uses F-216's file id protocol and posts only its point list. The route spec, the consumer map, AC15 and AC20 say so. The arithmetic and the fixtures AC1 to AC14 are unchanged.
 
 Consequence of the F-208 key answer: angle is bound to `Q`, not `G`. No question is left open.
+
+### Operator answer and lead rulings after review pass 1
+
+The operator answered on 2026-11-06, after `.claude/reviews/F-211-working-pass-1.md` found that PS3.3 10.7.1.1 says a projection image whose Pixel Spacing equals its Imager Pixel Spacing has not been corrected for magnification: treat it as detector plane. When the two are present and equal, the Imager Pixel Spacing path decides, so the length is corrected by the Estimated Radiographic Magnification Factor when the file has a usable one, and otherwise is reported as detector plane, not corrected for magnification. This changes F-195's choice order for that case only.
+
+Lead rulings under the operator's delegation of the quality call: an outline is refused when two edges that are not neighbours share any point, or two neighbours fold back along one line, which replaces "proper crossing" above. A present Pixel Spacing that differs from Imager Pixel Spacing decides on its own, and a later source cannot veto it. The page's outline point cap is the server's, tied by a test.
