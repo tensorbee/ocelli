@@ -402,8 +402,10 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
     if !page.contains("Drag a series here.") {
         return Err("an empty cell does not say what to do".to_owned());
     }
-    // AC13. `G` opens the picker, `Shift G` toggles tile mode, and the
-    // digits no longer choose a layout, so F-213 can bind them.
+    // AC13. The layout picker and the tile mode are reached from the
+    // keyboard only through `G` and `Shift G`, and otherwise only through
+    // their own buttons. This pins what F-208 owns and nothing about the
+    // other keys, so F-213 may bind the digits to window rows.
     for needle in [
         "data-key=\"G\"",
         "data-key=\"Shift G\"",
@@ -414,30 +416,13 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
             return Err(format!("the layout keys are not bound: {needle}"));
         }
     }
-    // The two key maps in `onKey` are object literals on one line each. No
-    // bare digit may be a key in either, so no digit reaches a layout, the
-    // tile mode or any other control.
-    for map in ["const clicks = {", "const map = {"] {
-        let at = page
-            .find(map)
-            .ok_or_else(|| format!("the page has no key map {map}"))?;
-        let literal = page
-            .get(at..)
-            .and_then(|rest| rest.find("};").and_then(|end| rest.get(..end)))
-            .ok_or_else(|| format!("the key map {map} does not close"))?;
-        for digit in '0'..='9' {
-            for key in [
-                format!("\"{digit}\":"),
-                format!("'{digit}':"),
-                format!(" {digit}:"),
-            ] {
-                if literal.contains(&key) {
-                    return Err(format!("a digit is bound in {map}: {key}"));
-                }
-            }
-        }
-    }
-    // `0` stays Fit. No branch of `onKey` tests a digit from 1 to 9.
+    // Inside `onKey`, including its `clicks` and `map` literals, those two
+    // branches are the only route to the picker or the tile mode, whatever
+    // key or spelling another branch would use. A branch reaching them by
+    // name, by the buttons' ids or nodes, or by the picker's own buttons is
+    // counted. The Escape branch that closes the picker names
+    // `layoutPicker.hidden`, `closeLayoutPicker` and `layoutButton.focus`,
+    // which open nothing.
     let key_at = page
         .find("function onKey(event) {")
         .ok_or_else(|| "the page has no key handler".to_owned())?;
@@ -445,10 +430,43 @@ fn the_page_has_viewport_cells() -> Result<(), String> {
         .get(key_at..)
         .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
         .ok_or_else(|| "the key handler does not close".to_owned())?;
-    for digit in '1'..='9' {
-        let branch = format!("event.key === \"{digit}\"");
-        if handler.contains(&branch) {
-            return Err(format!("a digit is bound in onKey: {branch}"));
+    for (token, allowed) in [
+        ("toggleTileMode(", 1),
+        ("openLayoutPicker(", 1),
+        ("setTileMode(", 0),
+        ("setLayout(", 0),
+        ("tileButton", 0),
+        ("tile-mode", 0),
+        ("layout\"", 0),
+        ("layout'", 0),
+        ("layout`", 0),
+        ("#layout", 0),
+        ("layoutButton.click", 0),
+        ("layoutPicker.hidden = false", 0),
+        ("data-columns", 0),
+        ("dataset.columns", 0),
+    ] {
+        let found = handler.matches(token).count();
+        if found != allowed {
+            return Err(format!(
+                "onKey reaches the layout or the tile mode outside G and Shift G: {token} appears {found} times, {allowed} allowed"
+            ));
+        }
+    }
+    // Across the page, `setLayout` is called only by the picker's buttons
+    // and the start-up layout, and the picker and the tile mode are opened
+    // only by their buttons and the two key branches. A second key path
+    // added through a helper function adds a call site here.
+    for (token, expected) in [
+        ("setLayout(", 3),
+        ("openLayoutPicker(", 3),
+        ("toggleTileMode", 3),
+    ] {
+        let found = page.matches(token).count();
+        if found != expected {
+            return Err(format!(
+                "{token} appears {found} times in the page, {expected} expected"
+            ));
         }
     }
     // AC4. A cell accepts a drag only when it carries the series type, on

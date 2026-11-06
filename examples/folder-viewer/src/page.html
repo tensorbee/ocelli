@@ -982,6 +982,27 @@ let presetModality = null;
 let tipTimer = 0;
 let thumbGeneration = 0;
 
+// The modality value under the cross. The local process chooses the cell,
+// computes the value and names its unit. The page prints the reply's text
+// and does no arithmetic on it. One request is in flight at a time, and a
+// reply is shown only for the cell and the image it was asked for. It is
+// declared with the other globals because `setLayout` reads it at start-up.
+const valueState = {
+  generation: 0,
+  // The viewport the readout is for. Another viewport changing its image
+  // leaves this readout alone.
+  cell: -1,
+  key: "",
+  base: "",
+  busy: false,
+  want: null,
+  column: -1,
+  row: -1,
+  shown: "",
+  shownColumn: -1,
+  shownRow: -1
+};
+
 // The viewports. Columns and rows each run 1 to 3, and cells are numbered
 // 0 to 8 row by row. A record is made the first time its cell is shown and
 // kept when the layout shrinks, so a cell shown again keeps its series,
@@ -3083,26 +3104,6 @@ function tilePoint(node, event) {
   return { x, y, width: node.width, height: node.height };
 }
 
-// The modality value under the cross. The local process chooses the cell,
-// computes the value and names its unit. The page prints the reply's text
-// and does no arithmetic on it. One request is in flight at a time, and a
-// reply is shown only for the cell and the image it was asked for.
-const valueState = {
-  generation: 0,
-  // The viewport the readout is for. Another viewport changing its image
-  // leaves this readout alone.
-  cell: -1,
-  key: "",
-  base: "",
-  busy: false,
-  want: null,
-  column: -1,
-  row: -1,
-  shown: "",
-  shownColumn: -1,
-  shownRow: -1
-};
-
 function resetValue() {
   valueState.generation += 1;
   valueState.key = "";
@@ -4391,6 +4392,14 @@ function setLayout(columns, rows) {
     vp.draftWindow = null;
     vp.prefetchAbort.abort();
     vp.tileAbort.abort();
+  }
+  // A readout for a hidden cell goes, and so does a reply still on its way
+  // for it, because resetValue moves the generation the reply carries.
+  if (valueState.cell >= count) {
+    resetValue();
+    valueState.cell = -1;
+    hideCross();
+    mag.hidden = true;
   }
   if (activeCell >= count) setActive(0);
   syncActiveOutline();
