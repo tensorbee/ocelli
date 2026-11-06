@@ -761,7 +761,7 @@ const SENTENCE = {
   "flip-h": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
   "flip-v": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
   "toggle-corners": "Show or hide the labels in the four corners.",
-  "toggle-cross": "Two lines meet at the pointer. The numbers are the column and row under it, counted from 1.",
+  "toggle-cross": "Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT whose file states HU, or states no unit and is not multi-energy. The local process computes the value.",
   "toggle-mag": "This circle enlarges the grey pixels already drawn. It copies them and does not blend them.",
   "toggle-letters": "The patient direction at each edge, read from Image Orientation (Patient). The letters are hidden while the picture is turned or flipped.",
   "key-image": "Marks this image in the series list for this session. It is not saved and it does not write a Key Object Selection.",
@@ -1678,6 +1678,8 @@ async function showIndex(next) {
   if (noteKey(image) !== previousKey) {
     selected = null;
     cancelDraft();
+    resetValue();
+    paintValue();
   }
   liveToken += 1;
   const allowGrid = gridAllowed();
@@ -2295,6 +2297,7 @@ function hideFault() {
 }
 
 function clearView() {
+  resetValue();
   loadToken += 1;
   tileToken += 1;
   shownWindow = null;
@@ -2698,7 +2701,9 @@ function pointReadout(event) {
     const read = document.getElementById("cross-read");
     read.style.left = (event.clientX - local.left) + "px";
     read.style.top = (event.clientY - local.top) + "px";
-    read.textContent = "C " + column + "  R " + row;
+    valueState.base = "C " + column + "  R " + row;
+    requestValue(point, column - 1, row - 1);
+    paintValue();
   } else hideCross();
   if (showMag && point) updateMag(event, tile, point);
   else mag.hidden = true;
@@ -2711,6 +2716,109 @@ function tilePoint(node, event) {
   const y = (event.clientY - rect.top) / rect.height * node.height;
   if (x < 0 || y < 0 || x > node.width || y > node.height) return null;
   return { x, y, width: node.width, height: node.height };
+}
+
+// The modality value under the cross. The local process chooses the cell,
+// computes the value and names its unit. The page prints the reply's text
+// and does no arithmetic on it. One request is in flight at a time, and a
+// reply is shown only for the cell and the image it was asked for.
+const valueState = {
+  generation: 0,
+  key: "",
+  base: "",
+  busy: false,
+  want: null,
+  column: -1,
+  row: -1,
+  shown: "",
+  shownColumn: -1,
+  shownRow: -1
+};
+
+function resetValue() {
+  valueState.generation += 1;
+  valueState.key = "";
+  valueState.want = null;
+  valueState.shown = "";
+  valueState.shownColumn = -1;
+  valueState.shownRow = -1;
+}
+
+function paintValue() {
+  const read = document.getElementById("cross-read");
+  const known = valueState.shownColumn === valueState.column && valueState.shownRow === valueState.row;
+  read.textContent = known && valueState.shown ? valueState.base + "  " + valueState.shown : valueState.base;
+}
+
+function requestValue(point, column, row) {
+  const image = currentImage();
+  if (!image || !image.info.monochrome) return;
+  const key = noteKey(image);
+  if (valueState.key !== key) {
+    resetValue();
+    valueState.key = key;
+  }
+  valueState.column = column;
+  valueState.row = row;
+  if (valueState.shownColumn === column && valueState.shownRow === row) {
+    valueState.want = null;
+    return;
+  }
+  valueState.want = { x: point.x, y: point.y, column, row, image, generation: valueState.generation };
+  if (!valueState.busy) sendValue();
+}
+
+async function sendValue() {
+  const want = valueState.want;
+  if (!want) return;
+  valueState.want = null;
+  valueState.busy = true;
+  let point = null;
+  try {
+    point = await fetchValue(want);
+  } catch {
+    point = null;
+  }
+  valueState.busy = false;
+  // A reply for another image, or for a cell the pointer has left, is dropped.
+  if (point && want.generation === valueState.generation &&
+      point.index_column === valueState.column && point.index_row === valueState.row) {
+    valueState.shown = point.text;
+    valueState.shownColumn = point.index_column;
+    valueState.shownRow = point.index_row;
+    paintValue();
+  }
+  if (valueState.want) sendValue();
+}
+
+function postValue(id, want) {
+  return fetch("/value", {
+    method: "POST",
+    headers: {
+      "X-Ocelli-File": id,
+      "X-Ocelli-Frame": String(want.image.frame),
+      "X-Ocelli-Points": want.x + "," + want.y
+    }
+  });
+}
+
+async function fetchValue(want) {
+  const file = want.image.file;
+  // No process copy of the file, so no request. The words belong to the
+  // readout's own cell.
+  const notHeld = () => ({ index_column: want.column, index_row: want.row, text: "not held" });
+  let id = await ensureFile(file);
+  if (!id) return notHeld();
+  let response = await postValue(id, want);
+  if (response.status === 410) {
+    filePosts.delete(file);
+    id = await ensureFile(file);
+    if (!id) return notHeld();
+    response = await postValue(id, want);
+  }
+  if (!response.ok) return null;
+  const reply = await response.json();
+  return reply.points && reply.points.length === 1 ? reply.points[0] : null;
 }
 
 function hideCross() {

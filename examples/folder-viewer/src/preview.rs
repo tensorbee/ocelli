@@ -40,6 +40,8 @@ use ocelli_render::display_index;
 use ocelli_viewport::presentation::WindowPreset;
 use ocelli_viewport::view::f32_from_f64;
 
+use crate::value::{ValueFacts, value_facts};
+
 const ROWS: Tag = Tag(0x0028, 0x0010);
 const COLUMNS: Tag = Tag(0x0028, 0x0011);
 const BITS_ALLOCATED: Tag = Tag(0x0028, 0x0100);
@@ -57,7 +59,7 @@ const VOI_FUNCTION: Tag = Tag(0x0028, 0x1056);
 const MODALITY_LUT_SEQUENCE: Tag = Tag(0x0028, 0x3000);
 const VOI_LUT_SEQUENCE: Tag = Tag(0x0028, 0x3010);
 const FRAME_VOI_LUT_SEQUENCE: Tag = Tag(0x0028, 0x9132);
-const PIXEL_VALUE_TRANSFORMATION: Tag = Tag(0x0028, 0x9145);
+pub(crate) const PIXEL_VALUE_TRANSFORMATION: Tag = Tag(0x0028, 0x9145);
 const PRESENTATION_SHAPE: Tag = Tag(0x2050, 0x0020);
 const PRESENTATION_SEQUENCE: Tag = Tag(0x2050, 0x0010);
 const PIXEL_DATA: Tag = Tag(0x7FE0, 0x0010);
@@ -68,7 +70,7 @@ const PIXEL_MEASURES_SEQUENCE: Tag = Tag(0x0028, 0x9110);
 const PLANE_ORIENTATION_SEQUENCE: Tag = Tag(0x0020, 0x9116);
 const SERIES_UID: Tag = Tag(0x0020, 0x000E);
 const SERIES_NUMBER: Tag = Tag(0x0020, 0x0011);
-const MODALITY: Tag = Tag(0x0008, 0x0060);
+pub(crate) const MODALITY: Tag = Tag(0x0008, 0x0060);
 const SERIES_DESCRIPTION: Tag = Tag(0x0008, 0x103E);
 const INSTANCE_NUMBER: Tag = Tag(0x0020, 0x0013);
 const SOP_INSTANCE: Tag = Tag(0x0008, 0x0018);
@@ -165,6 +167,7 @@ impl PreviewError {
             Self::Decode => "decode",
             Self::Window => "window",
             Self::Frame => "frame",
+            Self::Point => "point",
         }
     }
 }
@@ -196,6 +199,9 @@ pub enum PreviewError {
     /// The requested frame index is outside Number of Frames.
     #[error("the requested frame is not in this file")]
     Frame,
+    /// A requested point is outside the image.
+    #[error("the point is outside this image")]
+    Point,
 }
 
 /// Decode frame 0 with the file window.
@@ -439,7 +445,8 @@ fn note_borrowed_decode() {
 /// The samples are decoder output. Grey bytes are not stored, because a
 /// window change has to run `LutChain` again.
 pub(crate) struct HeldFrame {
-    /// Decoder output for this frame. Capacity is the accounted size.
+    /// Decoder output for this frame. Its capacity is charged in
+    /// [`HeldFrame::charged_bytes`].
     pub(crate) samples: Vec<u8>,
     /// Image Pixel evidence for [`Self::samples`].
     pub(crate) description: StoredPixelDescription,
@@ -451,12 +458,31 @@ pub(crate) struct HeldFrame {
     pub(crate) facts: Result<FrameFacts, PreviewError>,
     /// Full-range center and width when the file has no window. Otherwise an error.
     pub(crate) full_range: Result<(f32, f32), PreviewError>,
+    /// Request-independent inputs of the value at a point, or the refusal
+    /// that blocks every point. [`render_held`] does not read it. Boxed, so
+    /// a refused frame does not carry the facts' size inline. The facts'
+    /// heap bytes are charged in [`HeldFrame::charged_bytes`].
+    pub(crate) value: Result<Box<ValueFacts>, PreviewError>,
     /// Number of Frames, or 1 when that attribute is absent.
     pub(crate) frames: u32,
     /// Columns.
     pub(crate) width: u32,
     /// Rows.
     pub(crate) height: u32,
+}
+
+impl HeldFrame {
+    /// The bytes the cache charges for this frame.
+    ///
+    /// The capacity of the sample buffer, the struct itself, and the heap
+    /// bytes of the value facts when the frame has them.
+    pub(crate) fn charged_bytes(&self) -> usize {
+        let value = self.value.as_ref().map_or(0, |facts| facts.heap_bytes());
+        self.samples
+            .capacity()
+            .saturating_add(size_of::<Self>())
+            .saturating_add(value)
+    }
 }
 
 /// Chain inputs that do not depend on the request.
@@ -625,6 +651,7 @@ fn held_from_samples(
         recipe: prepared.recipe,
         facts: prepared.facts,
         full_range: prepared.full_range,
+        value: prepared.value,
         frames: parts.frames,
         width: parts.width,
         height: parts.height,
@@ -696,6 +723,7 @@ struct Prepared {
     recipe: Result<Recipe, PreviewError>,
     facts: Result<FrameFacts, PreviewError>,
     full_range: Result<(f32, f32), PreviewError>,
+    value: Result<Box<ValueFacts>, PreviewError>,
 }
 
 fn prepare_held(
@@ -712,6 +740,7 @@ fn prepare_held(
                 recipe: Err(error),
                 facts: Err(error),
                 full_range: Err(error),
+                value: Err(error),
             };
         }
     };
@@ -722,6 +751,7 @@ fn prepare_held(
                 recipe: Err(PreviewError::Attribute),
                 facts: Err(PreviewError::Attribute),
                 full_range: Err(PreviewError::Attribute),
+                value: Err(PreviewError::Attribute),
             };
         }
     };
@@ -731,6 +761,7 @@ fn prepare_held(
             recipe: Err(error),
             facts,
             full_range: Err(error),
+            value: Err(error),
         };
     }
     let (slope, intercept) = match rescale(&multi, frame_index) {
@@ -740,6 +771,7 @@ fn prepare_held(
                 recipe: Err(error),
                 facts,
                 full_range: Err(error),
+                value: Err(error),
             };
         }
     };
@@ -750,9 +782,21 @@ fn prepare_held(
                 recipe: Err(PreviewError::Window),
                 facts,
                 full_range: Err(PreviewError::Window),
+                value: Err(PreviewError::Window),
             };
         }
     };
+    // The value's stage 1 is this transform, so it refuses exactly when the
+    // preview's stage 1 does and never over a window or presentation input.
+    let value = value_facts(
+        &metadata,
+        object,
+        &multi,
+        frame_index,
+        description,
+        &modality,
+    )
+    .map(Box::new);
     let voi_lut = group_has(
         &multi,
         frame_index,
@@ -772,6 +816,7 @@ fn prepare_held(
         }),
         facts,
         full_range,
+        value,
     }
 }
 
@@ -1440,7 +1485,7 @@ fn resolved_decimals(
     Ok(values)
 }
 
-fn resolved_text(
+pub(crate) fn resolved_text(
     multi: &MultiframeMetadata<'_>,
     frame: usize,
     group: Tag,
@@ -1562,7 +1607,10 @@ fn required_text(object: &DefaultDicomObject, tag: Tag) -> Result<String, Previe
     optional_text(object, tag)?.ok_or(PreviewError::Attribute)
 }
 
-fn optional_text(object: &DefaultDicomObject, tag: Tag) -> Result<Option<String>, PreviewError> {
+pub(crate) fn optional_text(
+    object: &DefaultDicomObject,
+    tag: Tag,
+) -> Result<Option<String>, PreviewError> {
     let Ok(element) = object.element(tag) else {
         return Ok(None);
     };
@@ -2351,7 +2399,7 @@ fn optional_u32(object: &DefaultDicomObject, tag: Tag) -> Result<u32, PreviewErr
     Ok(u32::from(value))
 }
 
-fn push_field(out: &mut String, name: &str, value: &str, first: bool) {
+pub(crate) fn push_field(out: &mut String, name: &str, value: &str, first: bool) {
     if !first {
         out.push(',');
     }
@@ -2368,7 +2416,7 @@ fn push_number(out: &mut String, name: &str, value: u32) {
     out.push_str(&value.to_string());
 }
 
-fn json_string(out: &mut String, text: &str) {
+pub(crate) fn json_string(out: &mut String, text: &str) {
     out.push('"');
     for ch in text.chars() {
         match ch {

@@ -6,6 +6,7 @@
 
 mod preview;
 mod synthetic;
+mod value;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod held;
@@ -17,6 +18,7 @@ pub use preview::{
     preview_first_frame, preview_frame, window_function_from_token, window_preset_from_token,
 };
 pub use synthetic::{SLICES, slice};
+pub use value::{ImagePoint, value_frame};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use held::{Viewer, ViewerConfig};

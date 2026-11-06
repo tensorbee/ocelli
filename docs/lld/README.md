@@ -23,7 +23,7 @@ row here in the same hand.
 | [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection, measurement, ultrasound direction and rectangular redaction | F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195 |
 | [calibration.md](calibration.md) | Spacing provenance, SUVlbm, SUVbsa, length ratio and contour volume | F-195 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
-| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191 |
+| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191, F-210 |
 | [series-open.md](series-open.md) | Display groups, projected order, temporal slots, cine timing, and the example-viewer series panel | F-192 |
 | [overlays.md](overlays.md) | Overlay planes, display shutters, and the example-viewer overlay panel | F-193 |
 | [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046, F-216 |

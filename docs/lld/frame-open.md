@@ -1,7 +1,7 @@
 # Frame open
 
-**F-IDs that contributed:** F-191
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-191, F-210
+**Last updated:** 2026-11-06
 
 `open_frame` reads one Part 10 object and returns the inputs `LutChain`
 already accepts. It does not map samples. The example helper maps the
@@ -17,6 +17,11 @@ pub fn fill_padding(
     photometric: PhotometricInterpretation,
     chain: &LutChain,
 ) -> Result<(), FrameOpenError>
+pub fn read_padding(
+    metadata: &MetadataSet,
+    photometric: PhotometricInterpretation,
+    signed: bool,
+) -> Result<Option<PaddingRange>, FrameOpenError>
 ```
 
 `OpenedFrame` keeps the modality transform, the window input, the photometric
@@ -60,6 +65,11 @@ integers before the modality stage. MONOCHROME2, palette and colour require
 the padding value to be less than or equal to the limit. MONOCHROME1 requires
 the value to be greater than or equal to the limit. The other order is
 `PaddingOrder`. A limit without a value is `PaddingLimitWithoutValue`.
+
+`read_padding` is the same padding reader alone, for a caller that needs the
+range without the window, presentation, lossy, burned-in and private creator
+attributes that `open_frame` also reads and can refuse. The folder viewer's
+value at a pointer uses it.
 
 `padding_mask` reports which stored integers fall inside the range.
 `fill_padding` runs after `LutChain` and writes one constant at those

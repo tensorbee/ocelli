@@ -20,9 +20,10 @@ use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
     render_held, reset_phases, validate_frame_request,
 };
+use crate::value::value_json;
 use crate::{
-    FrameRequest, Preview, PreviewError, SLICES, headers_json, inspect_json, preview_frame, slice,
-    window_function_from_token, window_preset_from_token,
+    FrameRequest, ImagePoint, Preview, PreviewError, SLICES, headers_json, inspect_json,
+    preview_frame, slice, window_function_from_token, window_preset_from_token,
 };
 
 const HEADER_CAP: usize = 16 * 1024;
@@ -47,6 +48,8 @@ struct Request {
     body: Vec<u8>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    /// `X-Ocelli-Points`, read only by `/value`.
+    points: PointsHeader,
     close: bool,
     /// Capacity charged to inflight for this body.
     body_charge: usize,
@@ -371,6 +374,11 @@ fn route(
         }
         ("POST", "/preview") => preview_route(viewer, request, stream, charge),
         ("POST", "/file") => (file_route(viewer, request, charge), None),
+        ("POST", "/value") => {
+            let reply = value_route(viewer, &request, stream);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
         ("POST", "/inspect") => {
             let reply = json_or_error(inspect_json(&request.body, request.frame.frame));
             retire_request_body(charge, request.body);
@@ -1277,6 +1285,159 @@ fn preview_held(
     (reply, None)
 }
 
+/// `POST /value`: the modality value at each point of one held frame.
+///
+/// The file arrives once through `/file` and is named here by its id, with
+/// no body. A frame the process holds is read where it is. A frame it does
+/// not hold is decoded once from the held bytes, on a decode worker for the
+/// process server, and stored, so a later `/value` or `/preview` of that
+/// frame is served from it. The window headers are not read.
+fn value_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+    let Some(id) = request.file_id else {
+        return text_reply(400, Some("header"), "a value request names a file id");
+    };
+    if !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    let points = match parse_points(&request.points) {
+        Some(points) => points,
+        None => return text_reply(400, Some("points"), "the point list is not usable"),
+    };
+    let frame = request.frame.frame;
+    let (result, source) = match viewer.preview_source(id, frame) {
+        PreviewSource::Gone => return gone(),
+        PreviewSource::Hit(held) => (value_json(&held, frame, &points), "held"),
+        PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
+            Ok(Some(held)) => (value_json(&held, frame, &points), "decoded"),
+            Ok(None) => return busy_reply(),
+            Err(error) => return error_reply(error),
+        },
+    };
+    match result {
+        Ok(json) => {
+            let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
+            reply.source = Some(source);
+            reply
+        }
+        Err(error) => error_reply(error),
+    }
+}
+
+/// `x,y` pairs separated by one space, each number a finite decimal, from
+/// one to [`MAX_POINTS`] pairs. Anything else is `None`.
+fn parse_points(header: &PointsHeader) -> Option<Vec<ImagePoint>> {
+    let PointsHeader::One(text) = header else {
+        return None;
+    };
+    if text.is_empty() {
+        return None;
+    }
+    let mut points = Vec::new();
+    for pair in text.split(' ') {
+        if points.len() == MAX_POINTS {
+            return None;
+        }
+        let (x, y) = pair.split_once(',')?;
+        let x = x.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        let y = y.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        points.push(ImagePoint { x, y });
+    }
+    Some(points)
+}
+
+/// Decode one frame of a held file for `/value`, and store it.
+///
+/// The decode is the one `/preview` runs on a frame miss, with the same
+/// inflight charge and sample buffer, and no grey. The process server runs
+/// it on a decode worker. `Ok(None)` means no decode slot was free while the
+/// client waited.
+fn decode_for_value(
+    viewer: &Viewer,
+    id: FileId,
+    frame: u32,
+    bytes: Arc<crate::held::PostedBytes>,
+    stream: Option<&TcpStream>,
+) -> Result<Option<Arc<CachedFrame>>, PreviewError> {
+    let mut live = || stream.is_none_or(peer_open);
+    if viewer.schedules() {
+        let Some(permit) = viewer.acquire_decode(bytes.worker(), &mut live) else {
+            return Ok(None);
+        };
+        let worker = permit.worker();
+        let retire = permit.retire();
+        let inflight = viewer.inflight_counter();
+        let cache = viewer.cache_handle();
+        let Some((decoded, sample_charge)) = permit.call(move || {
+            let mut samples = Vec::new();
+            let mut sample_charge = 0_usize;
+            let decoded = with_decode_workspace(|workspace| {
+                decode_held(
+                    bytes.as_slice(),
+                    frame,
+                    &mut workspace.native,
+                    &mut samples,
+                    &mut |capacity| {
+                        sample_charge = capacity;
+                        inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
+                    },
+                    &mut |len| cache.claim_sample_buffer(len),
+                )
+            });
+            drop(bytes);
+            if decoded.is_err() {
+                cache.recycle_sample_buffer(std::mem::take(&mut samples));
+                if sample_charge > 0 {
+                    Viewer::release_counter(&inflight, sample_charge);
+                }
+                return (decoded, 0);
+            }
+            (decoded, sample_charge)
+        }) else {
+            return Ok(None);
+        };
+        let held = decoded?;
+        let stored = viewer.store_frame_with(id, frame, held, Some(worker), Some(retire));
+        if sample_charge > 0 {
+            viewer.leave_inflight(sample_charge);
+        }
+        return Ok(Some(stored));
+    }
+    let Some(mut loan) = viewer.loan_workspace(&mut live) else {
+        return Ok(None);
+    };
+    let mut samples = Vec::new();
+    let mut sample_charge = 0_usize;
+    let cache = viewer.cache_handle();
+    let decoded = decode_held(
+        &bytes,
+        frame,
+        &mut loan.workspace.native,
+        &mut samples,
+        &mut |capacity| {
+            sample_charge = capacity;
+            viewer.enter_inflight(capacity);
+        },
+        &mut |len| cache.claim_sample_buffer(len),
+    );
+    drop(bytes);
+    loan.note_growth();
+    let stored = match decoded {
+        Ok(held) => Ok(Some(viewer.store_frame(id, frame, held))),
+        Err(error) => {
+            viewer.recycle_sample_buffer(std::mem::take(&mut samples));
+            Err(error)
+        }
+    };
+    if sample_charge > 0 {
+        viewer.leave_inflight(sample_charge);
+    }
+    stored
+}
+
 fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) -> Reply {
     let frame = request.frame.frame;
     let body = request.body;
@@ -1702,6 +1863,7 @@ fn read_request(
         body,
         frame: parsed.frame,
         file_id: parsed.file_id,
+        points: parsed.points,
         close: parsed.close,
         body_charge: final_charge,
         body_counted: counted,
@@ -1936,8 +2098,22 @@ struct HeaderParts {
     length: Option<usize>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    points: PointsHeader,
     close: bool,
 }
+
+/// `X-Ocelli-Points` as it arrived. It is parsed by `/value` only, so a
+/// malformed list never refuses another route.
+#[derive(Debug, Default)]
+enum PointsHeader {
+    #[default]
+    Absent,
+    One(String),
+    Repeated,
+}
+
+/// Most points one `/value` request may name.
+const MAX_POINTS: usize = 64;
 
 fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut lines = header.split("\r\n");
@@ -1987,6 +2163,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_file = false;
     let mut frame = FrameRequest::default();
     let mut file_id = None;
+    let mut points = PointsHeader::Absent;
     for line in lines {
         if line.is_empty() {
             continue;
@@ -2042,6 +2219,11 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         } else if name.eq_ignore_ascii_case("x-ocelli-window-function") {
             once(&mut seen_function)?;
             frame.window_function = Some(parse_function(text)?);
+        } else if name.eq_ignore_ascii_case("x-ocelli-points") {
+            points = match points {
+                PointsHeader::Absent => PointsHeader::One(text.to_owned()),
+                PointsHeader::One(_) | PointsHeader::Repeated => PointsHeader::Repeated,
+            };
         } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
             once(&mut seen_preset)?;
             frame.window_preset =
@@ -2054,6 +2236,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         length,
         frame,
         file_id,
+        points,
         close,
     })
 }
@@ -2192,6 +2375,7 @@ mod tests {
                 body,
                 frame: FrameRequest::default(),
                 file_id: None,
+                points: PointsHeader::Absent,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,
@@ -2491,6 +2675,257 @@ mod tests {
         }
         if again.source != Some("held") {
             return Err("the frame being read was not served from the cache".to_owned());
+        }
+        drop(reading);
+        Ok(())
+    }
+
+    /// Slice 1 with a Rescale Type (0028,1054) of `len` letters `A`, placed
+    /// before VOI LUT Function (0028,1056) so the elements stay in order.
+    fn slice_one_with_rescale_type(len: u16) -> Result<Vec<u8>, String> {
+        slice_one_with(&"A".repeat(usize::from(len)), 0)
+    }
+
+    /// One explicit VR little endian element with a short length.
+    fn short_element(tag: (u16, u16), vr: [u8; 2], text: &[u8]) -> Result<Vec<u8>, String> {
+        let mut value = text.to_vec();
+        if !value.len().is_multiple_of(2) {
+            value.push(b' ');
+        }
+        let length = u16::try_from(value.len()).map_err(|_| "element length")?;
+        let mut element = Vec::new();
+        element.extend_from_slice(&tag.0.to_le_bytes());
+        element.extend_from_slice(&tag.1.to_le_bytes());
+        element.extend_from_slice(&vr);
+        element.extend_from_slice(&length.to_le_bytes());
+        element.extend(value);
+        Ok(element)
+    }
+
+    /// Put `element` in front of the first element that starts with `marker`.
+    fn splice_before(file: &[u8], marker: &[u8], element: &[u8]) -> Result<Vec<u8>, String> {
+        let at = file
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("the marker element is absent")?;
+        let mut out = Vec::with_capacity(file.len() + element.len());
+        out.extend_from_slice(file.get(..at).ok_or("split outside the file")?);
+        out.extend_from_slice(element);
+        out.extend_from_slice(file.get(at..).ok_or("split outside the file")?);
+        Ok(out)
+    }
+
+    /// Slice 1 with Rescale Type `unit` and `comments` bytes of Image
+    /// Comments (0020,4000), each spliced in tag order. A unit outside ASCII
+    /// also gets Specific Character Set (0008,0005) ISO_IR 192, UTF-8.
+    fn slice_one_with(unit: &str, comments: u16) -> Result<Vec<u8>, String> {
+        let mut file = slice(1).ok_or("synthetic slice 1 was absent")?;
+        if !unit.is_empty() {
+            let element = short_element((0x0028, 0x1054), *b"LO", unit.as_bytes())?;
+            file = splice_before(&file, &[0x28, 0x00, 0x56, 0x10, b'C', b'S'], &element)?;
+        }
+        if comments > 0 {
+            let element =
+                short_element((0x0020, 0x4000), *b"LT", &vec![b' '; usize::from(comments)])?;
+            file = splice_before(&file, &[0x28, 0x00, 0x02, 0x00, b'U', b'S'], &element)?;
+        }
+        if !unit.is_ascii() {
+            let element = short_element((0x0008, 0x0005), *b"CS", b"ISO_IR 192")?;
+            file = splice_before(&file, &[0x08, 0x00, 0x16, 0x00, b'U', b'I'], &element)?;
+        }
+        Ok(file)
+    }
+
+    /// Preview one file into `viewer` and require 200.
+    fn previewed(viewer: &Viewer, file: Vec<u8>, name: &str) -> Result<FileId, String> {
+        let id = viewer
+            .insert_file(file)
+            .ok_or_else(|| format!("file {name} was refused"))?;
+        let (reply, _) = preview_held(viewer, id, FrameRequest::default(), None);
+        if reply.status != 200 {
+            return Err(format!("preview {name} status was {}", reply.status));
+        }
+        Ok(id)
+    }
+
+    /// The charge of slice 0's held frame, whose unit comes from the CT rule.
+    fn rule_frame_charge() -> Result<usize, String> {
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let mut file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        file.shrink_to_fit();
+        previewed(&probe, file, "probe")?;
+        Ok(probe.pressure().used)
+    }
+
+    #[test]
+    fn the_steal_route_makes_room_for_a_long_unit() -> Result<(), String> {
+        // Frame X (slice 2, nobody reading) is cached first, then frame A
+        // (slice 0), which a reply holds. File B is slice 1 with a 64-letter
+        // Rescale Type, legal LO per PS3.5 Table 6.2-1, and 1024 bytes of
+        // Image Comments so that A's own claim did not need X's room. Every
+        // frame has the same sample length, so B's claim steals X. X and A
+        // charge F each, B charges F + 64, and the budget is 2F + file B +
+        // 63, one byte short of A, file B and B together. The steal frees
+        // only F, so the claim has to make the rest of the room without
+        // evicting the frame being read.
+        let frame_used = rule_frame_charge()?;
+        let mut file_x = slice(2).ok_or("synthetic slice 2 was absent")?;
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with(&"A".repeat(64), 1024)?;
+        file_x.shrink_to_fit();
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(file_b.capacity())
+            .saturating_add(63);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_x = previewed(&viewer, file_x, "X")?;
+        let id_a = previewed(&viewer, file_a, "A")?;
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let (reused_before, fresh_before) = viewer.buffer_claims();
+        previewed(&viewer, file_b, "B")?;
+        let (reused_after, fresh_after) = viewer.buffer_claims();
+        if reused_after != reused_before + 1 || fresh_after != fresh_before {
+            return Err(format!(
+                "B's claim went from reused {reused_before} fresh {fresh_before} to reused \
+                 {reused_after} fresh {fresh_after}, so it did not steal X's buffer"
+            ));
+        }
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
+        }
+        // X's frame left with its buffer, and its bytes had already gone.
+        let (stolen, _) = preview_held(&viewer, id_x, FrameRequest::default(), None);
+        if stolen.status != 410 {
+            return Err(format!(
+                "frame X answered {} after its buffer was stolen",
+                stolen.status
+            ));
+        }
+        drop(reading);
+        Ok(())
+    }
+
+    #[test]
+    fn the_claim_charges_the_value_facts_struct() -> Result<(), String> {
+        // A Rescale Type of 64 copies of U+10000 is 64 characters, legal LO
+        // per PS3.5 Table 6.2-1, and 256 bytes in UTF-8 (4 bytes each, RFC
+        // 3629), the whole unit bound. B charges F + 256, where F is A's
+        // charge from the CT rule. The budget is 2F + 256 + file B - 1. A
+        // claim that leaves out the boxed facts is short by their size, fits
+        // without making room, and the store then evicts frame A while a
+        // reply reads it. The whole claim makes its room first.
+        let frame_used = rule_frame_charge()?;
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with(&"\u{10000}".repeat(64), 0)?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(256)
+            .saturating_add(file_b.capacity())
+            .saturating_sub(1);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = previewed(&viewer, file_a, "A")?;
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let id_b = previewed(&viewer, file_b, "B")?;
+        let used = viewer.pressure().used;
+        if used != frame_used.saturating_mul(2).saturating_add(256) {
+            return Err(format!(
+                "held bytes were {used}, not A and a B with a 256-byte unit"
+            ));
+        }
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
+        }
+        let _ = id_b;
+        drop(reading);
+        Ok(())
+    }
+
+    #[test]
+    fn a_long_file_unit_does_not_evict_a_frame_being_read() -> Result<(), String> {
+        // PS3.5 Table 6.2-1: LO is 64 chars maximum, so a Rescale Type of 64
+        // letters is legal. Frame B owns those 64 bytes of unit text and
+        // frame A, from the CT rule, owns none, so B's charge is A's charge
+        // plus 64. The budget holds frame A, file B and frame B's charge
+        // less one byte. A claim that does not cover the unit fits without
+        // a steal, and the store then has to evict frame A while a reply is
+        // reading it. A claim that covers the unit reaches the steal first.
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with_rescale_type(64)?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let file_b_cap = file_b.capacity();
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let probe_id = probe
+            .insert_file(file_a.clone())
+            .ok_or("the probe file was refused")?;
+        let (probe_reply, _) = preview_held(&probe, probe_id, FrameRequest::default(), None);
+        if probe_reply.status != 200 {
+            return Err(format!(
+                "the probe preview status was {}",
+                probe_reply.status
+            ));
+        }
+        let frame_used = probe.pressure().used;
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(64)
+            .saturating_add(file_b_cap)
+            .saturating_sub(1);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = viewer.insert_file(file_a).ok_or("file A was refused")?;
+        let (first, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if first.status != 200 {
+            return Err(format!("preview A status was {}", first.status));
+        }
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let id_b = viewer.insert_file(file_b).ok_or("file B was refused")?;
+        let (second, _) = preview_held(&viewer, id_b, FrameRequest::default(), None);
+        if second.status != 200 {
+            return Err(format!("preview B status was {}", second.status));
+        }
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
         }
         drop(reading);
         Ok(())

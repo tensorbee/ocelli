@@ -266,7 +266,7 @@ impl Budgeted for Held {
     fn bytes(&self) -> usize {
         match self {
             Self::File(bytes) => bytes.capacity(),
-            Self::Frame(frame) => frame.samples.capacity() + size_of::<HeldFrame>(),
+            Self::Frame(frame) => frame.charged_bytes(),
         }
     }
 }
@@ -1196,7 +1196,7 @@ impl Viewer {
     ) -> Arc<CachedFrame> {
         let frames = held.frames;
         let sample_len = held.samples.len();
-        let sample_cap = held.samples.capacity();
+        let charged = held.charged_bytes();
         let value = Arc::new(CachedFrame {
             inner: held,
             worker,
@@ -1206,7 +1206,7 @@ impl Viewer {
         let key = HeldKey::Frame(id, index);
         let mut state = self.lock_cache();
         state.drain_recycled();
-        state.reserve_for_insert(sample_cap.saturating_add(size_of::<HeldFrame>()));
+        state.reserve_for_insert(charged);
         let admission = state.lru.insert(key, Held::Frame(Arc::clone(&value)));
         let kept = admission.refused.is_none();
         state.absorb(key, sample_len, admission);
@@ -1473,8 +1473,15 @@ impl CacheHandle {
     }
 }
 
+/// The charge a claim makes room for before the frame is decoded.
+///
+/// The sample bytes, the struct, the boxed value facts a grey frame carries
+/// and the longest unit text a file can name, so the charge when the frame
+/// is stored never exceeds this claim.
 fn frame_sample_cost(len: usize) -> usize {
     len.saturating_add(size_of::<HeldFrame>())
+        .saturating_add(size_of::<crate::value::ValueFacts>())
+        .saturating_add(crate::value::UNIT_MAX_BYTES)
 }
 
 impl CacheState {
@@ -1488,13 +1495,17 @@ impl CacheState {
         self.lru.pressure().used.saturating_add(self.free_bytes)
     }
 
+    /// Claim a sample buffer of `len` bytes for a decode.
+    ///
+    /// Every route makes room for the whole `frame_sample_cost` of the buffer
+    /// it returns: a parked buffer, a buffer stolen from the oldest frame of
+    /// the same length when no reply reads it, and a fresh one. A stolen
+    /// frame may have charged less than the new frame will, so its freed
+    /// bytes alone are not the room.
     fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
         self.drain_recycled();
         if let Some(buffer) = self.pop_free(len) {
-            self.note_reused();
-            let cost = buffer.capacity().saturating_add(size_of::<HeldFrame>());
-            self.make_room_dropping(cost);
-            return buffer;
+            return self.reuse_claimed(buffer);
         }
         let cost = frame_sample_cost(len);
         if self.charged().saturating_add(cost) <= self.limit {
@@ -1504,13 +1515,18 @@ impl CacheState {
         if let Some(buffer) = self.take_oldest_frame_buffer(len) {
             self.park_if_fits(buffer);
             if let Some(buffer) = self.pop_free(len) {
-                self.note_reused();
-                return buffer;
+                return self.reuse_claimed(buffer);
             }
         }
         self.make_room_dropping(cost);
         self.note_fresh();
         Vec::new()
+    }
+
+    fn reuse_claimed(&mut self, buffer: Vec<u8>) -> Vec<u8> {
+        self.note_reused();
+        self.make_room_dropping(frame_sample_cost(buffer.capacity()));
+        buffer
     }
 
     fn note_reused(&mut self) {
@@ -1562,7 +1578,9 @@ impl CacheState {
     /// Drop free buffers, then cached entries, until `cost` more bytes fit.
     ///
     /// A cached frame is discarded here. Its sample buffer is not parked,
-    /// because this room is for a buffer the caller already holds.
+    /// because this room is for a buffer the caller already holds. A frame a
+    /// reply is reading is passed over, because evicting it frees no memory
+    /// and makes that reply's next request answer 410.
     fn make_room_dropping(&mut self, cost: usize) {
         loop {
             if self.charged().saturating_add(cost) <= self.limit {
@@ -1571,7 +1589,7 @@ impl CacheState {
             if self.drop_one_free() {
                 continue;
             }
-            let evicted = self.evict_oldest();
+            let evicted = self.evict_oldest_unread();
             if evicted.is_empty() {
                 return;
             }
@@ -1637,8 +1655,61 @@ impl CacheState {
         self.discard_held(Held::Frame(arc));
     }
 
+    /// Evict the least recently used entry that is not a frame being read.
+    ///
+    /// A frame a reply holds moves to the most recent end and stays. Each
+    /// entry is looked at once at most, so a cache of frames all being read
+    /// gives up with nothing evicted.
+    fn evict_oldest_unread(&mut self) -> Vec<Held> {
+        for _ in 0..self.lru.len() {
+            let mut evicted = Vec::new();
+            for (key, held) in self.evict_oldest_keyed() {
+                let reading = matches!(&held, Held::Frame(arc) if Arc::strong_count(arc) > 1);
+                if !reading {
+                    self.forget_evicted(&key);
+                    evicted.push(held);
+                    continue;
+                }
+                let admission = self.lru.insert(key, held);
+                self.touch_frame(key);
+                for (other, dropped) in admission.evicted {
+                    self.forget_evicted(&other);
+                    evicted.push(dropped);
+                }
+                if let Some((refused, dropped)) = admission.refused {
+                    self.forget_evicted(&refused);
+                    evicted.push(dropped);
+                }
+            }
+            if !evicted.is_empty() {
+                return evicted;
+            }
+        }
+        Vec::new()
+    }
+
+    fn forget_evicted(&mut self, key: &HeldKey) {
+        self.forget_frame(key);
+        match key {
+            HeldKey::File(_) => self.files = self.files.saturating_sub(1),
+            HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
+        }
+    }
+
     /// Evict one least recently used entry. The caller parks or drops it.
     fn evict_oldest(&mut self) -> Vec<Held> {
+        let evicted = self.evict_oldest_keyed();
+        let mut out = Vec::new();
+        for (key, held) in evicted {
+            self.forget_evicted(&key);
+            out.push(held);
+        }
+        out
+    }
+
+    /// Take the least recently used entry out of the LRU, keys and all,
+    /// without touching the counts.
+    fn evict_oldest_keyed(&mut self) -> Vec<(HeldKey, Held)> {
         if self.lru.is_empty() {
             return Vec::new();
         }
@@ -1651,16 +1722,7 @@ impl CacheState {
         if self.lru.len() == before_len {
             return Vec::new();
         }
-        let mut evicted = Vec::new();
-        for (key, held) in admission.evicted {
-            self.forget_frame(&key);
-            match key {
-                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-            }
-            evicted.push(held);
-        }
-        evicted
+        admission.evicted
     }
 
     fn take_oldest_frame_buffer(&mut self, len: usize) -> Option<Vec<u8>> {
@@ -1677,11 +1739,7 @@ impl CacheState {
             self.frame_order.push_back(tracked);
             let admission = self.lru.insert(key, Held::Frame(arc));
             for (evicted_key, evicted) in admission.evicted {
-                self.forget_frame(&evicted_key);
-                match evicted_key {
-                    HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                    HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-                }
+                self.forget_evicted(&evicted_key);
                 self.discard_held(evicted);
             }
             if let Some((_, refused)) = admission.refused {
@@ -1704,11 +1762,7 @@ impl CacheState {
         }
         let displaced = admission.displaced.is_some();
         for (evicted_key, held) in admission.evicted {
-            self.forget_frame(&evicted_key);
-            match evicted_key {
-                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-            }
+            self.forget_evicted(&evicted_key);
             self.reclaim_held(held);
         }
         if let Some(held) = admission.displaced {
@@ -1816,6 +1870,7 @@ mod tests {
             recipe: Err(PreviewError::Window),
             facts: Err(PreviewError::Window),
             full_range: Err(PreviewError::Window),
+            value: Err(PreviewError::Window),
             frames: 1,
             width: columns,
             height: rows,
@@ -1866,6 +1921,42 @@ mod tests {
         if held.bytes() != expected {
             return Err(format!(
                 "held bytes were {} and the capacity sum is {expected}",
+                held.bytes()
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn held_bytes_charge_the_value_facts() -> Result<(), String> {
+        // Synthetic slice 0 is a CT with no Rescale Type, so it holds value
+        // facts with the unit text HU. The charge is every owned buffer's
+        // capacity plus the struct: the samples, the boxed facts and the
+        // unit text, as F-216 defines `bytes()`.
+        let bytes = crate::slice(0).ok_or("no synthetic slice")?;
+        let mut native = Vec::new();
+        let mut samples = Vec::new();
+        let frame = crate::preview::decode_held(
+            &bytes,
+            0,
+            &mut native,
+            &mut samples,
+            &mut |_| {},
+            &mut |_| Vec::new(),
+        )
+        .map_err(|error| format!("slice 0 was refused: {}", error.code()))?;
+        let facts = frame
+            .value
+            .as_ref()
+            .map_err(|error| format!("slice 0 has no value facts: {}", error.code()))?;
+        let expected = frame.samples.capacity()
+            + size_of::<HeldFrame>()
+            + size_of::<crate::value::ValueFacts>()
+            + facts.unit_capacity();
+        let held = Held::Frame(Arc::new(CachedFrame::plain(frame)));
+        if held.bytes() != expected {
+            return Err(format!(
+                "held bytes were {} and the owned sum is {expected}",
                 held.bytes()
             ));
         }
@@ -2029,6 +2120,57 @@ mod tests {
                 pressure.used
             ));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_claim_passes_over_every_frame_being_read() -> Result<(), String> {
+        // R1 and R2 are frames of 64 sample bytes that replies hold, at the
+        // oldest end. U is an unread frame of 64 behind them. A claim for 4
+        // bytes matches no cached length, so it steals nothing and must make
+        // room for frame_sample_cost(4). The budget is the two readers plus
+        // that cost, so evicting U alone is enough, and the claim has to look
+        // past both readers to find it. The 4-byte frame then stores within
+        // the budget and both readers stay held.
+        let reader_charge = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 64],
+            1,
+            32,
+        )?)))
+        .bytes();
+        let budget = reader_charge
+            .saturating_mul(2)
+            .saturating_add(frame_sample_cost(4));
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id = |serial: u64| FileId {
+            generation: viewer.generation,
+            serial,
+        };
+        let first = viewer.store_frame(id(1), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
+        let second = viewer.store_frame(id(2), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
+        drop(viewer.store_frame(id(3), 0, minimal_frame(vec![0_u8; 64], 1, 32)?));
+        let mut samples = viewer.cache_handle().claim_sample_buffer(4);
+        samples.clear();
+        samples.resize(4, 0);
+        drop(viewer.store_frame(id(4), 0, minimal_frame(samples, 1, 2)?));
+        for (name, serial) in [("R1", 1), ("R2", 2)] {
+            if !matches!(viewer.lookup_frame(id(serial), 0), Lookup::Hit(_)) {
+                return Err(format!("{name} was evicted while a reply read it"));
+            }
+        }
+        if matches!(viewer.lookup_frame(id(3), 0), Lookup::Hit(_)) {
+            return Err("the unread frame U was kept".to_owned());
+        }
+        let census = viewer.memory_census();
+        if census.pressure.used.saturating_add(census.free) > budget {
+            return Err(format!(
+                "used {} free {} budget {budget}",
+                census.pressure.used, census.free
+            ));
+        }
+        drop((first, second));
         Ok(())
     }
 
