@@ -368,3 +368,10 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 - **`jxl-oxide` receives the codestream alone.** For a container, the pre-check extracts the codestream from the `jxlc` box or the `jxlp` boxes in order, and passes only those bytes. No other box (`brob`, `jbrd`, `Exif`, `xml `, `jumb` or any other) ever reaches `jxl-oxide`. A container with no codestream, two `jxlc` boxes, a `jxlc` beside `jxlp` boxes, or `jxlp` boxes out of order or missing the last flag is refused before decode.
 - **A header that declares extra channels is refused in the pre-check.** Extra channels are refused later anyway, so the pre-check refuses a non-empty `ec_info` with `UnsupportedPixelFormat` before any parse that could grow with the header. `read_header` also grows its window geometrically rather than one byte at a time, so its cost is linear in the header length.
 - **`jxl-image` is not a direct dependency.** `jxl-oxide` re-exports the crate, so only `jxl-bitstream` and `jxl-oxide-common` stay direct, and D-28 says so.
+
+### Lead rulings after review pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-7.md`.
+
+- **The scanner's string rule is fixed in this story.** `scripts/unsafe_allowlist_check.py`'s string pattern must not treat a Rust string continuation as the end of a string, so code after it is scanned. A test pins it, and the fix must leave every tracked file's count unchanged.
+- **The audit's scope is a named commit.** The section names base commit `4165d1e8` rather than a merge-base command, and says that neither `ocelli-wasm` nor `ocelli-native` reaches `ocelli-codec`, so the shipped modules do not carry this closure today.
