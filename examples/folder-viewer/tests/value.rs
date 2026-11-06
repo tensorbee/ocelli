@@ -786,6 +786,53 @@ fn value_reports_padding_without_a_number() -> Result<(), String> {
 }
 
 #[test]
+fn value_refuses_a_malformed_padding_range() -> Result<(), String> {
+    // PS3.3 C.7.5.1.1.2. Pixel Padding Range Limit (0028,0121) is used only
+    // with a Pixel Padding Value (0028,0120), and in MONOCHROME2 the value is
+    // the low end of the inclusive range. A limit alone, or value 10 above
+    // limit 0, names no range, so the value cannot say which samples are
+    // padding and is refused `attribute`. Stored 5 is otherwise 5 (C.11.1).
+    let us = |tag: (u16, u16), value: u16| -> Result<((u16, u16), Vec<u8>), String> {
+        Ok((tag, short_le(tag, *b"US", &value.to_le_bytes())?))
+    };
+    let cases = [
+        ("a limit without a value", vec![us((0x0028, 0x0121), 10)?]),
+        (
+            "a reversed MONOCHROME2 range",
+            vec![us((0x0028, 0x0120), 10)?, us((0x0028, 0x0121), 0)?],
+        ),
+    ];
+    for (name, extra) in cases {
+        let mut spec = Spec::mono(1, &[5]);
+        spec.modality = Some("MR");
+        spec.rescale = Some(("1", "0"));
+        spec.extra = extra;
+        expect_refusal(
+            value_frame(&build(spec)?, 0, &[at(0.5, 0.5)]),
+            PreviewError::Attribute,
+            name,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn value_refuses_a_value_outside_f32() -> Result<(), String> {
+    // PS3.3 C.11.1: 65535 * 1e38 + 0 = 6.5535e42, above the largest finite
+    // f32, 3.4028235e38 (IEEE 754 binary32), so the modality value is not a
+    // number this route can print. It is refused `attribute`, because the
+    // rescale attributes are the cause and no window is involved.
+    let mut spec = Spec::mono(1, &[65_535]);
+    spec.modality = Some("MR");
+    spec.rescale = Some(("1e38", "0"));
+    expect_refusal(
+        value_frame(&build(spec)?, 0, &[at(0.5, 0.5)]),
+        PreviewError::Attribute,
+        "slope 1e38",
+    )
+}
+
+#[test]
 fn value_refuses_a_modality_lut_sequence() -> Result<(), String> {
     // PS3.3 C.11.1. A Modality LUT Sequence replaces rescale. This route does
     // not apply one, so it refuses with the preview's `window` code.

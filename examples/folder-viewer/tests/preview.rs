@@ -230,7 +230,7 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
         ));
     }
     if !page.contains(
-        "\"toggle-cross\": \"Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT that names no other unit and is not multi-energy. The local process computes the value.\"",
+        "\"toggle-cross\": \"Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT whose file states HU, or states no unit and is not multi-energy. The local process computes the value.\"",
     ) {
         return Err("the cross sentence does not name the value".to_owned());
     }

@@ -296,3 +296,5 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 ### Lead ruling on the value's claim, after the review pass 1 remediation
 
 Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call. The pre-decode claim for a frame covers its value's facts and the longest unit the file can name, Rescale Type being LO, at most 64 characters in PS3.5 Table 6.2-1, held as UTF-8. A Rescale Type or Units longer than 64 characters refuses the value with `attribute`. Every route that gives a claim its room makes room for that whole cost, so a frame a reply is reading is never evicted by a longer unit.
+
+AC12 now holds by construction, because stage 1 is the held frame's recipe. Its test pins that the value and the preview share that recipe, so a later change that gives the value its own stage 1 goes red.

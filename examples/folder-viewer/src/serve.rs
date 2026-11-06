@@ -2683,28 +2683,181 @@ mod tests {
     /// Slice 1 with a Rescale Type (0028,1054) of `len` letters `A`, placed
     /// before VOI LUT Function (0028,1056) so the elements stay in order.
     fn slice_one_with_rescale_type(len: u16) -> Result<Vec<u8>, String> {
-        let file = slice(1).ok_or("synthetic slice 1 was absent")?;
-        let marker = [0x28, 0x00, 0x56, 0x10, b'C', b'S'];
-        let at = file
-            .windows(marker.len())
-            .position(|window| window == marker)
-            .ok_or("slice 1 has no VOI LUT Function")?;
-        let mut value = vec![b'A'; usize::from(len)];
+        slice_one_with(&"A".repeat(usize::from(len)), 0)
+    }
+
+    /// One explicit VR little endian element with a short length.
+    fn short_element(tag: (u16, u16), vr: [u8; 2], text: &[u8]) -> Result<Vec<u8>, String> {
+        let mut value = text.to_vec();
         if !value.len().is_multiple_of(2) {
             value.push(b' ');
         }
-        let length = u16::try_from(value.len()).map_err(|_| "unit length")?;
+        let length = u16::try_from(value.len()).map_err(|_| "element length")?;
         let mut element = Vec::new();
-        element.extend_from_slice(&0x0028_u16.to_le_bytes());
-        element.extend_from_slice(&0x1054_u16.to_le_bytes());
-        element.extend_from_slice(b"LO");
+        element.extend_from_slice(&tag.0.to_le_bytes());
+        element.extend_from_slice(&tag.1.to_le_bytes());
+        element.extend_from_slice(&vr);
         element.extend_from_slice(&length.to_le_bytes());
         element.extend(value);
+        Ok(element)
+    }
+
+    /// Put `element` in front of the first element that starts with `marker`.
+    fn splice_before(file: &[u8], marker: &[u8], element: &[u8]) -> Result<Vec<u8>, String> {
+        let at = file
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("the marker element is absent")?;
         let mut out = Vec::with_capacity(file.len() + element.len());
         out.extend_from_slice(file.get(..at).ok_or("split outside the file")?);
-        out.extend(element);
+        out.extend_from_slice(element);
         out.extend_from_slice(file.get(at..).ok_or("split outside the file")?);
         Ok(out)
+    }
+
+    /// Slice 1 with Rescale Type `unit` and `comments` bytes of Image
+    /// Comments (0020,4000), each spliced in tag order. A unit outside ASCII
+    /// also gets Specific Character Set (0008,0005) ISO_IR 192, UTF-8.
+    fn slice_one_with(unit: &str, comments: u16) -> Result<Vec<u8>, String> {
+        let mut file = slice(1).ok_or("synthetic slice 1 was absent")?;
+        if !unit.is_empty() {
+            let element = short_element((0x0028, 0x1054), *b"LO", unit.as_bytes())?;
+            file = splice_before(&file, &[0x28, 0x00, 0x56, 0x10, b'C', b'S'], &element)?;
+        }
+        if comments > 0 {
+            let element =
+                short_element((0x0020, 0x4000), *b"LT", &vec![b' '; usize::from(comments)])?;
+            file = splice_before(&file, &[0x28, 0x00, 0x02, 0x00, b'U', b'S'], &element)?;
+        }
+        if !unit.is_ascii() {
+            let element = short_element((0x0008, 0x0005), *b"CS", b"ISO_IR 192")?;
+            file = splice_before(&file, &[0x08, 0x00, 0x16, 0x00, b'U', b'I'], &element)?;
+        }
+        Ok(file)
+    }
+
+    /// Preview one file into `viewer` and require 200.
+    fn previewed(viewer: &Viewer, file: Vec<u8>, name: &str) -> Result<FileId, String> {
+        let id = viewer
+            .insert_file(file)
+            .ok_or_else(|| format!("file {name} was refused"))?;
+        let (reply, _) = preview_held(viewer, id, FrameRequest::default(), None);
+        if reply.status != 200 {
+            return Err(format!("preview {name} status was {}", reply.status));
+        }
+        Ok(id)
+    }
+
+    /// The charge of slice 0's held frame, whose unit comes from the CT rule.
+    fn rule_frame_charge() -> Result<usize, String> {
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let mut file = slice(0).ok_or("synthetic slice 0 was absent")?;
+        file.shrink_to_fit();
+        previewed(&probe, file, "probe")?;
+        Ok(probe.pressure().used)
+    }
+
+    #[test]
+    fn the_steal_route_makes_room_for_a_long_unit() -> Result<(), String> {
+        // Frame X (slice 2, nobody reading) is cached first, then frame A
+        // (slice 0), which a reply holds. File B is slice 1 with a 64-letter
+        // Rescale Type, legal LO per PS3.5 Table 6.2-1, and 1024 bytes of
+        // Image Comments so that A's own claim did not need X's room. Every
+        // frame has the same sample length, so B's claim steals X. X and A
+        // charge F each, B charges F + 64, and the budget is 2F + file B +
+        // 63, one byte short of A, file B and B together. The steal frees
+        // only F, so the claim has to make the rest of the room without
+        // evicting the frame being read.
+        let frame_used = rule_frame_charge()?;
+        let mut file_x = slice(2).ok_or("synthetic slice 2 was absent")?;
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with(&"A".repeat(64), 1024)?;
+        file_x.shrink_to_fit();
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(file_b.capacity())
+            .saturating_add(63);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_x = previewed(&viewer, file_x, "X")?;
+        let id_a = previewed(&viewer, file_a, "A")?;
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        previewed(&viewer, file_b, "B")?;
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
+        }
+        // The steal happened: X's frame left and its bytes had already gone.
+        let (stolen, _) = preview_held(&viewer, id_x, FrameRequest::default(), None);
+        if stolen.status != 410 {
+            return Err(format!(
+                "frame X answered {}, so it was not stolen",
+                stolen.status
+            ));
+        }
+        drop(reading);
+        Ok(())
+    }
+
+    #[test]
+    fn the_claim_charges_the_value_facts_struct() -> Result<(), String> {
+        // A Rescale Type of 64 copies of U+10000 is 64 characters, legal LO
+        // per PS3.5 Table 6.2-1, and 256 bytes in UTF-8 (4 bytes each, RFC
+        // 3629), the whole unit bound. B charges F + 256, where F is A's
+        // charge from the CT rule. The budget is 2F + 256 + file B - 1. A
+        // claim that leaves out the boxed facts is short by their size, fits
+        // without making room, and the store then evicts frame A while a
+        // reply reads it. The whole claim makes its room first.
+        let frame_used = rule_frame_charge()?;
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with(&"\u{10000}".repeat(64), 0)?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(256)
+            .saturating_add(file_b.capacity())
+            .saturating_sub(1);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = previewed(&viewer, file_a, "A")?;
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let id_b = previewed(&viewer, file_b, "B")?;
+        let used = viewer.pressure().used;
+        if used != frame_used.saturating_mul(2).saturating_add(256) {
+            return Err(format!(
+                "held bytes were {used}, not A and a B with a 256-byte unit"
+            ));
+        }
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
+        }
+        let _ = id_b;
+        drop(reading);
+        Ok(())
     }
 
     #[test]

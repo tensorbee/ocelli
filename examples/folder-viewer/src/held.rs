@@ -1495,13 +1495,17 @@ impl CacheState {
         self.lru.pressure().used.saturating_add(self.free_bytes)
     }
 
+    /// Claim a sample buffer of `len` bytes for a decode.
+    ///
+    /// Every route makes room for the whole `frame_sample_cost` of the buffer
+    /// it returns: a parked buffer, a buffer stolen from the oldest unread
+    /// frame of the same length, and a fresh one. A stolen frame may have
+    /// charged less than the new frame will, so its freed bytes alone are not
+    /// the room.
     fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
         self.drain_recycled();
         if let Some(buffer) = self.pop_free(len) {
-            self.note_reused();
-            let cost = frame_sample_cost(buffer.capacity());
-            self.make_room_dropping(cost);
-            return buffer;
+            return self.reuse_claimed(buffer);
         }
         let cost = frame_sample_cost(len);
         if self.charged().saturating_add(cost) <= self.limit {
@@ -1511,13 +1515,18 @@ impl CacheState {
         if let Some(buffer) = self.take_oldest_frame_buffer(len) {
             self.park_if_fits(buffer);
             if let Some(buffer) = self.pop_free(len) {
-                self.note_reused();
-                return buffer;
+                return self.reuse_claimed(buffer);
             }
         }
         self.make_room_dropping(cost);
         self.note_fresh();
         Vec::new()
+    }
+
+    fn reuse_claimed(&mut self, buffer: Vec<u8>) -> Vec<u8> {
+        self.note_reused();
+        self.make_room_dropping(frame_sample_cost(buffer.capacity()));
+        buffer
     }
 
     fn note_reused(&mut self) {
@@ -1569,7 +1578,9 @@ impl CacheState {
     /// Drop free buffers, then cached entries, until `cost` more bytes fit.
     ///
     /// A cached frame is discarded here. Its sample buffer is not parked,
-    /// because this room is for a buffer the caller already holds.
+    /// because this room is for a buffer the caller already holds. A frame a
+    /// reply is reading is passed over, because evicting it frees no memory
+    /// and makes that reply's next request answer 410.
     fn make_room_dropping(&mut self, cost: usize) {
         loop {
             if self.charged().saturating_add(cost) <= self.limit {
@@ -1578,7 +1589,7 @@ impl CacheState {
             if self.drop_one_free() {
                 continue;
             }
-            let evicted = self.evict_oldest();
+            let evicted = self.evict_oldest_unread();
             if evicted.is_empty() {
                 return;
             }
@@ -1644,8 +1655,61 @@ impl CacheState {
         self.discard_held(Held::Frame(arc));
     }
 
+    /// Evict the least recently used entry that is not a frame being read.
+    ///
+    /// A frame a reply holds moves to the most recent end and stays. Each
+    /// entry is looked at once at most, so a cache of frames all being read
+    /// gives up with nothing evicted.
+    fn evict_oldest_unread(&mut self) -> Vec<Held> {
+        for _ in 0..self.lru.len() {
+            let mut evicted = Vec::new();
+            for (key, held) in self.evict_oldest_keyed() {
+                let reading = matches!(&held, Held::Frame(arc) if Arc::strong_count(arc) > 1);
+                if !reading {
+                    self.forget_evicted(&key);
+                    evicted.push(held);
+                    continue;
+                }
+                let admission = self.lru.insert(key, held);
+                self.touch_frame(key);
+                for (other, dropped) in admission.evicted {
+                    self.forget_evicted(&other);
+                    evicted.push(dropped);
+                }
+                if let Some((refused, dropped)) = admission.refused {
+                    self.forget_evicted(&refused);
+                    evicted.push(dropped);
+                }
+            }
+            if !evicted.is_empty() {
+                return evicted;
+            }
+        }
+        Vec::new()
+    }
+
+    fn forget_evicted(&mut self, key: &HeldKey) {
+        self.forget_frame(key);
+        match key {
+            HeldKey::File(_) => self.files = self.files.saturating_sub(1),
+            HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
+        }
+    }
+
     /// Evict one least recently used entry. The caller parks or drops it.
     fn evict_oldest(&mut self) -> Vec<Held> {
+        let evicted = self.evict_oldest_keyed();
+        let mut out = Vec::new();
+        for (key, held) in evicted {
+            self.forget_evicted(&key);
+            out.push(held);
+        }
+        out
+    }
+
+    /// Take the least recently used entry out of the LRU, keys and all,
+    /// without touching the counts.
+    fn evict_oldest_keyed(&mut self) -> Vec<(HeldKey, Held)> {
         if self.lru.is_empty() {
             return Vec::new();
         }
@@ -1658,16 +1722,7 @@ impl CacheState {
         if self.lru.len() == before_len {
             return Vec::new();
         }
-        let mut evicted = Vec::new();
-        for (key, held) in admission.evicted {
-            self.forget_frame(&key);
-            match key {
-                HeldKey::File(_) => self.files = self.files.saturating_sub(1),
-                HeldKey::Frame(_, _) => self.frames = self.frames.saturating_sub(1),
-            }
-            evicted.push(held);
-        }
-        evicted
+        admission.evicted
     }
 
     fn take_oldest_frame_buffer(&mut self, len: usize) -> Option<Vec<u8>> {
