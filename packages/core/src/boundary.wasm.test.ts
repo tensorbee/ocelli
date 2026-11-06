@@ -28,6 +28,7 @@ import {
   EVENT_HEADER_BYTES,
   EVENT_STRIDE,
   FLAG_INVERT,
+  FLAG_LOADING,
   frameResident,
   INVERT_BYTE,
   releaseSeries,
@@ -793,7 +794,30 @@ describe("wasm session boundary", () => {
     expect(frameResident(wasm, { ...request, rows: 513 })).toBe(false);
     expect(frameResident(wasm, request)).toBe(true);
 
-    // AC5: a matching show answers, a mismatch is refused and removes.
+    // D1's reproduction on the built module. Index 1 is cached and the
+    // selection is index 3. Scrolled back to slice 0, a show of index 1 is
+    // refused and leaves the state the scroll left, loading flag included.
+    // Before the fix it returned true, adopted index 1's samples and
+    // cleared the loading flag while copy_state still reported slice 0.
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: -3 }])),
+    ).toBe(1);
+    expect(
+      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(false);
+    const refused = readViewportState(wasm.copy_state());
+    expect(refused?.sliceIndex).toBe(0);
+    expect(refused !== null && (refused.flags & FLAG_LOADING) !== 0).toBe(true);
+    // The refusal is not a stale removal, so the entry is kept.
+    expect(
+      frameResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(true);
+
+    // AC5: the selection is index 1 now. A matching show answers, a
+    // mismatch is refused and removes.
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+    ).toBe(1);
     expect(
       showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
     ).toBe(true);
@@ -805,10 +829,8 @@ describe("wasm session boundary", () => {
     ).toBe(false);
 
     // Put the removed entry back so the release below has three frames of
-    // the series again, and drain the crossings along the way.
-    expect(
-      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: -2 }])),
-    ).toBe(1);
+    // the series again, and drain the crossings along the way. The
+    // selection is already index 1.
     writeFrame(wasm, sink, frame, {
       viewport: 1,
       columns: 512,
@@ -830,5 +852,5 @@ describe("wasm session boundary", () => {
     expect(payload?.series).toBe(series);
     expect(payload?.frames).toBe(3);
     expect(payload?.bytes).toBe(3_145_728n);
-});
+  });
 });

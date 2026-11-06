@@ -388,9 +388,9 @@ writeFrame({ memory }, sessionBulkSink(session), sampleBytes, {
   generation: 1,
 });</code></pre>
     <p>For this call the session object needs the module's <code>commit_frame</code> export too. <code>holdSessionBytes(wasm, bytes, previousTicket)</code> copies a whole response into the session's one bulk slot and returns its ticket without parsing it. That slot is the only bulk allocation, so other writes refuse until <code>release_bulk</code> drops the ticket.</p>
-    <p>A commit that carries a <code>content</code> id is also cached, if the session's frame budget admits it. The budget is off by default, so <code>setFrameBudget</code> comes first. <code>contentId</code> hashes the SOP Instance UID, the transfer syntax UID and the encoded bytes into one identity in the core, over the same bulk slot, so there is no second hash in JavaScript.</p>
+    <p>A commit that carries a <code>content</code> id with its <code>stackIndex</code> and <code>stackEpoch</code> is routed to the cache, and is cached if the session's frame budget admits it. A commit that carries a <code>content</code> id without both is refused with <code>InvalidValue</code> and nothing is committed. The budget is off by default, so <code>setFrameBudget</code> comes first. <code>contentId</code> hashes the SOP Instance UID, the transfer syntax UID and the encoded bytes into one identity in the core, over the same bulk slot, so there is no second hash in JavaScript.</p>
 <pre><code>import {
-  contentId, frameResident, sessionBulkSink, setFrameBudget, showResident, writeFrame,
+  contentId, sessionBulkSink, setFrameBudget, showResident, writeFrame, writeStack,
 } from "@ocelli/core";
 
 setFrameBudget(session, 256 * 1024 * 1024);

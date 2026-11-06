@@ -4,10 +4,11 @@
  * The session keeps committed frames in a cache whose budget the caller
  * sets, and the default is zero, which is off: a caller that never calls
  * {@link setFrameBudget} sees today's behaviour exactly. A commit that
- * carries a content id through `writeFrame` fills the cache, and
- * {@link frameResident} and {@link showResident} read it back without bytes
- * crossing the boundary again. {@link releaseSeries} and
- * {@link releaseStudy} empty it, one event per series through the ring.
+ * carries a content id with its stack positions through `writeFrame` fills
+ * the cache, one without both is refused, and {@link frameResident} and
+ * {@link showResident} read it back without bytes crossing the boundary
+ * again. {@link releaseSeries} and {@link releaseStudy} empty it, one
+ * event per series through the ring.
  *
  * Every function here refuses before any export call. A bad number is an
  * `OcelliError` `InvalidValue` and an unknown option key is `UnknownOption`,

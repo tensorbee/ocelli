@@ -11,7 +11,7 @@
 
 use ocelli_cache::{
     CacheEvent, CacheEvents, CommittedFrame, CommittedSource, ContentId, FrameKey, FrameLookup,
-    ImageCache, Pressure, PressureBand, SeriesId, TelemetryEvent, TierTelemetry,
+    ImageCache, Pressure, PressureBand, SeriesId, TelemetryEvent, TierCounters, TierTelemetry,
 };
 use ocelli_core::Stored;
 use ocelli_render::{CpuRaster, RasterError, RasterGrid, RasterQuality, RasterResult};
@@ -93,6 +93,10 @@ pub struct Session {
     /// The last pressure band reported through the ring. F-034's caller
     /// keeps the band so a crossing is one event and not a stream.
     last_band: PressureBand,
+    /// Evictions and refusals since the previous pressure reading, F-034's
+    /// `TierCounters`. Every reading takes them, so a reading resets them
+    /// and the next one starts from zero.
+    counters: TierCounters,
     /// The stack's keys in stored order, parsed by `configure_stack`, so a
     /// residency query or a show can name any index and not only the
     /// selected one.
@@ -121,6 +125,7 @@ impl Session {
             snapshot_code: 0,
             frames: ImageCache::new(0),
             last_band: PressureBand::Low,
+            counters: TierCounters::default(),
             stack_keys: Vec::new(),
         }
     }
@@ -343,6 +348,7 @@ impl Session {
             }
         }
         self.emit(&events);
+        self.note_counters(&events);
         let pressure = self.frames.pressure();
         let changed = TelemetryEvent::BudgetChanged {
             tier: pressure.tier,
@@ -395,6 +401,7 @@ impl Session {
         let committed = CommittedFrame::new(meta.columns, meta.rows, self.stored_samples.clone());
         let events = self.frames.insert(key, ContentId(content), committed);
         self.emit(&events);
+        self.note_counters(&events);
         self.emit_band();
     }
 
@@ -438,10 +445,19 @@ impl Session {
     /// Show the cached frame under the stack key at `index` when it answers
     /// for `content` at `columns` by `rows`.
     ///
-    /// A match adopts the frame exactly as `commit_current_frame` does, with
-    /// generation 0. A mismatch is F-224's stale removal and leaves the
-    /// displayed frame unchanged. A miss changes nothing. Returns 1 when
-    /// the frame was shown and 0 otherwise.
+    /// `index` must be the viewport's selected one, the same rule
+    /// `commit_selected_frame` commits under, because the displayed frame is
+    /// the slice the state, the scroll bar and any measurement say it is. A
+    /// different index is the [`SessionError::Selection`] refusal with
+    /// nothing drawn and the loading flag as it was. A match adopts the
+    /// frame exactly as `commit_current_frame` does, with generation 0. A
+    /// mismatch is F-224's stale removal and leaves the displayed frame
+    /// unchanged. A miss changes nothing. Returns 1 when the frame was
+    /// shown and 0 on a miss, a stale entry or a wrong epoch.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::Selection`] when `index` is not the selected index.
     pub fn show_resident(
         &mut self,
         index: u32,
@@ -449,12 +465,15 @@ impl Session {
         content: u64,
         columns: u32,
         rows: u32,
-    ) -> u32 {
+    ) -> Result<u32, SessionError> {
         if epoch == 0 || epoch != self.stack_epoch {
-            return 0;
+            return Ok(0);
+        }
+        if self.viewport.scroll().index() != Some(index) {
+            return Err(SessionError::Selection);
         }
         let Some(key) = self.stack_key_at(index) else {
-            return 0;
+            return Ok(0);
         };
         let source = CommittedSource {
             content: ContentId(content),
@@ -491,9 +510,9 @@ impl Session {
         };
         if shown {
             self.adopt_cpu_source(0);
-            1
+            Ok(1)
         } else {
-            0
+            Ok(0)
         }
     }
 
@@ -574,19 +593,47 @@ impl Session {
         self.ring.push_with_seq(|seq| event.encode(seq));
     }
 
-    /// One pressure reading as F-034's event. The session keeps no per
-    /// reading counters, so evicted and refused are zero and entries is the
-    /// live count.
-    fn pressure_reading(&self) -> TelemetryEvent {
+    /// Fold the events one cache call returned into [`Self::counters`].
+    ///
+    /// F-034's `TierCounters::record` folds an `Admission`, which the
+    /// session never holds: `ImageCache` converts it into `CacheEvents`
+    /// first. The two arms mirror that fold, saturated the same way. A
+    /// displaced value and a released series are neither an eviction nor a
+    /// refusal, and a stale removal emits no event at all, so none of the
+    /// three is counted.
+    fn note_counters(&mut self, events: &CacheEvents) {
+        for event in events.events() {
+            match *event {
+                CacheEvent::Evicted { bytes, .. } => {
+                    self.counters.evicted = self.counters.evicted.saturating_add(1);
+                    self.counters.evicted_bytes = self
+                        .counters
+                        .evicted_bytes
+                        .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
+                }
+                CacheEvent::Refused { .. } => {
+                    self.counters.refused = self.counters.refused.saturating_add(1);
+                }
+                CacheEvent::Displaced { .. } | CacheEvent::Released { .. } => {}
+            }
+        }
+    }
+
+    /// One pressure reading as F-034's event. `evicted`, `evicted_bytes`
+    /// and `refused` are the counts since the previous reading, kept in
+    /// [`Self::counters`] and taken here, so this reading resets them and
+    /// the next one starts from zero. `entries` is the live count.
+    fn pressure_reading(&mut self) -> TelemetryEvent {
         let pressure = self.frames.pressure();
+        let counters = self.counters.take();
         TelemetryEvent::Pressure {
             tier: pressure.tier,
             telemetry: TierTelemetry {
                 pressure,
                 entries: u32::try_from(self.frames.len()).unwrap_or(u32::MAX),
-                evicted: 0,
-                evicted_bytes: 0,
-                refused: 0,
+                evicted: counters.evicted,
+                evicted_bytes: counters.evicted_bytes,
+                refused: counters.refused,
             },
         }
     }
@@ -1460,11 +1507,16 @@ pub(crate) mod bind {
         )
     }
 
-    /// 1 shown, 0 miss, stale or wrong epoch.
+    /// 1 shown, 0 on a miss, a stale entry, a wrong epoch or an index that
+    /// is not the selected one.
     #[wasm_bindgen(js_name = show_resident)]
     pub fn show_resident(index: u32, epoch: u32, content: u64, columns: u32, rows: u32) -> u32 {
-        with_session(|session| session.show_resident(index, epoch, content, columns, rows))
-            .unwrap_or(0)
+        with_session(|session| {
+            session
+                .show_resident(index, epoch, content, columns, rows)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
     }
 
     /// Release every cached frame of `series`. Returns the frame count.
@@ -2725,7 +2777,7 @@ mod tests {
         };
         use ocelli_core::Stored;
 
-        use super::{FrameMeta, Session};
+        use super::{FrameMeta, Session, SessionError};
         use super::{KIND_PRESENTED, command_bytes, fill, require_viewport, slot};
 
         /// One frame of the plan's fixtures: 1,048,576 bytes at 512 by 512.
@@ -3002,14 +3054,17 @@ mod tests {
 
         #[test]
         fn show_resident_displays_and_stale_refuses() {
-            // AC5. One-sample frames of 4 bytes against a 12-byte budget.
-            // Index 2 is displayed. A mismatched show of index 1 removes the
-            // entry, returns 0 and leaves index 2's samples displayed, and
-            // the removal drops used from 12 to 8, which crosses Critical to
-            // Elevated: 10 * 8 = 80 < 108 = 9 * 12, so one pressure event
-            // follows. A matching show puts index 1's samples in
-            // stored_samples and their little-endian bytes in last_frame,
-            // clears loading and draws.
+            // AC5 and D1. One-sample frames of 4 bytes against a 12-byte
+            // budget. Index 2 is displayed and selected. A show of index 1
+            // while index 2 is selected is the Selection refusal
+            // commit_selected_frame gives: nothing is drawn, the loading
+            // flag is as the commit left it and the entry stays. Scrolled
+            // to index 1, a mismatched show removes the entry, returns 0
+            // and draws nothing, and the removal drops used from 12 to 8,
+            // which crosses Critical to Elevated: 10 * 8 = 80 < 108 = 9 *
+            // 12, so one pressure event follows. A matching show puts
+            // index 1's samples in stored_samples and their little-endian
+            // bytes in last_frame, clears loading and draws.
             let keys: Vec<FrameKey> = (0..4).map(|instance| key(5, instance)).collect();
             let (mut session, epoch) = cached_session(&keys);
             with_budget(&mut session, 12);
@@ -3021,20 +3076,34 @@ mod tests {
             assert_eq!(session.frame_cache_pressure().used, 12);
             drain(&mut session);
 
-            // The stale show. The display is index 2's and stays so.
-            assert_eq!(session.show_resident(1, epoch, CONTENTS[1] ^ 1, 1, 1), 0);
+            // The unselected show. The display is index 2's and stays so,
+            // and the entry is kept for the show that follows.
+            assert_eq!(
+                session.show_resident(1, epoch, CONTENTS[1] ^ 1, 1, 1),
+                Err(SessionError::Selection)
+            );
             assert!(samples_are(session.stored_samples(), &[30.0]));
+            assert_eq!(session.frame_cache_pressure().used, 12);
+            assert!(session.frame_resident(1, epoch, CONTENTS[1], 1, 1));
+            assert_eq!(drain(&mut session).len(), 16);
+
+            // The selection is index 1 now. The stale show removes the
+            // entry and draws nothing.
+            scroll(&mut session, -1);
+            assert_eq!(
+                session.show_resident(1, epoch, CONTENTS[1] ^ 1, 1, 1),
+                Ok(0)
+            );
+            assert!(session.stored_samples().is_empty());
             assert_eq!(session.frame_cache_pressure().used, 8);
             assert_eq!(kinds(&drain(&mut session)), [KIND_PRESSURE]);
             assert!(!session.frame_resident(1, epoch, CONTENTS[1], 1, 1));
 
-            // Put the entry back and clear the displayed source, so the
-            // success path below is the thing that answers both.
-            scroll(&mut session, -1);
+            // Put the entry back, so the success path below is the thing
+            // that answers both. The selection is already index 1.
             commit_at(&mut session, 1, epoch, CONTENTS[1], 1, 1, &[20.0]);
-            scroll(&mut session, -1);
 
-            assert_eq!(session.show_resident(1, epoch, CONTENTS[1], 1, 1), 1);
+            assert_eq!(session.show_resident(1, epoch, CONTENTS[1], 1, 1), Ok(1));
             assert!(samples_are(session.stored_samples(), &[20.0]));
             assert_eq!(session.last_frame(), &20.0_f32.to_le_bytes());
             // FLAG_LOADING is bit 2, and the show cleared it.
@@ -3042,6 +3111,33 @@ mod tests {
             let drawn = session.draw_committed_mono();
             assert!(matches!(drawn, Ok(result) if result.wrote && result.extent == [1, 1]));
             assert_eq!(session.frame_cache_pressure().used, 12);
+        }
+
+        #[test]
+        fn show_resident_refuses_an_index_that_is_not_the_selection() {
+            // D1's reproduction from the review. Slice 1 is cached and the
+            // selection is slice 0 after the scroll back. A show of slice 1
+            // is the Selection refusal, draws nothing and leaves the
+            // loading flag as the scroll left it. The code before the fix
+            // returned 1 here, adopted slice 1's samples and cleared the
+            // loading flag while copy_state still reported slice 0.
+            let (mut session, epoch) = cached_session(&[key(5, 0), key(5, 1)]);
+            with_budget(&mut session, 8);
+            commit_at(&mut session, 0, epoch, CONTENTS[0], 1, 1, &[10.0]);
+            scroll(&mut session, 1);
+            commit_at(&mut session, 1, epoch, CONTENTS[1], 1, 1, &[20.0]);
+            scroll(&mut session, -1);
+            drain(&mut session);
+            assert_eq!(session.viewport().scroll().index(), Some(0));
+            assert_eq!(
+                session.show_resident(1, epoch, CONTENTS[1], 1, 1),
+                Err(SessionError::Selection)
+            );
+            assert!(session.stored_samples().is_empty());
+            // FLAG_LOADING is bit 2, and the scroll left it set.
+            assert_eq!(session.viewport().flags() & 2, 2);
+            assert!(session.frame_resident(1, epoch, CONTENTS[1], 1, 1));
+            assert_eq!(drain(&mut session).len(), 16);
         }
 
         #[test]
@@ -3060,7 +3156,7 @@ mod tests {
             assert!(session.stored_samples().is_empty());
             assert!(session.frame_resident(0, next, CONTENTS[0], 1, 1));
             assert!(!session.frame_resident(0, epoch, CONTENTS[0], 1, 1));
-            assert_eq!(session.show_resident(0, next, CONTENTS[0], 1, 1), 1);
+            assert_eq!(session.show_resident(0, next, CONTENTS[0], 1, 1), Ok(1));
             assert!(samples_are(session.stored_samples(), &[10.0]));
         }
 
@@ -3176,6 +3272,58 @@ mod tests {
         }
 
         #[test]
+        fn a_budget_change_that_crosses_a_band_reports_the_pressure_last() {
+            // S1. Two 1,048,576-byte frames of a 2,097,152-byte budget are
+            // Critical: 10 * 2,097,152 >= 9 * 2,097,152. set_frame_budget(0)
+            // evicts both, least recently used first, then one
+            // BudgetChanged, then the pressure the crossing to Low pushes,
+            // because 0 of 0 is Low. Removing the trailing band call after
+            // the budget change leaves this list at three events and goes
+            // red here.
+            let keys: Vec<FrameKey> = (0..2).map(|instance| key(5, instance)).collect();
+            let (mut session, epoch) = cached_session(&keys);
+            with_budget(&mut session, 2_097_152);
+            commit_flat(&mut session, 0, epoch, CONTENTS[0], 10.0);
+            scroll(&mut session, 1);
+            commit_flat(&mut session, 1, epoch, CONTENTS[1], 20.0);
+            drain(&mut session);
+
+            assert_eq!(session.set_frame_budget(0), 1);
+            let ring = drain(&mut session);
+            assert_eq!(
+                kinds(&ring),
+                [
+                    KIND_EVICTED,
+                    KIND_EVICTED,
+                    KIND_BUDGET_CHANGED,
+                    KIND_PRESSURE
+                ]
+            );
+            // The evictions are least recently used first: index 0's key,
+            // then index 1's, each at 1,048,576 bytes.
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 8), 0);
+            assert_eq!(read_u64(&ring, 16 + 16 + 16), frame_bytes(1));
+            let second = 16 + 48;
+            assert_eq!(super::read_u32(&ring, second + 16 + 8), 1);
+            assert_eq!(read_u64(&ring, second + 16 + 16), frame_bytes(1));
+            // The budget change: the decoded tier at 0, budget 0 at 4,
+            // evicted bytes at 12 and evicted entries at 20.
+            let third = 16 + 2 * 48;
+            assert_eq!(super::read_u32(&ring, third + 16), 1);
+            assert_eq!(read_u64(&ring, third + 16 + 4), 0);
+            assert_eq!(read_u64(&ring, third + 16 + 12), frame_bytes(2));
+            assert_eq!(super::read_u32(&ring, third + 16 + 20), 2);
+            // The pressure reading the crossing pushed: used 0 of 0, and
+            // the two evictions this change returned are its counts.
+            let fourth = 16 + 3 * 48;
+            assert_eq!(super::read_u32(&ring, fourth + 16), 1);
+            assert_eq!(read_u64(&ring, fourth + 16 + 4), 0);
+            assert_eq!(read_u64(&ring, fourth + 16 + 12), 0);
+            assert_eq!(super::read_u32(&ring, fourth + 16 + 24), 2);
+            assert_eq!(session.frame_cache_pressure().used, 0);
+        }
+
+        #[test]
         fn a_non_multiple_of_four_and_a_contentless_commit_are_not_cached() {
             // AC9. A commit whose length is not a multiple of 4 has no
             // stored samples and is displayed as today, not cached. A commit
@@ -3230,6 +3378,61 @@ mod tests {
             assert_eq!(kinds(&ring), [KIND_REFUSED]);
             assert_eq!(super::read_u32(&ring, 16 + 16 + 8), 1);
             assert_eq!(read_u64(&ring, 16 + 16 + 16), 8);
+
+            // D3. The refusal is counted for the next reading: refused 1 at
+            // payload offset 28, and no eviction at 24, because the insert
+            // was refused before anything left. Before the fix the reading
+            // reported constant zeros.
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 1);
+        }
+
+        #[test]
+        fn a_pressure_reading_carries_the_counts_since_the_previous_one() {
+            // D3. AC2's walk: budget 3,145,728 and four 512 by 512 commits.
+            // The second and the third commit push the Elevated and the
+            // Critical crossing readings, and the fourth evicts index 0's
+            // entry with no crossing of its own. A requested reading then
+            // reports evicted 1 at payload offset 24, and a second reading
+            // reports 0: the counts are F-034's TierCounters, taken at each
+            // pressure push. Before the fix both readings reported
+            // constant zeros.
+            let keys: Vec<FrameKey> = (0..4).map(|instance| key(5, instance)).collect();
+            let (mut session, epoch) = cached_session(&keys);
+            with_budget(&mut session, 3_145_728);
+            for (index, (content, sample)) in CONTENTS
+                .iter()
+                .zip([10.0_f32, 20.0, 30.0, 40.0])
+                .enumerate()
+            {
+                if index > 0 {
+                    scroll(&mut session, 1);
+                }
+                commit_flat(
+                    &mut session,
+                    u32::try_from(index).unwrap_or(0),
+                    epoch,
+                    *content,
+                    sample,
+                );
+            }
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE, KIND_PRESSURE, KIND_EVICTED]);
+
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 1);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
+
+            assert_eq!(session.request_frame_pressure(), 1);
+            let ring = drain(&mut session);
+            assert_eq!(kinds(&ring), [KIND_PRESSURE]);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 24), 0);
+            assert_eq!(super::read_u32(&ring, 16 + 16 + 28), 0);
         }
 
         #[test]

@@ -306,11 +306,14 @@ per animation frame.
 
 The wasm session keeps committed frames in a cache whose budget the caller
 sets, and the default is zero, which is off. `setFrameBudget(wasm, bytes)`
-moves it. A commit that carries a `content` id fills the cache, and
+moves it. A commit that carries a `content` id with its `stackIndex` and
+`stackEpoch` fills the cache, and a commit that carries a `content` id
+without both is refused with `InvalidValue` and commits nothing.
 `frameResident` and `showResident` read it back without the bytes crossing
 the boundary again. `releaseSeries` and `releaseStudy` empty it, one event
-per series through the ring. The displayed frame is outside the cache and
-stays on screen through a release.
+per series that held frames, and a series with nothing cached emits no
+event. The displayed frame is outside the cache and stays on screen through
+a release.
 
 In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
 

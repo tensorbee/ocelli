@@ -490,7 +490,17 @@ function frameCommitMeta(meta: unknown): FrameCommitMeta {
     content?: unknown;
   };
   const selection = record.stackIndex !== undefined || record.stackEpoch !== undefined;
-  const cached = selection && record.content !== undefined;
+  const positioned = record.stackIndex !== undefined && record.stackEpoch !== undefined;
+  // A content id without both of its stack positions would be accepted and
+  // then silently dropped, because only a stack commit fills the cache.
+  // F-230's rule for this key is a refusal, not a silent drop.
+  if (record.content !== undefined && !positioned) {
+    throw new OcelliError(
+      "InvalidValue",
+      "content needs both stackIndex and stackEpoch",
+    );
+  }
+  const cached = positioned && record.content !== undefined;
   return {
     viewport: u32(record.viewport, "viewport"),
     columns: u32(record.columns, "columns"),

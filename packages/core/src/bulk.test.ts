@@ -928,3 +928,97 @@ it("routes a contentless stack commit to commit_selected_frame as before", () =>
   expect(selected).toBe(1);
   expect(cached).toBe(0);
 });
+
+it("refuses a content id without both stack positions before any export call", () => {
+  // D2. A commit that carries content without both stackIndex and
+  // stackEpoch would be accepted and then silently dropped, because only
+  // a stack commit fills the cache. F-230's rule for the key is a refusal
+  // with InvalidValue before the allocation, so no export is called and
+  // the ticket is never taken.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let calls = 0;
+  const wasm = {
+    memory,
+    alloc() { calls += 1; return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { calls += 1; return 1; },
+    commit_selected_frame() { calls += 1; return 1; },
+    commit_cached_frame() { calls += 1; return 1; },
+  };
+  const sink = sessionBulkSink(wasm);
+  const bytes = new Uint8Array(4);
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        stackIndex: 1,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        stackEpoch: 4,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(calls).toBe(0);
+});
+
+it("validates a content id as a u64 before any export call", () => {
+  // S2. FrameCommitMeta.content's validation was unwatched: a value above
+  // the u64 bound or one that is not a bigint at all reached the export,
+  // where wasm-bindgen wraps or throws a TypeError instead of F-230's
+  // InvalidValue. Removing the upper bound or the validation turns this
+  // red.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let calls = 0;
+  const wasm = {
+    memory,
+    alloc() { calls += 1; return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { calls += 1; return 1; },
+    commit_selected_frame() { calls += 1; return 1; },
+    commit_cached_frame() { calls += 1; return 1; },
+  };
+  const sink = sessionBulkSink(wasm);
+  const bytes = new Uint8Array(4);
+  for (const content of [2n ** 64n, -1n, 1.5]) {
+    expect(
+      codeOf(() =>
+        writeFrame(wasm, sink, bytes, {
+          viewport: 1,
+          columns: 1,
+          rows: 1,
+          generation: 0,
+          stackIndex: 1,
+          stackEpoch: 4,
+          content,
+        }),
+      ),
+    ).toBe("InvalidValue");
+  }
+  expect(calls).toBe(0);
+});
