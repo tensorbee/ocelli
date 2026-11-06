@@ -1050,7 +1050,10 @@ the repair.
    `ci_floor_check.gate_commands`, which is comment-stripped and span-aware by
    construction, and the guard is its third caller now. That is the
    propagation failure again, the answer present in the repository and not
-   reaching the caller.
+   reaching the caller. F-232 made both mechanisms required, so the same
+   plant refuses today with the script-dropped message instead of printing
+   the old sentence, and `lint-policy.unsafe-gate-named-only-in-a-comment`
+   watches the new fragment.
 
 4. **`continue-on-error` was in the parsed tree and nothing read it.** The
    string occurred nowhere in `scripts/`, in this file or in the runbook.
@@ -1101,11 +1104,29 @@ transcribed in `lint_policy_check.py`, and there is a second copy in
 `Cargo.toml`'s `[workspace.lints.clippy]` carrying the same five rows at the
 same levels. That is not an oversight, it is the point: comparing the two
 copies is the whole job of the check, and a rule with one copy has nothing to
-be compared against. `unsafe_code = "deny"` is the declared exception: R5 is enforced
-by `scripts/unsafe_allowlist_check.py` over the whole tree instead, which is
-stronger for what R5 asks, because a per-file `#![allow(unsafe_code)]` would
-silence the lint and would not silence the script. The check requires one of
-the two and names which it found.
+be compared against.
+
+**`unsafe_code` stopped being a declared exception in F-232, and both
+mechanisms are required now.** `Cargo.toml` carries
+`[workspace.lints.rust] unsafe_code = "forbid"`, one level above the
+section's literal `deny` because an inner `allow` silences a deny and cannot
+silence a forbid, and F-232 measured the whole workspace clean under it, the
+lib, bin, test and example roots included, with no exception for the two
+allowed files because neither exists yet. The lint covers every target of
+every member. `scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate
+beside it because the lint does not reach the vendored packages or the
+trybuild files, which the script audits, and because the script was one
+string regex away from the blindness F-229 measured. The check refuses a
+table below `forbid` naming `forbid`, and refuses the script dropped from
+the `unsafe` gate even with the table present. Its scanner is a
+left-to-right tokenizer since F-232, not a strip-and-search: it reports
+`unsafe` only as a keyword token, refuses an unterminated literal or comment
+naming the file and line, and refuses an allow, an expect or a warn of
+`unsafe_code` in any tracked Rust file. The sequence for the first story
+that writes one of the two allowed files, recorded in the scanner's
+docstring, is to move the table to `deny`, add `#![forbid(unsafe_code)]` to
+every other crate root, put `#[allow(unsafe_code)]` on that one `mod`
+declaration, and teach this check the one exception.
 
 **Where that check gets its file list from, and the honest name for it is a
 RECONSTRUCTION.** The member set comes from `cargo metadata --no-deps`, because

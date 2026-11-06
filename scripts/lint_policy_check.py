@@ -254,15 +254,17 @@ All five spellings, and the ones nobody has thought of, are one code path.
 job pins 3.12. A document `tomllib` cannot parse is REFUSED here rather than
 read as an empty table, which is the direction the regexes had wrong.
 
-## The one departure, declared rather than discovered
+## The unsafe rule, both mechanisms since F-232
 
-`unsafe_code = "deny"` is NOT in `Cargo.toml`. HLD 27.2 R5 is enforced instead
-by `scripts/unsafe_allowlist_check.py` over the whole tree, in the `unsafe`
-gate and in the CI floor. That substitution is stronger than the lint for the
-thing R5 actually asks for, because a per-file `#![allow(unsafe_code)]` would
-silence the lint and would not silence the script. This check requires ONE of
-the two and names which one it found, so removing the script without adding the
-lint is refused.
+HLD 27.1's row is in `Cargo.toml` at `forbid`, one level above the section's
+literal `deny`: an inner `allow` silences a deny and cannot silence a
+forbid. `scripts/unsafe_allowlist_check.py` stays beside it in the `unsafe`
+gate. Neither alone is the rule. The table reaches every target of every
+workspace member and does not reach the vendored packages or the trybuild
+files, and the script reaches every tracked `.rs` file and was one string
+regex away from the blindness F-229 measured. This check requires BOTH: a
+table below `forbid` is refused naming `forbid`, and the script dropped
+from the `unsafe` gate is refused even with the table present.
 
 Usage: python3 scripts/lint_policy_check.py
 """
@@ -293,7 +295,11 @@ REQUIRED_CLIPPY = {
     "float_cmp": "deny",
     "indexing_slicing": "warn",
 }
-REQUIRED_RUST = {"unsafe_code": "deny"}
+# HLD 27.1 writes `deny`. F-232 records `forbid`, one level above it: an
+# inner `allow` silences a deny and cannot silence a forbid, and neither
+# allowed file of 27.2 R5 exists yet, so nothing needs the exception. The
+# sequence for the first one is in the scanner's docstring.
+REQUIRED_RUST = {"unsafe_code": "forbid"}
 
 # Group and blanket names no crate may allow. NAMES ONLY, so the declared
 # constant ratchet in scripts/guards/catalogue.py records the set that decides
@@ -1794,25 +1800,32 @@ def main() -> int:
                 f"and the group wins. Allow the single lint at the expression "
                 f"that needs it, with a reason.")
 
-    # The declared departure. One of the two mechanisms must be present.
+    # HLD 27.1's row and HLD 27.2 R5's script, and BOTH are required since
+    # F-232. The table reaches every target of every member and misses the
+    # vendored packages and the trybuild files. The script reaches every
+    # tracked `.rs` file and was one string regex away from the blindness
+    # F-229 measured. Dropping either half is refused on its own.
     lint_level = rust.get("unsafe_code")
+    if lint_level is None or STRENGTH.get(lint_level, 0) < STRENGTH["forbid"]:
+        found = f"'{lint_level}'" if lint_level is not None else "absent"
+        problems.append(
+            f"HLD 27.1's [workspace.lints.rust] carries `unsafe_code` at "
+            f"{found} and the level must be 'forbid'. An inner `allow` "
+            f"silences 'deny' and cannot silence a forbid, and F-232 "
+            f"measured the whole workspace clean under it, the lib, bin, "
+            f"test and example roots included. Declare "
+            f"`unsafe_code = \"forbid\"`.")
     script = (ROOT / "scripts" / "unsafe_allowlist_check.py").is_file()
     gate, gate_problem = _unsafe_gate_runs_the_script()
     if gate_problem:
         problems.append(gate_problem)
-    if lint_level is not None and STRENGTH.get(lint_level, 0) >= 2:
-        unsafe_by = f"[workspace.lints.rust] unsafe_code = \"{lint_level}\""
-    elif script and gate:
-        unsafe_by = ("scripts/unsafe_allowlist_check.py in the `unsafe` gate, "
-                     "which is the declared substitution")
-    else:
-        unsafe_by = ""
+    if not (script and gate):
         problems.append(
-            "HLD 27.1 denies `unsafe_code` and neither mechanism is present. "
-            "Either declare it in [workspace.lints.rust], or keep "
-            "scripts/unsafe_allowlist_check.py in the `unsafe` gate. One of "
-            "the two, and removing the script without adding the lint leaves "
-            "HLD 27.2 R5 enforced by nothing.")
+            "scripts/unsafe_allowlist_check.py must stay in the `unsafe` gate "
+            "beside the lint. The table does not reach the vendored packages "
+            "or the trybuild files, which the script audits, and the script "
+            "does not reach the member targets the table does. Removing "
+            "either one leaves half of HLD 27.2 R5 enforced by nothing.")
 
     # Every workspace MEMBER inherits the table. A member that stops is the
     # second way to the same place, and no lint level notices it. The members
@@ -1992,7 +2005,9 @@ def main() -> int:
           f"`include!`(s) followed, carry no inner "
           f"allow or expect of a denied lint or of a group holding one, and "
           f"none on a `mod` item, {len(configs)} cargo config(s) lower no "
-          f"denied lint through rustflags, unsafe_code denied by {unsafe_by}")
+          f"denied lint through rustflags, unsafe_code forbidden by the "
+          f"workspace table at forbid and enforced beside it by "
+          f"scripts/unsafe_allowlist_check.py in the `unsafe` gate")
     return 0
 
 
