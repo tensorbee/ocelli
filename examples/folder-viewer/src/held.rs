@@ -1475,12 +1475,13 @@ impl CacheHandle {
 
 /// The charge a claim makes room for before the frame is decoded.
 ///
-/// The sample bytes, the struct and the boxed value facts a grey frame
-/// carries. A unit text the file supplies is the one owned byte run not
-/// known before the decode, so it is charged only when the frame is stored.
+/// The sample bytes, the struct, the boxed value facts a grey frame carries
+/// and the longest unit text a file can name, so the charge when the frame
+/// is stored never exceeds this claim.
 fn frame_sample_cost(len: usize) -> usize {
     len.saturating_add(size_of::<HeldFrame>())
         .saturating_add(size_of::<crate::value::ValueFacts>())
+        .saturating_add(crate::value::UNIT_MAX_BYTES)
 }
 
 impl CacheState {

@@ -455,6 +455,25 @@ type MultiEnergyCase = (
 );
 
 #[test]
+fn value_unit_is_bounded_by_the_lo_length() -> Result<(), String> {
+    // PS3.5 Table 6.2-1: LO, the VR of Rescale Type (0028,1054), is "64
+    // chars maximum". A 64-letter Rescale Type is answered with that unit.
+    // A 65-letter one is longer than any Rescale Type or Units value can be,
+    // so the route refuses it `attribute`. Stored 5, slope 1, intercept 0.
+    let legal = "A".repeat(64);
+    let got = unit_case("MR", Some(&legal), None)?;
+    let want = five_with(&legal, "rescale-type");
+    if got != want {
+        return Err(format!("64 letters: got {got}, wanted {want}"));
+    }
+    let long = "A".repeat(65);
+    match unit_case("MR", Some(&long), None) {
+        Err(code) if code == "attribute" => Ok(()),
+        other => Err(format!("65 letters gave {other:?}")),
+    }
+}
+
+#[test]
 fn value_multi_energy_ct_has_no_assumed_unit() -> Result<(), String> {
     // PS3.3 C.8.2.1, Table C.8-3, CT Image Module. Rescale Type is "Required
     // if the Rescale Type is not HU (Hounsfield Units), or Multi-energy CT

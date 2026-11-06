@@ -10,8 +10,6 @@
 //! refuse a value, and the value is the same for every window, invert,
 //! rotation, flip, zoom and pan.
 
-use std::borrow::Cow;
-
 use dicom_core::Tag;
 use ocelli_core::{Stored, exact_f32_integer};
 use ocelli_dicom::{
@@ -30,6 +28,15 @@ use crate::preview::{
 const RESCALE_TYPE: Tag = Tag(0x0028, 0x1054);
 const PET_UNITS: Tag = Tag(0x0054, 0x1001);
 const MULTI_ENERGY: Tag = Tag(0x0018, 0x9361);
+/// The longest unit a file can name, in characters. PS3.5 Table 6.2-1: LO,
+/// the VR of Rescale Type, is "64 chars maximum", and CS, the VR of Units,
+/// is "16 bytes maximum" of the Default Character Repertoire.
+const UNIT_MAX_CHARS: usize = 64;
+/// The most bytes a unit of [`UNIT_MAX_CHARS`] can own once decoded into
+/// Rust's UTF-8, at most [`char::MAX_LEN_UTF8`] bytes per character. The
+/// pre-decode claim includes it, so a stored frame never charges more than
+/// its claim made room for.
+pub(crate) const UNIT_MAX_BYTES: usize = UNIT_MAX_CHARS * char::MAX_LEN_UTF8;
 /// Every integer up to `2^24` is exact in `f32`, which is what `Stored` holds.
 const EXACT_STORED_BITS: u8 = 24;
 
@@ -52,25 +59,52 @@ pub(crate) struct ValueFacts {
     pub(crate) modality: ModalityTransform,
     /// Stored padding range, PS3.3 C.7.5.1.1.2.
     padding: Option<PaddingRange>,
-    /// Unit token, such as `HU`. Borrowed when this module's rule names it,
-    /// owned when the file's Rescale Type or Units does.
-    unit: Cow<'static, str>,
+    /// Unit token, such as `HU`.
+    unit: UnitText,
     /// Which attribute named the unit.
     unit_source: &'static str,
 }
 
 impl ValueFacts {
-    /// The heap bytes these facts own: the boxed struct and an owned unit text.
+    /// The heap bytes these facts own: the boxed struct and a file's unit text.
     pub(crate) fn heap_bytes(&self) -> usize {
         size_of::<Self>().saturating_add(self.unit_capacity())
     }
 
-    /// The capacity of an owned unit text, and 0 for a borrowed one.
+    /// The bytes a file's unit text owns, and 0 for a rule's unit.
     pub(crate) fn unit_capacity(&self) -> usize {
         match &self.unit {
-            Cow::Borrowed(_) => 0,
-            Cow::Owned(text) => text.capacity(),
+            UnitText::Rule(_) => 0,
+            UnitText::File(text) => text.len(),
         }
+    }
+}
+
+/// A unit named by this module's rule, or by the file.
+///
+/// A file's text is a `Box<str>`, which owns exactly its length, at most
+/// [`UNIT_MAX_BYTES`].
+enum UnitText {
+    /// `HU` or `unspecified`, from the rule.
+    Rule(&'static str),
+    /// Rescale Type or Units as the file states it.
+    File(Box<str>),
+}
+
+impl UnitText {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Rule(text) => text,
+            Self::File(text) => text,
+        }
+    }
+
+    /// A file's unit, refused `attribute` past the longest LO value.
+    fn from_file(code: &str) -> Result<Self, PreviewError> {
+        if code.chars().count() > UNIT_MAX_CHARS {
+            return Err(PreviewError::Attribute);
+        }
+        Ok(Self::File(Box::from(code)))
     }
 }
 
@@ -110,7 +144,7 @@ pub(crate) fn value_facts(
         rescale_type.as_deref(),
         units.as_deref(),
         multi_energy.as_deref(),
-    );
+    )?;
     Ok(ValueFacts {
         modality: modality.clone(),
         padding,
@@ -135,16 +169,16 @@ fn modality_unit(
     rescale_type: Option<&str>,
     units: Option<&str>,
     multi_energy: Option<&str>,
-) -> (Cow<'static, str>, &'static str) {
-    match (rescale_type, modality, units) {
-        (_, Some("PT"), Some(code)) => (Cow::Owned(code.to_owned()), "units"),
-        (Some("US"), _, _) => (Cow::Borrowed("unspecified"), "rescale-type"),
-        (Some(code), _, _) => (Cow::Owned(code.to_owned()), "rescale-type"),
+) -> Result<(UnitText, &'static str), PreviewError> {
+    Ok(match (rescale_type, modality, units) {
+        (_, Some("PT"), Some(code)) => (UnitText::from_file(code)?, "units"),
+        (Some("US"), _, _) => (UnitText::Rule("unspecified"), "rescale-type"),
+        (Some(code), _, _) => (UnitText::from_file(code)?, "rescale-type"),
         (None, Some("CT"), _) if matches!(multi_energy, None | Some("NO")) => {
-            (Cow::Borrowed("HU"), "ct-default")
+            (UnitText::Rule("HU"), "ct-default")
         }
-        (None, _, _) => (Cow::Borrowed("unspecified"), "none"),
-    }
+        (None, _, _) => (UnitText::Rule("unspecified"), "none"),
+    })
 }
 
 /// Decode one frame and read the value at each point.
@@ -198,7 +232,7 @@ pub(crate) fn value_json(
     let mut out = String::from("{\"frame\":");
     out.push_str(&frame.to_string());
     out.push(',');
-    push_field(&mut out, "unit", &facts.unit, true);
+    push_field(&mut out, "unit", facts.unit.as_str(), true);
     push_field(&mut out, "unit_source", facts.unit_source, false);
     out.push_str(",\"points\":[");
     for (at, (column, row)) in cells.into_iter().enumerate() {
@@ -232,7 +266,10 @@ pub(crate) fn value_json(
             out.push_str(",\"padding\":false,\"value\":");
             out.push_str(&number);
             out.push_str(",\"text\":");
-            json_string(&mut out, &format!("{number} {unit}", unit = facts.unit));
+            json_string(
+                &mut out,
+                &format!("{number} {unit}", unit = facts.unit.as_str()),
+            );
         }
         out.push('}');
     }
@@ -484,20 +521,37 @@ mod tests {
     #[test]
     fn an_owned_unit_is_charged_and_a_rule_unit_is_not() -> Result<(), String> {
         // A unit the file names is an owned byte run the cache must charge.
-        // HU from the CT rule is a borrowed constant and owns no heap.
+        // HU from the CT rule is a constant and owns no heap.
         let modality = ModalityTransform::new(None, Some(1.0), Some(0.0))
             .map_err(|_| "identity rescale was refused".to_owned())?;
-        let facts = |unit: Cow<'static, str>| ValueFacts {
+        let facts = |unit: UnitText| ValueFacts {
             modality: modality.clone(),
             padding: None,
             unit,
             unit_source: "rescale-type",
         };
-        let owned = facts(Cow::Owned(String::with_capacity(40)));
+        let owned =
+            facts(UnitText::from_file(&"A".repeat(40)).map_err(|error| error.code().to_owned())?);
         if owned.heap_bytes() != size_of::<ValueFacts>() + 40 {
             return Err(format!("an owned unit charged {}", owned.heap_bytes()));
         }
-        let borrowed = facts(Cow::Borrowed("HU"));
+        // 64 characters is the LO limit of PS3.5 Table 6.2-1. U+10000 takes
+        // 4 bytes in UTF-8 (RFC 3629), so 64 of them own 256 bytes, which the
+        // claim's bound must still cover. A 65th character is refused.
+        let widest = facts(
+            UnitText::from_file(&"\u{10000}".repeat(64))
+                .map_err(|error| error.code().to_owned())?,
+        );
+        if widest.unit_capacity() != 256 || widest.unit_capacity() > UNIT_MAX_BYTES {
+            return Err(format!(
+                "a 64-character unit owned {} bytes against a bound of {UNIT_MAX_BYTES}",
+                widest.unit_capacity()
+            ));
+        }
+        if UnitText::from_file(&"\u{10000}".repeat(65)).is_ok() {
+            return Err("a 65-character unit was accepted".to_owned());
+        }
+        let borrowed = facts(UnitText::Rule("HU"));
         if borrowed.heap_bytes() != size_of::<ValueFacts>() {
             return Err(format!("a borrowed unit charged {}", borrowed.heap_bytes()));
         }

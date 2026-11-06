@@ -2680,6 +2680,96 @@ mod tests {
         Ok(())
     }
 
+    /// Slice 1 with a Rescale Type (0028,1054) of `len` letters `A`, placed
+    /// before VOI LUT Function (0028,1056) so the elements stay in order.
+    fn slice_one_with_rescale_type(len: u16) -> Result<Vec<u8>, String> {
+        let file = slice(1).ok_or("synthetic slice 1 was absent")?;
+        let marker = [0x28, 0x00, 0x56, 0x10, b'C', b'S'];
+        let at = file
+            .windows(marker.len())
+            .position(|window| window == marker)
+            .ok_or("slice 1 has no VOI LUT Function")?;
+        let mut value = vec![b'A'; usize::from(len)];
+        if !value.len().is_multiple_of(2) {
+            value.push(b' ');
+        }
+        let length = u16::try_from(value.len()).map_err(|_| "unit length")?;
+        let mut element = Vec::new();
+        element.extend_from_slice(&0x0028_u16.to_le_bytes());
+        element.extend_from_slice(&0x1054_u16.to_le_bytes());
+        element.extend_from_slice(b"LO");
+        element.extend_from_slice(&length.to_le_bytes());
+        element.extend(value);
+        let mut out = Vec::with_capacity(file.len() + element.len());
+        out.extend_from_slice(file.get(..at).ok_or("split outside the file")?);
+        out.extend(element);
+        out.extend_from_slice(file.get(at..).ok_or("split outside the file")?);
+        Ok(out)
+    }
+
+    #[test]
+    fn a_long_file_unit_does_not_evict_a_frame_being_read() -> Result<(), String> {
+        // PS3.5 Table 6.2-1: LO is 64 chars maximum, so a Rescale Type of 64
+        // letters is legal. Frame B owns those 64 bytes of unit text and
+        // frame A, from the CT rule, owns none, so B's charge is A's charge
+        // plus 64. The budget holds frame A, file B and frame B's charge
+        // less one byte. A claim that does not cover the unit fits without
+        // a steal, and the store then has to evict frame A while a reply is
+        // reading it. A claim that covers the unit reaches the steal first.
+        let mut file_a = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let mut file_b = slice_one_with_rescale_type(64)?;
+        file_a.shrink_to_fit();
+        file_b.shrink_to_fit();
+        let file_b_cap = file_b.capacity();
+        let probe = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let probe_id = probe
+            .insert_file(file_a.clone())
+            .ok_or("the probe file was refused")?;
+        let (probe_reply, _) = preview_held(&probe, probe_id, FrameRequest::default(), None);
+        if probe_reply.status != 200 {
+            return Err(format!(
+                "the probe preview status was {}",
+                probe_reply.status
+            ));
+        }
+        let frame_used = probe.pressure().used;
+        let budget = frame_used
+            .saturating_mul(2)
+            .saturating_add(64)
+            .saturating_add(file_b_cap)
+            .saturating_sub(1);
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let id_a = viewer.insert_file(file_a).ok_or("file A was refused")?;
+        let (first, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if first.status != 200 {
+            return Err(format!("preview A status was {}", first.status));
+        }
+        let reading = match viewer.preview_source(id_a, 0) {
+            PreviewSource::Hit(frame) => frame,
+            PreviewSource::Shared(_) | PreviewSource::Gone => {
+                return Err("frame A was not cached after its preview".to_owned());
+            }
+        };
+        let id_b = viewer.insert_file(file_b).ok_or("file B was refused")?;
+        let (second, _) = preview_held(&viewer, id_b, FrameRequest::default(), None);
+        if second.status != 200 {
+            return Err(format!("preview B status was {}", second.status));
+        }
+        let (again, _) = preview_held(&viewer, id_a, FrameRequest::default(), None);
+        if again.status != 200 || again.source != Some("held") {
+            return Err(format!(
+                "the frame being read answered {} from {:?}",
+                again.status, again.source
+            ));
+        }
+        drop(reading);
+        Ok(())
+    }
+
     #[test]
     fn a_pooled_server_posts_and_previews_on_two_workers() -> Result<(), String> {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
