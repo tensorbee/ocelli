@@ -181,11 +181,14 @@ only.
 | Imager Pixel Spacing only | refused, `UncalibratedSpacingOnly` | none |
 | neither | refused, `MissingPixelSpacing` | none |
 
-**The fourth row is the load-bearing one.** Imager Pixel Spacing is spacing at
-the detector plane. On a projection radiograph it differs from spacing in the
-image by the source-to-image magnification factor, typically 10 to 20 per cent,
-so substituting it produces a geometry that renders correctly and measures
-wrong. The caller decides.
+**The fourth row is the load-bearing one.** PS3.3 C.8.11.4: Imager Pixel
+Spacing is measured at the front plane of the detector housing and is never
+adjusted for geometric magnification. PS3.3 C.8.7.5's magnification factor
+relates it to the patient plane. Substituting it would give a geometry that
+renders correctly and measures in the detector plane. The caller decides.
+PS3.3 10.7.1.1 says only that an uncorrected Pixel Spacing has the same values
+as Imager Pixel Spacing and a corrected one differs, which the second and
+third rows record.
 
 Slice Thickness `(0018,0050)` and Spacing Between Slices `(0018,0088)` are
 retained as evidence and are never used as inter-frame spacing. Thickness is the

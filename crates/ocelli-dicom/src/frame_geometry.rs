@@ -263,10 +263,12 @@ impl FrameGeometry {
         let pixel_spacing = resolve(metadata, frame, PIXEL_MEASURES_SEQUENCE, PIXEL_SPACING)?;
 
         let imager_mm = imager_pixel_spacing(metadata.metadata())?;
-        // DICOM PS3.3 10.7.1.1. Imager Pixel Spacing is spacing at the
-        // detector plane. Substituting it for image spacing scales every
-        // measurement by the source-to-image magnification factor on an image
-        // that still renders correctly, so the caller decides rather than us.
+        // DICOM PS3.3 C.8.11.4. Imager Pixel Spacing is measured at the front
+        // plane of the detector housing and is never adjusted for geometric
+        // magnification. PS3.3 C.8.7.5's magnification factor relates it to
+        // the patient plane. Substituting it for Pixel Spacing would measure
+        // in the detector plane on an image that still renders correctly, so
+        // the caller decides rather than us.
         let Some(pixel_spacing) = pixel_spacing else {
             return Err(if imager_mm.is_some() {
                 FrameGeometryError::UncalibratedSpacingOnly

@@ -568,10 +568,10 @@ fn pixel_spacing_alone_is_reported_as_image_only() {
 
 #[test]
 fn imager_pixel_spacing_alone_is_refused_and_never_substituted() {
-    // DICOM PS3.3 10.7.1.1. Imager Pixel Spacing is spacing at the DETECTOR
-    // plane. On a projection radiograph it differs from spacing in the image by
-    // the source-to-image magnification factor, typically 10 to 20 per cent.
-    // Substituting it produces a geometry that renders and measures wrong, so
+    // DICOM PS3.3 C.8.11.4. Imager Pixel Spacing is measured at the front
+    // plane of the DETECTOR housing and is never adjusted for geometric
+    // magnification. PS3.3 C.8.7.5's magnification factor relates it to the
+    // patient plane. Substituting it would measure in the detector plane, so
     // the answer is a refusal and the caller decides.
     let mut metadata = legacy_instance_omitting(&["2.0", "0.5"], Some(PIXEL_SPACING));
     insert(

@@ -106,7 +106,8 @@ pub struct Calibration {
 ///
 /// One exception, PS3.3 10.7.1.1: a Pixel Spacing equal to the Imager
 /// Pixel Spacing has not been calibrated for geometric magnification, so
-/// the imager path decides. A factor gives
+/// the imager path decides once Pixel Spacing passes its own check. A
+/// factor gives
 /// [`CalibrationSource::ImagerSpacing`], the imager spacing divided by the
 /// factor. No factor gives [`CalibrationSource::Detector`], the raw imager
 /// spacing at the detector plane. A present factor that cannot be used
@@ -120,11 +121,16 @@ pub struct Calibration {
 /// non-finite half of the imager pair.
 /// [`SuvError::Unavailable`] when every source is absent, or a present
 /// magnitude is not strictly positive, or the imager pair is incomplete.
+/// On the equal branch both Pixel Spacing and the imager pair are checked,
+/// in that order.
 pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, SuvError> {
     if let Some(spacing) = request.pixel_spacing {
         if let Some(imager) = request.imager_spacing
             && same_pair(spacing, imager)
         {
+            // Pixel Spacing is the earlier present source, so its own check
+            // runs first and an invalid one is refused, not replaced.
+            accept(CalibrationSource::PixelSpacing, spacing, None)?;
             return detector_plane(imager, request.estimated_radiographic_magnification_factor);
         }
         return accept(CalibrationSource::PixelSpacing, spacing, None);
@@ -164,8 +170,9 @@ pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, Su
 }
 
 /// Both halves agree under [`ocelli_core::spacing_pair_agrees`], the one
-/// definition `ocelli-dicom`'s `ImagerAgrees` also uses. A validity check
-/// follows in [`accept`].
+/// definition `ocelli-dicom`'s `ImagerAgrees` also uses. This is not a
+/// validity check. On the equal branch [`accept`] checks Pixel Spacing and
+/// then the imager pair.
 fn same_pair(left: SpacingMm, right: SpacingMm) -> bool {
     ocelli_core::spacing_pair_agrees(left.row, left.column, right.row, right.column)
 }

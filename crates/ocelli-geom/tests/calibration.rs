@@ -170,6 +170,33 @@ fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
 }
 
 #[test]
+fn an_invalid_pixel_spacing_is_refused_beside_an_agreeing_imager_pair() {
+    // F-211 review pass 3, D1. A present Pixel Spacing that is not strictly
+    // positive is refused `Unavailable` and does not fall through (F-195).
+    // An Imager Pixel Spacing within the 1e-9 mm tolerance of it does not
+    // change that: 0\0 beside 5e-10\5e-10, with or without a factor, and
+    // -5e-10\-5e-10 beside 5e-10\5e-10, each differ by 5e-10 or 1e-9 mm and
+    // agree, and each is still refused.
+    let near = Some(pair(5.0e-10, 5.0e-10));
+    for (pixel, factor) in [
+        (pair(0.0, 0.0), None),
+        (pair(0.0, 0.0), Some(2.0)),
+        (pair(-5.0e-10, -5.0e-10), None),
+    ] {
+        let refused = select_calibration(CalibrationRequest {
+            pixel_spacing: Some(pixel),
+            imager_spacing: near,
+            estimated_radiographic_magnification_factor: factor,
+            ..empty()
+        });
+        assert!(
+            matches!(refused, Err(SuvError::Unavailable)),
+            "{pixel:?} with factor {factor:?}: {refused:?}"
+        );
+    }
+}
+
+#[test]
 fn an_equal_pair_is_equal_within_the_one_spacing_tolerance() {
     // F-211 review pass 2, S1. One definition of an equal pair,
     // `ocelli_core::spacing_pair_agrees`, the one `ocelli-dicom`'s

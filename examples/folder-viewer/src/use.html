@@ -668,7 +668,7 @@ match StackGeometry::derive(&amp;multi)?.shear() {
 }</code></pre>
     <p>A <code>Pt&lt;World&gt;</code> and a <code>Pt&lt;Index&gt;</code> are different types, so a transform cannot be handed a point from the wrong space. <code>World</code> is the LPS patient system in millimetres.</p>
     <p>Stack shear is measured from the geometry, never read from Gantry/Detector Tilt <code>(0018,1120)</code>, which is Type 3 and nominal. Non uniform frame spacing, non parallel frames and coincident frames are refused rather than averaged, because rendering them as uniform distorts geometry in a way no measurement tool flags.</p>
-    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated, so one is never substituted for the other. <code>ocelli_geom::select_calibration</code> names the source it used.</p>
+    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated. <code>ocelli_geom::select_calibration</code> names the source it used, so a measurement never reports one as the other.</p>
 <pre><code>use ocelli_geom::{select_calibration, CalibrationRequest, SpacingMm};
 
 let calibration = select_calibration(CalibrationRequest {

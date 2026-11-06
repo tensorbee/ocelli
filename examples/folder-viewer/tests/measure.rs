@@ -645,6 +645,17 @@ fn measure_calibration_provenance() -> Result<(), String> {
         "\"text\":\"0.6 mm at the detector\"",
         "within the tolerance",
     )?;
+    // F-211 review pass 3, D1. A Pixel Spacing of 0\0 is present and not
+    // usable, so it is refused even beside an Imager Pixel Spacing of
+    // 5E-10\5E-10, which agrees with it within the 1e-9 mm tolerance.
+    let zero_near = spaced(&[(PIXEL_SPACING, "0\\0"), (IMAGER_SPACING, "5E-10\\5E-10")])?;
+    expect_refusal(
+        &zero_near,
+        MeasureShape::Length,
+        &segment,
+        PreviewError::Calibration,
+        "zero Pixel Spacing beside an agreeing imager pair",
+    )?;
     for factor in ["two", "0", "-2"] {
         let file = spaced(&[
             (PIXEL_SPACING, equal),

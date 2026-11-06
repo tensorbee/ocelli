@@ -19,7 +19,7 @@ row here in the same hand.
 
 | File | Area | F-IDs |
 |------|------|-------|
-| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005, F-018 |
+| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces, and the one spacing equality | F-001, F-005, F-018, F-211 |
 | [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection, measurement, ultrasound direction and rectangular redaction | F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195 |
 | [calibration.md](calibration.md) | Spacing provenance, SUVlbm, SUVbsa, length ratio and contour volume | F-195 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
