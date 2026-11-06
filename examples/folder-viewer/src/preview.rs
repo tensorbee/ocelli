@@ -342,6 +342,9 @@ fn photometric_name(photometric: PhotometricInterpretation) -> &'static str {
         PhotometricInterpretation::YbrPartial422 => "YBR_PARTIAL_422",
         PhotometricInterpretation::YbrIct => "YBR_ICT",
         PhotometricInterpretation::YbrRct => "YBR_RCT",
+        // XYB is three samples, so this preview refuses it as not-monochrome
+        // before decode. The arm exists so the match stays exhaustive.
+        PhotometricInterpretation::Xyb => "XYB",
     }
 }
 

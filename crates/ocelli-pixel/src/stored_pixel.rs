@@ -52,6 +52,8 @@ pub enum PhotometricInterpretation {
     YbrIct,
     /// JPEG 2000 reversible colour transform evidence.
     YbrRct,
+    /// JPEG XL XYB evidence. PS3.3 C.7.6.3.1.2 gives no matrix, so the codec owns the conversion.
+    Xyb,
 }
 
 impl PhotometricInterpretation {
@@ -63,7 +65,8 @@ impl PhotometricInterpretation {
             | Self::YbrFull422
             | Self::YbrPartial422
             | Self::YbrIct
-            | Self::YbrRct => 3,
+            | Self::YbrRct
+            | Self::Xyb => 3,
         }
     }
 }

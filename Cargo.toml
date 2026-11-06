@@ -169,6 +169,13 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
 
+# F-229, deviation D-28. Direct pins because dicom-rs routes JPEG XL through
+# its inventory registry, which HLD section 21 says does not work on wasm.
+# Default features stay off so the pins gate does not see Rayon. `jxl-render`
+# is direct because `jxl-oxide` does not re-export `ImageBuffer`.
+jxl-oxide = { version = "=0.12.6", default-features = false }
+jxl-render = { version = "=0.12.4", default-features = false }
+
 # DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
 # are rayon and simd, and the gdcm feature is native-only. On wasm you want
 # default-features = false, then jpeg, rle, deflate and openjp2 selected

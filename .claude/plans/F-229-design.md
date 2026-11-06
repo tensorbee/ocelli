@@ -344,3 +344,19 @@ None open. Each is a lead decision under the operator's delegation of 2026-11-05
 - Q7, order against F-220. Answered: lead decision under the operator's delegation of 2026-11-05. After F-220 integrates, which is safe in either order because the shipped closure does not change (fact 3).
 - Q8, XYB. Answered: lead decision under the operator's delegation of 2026-11-05. A codec-owned `ocelli-pixel` variant, decision 10.
 - Q9, a panic in the dependency. Answered: lead decision under the operator's delegation of 2026-11-05. AC16 is the test, and a panic found there stops the story and goes to the operator with options, decision 12. This is a conditional escalation, not an open question today.
+
+### Operator answer after the robustness stop
+
+Given by the operator on 2026-11-05, after `malformed_jpegxl_never_panics` found that a bit-flipped `.111` codestream reaches an unconditional `expect("is_last not found")` at `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`, in the DHT branch of JPEG reconstruction, which under `panic = "abort"` ends the process.
+
+- **`.110` and `.112` ship. `.111` is reported unavailable.** JPEG XL JPEG Recompression is registered as a known syntax that is unavailable, with a reason naming the upstream defect, and no Ocelli path calls `reconstruct_jpeg` or any other `jxl-jbr` entry point. A `.111` frame is refused before any byte reaches `jxl-oxide`, the same way Deflated is unavailable today. ACs that required a `.111` decode are replaced by AC7b: a `.111` frame, intact or malformed, returns the unavailable refusal and never panics.
+- **The corruption scan is complete before the story ships.** `malformed_jpegxl_never_panics` runs every truncation and every fixed-seed bit flip over every `.110` and `.112` fixture, not stopping at the first panic, and must pass. A panic on any of them stops the story again.
+- **The upstream defect is filed** with jxl-oxide by the sprint lead as https://github.com/tirr-c/jxl-oxide/issues/512, and a later story turns `.111` on once a released version fixes it.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-2.md`, which found that the hand-written ICC pre-check read two fields differently from `jxl-oxide` and so still let a 29-byte input reach a 256 MiB allocation.
+
+- **The pre-check refuses on the ICC flag, not on a size.** Every codestream that declares an embedded ICC profile is refused anyway (AC13, `UnsupportedPixelFormat`), so the pre-check refuses as soon as it reads `want_icc`, with no size comparison.
+- **Prefer the library's own header parser.** If `jxl-image`'s `ImageHeader::parse` reads the header up to and including `want_icc` without allocating the profile, the pre-check calls it and the hand-written walker is deleted. `jxl-image` is then pinned exactly beside `jxl-oxide` and `jxl-render`, and D-28 names it. If it cannot be used without the allocation, the walker stays and a seeded differential test against `ImageHeader::parse` must show zero disagreements on whether `want_icc` is set.
+- **The pre-check fails closed.** Any header it cannot read to `want_icc`, a container box whose size runs past the input included, is refused before `jxl-oxide` sees a byte.

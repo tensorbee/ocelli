@@ -507,7 +507,8 @@ impl PresentationTransform {
             | PhotometricInterpretation::YbrFull422
             | PhotometricInterpretation::YbrPartial422
             | PhotometricInterpretation::YbrIct
-            | PhotometricInterpretation::YbrRct => {
+            | PhotometricInterpretation::YbrRct
+            | PhotometricInterpretation::Xyb => {
                 return Err(PixelError::PresentationLutNotApplicable);
             }
         };
