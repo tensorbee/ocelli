@@ -688,9 +688,14 @@ impl<V: Budgeted> ImageCache<V> {
         let Some(held) = entry else {
             return FrameLookup::Miss;
         };
-        let bytes = held.bytes();
-        if !matches(held) {
-            self.decoded.remove(key);
+        let stale = !matches(held);
+        // The reference is not used past this line, so on the stale path the
+        // map is free to take back. The bytes reported are those of the
+        // entry the removal actually returned. The reference that escapes on
+        // the hit path is taken by a second read, because a loan that may
+        // escape into the return cannot be the one the removal ended.
+        if stale {
+            let bytes = self.decoded.remove(key).map_or(0, |h| h.bytes());
             return FrameLookup::Stale { bytes };
         }
         match self.decoded.get(key) {

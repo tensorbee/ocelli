@@ -414,7 +414,7 @@ if (showResident(session, slot)) {
 }</code></pre>
 
     <h3 id="js-dicomweb"><span class="num">5.6</span>DICOMweb</h3>
-    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes five options.</p>
+    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes six options.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Option</th><th>Type</th></tr></thead>
       <tbody>
@@ -423,6 +423,7 @@ if (showResident(session, slot)) {
         <tr><td><code>fetch</code></td><td><code>typeof fetch</code>, so authentication stays yours</td></tr>
         <tr><td><code>wasm</code></td><td><code>WasmMemory</code>, an object with <code>memory</code></td></tr>
         <tr><td><code>sink</code></td><td><code>DicomwebResponseSink</code>, with <code>alloc(len)</code> and <code>commit_dicomweb_response(ptr, len, kind)</code></td></tr>
+        <tr><td><code>cache</code></td><td><code>DicomwebCacheMode</code>, optional, the fetch cache mode of every request. <code>"no-cache"</code> by default, which revalidates a stored response with the server before using it. <code>"no-store"</code>, <code>"reload"</code> and <code>"default"</code> are accepted, and <code>"default"</code> opts in to the browser's heuristic freshness. Any other value, <code>"force-cache"</code> and <code>"only-if-cached"</code> among them, is refused at construction with <code>DicomwebError</code> code <code>InvalidRequest</code></td></tr>
       </tbody>
     </table></div>
     <p>Each method validates its UIDs, fetches with the right <code>Accept</code> header, checks the content type and copies the body into memory once. It resolves to nothing. The body reaches you through the sink, with a <code>kind</code> object whose <code>type</code> is <code>qido-json</code>, <code>wado-uri-part10</code>, <code>wado-rs-instances</code> or <code>wado-rs-frames</code>.</p>

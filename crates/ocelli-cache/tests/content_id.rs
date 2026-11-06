@@ -29,8 +29,8 @@ fn fixture_content_id_values() {
     );
 
     // The same buffer with its last byte 4 instead of 3 changes one fold
-    // step, and the state cannot return to a previous value because the
-    // prime is odd. 0x49e8b750ff1cd5a4, hand-computed the same way.
+    // step, and two states that diverge at one position stay distinct under
+    // the same later bytes. 0x49e8b750ff1cd5a4, hand-computed the same way.
     assert_eq!(
         ContentId::of(b"1.2.3", b"1.2.840.10008.1.2.1", &[0, 1, 2, 4]).0,
         0x49e8_b750_ff1c_d5a4,
