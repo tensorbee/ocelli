@@ -23,7 +23,7 @@
 //! F-211 adds [`region_contains`] and [`region_bounds`]. A sample belongs
 //! to a region when its centre, the index point, is inside or on the
 //! boundary, and the polygon rule is the F-085 rule of `ocelli-seg`.
-//! [`polygon_crosses_itself`] finds a proper crossing of two edges.
+//! [`polygon_crosses_itself`] finds where a ring crosses or touches itself.
 
 #![cfg_attr(not(test), no_std)]
 

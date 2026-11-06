@@ -656,6 +656,26 @@ fn measure_calibration_provenance() -> Result<(), String> {
         PreviewError::Calibration,
         "zero Pixel Spacing beside an agreeing imager pair",
     )?;
+    // F-211 review pass 4, D1. Imager Pixel Spacing alone with no factor is
+    // the detector row, and a pair it cannot use refuses rather than being
+    // measured or read as absent: zero and negative are not strictly
+    // positive (C.8.11.4 gives a physical distance), `x\y` is not a Decimal
+    // String pair, and one value is not a pair.
+    for (name, imager) in [
+        ("zero", "0\\0"),
+        ("negative", "-0.2\\-0.2"),
+        ("unparseable", "x\\y"),
+        ("one value", "0.2"),
+    ] {
+        let file = spaced(&[(IMAGER_SPACING, imager)])?;
+        expect_refusal(
+            &file,
+            MeasureShape::Length,
+            &segment,
+            PreviewError::Calibration,
+            &format!("Imager Pixel Spacing alone, {name}"),
+        )?;
+    }
     for factor in ["two", "0", "-2"] {
         let file = spaced(&[
             (PIXEL_SPACING, equal),

@@ -588,3 +588,27 @@ fn geom(error: GeomError) -> PreviewError {
         GeomError::Frame => PreviewError::Point,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F-211 review pass 4, D1. A Decimal String never parses to a
+    /// non-finite number, so the detector row's finiteness check is driven
+    /// here with the inputs directly. An infinite half of an Imager Pixel
+    /// Spacing alone is not a distance and refuses.
+    #[test]
+    fn a_non_finite_imager_pair_alone_refuses() {
+        for (row, column) in [(f64::INFINITY, 0.2), (0.2, f64::INFINITY)] {
+            let inputs = CalibrationInputs {
+                pixel_spacing: SpacingInput::Absent,
+                imager_spacing: SpacingInput::Pair { row, column },
+                magnification: FactorInput::Absent,
+            };
+            assert!(
+                matches!(choose_spacing(&inputs), Err(PreviewError::Calibration)),
+                "row {row} column {column}"
+            );
+        }
+    }
+}

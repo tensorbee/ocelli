@@ -177,21 +177,35 @@ fn an_invalid_pixel_spacing_is_refused_beside_an_agreeing_imager_pair() {
     // change that: 0\0 beside 5e-10\5e-10, with or without a factor, and
     // -5e-10\-5e-10 beside 5e-10\5e-10, each differ by 5e-10 or 1e-9 mm and
     // agree, and each is still refused.
-    let near = Some(pair(5.0e-10, 5.0e-10));
-    for (pixel, factor) in [
-        (pair(0.0, 0.0), None),
-        (pair(0.0, 0.0), Some(2.0)),
-        (pair(-5.0e-10, -5.0e-10), None),
+    //
+    // F-211 review pass 4, S1. The order is Pixel Spacing first, then the
+    // imager path, and both halves of each pair are checked:
+    // - 0\0 with a NaN factor is Pixel Spacing's `Unavailable`, not the
+    //   factor's `Frame`, because Pixel Spacing is checked first.
+    // - 0\0.2 beside 5e-10\0.2, and 0.2\0 beside 0.2\5e-10, agree within
+    //   the tolerance and have one invalid half, which refuses.
+    // - A valid 5e-10\5e-10 beside an agreeing imager pair of 0\0 takes the
+    //   imager path, whose pair is not strictly positive, so it refuses and
+    //   does not fall back to Pixel Spacing.
+    let near = pair(5.0e-10, 5.0e-10);
+    for (pixel, imager, factor) in [
+        (pair(0.0, 0.0), near, None),
+        (pair(0.0, 0.0), near, Some(2.0)),
+        (pair(-5.0e-10, -5.0e-10), near, None),
+        (pair(0.0, 0.0), near, Some(f64::NAN)),
+        (pair(0.0, 0.2), pair(5.0e-10, 0.2), None),
+        (pair(0.2, 0.0), pair(0.2, 5.0e-10), None),
+        (near, pair(0.0, 0.0), None),
     ] {
         let refused = select_calibration(CalibrationRequest {
             pixel_spacing: Some(pixel),
-            imager_spacing: near,
+            imager_spacing: Some(imager),
             estimated_radiographic_magnification_factor: factor,
             ..empty()
         });
         assert!(
             matches!(refused, Err(SuvError::Unavailable)),
-            "{pixel:?} with factor {factor:?}: {refused:?}"
+            "{pixel:?} beside {imager:?} with factor {factor:?}: {refused:?}"
         );
     }
 }

@@ -186,7 +186,7 @@ Spacing is measured at the front plane of the detector housing and is never
 adjusted for geometric magnification. PS3.3 C.8.7.5's magnification factor
 relates it to the patient plane. Substituting it would give a geometry that
 renders correctly and measures in the detector plane. The caller decides.
-PS3.3 10.7.1.1 says only that an uncorrected Pixel Spacing has the same values
+PS3.3 10.7.1.1 says that an uncorrected Pixel Spacing has the same values
 as Imager Pixel Spacing and a corrected one differs, which the second and
 third rows record.
 
