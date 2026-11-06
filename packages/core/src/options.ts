@@ -23,6 +23,7 @@ export const DICOMWEB_CLIENT_OPTION_KEYS = [
   "fetch",
   "wasm",
   "sink",
+  "cache",
 ] as const satisfies readonly (keyof DicomwebClientOptions)[];
 
 type MissingDicomwebClient = Exclude<
@@ -82,6 +83,7 @@ export const WADO_INSTANCE_REQUEST_KEYS = [
   "seriesUid",
   "instanceUid",
   "post",
+  "cache",
 ] as const satisfies readonly (keyof WadoInstanceRequest)[];
 
 type MissingWadoInstance = Exclude<

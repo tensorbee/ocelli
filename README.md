@@ -345,7 +345,15 @@ export function Viewer() {
 
 `DicomwebClient` in `@ocelli/core` is the QIDO-RS, WADO-RS and WADO-URI client.
 Construct it with a studies service URL, a WADO-URI URL, `fetch`, wasm memory
-and a response sink. A transport failure keeps a status code. It does not keep
+and a response sink. Every request is sent with the fetch cache mode from the
+optional `cache` option. The default is `"no-cache"`, which revalidates a
+stored response with the server before using it, so a re-processed object is
+never served from the browser's HTTP cache without asking. `"no-store"`,
+`"reload"` and `"default"` are accepted. `"force-cache"` and
+`"only-if-cached"` can serve a stored response that is stale, and are refused
+at construction with `DicomwebError` code `InvalidRequest`. A proxy or a
+service worker between the browser and the server is outside what a cache
+mode controls. A transport failure keeps a status code. It does not keep
 the URL, the headers or the body. An option the client does not know is refused
 with `OcelliError` code `UnknownOption`, which names it.
 

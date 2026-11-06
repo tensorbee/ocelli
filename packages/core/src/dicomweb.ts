@@ -39,12 +39,33 @@ export interface QidoSearchOptions {
   readonly signal?: AbortSignal;
 }
 
+/** The fetch cache modes a `DicomwebClient` accepts. */
+export type DicomwebCacheMode = "no-cache" | "no-store" | "reload" | "default";
+
+const CACHE_MODES: readonly DicomwebCacheMode[] = [
+  "no-cache",
+  "no-store",
+  "reload",
+  "default",
+];
+
 export interface DicomwebClientOptions {
   readonly studiesServiceUrl: string;
   readonly wadoUriUrl: string;
   readonly fetch: typeof fetch;
   readonly wasm: WasmMemory;
   readonly sink: DicomwebResponseSink;
+  /**
+   * The cache mode of every request. `"no-cache"` revalidates a stored
+   * response with the server before using it, and is the default, so a
+   * re-processed object is never served from the browser's HTTP cache
+   * without asking. `"default"` is an explicit opt-in to the browser's
+   * heuristic freshness. `"force-cache"` and `"only-if-cached"` can serve a
+   * stored response that is stale, and are refused at construction. A proxy
+   * or a service worker between the browser and the server is outside what
+   * a cache mode controls.
+   */
+  readonly cache?: DicomwebCacheMode;
 }
 
 interface ParsedContentType {
@@ -59,14 +80,19 @@ export class DicomwebClient {
   readonly #fetch: typeof fetch;
   readonly #wasm: WasmMemory;
   readonly #sink: DicomwebResponseSink;
+  readonly #cache: DicomwebCacheMode;
 
   constructor(options: DicomwebClientOptions) {
     refuseUnknownOptions("DicomwebClientOptions", options, DICOMWEB_CLIENT_OPTION_KEYS);
+    if (options.cache !== undefined && !validCacheMode(options.cache)) {
+      throw new DicomwebError("InvalidRequest");
+    }
     this.#studiesServiceUrl = safeUrl(options.studiesServiceUrl);
     this.#wadoUriUrl = safeUrl(options.wadoUriUrl);
     this.#fetch = options.fetch;
     this.#wasm = options.wasm;
     this.#sink = options.sink;
+    this.#cache = options.cache ?? "no-cache";
   }
 
   async searchStudies(options: QidoSearchOptions = {}): Promise<void> {
@@ -261,6 +287,7 @@ export class DicomwebClient {
       response = await this.#fetch(url, {
         method: "GET",
         headers: { Accept: accept },
+        cache: this.#cache,
         ...(signal === undefined ? {} : { signal }),
       });
     } catch (error: unknown) {
@@ -352,6 +379,10 @@ function safeUrl(value: string): URL {
 
 function validUint(value: number | undefined): boolean {
   return value === undefined || (Number.isSafeInteger(value) && value >= 0);
+}
+
+function validCacheMode(value: string): boolean {
+  return CACHE_MODES.some((mode) => mode === value);
 }
 
 function validDicomUid(value: string): boolean {

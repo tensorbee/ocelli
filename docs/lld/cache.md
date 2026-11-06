@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-224
+**Last updated:** 2026-11-06
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -26,6 +26,9 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 | `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
 | `HandoffError` | F-035. `Length` when the buffer length is not `HandoffMeta.bytes` |
+| `ContentId` | F-224. FNV-1a 64 over the length-prefixed SOP Instance UID, transfer syntax UID and encoded bytes |
+| `FrameSource` | F-224. What a lookup presents: the content id, the description and the plane the caller holds |
+| `FrameLookup` | F-224. `Hit`, `Miss`, or `Stale` with the sample length of the frame it removed |
 
 ## What `bytes` means, which is the promise the budget keeps
 
@@ -159,7 +162,8 @@ dependency here: this crate never sees a texture, only its size.
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
 first because `Lru` releases the previous value before eviction begins, then
 the evictions in least recently used order. `release_series` adds `Released`.
-**The four variants are never collapsed.**
+**The four variants are never collapsed.** F-224 adds the content id an
+insert carries and the validity check in `get`. See Frame identity below.
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
 1, 2 and 3 for evicted, displaced and refused and kind 7 for a released
@@ -203,6 +207,45 @@ The shell side of the same hop is `packages/core/src/bulk.ts`, which is one
 of the two files allowed to view wasm linear memory. F-101's `Session` in
 `ocelli-wasm` is the live owner of one outstanding allocation. A commit
 releases that allocation on success and on refusal.
+
+## Frame identity, F-224
+
+A held frame carries the identity of the bytes it was decoded from.
+`ContentId` is FNV-1a 64 over the length-prefixed SOP Instance UID, the
+transfer syntax UID and the encoded bytes, in that order, each length a
+little-endian `u64`. The UID is in the input because WADO-RS frame retrieval
+returns pixel bytes with no UID in them, and the transfer syntax because the
+same bytes decode differently under two syntaxes. The length prefixes make
+the field boundaries unambiguous. The prime is odd, so every fold step is a
+bijection of `u64` and a change confined to one byte position always changes
+the value. The draft's reference vectors are pinned over the private fold in
+`image.rs`, because `ContentId::of` always adds the prefixes, and the empty
+input of three zero lengths is 24 zero bytes hashing to 0x81d23fd7003c2305.
+
+`ImageCache::insert` takes the content id beside the key. The `Lru`'s value
+is a private `HeldFrame` of that id and the frame, and its `Budgeted::bytes`
+is the frame's own byte count, so admitted sizes and every event payload are
+what they were. `FrameKey`, `HandoffMeta` and the encoded event are
+unchanged.
+
+`ImageCache::get` takes a `FrameSource` of the content id, the
+`StoredPixelDescription` and the `ImagePlane` the caller now holds, and
+answers `FrameLookup`. The description and the plane are compared exactly,
+not hashed, because a re-process can correct Pixel Spacing or Image Position
+and keep both the UID and the pixel bytes. A hit is the frame itself and
+makes it the most recently used. A frame held under the key from other bytes
+or other metadata is removed and reported as `Stale` with the sample length
+it was admitted at, so a caller can count what left. The removal is explicit
+and emits no event, and it is not an `Admission`, so `TierCounters` has
+nothing to record and cannot count it as an eviction. A second identical
+stale lookup is a miss, so the slot holds at most one version.
+
+What the decoded tier cannot know: a lookup by slot without fresh bytes or a
+fresh validator cannot detect that the source changed. The decoded tier
+saves a decode, never a fetch. Freshness of the fetch is the transport's
+job, which is `docs/lld/dicomweb.md`'s cache mode. A re-process that changes
+neither the UID, the transfer syntax, the encoded bytes, the description nor
+the plane produces the same frame and is not stale.
 
 ## The volume cache, F-033
 
