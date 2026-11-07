@@ -71,6 +71,10 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
 
+## Pulled forward from S47
+
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 waits, because it depends on F-231, which is not integrated. Their backlog rows keep sprint S47 until they integrate.
+
 ## Questions for the operator
 
 - **Non-finite F32 samples in the pyramid, before F-120.** F-119's plan does
