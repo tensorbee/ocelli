@@ -922,6 +922,11 @@ const GONE = "the viewer process at this address is not answering. Run " + RELEA
 const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run " + RELEASE_COMMAND + " again.";
 const DEBUG_STATUS = "This is the slow debug build. Run " + RELEASE_COMMAND + ".";
 const FILE_GONE = "the file is no longer held by this process";
+// Most ids one /forget names. The process refuses a longer list.
+const FORGET_LINES = 65536;
+// Most ids one pagehide beacon carries. An id is at most 33 characters and a
+// line feed, so a beacon is at most 57,800 bytes, under Chromium's 64 KiB.
+const BEACON_IDS = 1700;
 const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 const GREY_WORD = new Uint32Array(256);
 for (let greyIndex = 0; greyIndex < 256; greyIndex += 1) {
@@ -982,6 +987,10 @@ const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
 const filePosts = new WeakMap();
+// The ids the process gave the current open's files, and those files. Both
+// are replaced on every open, after the previous open's ids are forgotten.
+let openIds = new Set();
+let openFiles = new WeakSet();
 const posting = new Map();
 const canvasBuffers = new WeakMap();
 const thumbBitmaps = new Map();
@@ -1112,6 +1121,12 @@ folderInput.addEventListener("change", () => {
   readFolder(files);
 });
 document.getElementById("source-synthetic").addEventListener("click", openSynthetic);
+// Leaving the page forgets the open's ids, in beacons a closing page still sends.
+window.addEventListener("pagehide", () => {
+  const ids = Array.from(openIds);
+  openIds = new Set();
+  forgetIds(ids, true);
+});
 document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
 for (const button of document.querySelectorAll("[data-open]")) {
   button.addEventListener("click", () => {
@@ -1375,8 +1390,43 @@ async function noteBuild() {
   } catch {}
 }
 
+// Tell the process to drop these ids, with a fetch while the page stays and
+// with beacons as it is left. A failed forget is not retried, because the
+// process budget still bounds what it holds.
+function forgetIds(ids, beacon) {
+  const chunk = beacon ? BEACON_IDS : FORGET_LINES;
+  for (let at = 0; at < ids.length; at += chunk) {
+    const body = ids.slice(at, at + chunk).join("\n");
+    if (beacon) {
+      try { navigator.sendBeacon("/forget", body); } catch {}
+    } else {
+      fetch("/forget", { method: "POST", body }).then((response) => response.arrayBuffer()).catch(() => {});
+    }
+  }
+}
+
+// A new open. The previous open's ids are forgotten, and from here on only
+// this open's files are posted.
+function beginOpen(files) {
+  const left = Array.from(openIds);
+  openIds = new Set();
+  openFiles = new WeakSet(files);
+  forgetIds(left, false);
+}
+
+// Keep an id the process gave a file of the open `ids` belongs to. An id that
+// arrives after another open began is forgotten at once.
+function keepId(ids, id) {
+  if (!id) return;
+  if (ids === openIds) ids.add(id);
+  else forgetIds([id], false);
+}
+
 async function ensureFile(file) {
   if (filePosts.has(file)) return filePosts.get(file);
+  // A file of an open the page has left is not posted again, so a late 410
+  // for it cannot put back what the forget removed.
+  if (!openFiles.has(file)) throw abortError();
   const pending = posting.get(file);
   if (pending) return pending;
   const job = postFile(file).finally(() => {
@@ -1387,6 +1437,7 @@ async function ensureFile(file) {
 }
 
 async function postFile(file) {
+  const ids = openIds;
   const response = await fetch("/file", { method: "POST", body: file });
   if (!response.ok) {
     const message = await response.text();
@@ -1398,6 +1449,8 @@ async function postFile(file) {
     return "";
   }
   const id = response.headers.get("X-Ocelli-File") || "";
+  keepId(ids, id);
+  if (ids !== openIds) throw abortError();
   filePosts.set(file, id);
   return id;
 }
@@ -1580,6 +1633,8 @@ async function readFolder(fileList) {
   thumbGeneration += 1;
   resetViewports();
   const files = Array.from(fileList);
+  beginOpen(files);
+  const opened = openIds;
   let cursor = 0;
   let skipped = 0;
   let failed = 0;
@@ -1604,7 +1659,11 @@ async function readFolder(fileList) {
         failed += 1;
         continue;
       }
-      if (generation !== currentGeneration) return;
+      if (generation !== currentGeneration) {
+        // Posted for an open that has been left, so forgotten at once.
+        keepId(opened, response.headers.get("X-Ocelli-File") || "");
+        return;
+      }
       if (!response.ok) {
         if (response.headers.get("X-Ocelli-Error") === "not-part10") skipped += 1;
         else if (response.headers.get("X-Ocelli-Error") === "body") oversized += 1;
@@ -1615,6 +1674,7 @@ async function readFolder(fileList) {
         const info = await response.json();
         if (response.headers.get("X-Ocelli-Held") === "0") filePosts.set(file, "");
         else filePosts.set(file, response.headers.get("X-Ocelli-File") || "");
+        keepId(opened, response.headers.get("X-Ocelli-File") || "");
         found.push({ file, info });
       } catch {
         failed += 1;

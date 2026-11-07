@@ -65,7 +65,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs and link.mjs (F-208, F-209)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs and forget.mjs (F-208, F-209, F-226)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -158,7 +158,10 @@ run_gate() {
     # synthetic study, measured in headless Chromium through tools/bench's
     # pinned Playwright. Then F-208's pointer readout check: a layout
     # change, a window resize, a zoom and a tile toggle with the pointer
-    # still each hide the readout, and a move shows it again. Chained on
+    # still each hide the readout, and a move shows it again. F-209's
+    # reference line check follows, then F-226's forget check: the process
+    # forgets the folder the page left, a late reply does not post the old
+    # file again, and leaving the page forgets the folder open. Chained on
     # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
     # the viewer, so it is outside the floor. The CI step that runs it is the
     # `viewer-browser` job, which installs both.
@@ -170,7 +173,8 @@ run_gate() {
                  fi
                  node examples/folder-viewer/tests/browser/aspect.mjs &&
                  node examples/folder-viewer/tests/browser/readout.mjs &&
-                 node examples/folder-viewer/tests/browser/link.mjs ;;
+                 node examples/folder-viewer/tests/browser/link.mjs &&
+                 node examples/folder-viewer/tests/browser/forget.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&

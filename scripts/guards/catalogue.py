@@ -763,6 +763,22 @@ def _link_check_accepts_a_stale_line(box: Sandbox) -> None:
     )
 
 
+def _forget_check_accepts_the_left_folder(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/forget.mjs",
+        "    if (counted !== left.bFiles) {",
+        "    if (false) {",
+    )
+
+
+def _forget_check_accepts_a_late_post(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/forget.mjs",
+        "    if (late.reposts !== 0) {",
+        "    if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13444,6 +13460,70 @@ GUARDS: tuple[Guard, ...] = (
               "build of the viewer, which a disposable sandbox does not have, "
               "so it is watched by the `viewer-browser` gate and its CI job. "
               "The nothing-shown branch has no probe.",
+    ),
+    Guard(
+        id="viewer-browser.forget",
+        file="examples/folder-viewer/tests/browser/forget.mjs",
+        gate="viewer-browser",
+        spec="F-226 design AC13 to AC15, the folder viewer forgets the "
+             "folder the page left",
+        refuses="A second open after which `GET /held` still counts files or "
+                "frames of the folder left, an id of that folder that does not "
+                "answer 410, a late preview of it that is not 410 or that is "
+                "followed by a post of its file, a `pagehide` that sends a "
+                "beacon of more than 1,700 ids, a number of forget requests "
+                "other than the ids over 1,700 rounded up, forget requests "
+                "that do not carry every id, files or frames still held after "
+                "the beacons or after the page navigates away, and a run in "
+                "which a case was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `forgetProblems`, which the script prints and "
+               "exits 1 on, and the probes below drive two of its branches.",
+        probes=(
+            Probe(
+                "viewer-browser.forget-left-folder",
+                _forget_check_accepts_the_left_folder,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { forgetProblems } from "
+                    "'./examples/folder-viewer/tests/browser/forget.mjs';\n"
+                    "const problems = forgetProblems({ left: { bFiles: 3, "
+                    "held: { files: 1, frames: 6 }, aStatuses: [410] } });\n"
+                    "if (problems.some((line) => line.includes(\"not B's "
+                    "3\"))) process.exit(0);\n"
+                    "console.error('forget check accepted a folder the page "
+                    "left'); process.exit(1);",
+                ),
+                "forget check accepted a folder the page left",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.forget-late-post",
+                _forget_check_accepts_a_late_post,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { forgetProblems } from "
+                    "'./examples/folder-viewer/tests/browser/forget.mjs';\n"
+                    "const problems = forgetProblems({ late: { caught: true, "
+                    "lateStatus: 410, reposts: 1 } });\n"
+                    "if (problems.some((line) => line.includes('posted again "
+                    "1 times'))) process.exit(0);\n"
+                    "console.error('forget check accepted a late post of a "
+                    "file the page left'); process.exit(1);",
+                ),
+                "forget check accepted a late post of a file the page left",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the left-folder count with the census F-216's "
+              "page gave and the late-post branch with one post. The "
+              "observation itself needs Chromium and a release build of the "
+              "viewer, which a disposable sandbox does not have, so it is "
+              "watched by the `viewer-browser` gate and its CI job. The 410, "
+              "beacon size, beacon count, carried-id, held-after and "
+              "not-observed branches have no probe.",
     ),
     Guard(
         id="bench.cold-start",
