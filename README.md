@@ -230,8 +230,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    to its image nearest the source image's position, when both series share a
    Frame of Reference UID and the cosine of the angle between their planes
    is above 0.9, which is under about 26 degrees. Window copies the source's
-   window when a W/L drag ends, on a preset and on Reset. A preset is not sent to a viewport whose image is not
-   CT, and no window is sent to one whose image is not monochrome. Zoom
+   window when a W/L drag ends, on a window row, on a region window and on
+   Reset. A preset is not sent to a viewport whose image the local process
+   does not offer it on, which is any image that is not CT. A file window is
+   sent by its place in the list, and a viewport whose image lists fewer
+   windows shows its first. No window is sent to one whose image is not
+   monochrome. Zoom
    copies the source's zoom over each viewport's own fit, and pan is not
    copied. A click on a series row is a new load and copies nothing.
    Reference lines, on at load, draw a yellow line in each other viewport
@@ -242,7 +246,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    and starts at 10.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
-   W/L), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
+   W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
    Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
    view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
    (Pointer cross, Magnifier, Corners, Orientation letters), the layout
@@ -251,9 +255,32 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Reference lines, which have no key), and Key
    image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
    Key image and Headers act on the outlined viewport.
-   Scroll starts active. The right column holds the window presets, the marks
+   Scroll starts active. The right column holds the window list, the marks
    and the mouse and key lists. The icons at either end of the top bar, or
-   the `[` and `]` keys, hide and show the two side columns.
+   the `[` and `]` keys, hide and show the two side columns. On a CT the
+   window list starts with the three presets, Soft tissue, Lung and Bone,
+   and then lists the file's own windows in file order, each named by its
+   Window Center & Width Explanation, or `Window n` when it has none. On any
+   other image it lists the file's windows only. The keys `1` to `9` choose
+   rows 1 to 9, and `0` stays Fit. Each VOI LUT Sequence item is listed as a
+   row that cannot be chosen, because this preview does not apply one, and
+   while a file has one its other rows cannot be chosen either. A multiframe
+   whose windows change per frame lists the shown frame's own, asked for by
+   file id. A slice keeps its window, and a file window past the next
+   image's list shows that image's first. A series change and Reset return
+   to the first file window. The bottom right corner names the window shown:
+   the preset, the file window's name, `region` or `manual`. A window the
+   local process refuses leaves the image and the window as they were and
+   puts the reason in the sentence line. Region window is a drag of a
+   rectangle. The window then runs from the least to the greatest modality
+   value whose pixel centre is inside it, with padding left out, and keeps
+   the function already shown. The local process finds the two values
+   through `POST /region`, and `windowRegion` from `@ocelli/core` makes the
+   window. The process serves the built `packages/core/dist` under `/lib/`,
+   so run `npm run build` before starting the viewer, or the region window
+   reads unavailable and says so. Its centre is the middle of that span.
+   cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean and
+   keeps a width of at least 10, so the two can give different windows.
 7. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
@@ -329,7 +356,8 @@ A file that is not a Part 10 DICOM object is skipped and counted. A colour
 frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window
 center and a window width stays on a fixed error sentence. The corner of an
 image that is not monochrome reads `Window not applicable`, and its window
-presets are off. A series of more than 65536 images is not linked: it does
+rows are off. The local process refuses a window preset on an image whose
+Modality is not CT, whatever the page sends. A series of more than 65536 images is not linked: it does
 not scroll with the others and has no reference line.
 
 The page HTML is compiled into the binary. After a change under

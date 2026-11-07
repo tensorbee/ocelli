@@ -2,7 +2,10 @@
 //!
 //! The page chooses the folder. This crate parses with `parse_part10`,
 //! decodes with the codec registry, and maps samples with `LutChain`.
-//! It does not read a path of its own.
+//! The only paths it reads are the built `@ocelli/core` modules and dcmjs's
+//! ES build, which `GET /lib/` serves by an allowlist of names from fixed
+//! directories of the repository it was built in, for the page's region
+//! window. It reads no path a request names.
 
 #![doc(test(attr(forbid(unsafe_code))))]
 

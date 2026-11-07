@@ -386,6 +386,75 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     ) {
         return Err("the letters sentence does not name Patient Orientation".to_owned());
     }
+    // F-213 AC12. The window rows come from the inspect reply, so the page
+    // holds no preset token, no preset number and no modality test of its
+    // own. Bare 1 to 9 choose a row and never the layout.
+    for held in ["data-preset", "-600", "1500", "\"CT\"", "soft_tissue"] {
+        if page.contains(held) {
+            return Err(format!("the page keeps a window of its own: {held}"));
+        }
+    }
+    let keys = function_body(page, "onKey")?;
+    if !keys.contains("event.key >= \"1\" && event.key <= \"9\"")
+        || !keys.contains("chooseRow(vp, Number(event.key));")
+        || keys.contains("setLayout(")
+    {
+        return Err("1 to 9 do not choose a window row".to_owned());
+    }
+    if !keys.contains("y: \"wlregion\"") || !page.contains("data-key=\"Y\"") {
+        return Err("the region window has no key".to_owned());
+    }
+    for read in [
+        "Array.isArray(info.presets) ? info.presets : []",
+        "Array.isArray(info.windows) ? info.windows : []",
+        "Array.isArray(info.voiLuts) ? info.voiLuts : []",
+    ] {
+        if !page.contains(read) {
+            return Err(format!("the window list does not read {read}"));
+        }
+    }
+    // Amendment 2. The file window index is in every viewport's cache key,
+    // is sent as its header, and travels with a linked window.
+    if !function_body(page, "cacheKey")?.contains("\"file\" + effectiveIndex(image, view)") {
+        return Err("the cache key leaves out the file window index".to_owned());
+    }
+    if !page.contains(
+        "const index = effectiveIndex(image, view);\n    if (index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
+    ) {
+        return Err("the file window index is not sent".to_owned());
+    }
+    if !function_body(page, "copyWindow")?.contains("vp.windowIndex = index;") {
+        return Err("a linked window copy drops the file window index".to_owned());
+    }
+    // AC17. The region window imports `windowRegion` from the built library
+    // through the import map, and says so when the build is missing.
+    if !page.contains(
+        "<script type=\"importmap\">{\"imports\":{\"@ocelli/core\":\"/lib/ocelli-core/index.js\",\"dcmjs\":\"/lib/dcmjs.js\"}}</script>",
+    ) {
+        return Err("the page has no import map for the library".to_owned());
+    }
+    if !page.contains("import(\"@ocelli/core\")")
+        || !page.contains("core.windowRegion([extent.min, extent.max])")
+    {
+        return Err("the region window does not use windowRegion from the library".to_owned());
+    }
+    if !page.contains("\"The region window needs the library build. Run npm run build in the repository, then start the viewer again.\"") {
+        return Err("the page lacks the library sentence".to_owned());
+    }
+    // The region and the per-frame windows are asked for by file id with
+    // no body, so a frame change never posts the file again.
+    for (route, name) in [("fetch(\"/region\"", "region"), ("fetch(\"/inspect\"", "inspect")] {
+        let at = page
+            .find(route)
+            .ok_or_else(|| format!("the page does not ask for the {name}"))?;
+        let call = page
+            .get(at..)
+            .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
+            .ok_or_else(|| format!("the {name} call does not close"))?;
+        if !call.contains("\"X-Ocelli-File\": id") || call.contains("body") {
+            return Err(format!("the {name} call is not by id without a body: {call}"));
+        }
+    }
     Ok(())
 }
 

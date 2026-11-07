@@ -40,6 +40,16 @@ describe("manipulation tools", () => {
     expect(windowRegion([10, 30, 20])).toEqual({ centre: 20, width: 20 });
   });
 
+  it("a region window from its minimum and maximum equals one from every sample", () => {
+    // F-213 AC11. The folder viewer sends only the extremes of its region.
+    // The six modality values of its AC9 rectangle are stored 0, 1, 2, 4,
+    // 5 and 6 minus 1024. Minimum -1024, maximum -1018. Centre
+    // (-1024 + -1018) / 2 is -1021. Width -1018 - -1024 is 6.
+    const every = [-1024, -1023, -1022, -1020, -1019, -1018];
+    expect(windowRegion([-1024, -1018])).toEqual({ centre: -1021, width: 6 });
+    expect(windowRegion(every)).toEqual({ centre: -1021, width: 6 });
+  });
+
   it("an empty region and a non-finite sample are refused", () => {
     expect(windowRegion([])).toBeNull();
     expect(windowRegion([10, Number.NaN, 20])).toBeNull();

@@ -65,7 +65,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs and forget.mjs (F-208, F-209, F-226)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs and window.mjs (F-208, F-209, F-226, F-213)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -174,7 +174,8 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/aspect.mjs &&
                  node examples/folder-viewer/tests/browser/readout.mjs &&
                  node examples/folder-viewer/tests/browser/link.mjs &&
-                 node examples/folder-viewer/tests/browser/forget.mjs ;;
+                 node examples/folder-viewer/tests/browser/forget.mjs &&
+                 node examples/folder-viewer/tests/browser/window.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
