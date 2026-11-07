@@ -166,14 +166,16 @@ pub(crate) enum Lookup {
     Miss(Arc<PostedBytes>),
 }
 
-/// A preview's view of one id. The posted bytes stay in the cache for the
-/// whole decode, so a second preview or `/headers` still finds them.
+/// A preview's view of one id. The posted bytes stay in the cache during a
+/// decode unless the id is forgotten, so a second preview or `/headers`
+/// still finds them.
 pub(crate) enum PreviewSource {
     /// The id is unknown, or the bytes and this frame are both gone.
     Gone,
     /// The decoded frame.
     Hit(Arc<CachedFrame>),
-    /// Posted bytes. The cache keeps its own `Arc` until the frame is stored.
+    /// Posted bytes. The cache keeps its own `Arc` until the frame is stored
+    /// or the id is forgotten.
     Shared(SharedBytes),
 }
 
@@ -361,11 +363,10 @@ struct CacheState {
     /// Oldest frame at the front. A hit moves its key to the back.
     frame_order: VecDeque<TrackedFrame>,
     recycle_rx: Receiver<Vec<u8>>,
-    /// Decodes holding each id's posted bytes, counted where
-    /// `preview_source` hands them out and released when the decode's
-    /// [`Flight`] drops after its store.
+    /// Flights per id, made where `preview_source` hands out posted bytes
+    /// and released when each [`Flight`] drops.
     in_flight: BTreeMap<FileId, u32>,
-    /// Ids forgotten while a decode held their bytes. `store_frame_with`
+    /// Ids forgotten while a flight was out for them. `store_frame_with`
     /// stores nothing for them. An id leaves when its count reaches zero.
     doomed: BTreeSet<FileId>,
     /// The page token each posted id arrived under. A forget removes its
