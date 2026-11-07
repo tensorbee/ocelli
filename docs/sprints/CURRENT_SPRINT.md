@@ -237,6 +237,13 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
   with a draft plan whose six questions are open for the operator, the
   patent position among them, because the pool's list still names patents
   active in Malaysia.
+  **Answered by the operator later on 2026-11-07:** proceed with the two
+  Malaysian patents recorded in `docs/SOURCE-POLICY.md`, an `f64` IDCT from
+  H.262 Annex A, a MONOCHROME2 file drawn from its Y plane, libmpeg2 and
+  ffmpeg's MPEG-2 decoder source read-blocked and enforced by the provenance
+  checker, real time natively at both sizes and in Chrome at 720 by 576, and
+  synthetic clips with a recorded assessment of the conformance streams.
+  F-242 is approved at 8w with no deviation.
 
 ## What is carried in
 

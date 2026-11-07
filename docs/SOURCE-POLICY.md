@@ -118,9 +118,16 @@ and **marked for verification**: the MPEG-2 patent pool's published list
 dated 1 January 2026, administered by Via LA, formerly MPEG LA, states that
 the last United States patent expired on 13 February 2018 and that patents
 remain active only in Malaysia. A third-party tracker of that list names two
-Malaysian patents, MY 163465-A and MY 177139-A, with possible expiry in 2032
-and 2035. A pool list also says nothing about patents held outside the pool.
-F-242's plan carries the full assessment and its open questions.
+Malaysian patents, MY 163465-A and MY 177139-A, "Synchronization arrangement
+for a compressed video signal", with possible expiry on 15 September 2032 and
+8 September 2035. The lead has not checked those two against the pool's list
+attachment or the Malaysian register. A pool list also says nothing about
+patents held outside the pool. F-242's plan carries the full assessment.
+
+**The operator decided on 2026-11-07 to proceed knowing those two Malaysian
+patents.** The MPEG-2 decoder ships in the wasm module and the native
+binaries, which are published worldwide, Malaysia included, and the risk is
+recorded here rather than resolved. This is not legal advice.
 
 Any other codec covered by a patent pool, video or audio, enters a shipped
 artefact only with a written assessment in its story's plan and the
@@ -160,6 +167,19 @@ form as the table above, with the date it was decided.
 | aclysma/profiling | Apache-2.0 on GitHub, MIT file pinned | yes | yes, pinned licence file | 2026-11-05 |
 | gfx-rs/rspirv | Apache-2.0 | yes | yes, pinned licence file | 2026-11-05 |
 | spdx/license-list-data | not stated | yes | **NO** | 2026-11-05 |
+| libmpeg2 | GPL-2.0 | **NO** | no | 2026-11-07 |
+| FFmpeg MPEG-2 decoder source | LGPL-2.1-or-later | **NO** | no, ffmpeg runs only as a host tool | 2026-11-07 |
+
+**libmpeg2 and FFmpeg's MPEG-2 decoder source are read-blocked from
+2026-11-07**, by the operator's answer to F-242's question 4, for the reason
+dwv is: translating a decoder's source into Rust is a translation. They are
+not to be read or depended on by a person or an agent on this project. ffmpeg
+itself stays allowed as a host tool that is run, as "What a dependency is"
+says, and its source is not opened. Until F-242 lands,
+`scripts/source_provenance_check.py` does not enforce these two rows, and this
+paragraph is the rule. F-242 adds libmpeg2 to the checker's mention,
+dependency and URL rules, and ffmpeg's source to its dependency and URL rules
+only, because naming ffmpeg as a host tool is allowed.
 
 ### Shipped binary notice sources
 

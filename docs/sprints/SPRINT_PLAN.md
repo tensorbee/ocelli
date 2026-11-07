@@ -650,7 +650,7 @@ _S42 to S44, 11 stories, 43 engineer-weeks._
 
 The local folder viewer opens a synthetic study or a folder, and the page shows the image tools, the marks, and how to call the library.
 
-_S45 to S48, 36 stories, 129 engineer-weeks._
+_S45 to S48, 36 stories, 130 engineer-weeks._
 
 F-208 to F-221, F-223 to F-234, F-239 and F-240 run in S46 beside F-119, and
 F-235 to F-238 and F-241 run in S47 beside F-120, and F-242 runs in S48 beside F-121 and F-122. Their rows are in the S46, S47 and S48 tables under
@@ -730,7 +730,7 @@ _S46 to S49, 7 stories, 50 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-121 | E30.3 | Adaptive per-LOD sample count with opacity correction | Rust | 8w |
 | F-122 | E30.4 | Residency budget, prefetch and eviction policy | Rust | 8w |
-| F-242 | E4.12 | MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name | All | 7w |
+| F-242 | E4.12 | MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name | All | 8w |
 
 #### Sprint S49
 
