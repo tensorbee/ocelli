@@ -598,24 +598,29 @@ case "$command" in
     echo "  4/13 resolved features agree across targets"
     python3 scripts/target_feature_check.py
 
-    # 5. The same production JPEG 2000 proof executes natively. Steps 6 and 9
-    # run that exact source as plain and SIMD-enabled wasm under Node.
+    # 5. The Node executor's own refusals and control. Step 6 runs the
+    # production JPEG 2000 proof natively, and step 9 runs that exact source
+    # as plain and SIMD-enabled wasm under Node.
     echo "  5/13 codec wasm runner refusals and control"
     node --test scripts/tests/test_run_codec_wasm.mjs
 
     echo "  6/13 JPEG 2000 production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_jpeg2000
 
-    # 7 and 8. The SIMD flag travels in
+    # 7. The SIMD flag travels in
     # CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS and not in `cargo rustc
     # --`, which hands its arguments to the final crate only, the example,
-    # and compiles every dependency without them. F-229's review measured
-    # that shape: the "+simd128" build held jxl rlibs byte-identical to the
-    # plain build's. With an explicit --target, cargo applies a target's
-    # rustflags to the target's crates and to no build script or proc macro,
-    # which run on the host. The SIMD variants keep their own --target-dir,
-    # so the flag change never invalidates the plain or default caches.
-    # F-233.
+    # and compiles every dependency without them. With an explicit --target,
+    # cargo applies a target's rustflags to the target's crates and to no
+    # build script or proc macro, which run on the host. The SIMD variants
+    # keep their own --target-dir, so the flag change never invalidates the
+    # plain or default caches. F-233.
+    #
+    # What the flag changes per crate is `cfg(target_feature = "simd128")`
+    # source selection. Code generation is not per crate: the release
+    # profile is `lto = "fat"`, so every dependency's rlib carries bitcode
+    # and all of it is code-generated once, at the example's link, under the
+    # example's flags. docs/lld/build-targets.md records what was measured.
     echo "  7/13 JPEG 2000 production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
@@ -623,15 +628,14 @@ case "$command" in
       cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    # The comparison refuses a SIMD variant whose listed crates are
-    # byte-identical to the plain build's, or missing from either directory.
-    # The list is F-233's: the two verification crates and, now that F-229
-    # has landed, the three jxl crates whose 50 wasm32 SIMD regions are what
-    # the flag is for.
-    echo "  8/13 the SIMD JPEG 2000 variant compiles every listed crate with the flag"
+    # 8. The check reads the two linked modules. It refuses a SIMD module
+    # holding no SIMD instruction the plain module lacks, and a plain module
+    # holding any. It says nothing about which crate's code the SIMD
+    # instructions came from, and the OK line names every one it found.
+    echo "  8/13 the SIMD JPEG 2000 module holds SIMD instructions, the plain one none"
     python3 scripts/simd_variant_check.py \
-      target/codec-wasm-plain target/codec-wasm-simd \
-      ocelli_codec openjph_core jxl_grid jxl_render jxl_modular
+      target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
+      target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
 
     echo "  9/13 plain and SIMD JPEG 2000 wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
@@ -651,10 +655,10 @@ case "$command" in
       cargo build -p ocelli-codec --release --example verify_htj2k \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  12/13 the SIMD HTJ2K variant compiles every listed crate with the flag"
+    echo "  12/13 the SIMD HTJ2K module holds SIMD instructions, the plain one none"
     python3 scripts/simd_variant_check.py \
-      target/codec-wasm-plain target/codec-wasm-simd \
-      ocelli_codec openjph_core jxl_grid jxl_render jxl_modular
+      target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
+      target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm
 
     echo "  13/13 plain and SIMD HTJ2K wasm execute under Node"
     node scripts/run_codec_wasm.mjs \

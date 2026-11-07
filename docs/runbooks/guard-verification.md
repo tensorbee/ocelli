@@ -653,7 +653,7 @@ it, for the reason `CLAUDE.md` gives about tier C and the LUT chain.
 | 439 | `scripts/corpus_tests.py` | `corpus-tests.skip-is-not-a-pass`, level 3 | must refuse, output carries `FAIL: a prerequisite` | floor | `bin/ocelli.sh gate guards` |
 | 440 | `scripts/corpus_synth.py` | none in this harness | A manifest whose header is not the recorded column set, and a `--case` naming a case the generator does not have. | - | scripts/tests/test_corpus_synth.py (run by the `corpus-tests` gate) |
 | 441 | `scripts/target_feature_check.py` | `target-features.cannot-run`, level 3 | must refuse, output carries `could not run` | deep | `bin/ocelli.sh gate guards-deep` |
-| 442 | `scripts/simd_variant_check.py` | `simd-variant.identical-rlib`, level 1 | must refuse, output carries `byte-identical` | floor | `bin/ocelli.sh gate guards` |
+| 442 | `scripts/simd_variant_check.py` | `simd-variant.no-simd-instruction`, level 1 | must refuse, output carries `no SIMD instruction` | floor | `bin/ocelli.sh gate guards` |
 | 443 | `scripts/package_check.py` | `packages.exports-not-in-tarball`, level 1 | must refuse, output carries `advertises` | floor | `bin/ocelli.sh gate guards` |
 | 444 | `scripts/package_check.py` | `packages.test-file-in-tarball`, level 1 | must refuse, output carries `which is a test file` | floor | `bin/ocelli.sh gate guards` |
 | 445 | `scripts/package_check.py` | `packages.version-skew`, level 1 | must refuse, output carries `the Rust workspace is` | floor | `bin/ocelli.sh gate guards` |

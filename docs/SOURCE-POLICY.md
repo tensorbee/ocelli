@@ -408,9 +408,12 @@ for `ocelli-native` both answer as a package that matches nothing in their
 graphs, and the reverse tree names `ocelli-folder-viewer` and
 `ocelli-oracle`. **The builds that compile the fifty are the SIMD legs of
 `bin/ocelli.sh native` steps 7 and 11**, where F-233 passes `+simd128` to
-every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` and
-`scripts/simd_variant_check.py` at steps 8 and 12 refuses a variant whose
-dependency rlibs match the plain build's. The plain legs compile the 138 in
+every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`. F-233
+measured each of the three crates' gated code compiled into its SIMD rlib and
+not into its plain one, and none of it linked into either verification module:
+no function of the three crates holds a SIMD instruction in either SIMD module.
+`docs/lld/build-targets.md` records the commands. The plain legs compile the
+138 in
 release, step 2's dev-profile workspace check compiles 137 of them, and steps
 9 and 13 execute the resulting modules under Node. The other **346 are compiled out
 of a wasm32 build**: the `x86_64` and `aarch64` specialisations,

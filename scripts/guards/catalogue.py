@@ -11217,66 +11217,71 @@ GUARDS: tuple[Guard, ...] = (
         id="simd-variant",
         file="scripts/simd_variant_check.py",
         gate="native",
-        spec="F-233, `bin/ocelli.sh native` steps 8 and 12, and D-22's "
-             "evidence clause",
-        refuses="A SIMD verification variant whose listed crate's release "
-                "rlib is byte-identical between the plain and the SIMD target "
-                "directories, naming the crate and the rlib, and a listed "
-                "crate whose rlib is missing from either side.",
+        spec="F-233's lead rulings after review pass 1, `bin/ocelli.sh "
+             "native` steps 8 and 12, and D-22's evidence clause",
+        refuses="A SIMD verification module holding no SIMD instruction the "
+                "plain module lacks, a plain module holding any SIMD "
+                "instruction, and a module that is missing or that the "
+                "decoder cannot walk to its last byte.",
         claims=("*",),
         probes=(
             Probe(
-                "simd-variant.identical-rlib", None,
+                "simd-variant.no-simd-instruction", None,
                 python_snippet(
-                    "simd_variant_check.check, identical rlibs",
+                    "simd_variant_check.check, no SIMD instruction",
                     "import sys, tempfile\n"
                     "from pathlib import Path\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import simd_variant_check as s\n"
-                    "deps = Path('wasm32-unknown-unknown/release/deps')\n"
+                    "def mod(body):\n"
+                    "    entry = b'\\x00' + body\n"
+                    "    code = bytes([1, len(entry)]) + entry\n"
+                    "    return (b'\\x00asm\\x01\\x00\\x00\\x00'\n"
+                    "            b'\\x01\\x04\\x01\\x60\\x00\\x00'\n"
+                    "            b'\\x03\\x02\\x01\\x00\\x0a'\n"
+                    "            + bytes([len(code)]) + code)\n"
                     "root = Path(tempfile.mkdtemp())\n"
-                    "plain = root / 'plain'\n"
-                    "simd = root / 'simd'\n"
-                    "for side in (plain, simd):\n"
-                    "    (side / deps).mkdir(parents=True)\n"
-                    "    (side / deps / 'libprobe_codec-abc123.rlib')"
-                    ".write_bytes(b'same bytes')\n"
-                    "bad = s.check(plain, simd, ['probe_codec'])\n"
+                    "plain = root / 'plain.wasm'\n"
+                    "simd = root / 'simd.wasm'\n"
+                    "plain.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "simd.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "bad = s.check(plain, simd)\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n"),
-                "byte-identical",
+                "no SIMD instruction",
                 level=1,
                 control=python_snippet(
-                    "simd_variant_check.check, differing rlibs",
+                    "simd_variant_check.check, v128.const",
                     "import sys, tempfile\n"
                     "from pathlib import Path\n"
                     "sys.path.insert(0, 'scripts')\n"
                     "import simd_variant_check as s\n"
-                    "deps = Path('wasm32-unknown-unknown/release/deps')\n"
+                    "def mod(body):\n"
+                    "    entry = b'\\x00' + body\n"
+                    "    code = bytes([1, len(entry)]) + entry\n"
+                    "    return (b'\\x00asm\\x01\\x00\\x00\\x00'\n"
+                    "            b'\\x01\\x04\\x01\\x60\\x00\\x00'\n"
+                    "            b'\\x03\\x02\\x01\\x00\\x0a'\n"
+                    "            + bytes([len(code)]) + code)\n"
                     "root = Path(tempfile.mkdtemp())\n"
-                    "plain = root / 'plain'\n"
-                    "simd = root / 'simd'\n"
-                    "for side in (plain, simd):\n"
-                    "    (side / deps).mkdir(parents=True)\n"
-                    "    name = 'libprobe_codec-abc123.rlib' if side is plain"
-                    " else 'libprobe_codec-def456.rlib'\n"
-                    "    body = b'plain bytes' if side is plain"
-                    " else b'simd bytes'\n"
-                    "    (side / deps / name).write_bytes(body)\n"
-                    "bad = s.check(plain, simd, ['probe_codec'])\n"
+                    "plain = root / 'plain.wasm'\n"
+                    "simd = root / 'simd.wasm'\n"
+                    "plain.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "simd.write_bytes(mod(b'\\xfd\\x0c' + bytes(16)\n"
+                    "                     + b'\\x1a\\x0b'))\n"
+                    "bad = s.check(plain, simd)\n"
                     "print('\\n'.join(bad))\n"
                     "sys.exit(1 if bad else 0)\n"),
-                note="Level 1. The planted layout is the one the native arm "
-                     "produces, `<target-dir>/wasm32-unknown-unknown/release/"
-                     "deps/lib<crate>-<hash>.rlib`, because both verification "
-                     "examples build with `--target wasm32-unknown-unknown "
-                     "--release`. The probe plants the state F-229's review "
-                     "measured, a `+simd128` build whose rlib matches the "
-                     "plain build's, and the control plants differing bytes "
-                     "so the refusal is shown to discriminate. The missing-"
-                     "side refusals are driven by "
-                     "`scripts/tests/test_simd_variant_check.py`, run by the "
-                     "guards gate."),
+                note="Level 1. Both modules are hand-assembled, one type, "
+                     "one function and a code section, and stand in for the "
+                     "two `examples/<name>.wasm` files the native arm links. "
+                     "The probe's SIMD module holds `i32.const 0, drop`, the "
+                     "state a build that lost `+simd128` at the example's "
+                     "link produces, and the control's holds `v128.const`, "
+                     "so the refusal is shown to discriminate. The plain-"
+                     "module, missing and undecodable refusals are driven by "
+                     "`scripts/tests/test_simd_variant_check.py`, which `gate "
+                     "native` runs after the arm."),
         ),
     ),
     Guard(

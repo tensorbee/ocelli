@@ -138,18 +138,91 @@ Thirteen steps, each exit code read from the command itself.
 | 5 | `scripts/tests/test_run_codec_wasm.mjs`. The Node executor refuses wrong arity and a module without the production entry point |
 | 6 | The production JPEG 2000 proof executes natively against exact and lossy synthetic truth |
 | 7 | The same source builds as plain and `+simd128` release wasm modules. F-233 passes the flag to every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` on the SIMD build only, so no build script or proc macro sees it and the plain cache is untouched |
-| 8 | `scripts/simd_variant_check.py` refuses a `+simd128` build whose listed crates' release rlibs are byte-identical to the plain build's, or missing from either directory. The list is `ocelli_codec`, `openjph_core`, `jxl_grid`, `jxl_render` and `jxl_modular` |
+| 8 | `scripts/simd_variant_check.py` decodes the two linked `verify_jpeg2000.wasm` modules and refuses a SIMD module holding no SIMD instruction the plain module lacks, a plain module holding any, and a module that is missing or does not decode. The OK line names every SIMD opcode found, with its count |
 | 9 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
 | 10 | The production HTJ2K proof executes natively against the same truth |
 | 11 | The same source builds as plain and `+simd128` release wasm modules, the flag reaching every crate |
-| 12 | `scripts/simd_variant_check.py` refuses again, over the same five crates |
+| 12 | `scripts/simd_variant_check.py` again, over the two `verify_htj2k.wasm` modules |
 | 13 | Node executes both HTJ2K wasm modules |
 
-Steps 6 to 9 are F-026's codec-specific execution proof with F-233's rlib
-comparison, and steps 10 to 13 are the same shape for HTJ2K, the standing
+Steps 6 to 9 are F-026's codec-specific execution proof with F-233's module
+check, and steps 10 to 13 are the same shape for HTJ2K, the standing
 version of F-X013's claim (D-22). `gate wasm` builds
 the render module and the decode module of `ocelli-wasm`. It does not
 exercise `ocelli-codec`.
+
+### What the SIMD variant contains, measured once
+
+F-233 measured the SIMD variant on 2026-11-07 with rustc 1.97.1. These are
+recorded facts, not standing checks, and steps 8 and 12 assert only the module
+property in the table above. Scratch target directories throughout, built with
+the arm's own commands.
+
+**The flag reaches each crate's `cfg`.** Six crates in `ocelli-codec`'s wasm32
+closure have `cfg(target_feature = "simd128")` code, found by `grep -rln
+simd128` over each package's `src`. For each, the first command prints
+`target_feature="simd128"` under the SIMD variable and not without it:
+
+```bash
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
+  cargo rustc -p <crate> --lib --release --target wasm32-unknown-unknown \
+  --target-dir <scratch> -- --print cfg | grep simd128
+cargo rustc -p <crate> --lib --release --target wasm32-unknown-unknown \
+  --target-dir <scratch> -- --print cfg | grep simd128
+```
+
+**The gated code is compiled in.** Read from each crate's `.d` dep-info file
+and from the bitcode member `/0` and `lib.rmeta` of its rlib, plain against
+SIMD:
+
+| Crate | Plain / SIMD |
+|-------|--------------|
+| glam 0.30.10 | dep-info lists 14 `wasm32` source files under SIMD only and 13 `scalar` files under plain only |
+| jpeg-decoder 0.3.2 | bitcode names `arch::wasm::color_convert_line_ycbcr` 0 / 5 times and `arch::wasm::dequantize_and_idct_block_8x8` 0 / 4 |
+| jxl-grid 0.6.2 | `lib.rmeta` holds `v128`, the `SimdVector for v128` impl, 0 / 3 times |
+| jxl-modular 0.11.3 | bitcode names `inverse_h_i16_wasm32_simd128` 0 / 104 times |
+| jxl-render 0.12.4 | dep-info lists 5 `wasm32` source files under SIMD only, bitcode names `epf_row_wasm32_simd128` 0 / 57 times |
+| memchr 2.8.3 | dep-info lists 5 `arch/wasm32` source files under SIMD only |
+
+**None of that code reaches either module.** The release profile is `lto =
+"fat"`, so each rlib carries bitcode and code generation runs once, at the
+example's link, under the example's flags. Disassembled with
+`scripts/simd_variant_check.py`, cross-checked with binaryen `wasm-dis
+--all-features` version 125, which is not a repository dependency:
+
+| Module | SIMD instructions | Executed by the proof |
+|--------|-------------------|-----------------------|
+| `verify_jpeg2000.wasm`, plain | none | none |
+| `verify_jpeg2000.wasm`, SIMD | 156: `v128.load` 67, `v128.store` 62, `v128.const` 9, `i8x16.eq` 8, `i8x16.all_true` 8, `v128.load64_lane` 1, `v128.load64_zero` 1 | 14: `v128.load` 7, `v128.store` 7, in `ritk_codecs::jpeg_2000::image::decode_j2k_fragment` and in core and alloc generics instantiated for ritk-codecs types |
+| `verify_htj2k.wasm`, plain | none | none |
+| `verify_htj2k.wasm`, SIMD | 43: `v128.load` 18, `v128.store` 23, `v128.const` 2. 30 in openjph-core functions, 5 in `ocelli_codec`'s `Htj2kDecoder::decode`, 6 in std and 2 in dlmalloc | 25: `v128.store` 14, `v128.load` 9, `v128.const` 2. 20 in openjph-core, in `Tile::read_tile_data`, `Codestream::read_headers`, `Subband::new`, `rev53_atk` and `irv97_inverse_1d`, and 5 in `Htj2kDecoder::decode` |
+
+No lane arithmetic appears in either module. The only lane-wise operations are
+`i8x16.eq` and `i8x16.all_true` in the JPEG 2000 module, and neither executes.
+No function of glam, jpeg-decoder, memchr or the three jxl crates holds a SIMD
+instruction. The function attribution comes from a scratch build with
+`CARGO_PROFILE_RELEASE_STRIP=false`, whose SIMD inventory equals the stripped
+build's. The execution column comes from a scratch rewrite that inserts
+`unreachable` after one SIMD instruction at a time and runs the module under
+Node: a trap means that instruction executed. The same rewrite with no trap
+inserted is byte-identical to its input and completes.
+
+**What the check refuses and what it passes**, through the real arm in a
+scratch copy of the tree or with the arm's commands:
+
+| Build | SIMD module | Step 8 or 12 | rlib comparison it replaced |
+|-------|-------------|--------------|-----------------------------|
+| A `RUSTC_WRAPPER` strips `+simd128` from every crate | byte-identical to plain | refused | passed |
+| `-C target-feature=+bulk-memory` in place of `+simd128` | no SIMD instruction | refused | passed |
+| The same wrapper strips the flag from every crate but the example | byte-identical to the pre-F-233 `cargo rustc --` module | passes | passed |
+| A reused HTJ2K SIMD directory: a no-flag build, the SIMD build, the no-flag build again with nothing recompiled | the third build's module is byte-identical to plain | refused | passed |
+
+The third row is not refused. The pre-F-233 module and the F-233 module differ
+in bytes and hold the same SIMD inventory, so no check over the linked module
+separates them. The per-crate `cfg` facts above are the only measured
+difference, and nothing asserts them on each run. In the fourth row cargo
+links the fresh unit's module into `examples/` again, so the check reads the
+build that just ran.
 
 **Step 2 deliberately omits `--all-targets` and step 3 keeps it.** For wasm32
 that flag pulls in dev-dependencies, and `proptest` reaches `wait-timeout`,
