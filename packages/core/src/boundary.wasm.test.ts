@@ -313,8 +313,15 @@ describe("wasm session boundary", () => {
     // the session inside the refused export, so bulk_ticket() answers 0.
     // The committed frame is kept: an interaction publish before the
     // refusals and one after hand the stub canvas the same image, each
-    // observation counting its blit, so a refusal that cleared or replaced
-    // the retained frame fails the comparison or the count.
+    // observation counting its blit, so a refusal that cleared the
+    // retained frame fails the blit count and one that replaced it fails
+    // the pixel comparison. That comparison can only fail if the blit
+    // answers the committed value. A 1 by 1 Float32 frame under the Fit
+    // alone does not answer it: without a window 40, 41, 42 and 43 blit
+    // byte-identical images. So the case submits a Fit to the canvas
+    // size and a narrow window after binding the canvas, and the control
+    // commit after the final transfer asserts a different value changes
+    // the blit.
     installCanvasStubs();
     const wasm = await loadModule();
     const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));
@@ -326,6 +333,18 @@ describe("wasm session boundary", () => {
     const sliceIndex = () => readViewportState(wasm.copy_state())?.sliceIndex;
     const canvas = new StubCanvas();
     wasm.bindCpuCanvas(canvas, 80, 40, 1);
+    // The window is what makes the blit answer the committed value, so
+    // the kept-frame comparison below compares two images that can
+    // differ, not two constants.
+    expect(
+      submit(
+        wasm,
+        packCommands(1, [
+          { kind: "Fit", width: 80, height: 40, columns: 1, rows: 1 },
+          { kind: "SetWindow", centre: 41, width: 10, function: "linear" },
+        ]),
+      ),
+    ).toBe(2);
 
     acceptTransferredFrame(
       { memory: wasm.memory },
@@ -381,6 +400,11 @@ describe("wasm session boundary", () => {
       { ...target, stackIndex: 0, stackEpoch: epoch },
     );
     expect(wasm.bulk_ticket()).toBe(0);
+    // Control for the kept-frame comparison: a different value at the
+    // current selection changes the blit, so that comparison can fail.
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(3);
+    expect(blittedPixels(canvas)).not.toEqual(kept);
   });
   it("refuses address 0, reuses an address only with a new ticket, and commits through writeFrame", async () => {
     const wasm = await loadModule();
