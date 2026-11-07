@@ -619,3 +619,9 @@ Repository bootstrap. Nothing is published.
   and no longer misses `unsafe` after a quote character literal, a raw string
   or a comment holding a quote, and it refuses an attribute that weakens
   `unsafe_code`. Nothing published changes.
+- A contributor's `bin/ocelli.sh gate native` builds the `+simd128`
+  codec verification modules with the flag on every crate, so each
+  dependency's `simd128` code paths are compiled, and two new steps refuse a
+  SIMD module holding no SIMD instruction and a plain module holding any. The
+  modules hold SIMD loads, stores and constants and no lane arithmetic.
+  Nothing published changes.
