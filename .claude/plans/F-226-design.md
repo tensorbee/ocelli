@@ -332,3 +332,12 @@ Made by the sprint lead on 2026-11-07 from read-only groundwork against the spri
 - **New refusals are claimed.** Any refusal the `/forget` route adds is registered with `scripts/guards/catalogue.py` and the census stays at zero unwatched.
 - **The new browser check is wired** into `bin/ocelli.sh viewer-browser` and its `--list` description, beside `aspect.mjs`, `readout.mjs` and `link.mjs`.
 - **Pass 4's carried note** on `RingEvent::kind`'s doc is fixed if it is still untrue.
+
+### Lead ruling after the viewer half's AC15 measurement
+
+Made by the sprint lead on 2026-11-07. The implementer measured in Chromium that the 64 KiB keepalive limit is on all keepalive bytes in flight from the page, not on each beacon, so decision 7's two beacons of 1,700 ids can never both arrive, and a 3,400-file folder left 1,700 files held.
+
+- **Leaving the page forgets by page, in one short beacon.** Each page load makes a random page token and sends it with every `/file` post. The server records the token beside each held file. On `pagehide` the page sends one beacon naming its token, and the server forgets every file posted under it, through the same removal path as `/forget`. Another page's files are untouched. Opening another folder still forgets by id, through an ordinary request with no keepalive limit.
+- **AC15 is restated.** A 3,400-file synthetic folder sends exactly one beacon on `pagehide`, under 1 KiB, after which `GET /held` counts none of that page's files, while a second page's held files are unchanged. Sending one beacon per id goes red, and so does forgetting by token without matching the token.
+- **The token is not trusted for more than its own files.** A malformed token is refused with `400 forget`. An unknown token forgets nothing and answers four zeros.
+- **Content type.** `/forget` replies with the same JSON content type as the other JSON routes.
