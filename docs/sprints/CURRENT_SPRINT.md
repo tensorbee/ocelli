@@ -35,6 +35,7 @@
 | F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
+| F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, window, invert, value and region statistics reported unavailable on a colour frame, and every colour shape this build cannot draw refused by name | All | 4w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -184,6 +185,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   says.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story builds
   every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim. F-233 implements it.
+- **A colour series in the folder viewer shows a fault, not an image.** Every
+  frame that is not `MONOCHROME1` or `MONOCHROME2` stops at
+  `PreviewError::NotMonochrome` in `examples/folder-viewer/src/preview.rs`,
+  and the page shows "this preview shows monochrome frames only". The library
+  already has the colour stage, F-030's `ColorTransform` in `ocelli-pixel`.
+  **Decided by the operator on 2026-11-07:** the folder viewer previews RGB,
+  YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR frames with
+  Planar Configuration through that stage and the decoder's reported output
+  space, so the colour arithmetic exists once in the library. F-239
+  implements it, scheduled first in the folder viewer chain, ahead of F-212.
+  F-212 now depends on it.
 
 ## What is carried in
 

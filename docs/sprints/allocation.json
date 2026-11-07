@@ -3092,6 +3092,29 @@
       "sprint": "S47"
     },
     {
+      "fid": "F-239",
+      "eid": "E38.37",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, window, invert, value and region statistics reported unavailable on a colour frame, and every colour shape this build cannot draw refused by name",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E4.8",
+        "E38.19",
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-030",
+        "F-209",
+        "F-216"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
@@ -3185,13 +3208,15 @@
       "layer": "All",
       "weeks": 4,
       "depends_eids": [
-        "E38.16"
+        "E38.16",
+        "E38.37"
       ],
-      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today.",
+      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today. F-239 lands first, by the operator's order of 2026-11-07.",
       "milestone": "M20",
       "sprint": "S46",
       "depends_fids": [
-        "F-206"
+        "F-206",
+        "F-239"
       ]
     },
     {

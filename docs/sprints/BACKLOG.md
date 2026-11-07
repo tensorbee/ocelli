@@ -355,7 +355,7 @@ beside F-119.
 | F-209 | E38.19 | S46 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | F-208, F-199 | done |
 | F-210 | E38.20 | S46 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | F-207, F-191 | done |
 | F-211 | E38.21 | S46 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | F-210, F-195 | done |
-| F-212 | E38.22 | S46 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | F-206 | pending |
+| F-212 | E38.22 | S46 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | F-206, F-239 | pending |
 | F-213 | E38.23 | S46 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | F-200, F-207 | pending |
 | F-214 | E38.24 | S46 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | F-207 | pending |
 | F-215 | E38.25 | S46 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | F-201, F-196, F-207 | pending |
@@ -381,6 +381,7 @@ beside F-119.
 | F-236 | E16.7 | S47 | acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels | TS | 1w | F-231 | pending |
 | F-237 | E19.6 | S47 | The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place | Build | 1w | F-220, F-228 | pending |
 | F-238 | E19.7 | S47 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | Build | 2w | F-220, F-233 | pending |
+| F-239 | E38.37 | S46 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, window, invert, value and region statistics reported unavailable on a colour frame, and every colour shape this build cannot draw refused by name | All | 4w | F-030, F-209, F-216 | pending |
 
 ### M14, Out-of-core volume streaming
 
