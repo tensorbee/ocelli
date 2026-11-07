@@ -3097,9 +3097,9 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, window, invert, value and region statistics reported unavailable on a colour frame, and every colour shape this build cannot draw refused by name",
+      "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name",
       "layer": "All",
-      "weeks": 4,
+      "weeks": 11,
       "depends_eids": [
         "E4.8",
         "E38.19",
@@ -3110,7 +3110,26 @@
         "F-209",
         "F-216"
       ],
-      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212.",
+      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212. Questions 1 to 8 answered by the operator on 2026-11-07, widening the story to JPEG 2000 and HTJ2K colour decoding and cornerstone3D's colour window, and F-240 filed to apply matrix ICC profiles after it.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-240",
+      "eid": "E38.38",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-239"
+      ],
+      "notes": "Filed by the operator on 2026-11-07 with the answers to F-239's questions. F-239 draws a frame carrying ICC Profile (0028,2000) with a sentence that the profile was not applied, and this story applies the matrix and tone-curve subset. Scheduled right after F-239. A subset of F-145, which keeps its own row and its recorded E4.9 defect.",
       "milestone": "M20",
       "sprint": "S46"
     },
