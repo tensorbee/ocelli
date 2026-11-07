@@ -37,6 +37,7 @@
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
+| F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -244,6 +245,20 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
   checker, real time natively at both sizes and in Chrome at 720 by 576, and
   synthetic clips with a recorded assessment of the conformance streams.
   F-242 is approved at 8w with no deviation.
+- **A monochrome JPEG-LS frame can draw wrong pixels with no error.** A
+  reviewer saw an Enhanced CT frame under `.80` drawn as flat grey. The vendored
+  `ritk-codecs` run-mode loop raises RUNindex when a run reaches the end of a
+  line on a partial segment, so every later run reads the wrong length, and
+  the scan decoder returns `Ok` from a desynchronised or truncated scan. 916 of
+  1,024 samples were wrong in each frame of the reported file. No corpus row
+  reaches the trigger, which is why every test passed.
+  **Decided by the operator on 2026-11-07:** a new S46 story, done next,
+  patches the vendored scan decoder to T.87 A.7.1, refuses a scan that runs out
+  of data or leaves unread bytes before EOI, refuses by name an LSE preset the
+  decoder does not apply, records the patch and amends D-20, and adds
+  CharLS-encoded trigger fixtures and banded corpus rows. F-243 implements it,
+  E4.13 at 3w, approved with no new deviation. It lands before F-239's codec
+  part, whose `ritk-codecs` patch merges onto it, so F-239 now depends on it.
 
 ## What is carried in
 

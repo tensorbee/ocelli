@@ -549,6 +549,7 @@ Also given on 2026-11-07, relayed by the lead and applied:
 
 - **Size and speed.** The features must not grow the wasm build beyond budget or make the system slower. Applied in AC29, AC30 and AC31.
 - **cornerstone3D 5.8.2 is the floor and Ocelli should be better.** Every cornerstone behaviour for these images is matched or named as a gap with its reason, every departure is better on a measured axis and recorded under D14, and where cornerstone can be timed on the same frame both numbers are recorded with the target that Ocelli is not slower. Applied in "cornerstone3D 5.8.2 is the floor", item 4's R, G and B readout, AC13, AC20 and AC32. The table names two gaps, `YBR_PARTIAL_420` and tie rounding, with reasons.
+- **F-243 lands first.** The operator scheduled F-243, the JPEG-LS run-mode patch to the vendored `ritk-codecs` scan decoder, next on 2026-11-07, and this story now depends on it. F-243 patches only `src/jpeg_ls/*` and records them in `PATCH-PROVENANCE.md` and in `RITK_PATCHED_HASHES` in the same shape `work/f-239-codec` uses, with `RITK_MANIFEST_PATCHED_HASHES` for the manifests. The codec branch merges onto it as a union: both provenance sections, both sets of digests, one recomputed `RITK_PROVENANCE_SHA256`, and both sets of corpus rows. The source-file refusal text becomes "has undeclared changes beyond its recorded patch" rather than naming D-31.
 
 ## Open questions
 
