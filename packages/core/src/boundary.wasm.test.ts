@@ -319,9 +319,9 @@ describe("wasm session boundary", () => {
     // answers the committed value. A 1 by 1 Float32 frame under the Fit
     // alone does not answer it: without a window 40, 41, 42 and 43 blit
     // byte-identical images. So the case submits a Fit to the canvas
-    // size and a narrow window after binding the canvas, and the control
-    // commit after the final transfer asserts a different value changes
-    // the blit.
+    // size and a narrow window after binding the canvas, and the final
+    // transfer is the control: its publish asserts a different value
+    // changes the blit.
     installCanvasStubs();
     const wasm = await loadModule();
     const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));

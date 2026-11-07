@@ -633,8 +633,8 @@ function transferredMock(stacked: boolean): {
  * `acceptTransferredFrame` takes the memory and the sink separately and
  * builds its one view from `wasm.memory.buffer`, so the read count is the
  * view count: one per call on the specified path. The read count observes
- * the view, not the copy: the copy is counted by the `Uint8Array`
- * prototype spies in the one-copy test. The sink keeps the raw mock, so
+ * the view, not the copy: the copy is counted by the prototype spies in
+ * the one-copy test. The sink keeps the raw mock, so
  * nothing the sink does is counted.
  */
 function countingMemory(wasm: SessionBulkExports): {
@@ -1045,17 +1045,24 @@ group("acceptTransferredFrame, HLD 17.2", () => {
     // AC9. The transferred path reserves len bytes once and copies them
     // once, on the generation route, the selected route and the cached
     // route. `asked` is the reservation count. The copy is counted
-    // directly: a spy on `Uint8Array.prototype.set` counts the calls
-    // whose target buffer is the wasm memory's buffer, a spy on
-    // `Uint8Array.prototype.slice` counts a defensive `slice`, both are
-    // installed around the call and restored after it, and the sum
-    // answers 1. A second `set` through the same view, two `set` calls
-    // through one saved buffer, a duplicated `set` line and a defensive
-    // `slice` each answer 2 and are red. `reads` observes the view, not
-    // the copy: the call takes the sink separately from the memory and
-    // reads `wasm.memory` exactly once, to build the one view it sets
-    // through, so a second view is red on `reads`, and a second
-    // reservation is red on `asked`.
+    // directly: a spy on the shared `%TypedArray%` prototype counts a
+    // `set` whose target buffer is the wasm memory's buffer or whose
+    // source is a view over the transferred buffer, and a `slice`
+    // through any typed-array view, and a spy on
+    // `ArrayBuffer.prototype.slice` counts a slice of the transferred
+    // buffer itself and no other buffer. All three are installed around
+    // the call and restored after it, and the sum answers 1. A second
+    // `set` through the same view, two `set` calls through one saved
+    // buffer, a duplicated `set` line, a defensive `Uint8Array` `slice`,
+    // `buffer.slice(0)`, a staging copy out of a view over the
+    // transferred buffer and a second copy through an `Int8Array` view
+    // each answer 2 on the copy count and are red. A constructor copy,
+    // `Uint8Array.from` and `structuredClone` are outside what a
+    // prototype spy sees. `reads` observes the view, not the copy: the
+    // call takes the sink separately from the memory and reads
+    // `wasm.memory` exactly once, to build the one view it sets through,
+    // so a second view is red on `reads`, and a second reservation is
+    // red on `asked`.
     const routes = [
       {
         stacked: false,
@@ -1086,13 +1093,20 @@ group("acceptTransferredFrame, HLD 17.2", () => {
       const buffer = exactBuffer(bytes);
       const sink = sessionBulkSink(mock.wasm);
       // The copy count, installed around the one call and restored after
-      // it: a `set` whose target buffer is the wasm memory's buffer is a
-      // copy in, and any `Uint8Array` `slice` is a staging copy.
+      // it: a `set` into the wasm memory or out of the transferred
+      // buffer, a `slice` through any typed-array view, and an
+      // `ArrayBuffer` `slice` of the transferred buffer itself.
       let copies = 0;
-      const set = Uint8Array.prototype.set;
-      const slice = Uint8Array.prototype.slice;
+      const typedProto = Object.getPrototypeOf(Uint8Array.prototype) as typeof Uint8Array.prototype;
+      const set = typedProto.set;
+      const slice = typedProto.slice;
+      const bufferSlice = ArrayBuffer.prototype.slice;
       const countingSet = function (this: Uint8Array, ...args: Parameters<typeof set>) {
-        if (this.buffer === mock.wasm.memory.buffer) {
+        const source = args[0];
+        if (
+          this.buffer === mock.wasm.memory.buffer ||
+          (typeof source === "object" && source !== null && "buffer" in source && source.buffer === buffer)
+        ) {
           copies += 1;
         }
         return set.apply(this, args);
@@ -1101,13 +1115,24 @@ group("acceptTransferredFrame, HLD 17.2", () => {
         copies += 1;
         return slice.apply(this, args);
       };
-      Uint8Array.prototype.set = countingSet;
-      Uint8Array.prototype.slice = countingSlice;
+      const countingBufferSlice = function (
+        this: ArrayBuffer,
+        ...args: Parameters<typeof bufferSlice>
+      ): ArrayBuffer {
+        if (this === buffer) {
+          copies += 1;
+        }
+        return bufferSlice.apply(this, args);
+      };
+      typedProto.set = countingSet;
+      typedProto.slice = countingSlice;
+      ArrayBuffer.prototype.slice = countingBufferSlice;
       try {
         acceptTransferredFrame(counted.observed, sink, buffer, meta, route.target);
       } finally {
-        Uint8Array.prototype.set = set;
-        Uint8Array.prototype.slice = slice;
+        typedProto.set = set;
+        typedProto.slice = slice;
+        ArrayBuffer.prototype.slice = bufferSlice;
       }
       expect(mock.asked).toEqual([16]);
       expect(counted.reads()).toBe(1);
