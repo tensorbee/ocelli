@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021, F-101, F-198, F-230
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-021, F-101, F-198, F-230, F-224
+**Last updated:** 2026-11-06
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -38,8 +38,8 @@ non-decimal components, leading-zero forms, and longer values are
 `InvalidRequest`.
 
 Automatic retry, authentication refresh, whole-study retrieval, whole-series
-retrieval, rendered WADO-URI output, caching, and timeout policy are outside
-this contract.
+retrieval, rendered WADO-URI output, response caching of its own, and timeout
+policy are outside this contract.
 
 ## Transport validation and errors
 
@@ -64,6 +64,23 @@ rule.
 
 The injected fetch receives the caller's `AbortSignal` unchanged. Ocelli does
 not retry a rejected fetch.
+
+## The fetch cache mode
+
+Every request is sent with a fetch cache mode. `DicomwebClientOptions` takes
+an optional `cache`, and `postWadoInstance` takes the same field on
+`WadoInstanceRequest` and passes it through. The accepted values are
+`"no-cache"`, `"no-store"`, `"reload"` and `"default"`, and the default is
+`"no-cache"`. `"no-cache"` uses a stored response only after a conditional
+request to the server, which closes the RFC 9111 heuristic freshness path a
+server sending no `Cache-Control` would otherwise open, and a server with
+validators answers 304 so an unchanged object is not downloaded twice.
+`"default"` is an explicit opt-in to the browser's heuristics.
+`"force-cache"` and `"only-if-cached"` return a stored response whether or
+not it is stale, and are refused at construction with `DicomwebError` code
+`InvalidRequest` before any fetch, as is any other string. A proxy or a
+service worker between the browser and the server is outside what a cache
+mode controls.
 
 ## Bulk boundary
 

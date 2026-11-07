@@ -230,6 +230,15 @@ describe("F-103 event catalogue", () => {
     expect(decodeNamedEvent(event(RING_EVENT_KIND.pressure, badTier))).toBeNull();
   });
 
+  it("names_the_producer_that_now_ships_the_evicted_kind", () => {
+    // F-231. The session's frame cache produces cache.evicted from a
+    // shipped module for the first time, so the mapped cornerstone row
+    // names that producer and no longer the encoder alone.
+    const row = CORNERSTONE_EVENT_MAP.find((entry) => entry.ocelli === "cache.evicted");
+    expect(row?.cornerstone).toBe("IMAGE_CACHE_IMAGE_REMOVED");
+    expect(row?.producer).toContain("ocelli-wasm session frame cache");
+  });
+
   it("does_not_listen_and_does_not_declare_a_second_catalogue", () => {
     const marker = "export const " + "OCELLI_EVENTS =";
     const dirs = [HERE, join(HERE, "..", "..", "react", "src")];

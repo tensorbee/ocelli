@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231
+**Last updated:** 2026-11-07
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -367,6 +367,40 @@ This is resident selection, not F-052 series loading, decoding or prefetch.
 `writeCommands` obtains its immediate memory view after allocation, because
 allocation may grow wasm memory. It delegates ticket authorization to the
 existing command sink. No command ID or 96-byte readback layout changed.
+
+## Session frame cache
+
+F-231. `packages/core/src/frame-cache.ts` calls the session cache's exports
+and `docs/lld/cache.md` says what the cache does. `setFrameBudget(wasm,
+bytes)` sets the budget in bytes, a `u32`, and 0 is off, the default.
+`frameResident(wasm, request)` and `showResident(wasm, request)` take a
+`ResidentFrameRequest` of `index`, `epoch`, `content`, `columns` and `rows`.
+`frameResident` answers whether the frame is held for that content id and
+extent and is not a use. `showResident` draws a held frame and returns
+true, returns false for a miss, a stale entry or a wrong epoch, and throws
+`OcelliError` code `CommitRefused` when, under the current epoch, the index
+is not the selected slice, as `writeFrame` does, so a caller can tell a refusal
+from a miss. `releaseSeries(wasm, series)` returns the frames released.
+`releaseStudy(wasm, series)` takes the caller's list of series, validates
+every entry before the first call, skips duplicates and sums the counts,
+one export call per series, because the cache holds no study.
+`requestFramePressure(wasm)` asks for one `cache.pressure` reading.
+
+`FrameCommitMeta` gains an optional `content`, a `bigint` `u64`. A meta with
+`stackIndex`, `stackEpoch` and `content` commits through
+`commit_cached_frame`, and one with the two stack keys alone through
+`commit_selected_frame` as before. A `content` without both stack keys is
+refused with `InvalidValue`, so a content id is never accepted and then
+ignored. `contentId(wasm, sopInstanceUid, transferSyntaxUid, encoded)` in
+`bulk.ts` writes the three back to back into the bulk slot and calls
+`content_id`, which hashes through `ContentId::of` in Rust and drops the
+slot, so FNV-1a exists once and no pixel crosses up. An `undefined` answer
+is a refusal and throws `CommitRefused`, because 0 is a legitimate id.
+
+A non-`u32` index, epoch, column, row or budget and a `bigint` outside `u64`
+are `InvalidValue`, and an unknown request key is `UnknownOption`, each
+before any export call. `ResidentFrameRequest` and `FrameCommitMeta`'s new
+key are in F-230's key lists in `options.ts`.
 
 ## Decode worker pool
 

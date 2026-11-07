@@ -3103,14 +3103,16 @@
       "depends_eids": [
         "E4.8",
         "E38.19",
-        "E38.26"
+        "E38.26",
+        "E4.13"
       ],
       "depends_fids": [
         "F-030",
         "F-209",
-        "F-216"
+        "F-216",
+        "F-243"
       ],
-      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212. Questions 1 to 8 answered by the operator on 2026-11-07, widening the story to JPEG 2000 and HTJ2K colour decoding and cornerstone3D's colour window, and F-240 filed to apply matrix ICC profiles after it.",
+      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212. Questions 1 to 8 answered by the operator on 2026-11-07, widening the story to JPEG 2000 and HTJ2K colour decoding and cornerstone3D's colour window, and F-240 filed to apply matrix ICC profiles after it. F-243 lands first, by the operator's order of 2026-11-07, and this story's ritk-codecs patch merges onto it.",
       "milestone": "M20",
       "sprint": "S46"
     },
@@ -3176,6 +3178,25 @@
       "notes": "Decided by the operator on 2026-11-07, F-241 question 4: a Rust MPEG-2 decoder now, so local MPEG-2 files play, beating cornerstone, its own story by question 9. No dependency unless docs/SOURCE-POLICY.md is satisfied. The patent position is what the policy's patent section relies on and is marked for verification. Open questions are the operator's. Questions 1 to 6 answered by the operator on 2026-11-07: proceed on patents with the Malaysian risk recorded, f64 IDCT, MONOCHROME2 as the Y plane, libmpeg2 and ffmpeg's decoder source read-blocked and enforced by the provenance checker, real-time thresholds, synthetic clips with a recorded assessment of the conformance streams.",
       "milestone": "M20",
       "sprint": "S48"
+    },
+    {
+      "fid": "F-243",
+      "eid": "E4.13",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E4.6"
+      ],
+      "depends_fids": [
+        "F-028"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: a monochrome JPEG-LS frame with a long flat run ending a line decodes to wrong pixels with no error. The vendored run-mode loop raises RUNindex on a partial end-of-line segment, and the scan decoder never refuses a desynchronised or truncated scan. This story patches the vendored decoder, lands before F-239's codec part, and F-239's ritk-codecs patch merges onto it. E4.13 rather than E4.9, which F-145's recorded defect declares.",
+      "milestone": "M20",
+      "sprint": "S46"
     },
     {
       "fid": "F-208",

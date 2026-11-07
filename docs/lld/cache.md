@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224, F-231
 **Last updated:** 2026-11-07
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -21,11 +21,14 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `CacheTier` | Section 8's three tiers, `Encoded`, `Decoded` and `Gpu` |
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
 | `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
-| `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
+| `ImageCache` | F-032, generic over the tier's value since F-231. An `Lru<FrameKey, HeldValue<V>>` returning events. The value is the private `HeldValue<V>`, the content id beside the `V` |
 | `CacheEvent` | F-032 and F-226. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused`, plus `Released` from a series release |
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 | `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
 | `HandoffError` | F-035. `Length` when the buffer length is not `HandoffMeta.bytes` |
+| `ContentId` | F-224. FNV-1a 64 over the length-prefixed SOP Instance UID, transfer syntax UID and encoded bytes |
+| `FrameSource` | F-224. What a lookup presents: the content id, the description and the plane the caller holds |
+| `FrameLookup` | F-224. `Hit`, `Miss`, or `Stale` with the sample length of the frame it removed |
 
 ## What `bytes` means, which is the promise the budget keeps
 
@@ -144,8 +147,10 @@ on, and a field repeating that would be a second place for it to be wrong.
 `Lru` per tier. `ImageCache` and `VolumeCache` are both `CacheTier::Decoded`.
 `BrickCache` is `CacheTier::Gpu`. No production cache is `CacheTier::Encoded`.
 
-**Two value types live in this crate.** F-032 built the decoded tier's
-`DecodedFrame` and its `ImageCache`. F-036 built `Brick` and `BrickCache` on
+**Three value types live in this crate.** F-032 built the decoded tier's
+`DecodedFrame` and its `ImageCache`. F-231 built `CommittedFrame`, the
+value the wasm session caches, and `ImageCache<V>` holds either, both on
+`CacheTier::Decoded`. F-036 built `Brick` and `BrickCache` on
 the GPU tier, and `bytes` is the host buffer length. F-033's `Volume`
 implements `Budgeted` in `ocelli-volume` and keeps a second decoded-tier
 `Lru` there, so a volume cannot spend the frame budget. Encoded bytes are
@@ -318,7 +323,8 @@ No other crate names it.
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
 first because `Lru` releases the previous value before eviction begins, then
 the evictions in least recently used order. `release_series` adds `Released`.
-**The four variants are never collapsed.**
+**The four variants are never collapsed.** F-224 adds the content id an
+insert carries and the validity check in `get`. See Frame identity below.
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
 1, 2 and 3 for evicted, displaced and refused and kind 7 for a released
@@ -362,6 +368,98 @@ The shell side of the same hop is `packages/core/src/bulk.ts`, which is one
 of the two files allowed to view wasm linear memory. F-101's `Session` in
 `ocelli-wasm` is the live owner of one outstanding allocation. A commit
 releases that allocation on success and on refusal.
+
+## Frame identity, F-224
+
+A held frame carries the identity of the bytes it was decoded from.
+`ContentId` is FNV-1a 64 over the length-prefixed SOP Instance UID, the
+transfer syntax UID and the encoded bytes, in that order, each length a
+little-endian `u64`. The UID is in the input because WADO-RS frame retrieval
+returns pixel bytes with no UID in them, and the transfer syntax because the
+same bytes decode differently under two syntaxes. The length prefixes make
+the field boundaries unambiguous. The prime is odd, so every fold step is a
+bijection of `u64` and a change confined to one byte position always changes
+the value. The draft's reference vectors are pinned over the private fold in
+`image.rs`, because `ContentId::of` always adds the prefixes, and the empty
+input of three zero lengths is 24 zero bytes hashing to 0x81d23fd7003c2305.
+
+`ImageCache::insert` takes the content id beside the key. The `Lru`'s value
+is a private `HeldValue<V>` of that id and the value, and its
+`Budgeted::bytes` is the value's own byte count, so admitted sizes and every
+event payload are what they were. `FrameKey`, `HandoffMeta` and the encoded
+event are unchanged.
+
+`ImageCache::get` takes a `FrameSource` of the content id, the
+`StoredPixelDescription` and the `ImagePlane` the caller now holds, and
+answers `FrameLookup`. The description and the plane are compared exactly,
+not hashed, because a re-process can correct Pixel Spacing or Image Position
+and keep both the UID and the pixel bytes. A hit is the frame itself and
+makes it the most recently used. A frame held under the key from other bytes
+or other metadata is removed and reported as `Stale` with the sample length
+it was admitted at, so a caller can count what left. The removal is explicit
+and emits no event, and it is not an `Admission`, so `TierCounters` has
+nothing to record and cannot count it as an eviction. A second identical
+stale lookup is a miss, so the slot holds at most one version.
+
+What the decoded tier cannot know: a lookup by slot without fresh bytes or a
+fresh validator cannot detect that the source changed. The decoded tier
+saves a decode, never a fetch. Freshness of the fetch is the transport's
+job, which is `docs/lld/dicomweb.md`'s cache mode. A re-process that changes
+neither the UID, the transfer syntax, the encoded bytes, the description nor
+the plane produces the same frame and is not stale.
+
+## The session's decoded tier, F-231
+
+`ImageCache<V: Budgeted = DecodedFrame>` is generic over its value, and the
+insert, `set_budget`, `release_series`, `contains`, `remove`, `pressure`
+and `len` are shared. The stale rule is one private `lookup` taking a match
+predicate. `ImageCache<DecodedFrame>::get` presents F-224's `FrameSource`.
+`ImageCache<CommittedFrame>::get` presents a `CommittedSource`, the content
+id with the `columns` and `rows` the commit named, and compares all three
+exactly. `FrameLookup<'a, V>` carries the value type and its three variants
+are unchanged. `set_budget` moves the budget and returns the evictions only,
+least recently used first, because F-034's order puts the budget-changed
+event after them and the caller writes that event.
+
+`CommittedFrame` is columns, rows and the `Stored` samples, and nothing
+else. The session receives no `StoredPixelDescription` and no `ImagePlane`,
+and building a `DecodedFrame` would mean fabricating a geometry. Its
+`bytes` is the sample count times `size_of::<Stored>()`, 4, saturating at
+`usize::MAX`, so a 512 by 512 monochrome frame is 1,048,576 bytes. That is
+why this crate depends on `ocelli-core`, which `ocelli-pixel` already did.
+
+`crates/ocelli-wasm/src/session.rs` holds one `ImageCache<CommittedFrame>`
+in the session of the render worker's instance, decision D5 unchanged.
+**The budget is the caller's and the default is 0, which is off.** With a
+budget of 0 a commit inserts nothing and pushes no cache event, so a caller
+that never sets one commits as before. Only `commit_cached_frame`
+fills it, which is `commit_selected_frame` plus a content id, keyed by the
+stack's `FrameKey` at the committed index. A commit with no content id, or
+one whose length is not a multiple of 4 and so holds no samples, is
+displayed and not cached. A `configure_stack` clears the displayed frame
+and keeps the cache, and the epoch gates every query and show, so a stale
+epoch answers 0.
+
+**Residency is a query that is not a use.** `is_resident` reads through
+`Lru::peek`, which moves no tick, and removes nothing on a mismatch.
+`show_resident` is the use. It refuses any index but the viewport's
+selected one with the `Selection` refusal and draws nothing, a hit copies
+the samples into the displayed frame's two buffers and adopts it with
+generation 0, a mismatch is F-224's stale removal and leaves the display as
+it was, and a miss changes nothing. **The displayed frame is outside the
+budget.** The CPU raster reads the session's own sample buffer, and the
+`Lru` has no pin, so a frame both displayed and cached costs 8 bytes per
+sample outside the budget and 4 inside it. A release that removes its
+cached copy leaves it on screen.
+
+Each insert's events are pushed in the order `ImageCache` returned them,
+then the session compares the pressure band with the last one it reported
+and pushes one `cache.pressure` on a crossing. A release, a budget change
+and a stale removal end in the same comparison. A pressure reading's
+`evicted`, `evicted_bytes` and `refused` are F-034's `TierCounters`, the
+counts since the previous reading, which the reading takes. A displaced
+frame, a released series and a stale removal are none of the three.
+`docs/lld/events.md` has the order of each call.
 
 ## The volume cache, F-033
 

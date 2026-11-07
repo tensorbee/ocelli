@@ -97,6 +97,19 @@ impl EventRing {
         seq
     }
 
+    /// Push one event with the next sequence number, assigned the way
+    /// `push_presented` assigns its own, so every kind shares one sequence
+    /// space.
+    ///
+    /// The closure receives the sequence number and returns the complete
+    /// event. A full ring counts the event in `dropped` and consumes the
+    /// sequence number, which is the same order `push_presented` has.
+    pub fn push_with_seq(&mut self, event: impl FnOnce(u64) -> RingEvent) {
+        let seq = self.seq;
+        self.seq = self.seq.wrapping_add(1);
+        self.push(event(seq));
+    }
+
     /// Copy a 16-byte header and the pending events in order, then advance.
     ///
     /// The copy's tail is 0 and its head is the pending count, so a reader

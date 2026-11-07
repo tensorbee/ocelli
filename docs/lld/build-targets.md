@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231
 **Last updated:** 2026-11-07
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -101,7 +101,12 @@ F-101 adds `alloc`, `bulk_ticket`, `release_bulk`, `apply_commands`,
 `commit_frame`, `configure_stack`, `commit_selected_frame`, `copy_state`,
 `drain_events` and `ring_capacity` on wasm32, plus the CPU canvas set
 `bindCpuCanvas`, `resizeCpuCanvas`, `publishCpuCanvas`, `publishCpuColor` and
-`publishCpuInteraction`. F-198 adds `resolvedTier`. There is no `ring_ptr` and
+`publishCpuInteraction`. F-198 adds `resolvedTier`. F-231 adds the session
+frame cache's seven, `set_frame_budget`, `commit_cached_frame`,
+`frame_resident`, `show_resident`, `release_series`, `request_frame_pressure`
+and `content_id`, every one in `session.rs`'s `mod bind` and returning a
+`u32` or, for `content_id`, an `Option<u64>` that is `undefined` on a
+refusal. There is no `ring_ptr` and
 no pixel getter. A pointer would be a view over linear memory, and the drain
 export copies bytes out instead. `coreAvailable()` stays false until `loadCore`
 resolves true. The render size budget is `ci/wasm-size-budget.json`. F-110 did not
@@ -382,6 +387,17 @@ module measured 16,455 bytes the same day and is recorded in
 module does not link wgpu or Naga. Cold start was not remeasured, so this
 story does not close gate A4.
 
+F-231 measured the render artefact at 2,202,907 bytes on 2026-11-07, against
+the ceiling of 2,258,755, which is the 2,151,196 byte baseline and its 5
+percent. The last recorded measurement was 2,179,402 bytes, at F-233's
+integration, so the module grew 23,505 bytes. F-231 is the session frame
+cache entering the shipped module: an `ImageCache<CommittedFrame>`, its
+`BTreeMap` operations over `FrameKey`, the FNV-1a fold, F-034's event
+encoders and the seven exports. The growth is not split among them, and
+F-224, which changed `ocelli-cache` between the two measurements, was not
+measured on its own. The decode module stayed at 16,455 bytes. Neither
+budget file was edited.
+
 **That number is not an answer to Appendix A gate A4 and must not be read as
 one.** A4 asks whether binary size and cold start land within budget and
 estimates 3 to 8 MB uncompressed with Naga dominating. 2,151,196 bytes is the
@@ -414,9 +430,10 @@ other thing once the module is feature-complete.
 
 ## The exported surface, and the panic probe
 
-The module exports twenty-four functions of ours. F-050 added `snapshot`,
+The module exports thirty-two functions of ours, counted from the
+generated `ocelli_wasm.d.ts` on the F-231 build. F-050 added `snapshot`,
 `snapshot_error` and `restore_snapshot` to the twenty-one that were already
-there. wasm-bindgen adds its own,
+there, F-198 added `resolvedTier` and F-231 added seven. wasm-bindgen adds its own,
 and `memory`, which are the glue's and not this table's. The table below names
 the six that predate F-101, which are the measurement root, the panic probe and
 the two render-target calls. The F-101 boundary and CPU canvas exports are

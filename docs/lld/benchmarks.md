@@ -172,7 +172,7 @@ remeasured after F-039 or F-050. 2.3 ms is not a measurement of the current modu
 **It is not an answer to gate A4 and must not be read as one.** A4 estimates
 3 to 8 MB uncompressed with Naga dominating, and it also names cold start.
 The F-039 release module that this measurement names exported six functions
-and contains Naga. The current release module exports twenty-four functions.
+and contains Naga. The functions the release module exports are listed in `docs/lld/build-targets.md`.
 **A4 stays open.** The 2.3 ms figure remains the F-006 regression baseline
 until a later story measures cold start on this module.
 

@@ -25,6 +25,7 @@
 
 export {
   acceptTransferredFrame,
+  contentId,
   exportDecodedFrame,
   holdSessionBytes,
   sessionBulkSink,
@@ -52,6 +53,7 @@ export { OcelliError } from "./ocelli-error.js";
 export { postWadoInstance } from "./instance-bytes.js";
 export type { WadoInstanceRequest } from "./instance-bytes.js";
 export type {
+  DicomwebCacheMode,
   DicomwebClientOptions,
   DicomwebErrorCode,
   QidoSearchOptions,
@@ -244,6 +246,16 @@ export type { SecondaryCaptureImage, SecondaryCaptureRequest } from "./secondary
 
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
+
+export {
+  frameResident,
+  releaseSeries,
+  releaseStudy,
+  requestFramePressure,
+  setFrameBudget,
+  showResident,
+} from "./frame-cache.js";
+export type { FrameCacheExports, ResidentFrameRequest } from "./frame-cache.js";
 
 export { attachSideBySide } from "./alongside.js";
 export type { SideBySide } from "./alongside.js";

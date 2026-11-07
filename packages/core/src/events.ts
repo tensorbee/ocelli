@@ -173,7 +173,7 @@ const CORE_ROWS: readonly CornerstoneEventRow[] = [
   { cornerstone: "VOLUME_LOADED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "no Ocelli volume event yet" },
   { cornerstone: "VOLUME_LOADED_FAILED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "no Ocelli volume event yet" },
   { cornerstone: "IMAGE_CACHE_IMAGE_ADDED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "an admission is not a cache ring kind" },
-  { cornerstone: "IMAGE_CACHE_IMAGE_REMOVED", source: "core", ocelli: "cache.evicted", delivery: "ring", producer: "ocelli-cache CacheEvent::Evicted", reason: "removal is the 5.8.2 event closest to frame-cache eviction" },
+  { cornerstone: "IMAGE_CACHE_IMAGE_REMOVED", source: "core", ocelli: "cache.evicted", delivery: "ring", producer: "ocelli-wasm session frame cache via ocelli-cache CacheEvent::Evicted", reason: "removal is the 5.8.2 event closest to frame-cache eviction" },
   { cornerstone: "VOLUME_CACHE_VOLUME_ADDED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "the volume cache is not the frame cache" },
   { cornerstone: "VOLUME_CACHE_VOLUME_REMOVED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "volume removal is not frame-cache eviction" },
   { cornerstone: "STACK_NEW_IMAGE", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "the selected slice is viewport state" },

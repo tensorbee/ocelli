@@ -493,6 +493,7 @@ const LIBRARY_FILES: &[&str] = &[
     "events",
     "fatal",
     "flag",
+    "frame-cache",
     "generated",
     "index",
     "instance-bytes",

@@ -70,6 +70,31 @@ describe("one WADO-RS instance", () => {
     expect(Array.from(body ?? [])).toEqual(Array.from(envelope()));
     expect(boundaries).toEqual([BOUNDARY]);
   });
+
+  it("sends the requested cache mode and defaults to no-cache", async () => {
+    const inits: Array<RequestInit | undefined> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      inits.push(init);
+      return instanceResponse();
+    };
+    const request = {
+      studiesServiceUrl: "https://example.test/dicomweb/",
+      wadoUriUrl: "https://example.test/wado",
+      fetch: fetcher,
+      studyUid: STUDY,
+      seriesUid: SERIES,
+      instanceUid: INSTANCE,
+      post: () => {},
+    };
+
+    await postWadoInstance({ ...request, cache: "no-store" });
+    expect(inits[0]?.cache).toBe("no-store");
+
+    // Without the field the client's own default applies, which is the
+    // revalidating "no-cache" and not the Fetch "default".
+    await postWadoInstance(request);
+    expect(inits[1]?.cache).toBe("no-cache");
+  });
 });
 
 describe("session bulk slot", () => {

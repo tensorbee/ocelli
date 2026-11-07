@@ -194,6 +194,8 @@ The debug build is about ten times slower on a window step. Each file is posted 
 
 Opening another folder or the synthetic study tells the process to forget the folder the page left. The page sends that folder's file ids to `POST /forget`, and the process drops each posted file and every decoded frame of it, so `GET /held` then counts only the folder now open. A reply for the folder left that arrives late does not post its file again. A decode already running for a forgotten file stores nothing. Its request is still answered, with 410 Gone when its render had to wait for grey room, or 503 if that wait runs out. Each page load sends a random token with every file it posts, and leaving the page sends one short beacon naming that token, so the process forgets every file that page posted and no other page's. A list of ids would not do, because Chromium allows only 64 KiB of beacons in flight at once. A forget that fails is not retried, and the cache budget, which `OCELLI_CACHE_MIB` sets, and the 16 MiB reply pool still bound what the process holds.
 
+Choosing the same folder again reads its files again, and every grey the page keeps is keyed by the file object that folder choice gave it, never by the file's name, size or time. The series list's thumbnails are keyed by series and drawn again on every open. A file rewritten on disk after the folder was opened is found when the window regains focus, when the page becomes visible again, when a series is selected or when another viewport becomes active. The page then reads one byte of each file of the active series, four at a time, and a file the browser refuses to read is forgotten by the process and shown as "This file changed or was removed on disk after the folder was opened. Open the folder again to see it." In Four images the sentence is in that file's tile and the other tiles still draw. The status line counts such files in the active series. A modification time that moved counts as a change even when the bytes are the same. Three limits hold. A rewrite that keeps the file's modification time is not detected, and the page keeps showing the bytes it already holds until the folder is opened again. A change is noticed at the next focus, return to the page, series selection or change of active viewport, not as it happens. Only Chromium was measured, and other browsers may behave differently.
+
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless
 `OCELLI_PORT` names a fixed one. `0` also means chosen at startup. A fixed
@@ -435,6 +437,22 @@ let _keep = parsed;
 that boundary. The shell sends typed commands down and drains one event ring
 per animation frame.
 
+The wasm session keeps committed frames in a cache whose budget the caller
+sets, and the default is zero, which is off. `setFrameBudget(wasm, bytes)`
+moves it. A commit that carries a `content` id with its `stackIndex` and
+`stackEpoch` fills the cache, and a commit that carries a `content` id
+without both is refused with `InvalidValue` and commits nothing.
+`frameResident` and `showResident` read it back without the bytes crossing
+the boundary again. Under a wrong epoch `showResident` returns false at any
+index. Under the current epoch it answers only for the slice the viewport has
+selected, another index throws the coded `CommitRefused`, and at the selected
+index a miss or a stale entry returns false.
+`releaseSeries` and `releaseStudy` release the named series, one
+`cache.released` event per series that held frames, a series with nothing
+cached emits no event, and a release that crosses a pressure band pushes
+`cache.pressure` after `cache.released`. The displayed frame is outside the
+cache and stays on screen through a release.
+
 In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
 
 `@ocelli/core` depends on dcmjs 0.52.2, which declares adm-zip 0.5.17 as a
@@ -476,7 +494,15 @@ export function Viewer() {
 
 `DicomwebClient` in `@ocelli/core` is the QIDO-RS, WADO-RS and WADO-URI client.
 Construct it with a studies service URL, a WADO-URI URL, `fetch`, wasm memory
-and a response sink. A transport failure keeps a status code. It does not keep
+and a response sink. Every request is sent with the fetch cache mode from the
+optional `cache` option. The default is `"no-cache"`, which revalidates a
+stored response with the server before using it, so a re-processed object is
+never served from the browser's HTTP cache without asking. `"no-store"`,
+`"reload"` and `"default"` are accepted. `"force-cache"` and
+`"only-if-cached"` can serve a stored response that is stale, and are refused
+at construction with `DicomwebError` code `InvalidRequest`. A proxy or a
+service worker between the browser and the server is outside what a cache
+mode controls. A transport failure keeps a status code. It does not keep
 the URL, the headers or the body. An option the client does not know is refused
 with `OcelliError` code `UnknownOption`, which names it.
 

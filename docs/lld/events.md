@@ -1,6 +1,6 @@
 # Events
 
-**F-IDs that contributed:** F-032, F-034, F-101, F-103, F-226
+**F-IDs that contributed:** F-032, F-034, F-101, F-103, F-226, F-231
 **Last updated:** 2026-11-07
 
 The shell's names for what the ring delivers and for what stays in the shell.
@@ -52,6 +52,32 @@ a different cornerstone event would name the wrong observation.
 `IMAGE_RENDERED` is `frame.presented`. `IMAGE_CACHE_IMAGE_REMOVED` is
 `cache.evicted`. `CACHE_SIZE_EXCEEDED` is `cache.pressure`. Volume-cache
 removal is not frame-cache eviction.
+
+## Producers
+
+Kind 6 is the session's draw, `push_presented`. Kinds 1 to 5 and 7 are the
+wasm session's frame cache, F-231, `crates/ocelli-wasm/src/session.rs`, and
+each is pushed through `EventRing::push_with_seq`, which assigns the next
+sequence number as `push_presented` does, so every kind shares one sequence
+space. The cache is off until the caller sets a budget, and with no budget
+a commit pushes only kind 6.
+
+- **A cached commit** pushes the insert's events in `ImageCache`'s order,
+  `cache.displaced`, then each `cache.evicted` least recently used first,
+  then `cache.refused`, and then one `cache.pressure` if the band crossed.
+- **A budget change** pushes each `cache.evicted`, then one
+  `cache.budgetChanged` whose count and bytes are those evictions and whose
+  `dropped` is the ring's own count, then one `cache.pressure` if the band
+  crossed. This is F-034's order.
+- **A series release** pushes one `cache.released` for the series, or none
+  when it held nothing, then one `cache.pressure` if the band crossed.
+- **A stale removal** at `show_resident` pushes no cache event, and then one
+  `cache.pressure` if the band crossed.
+- **`request_frame_pressure`** pushes one `cache.pressure` whatever the band.
+
+A pressure reading's `evicted` and `refused` are the counts since the
+previous reading. A burst larger than the free ring space is counted in the
+header's `dropped`, and the events already held are not overwritten.
 
 ## What stays state
 

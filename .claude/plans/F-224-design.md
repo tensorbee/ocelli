@@ -374,3 +374,17 @@ None open. Every judgement call is a lead decision.
 - Q3, the cache mode default. Answered: lead decision under the operator's delegation of 2026-11-05. `no-cache`, with `force-cache` and `only-if-cached` refused, decision 6.
 - Q4, what the folder viewer can detect. Answered: lead decision under the operator's delegation of 2026-11-05. A re-pick always, a rewrite that moves the modification time at the next focus or selection, a rewrite that restores it never, decisions 9 to 11, from evidence E1 to E3.
 - Q5, order. Answered: lead decision under the operator's delegation of 2026-11-05. After F-230 and F-226, recorded under Dependencies.
+
+### Lead ruling after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-224-working-pass-1.md`. `ImageCache` never hands an admission to `TierCounters`, so AC7's counter half is a structural fact checked by review, and the test block that could not fail is removed. AC7's event half, no event on `Stale` and no `Displaced` after it, stays a test.
+
+### Lead amendments for the folder viewer half, against the sprint head after F-226
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork. Where these differ from the text above, these win. Line numbers are re-measured at implementation.
+
+- **The forget is F-226's.** A file detected as changed is forgotten through the page's existing forget helper and `POST /forget` from F-226, not a second route.
+- **Thumbnails are keyed by series, not by file.** Decision 8's thumbnail re-keying clause has nothing to re-key and is withdrawn. A changed file's thumbnail is refreshed only if its series' thumbnail was drawn from that file.
+- **`cacheKey` is shared with F-213,** which will add the file window index. This story replaces only the file identity prefix, so the later merge is one line.
+- **The new browser check is wired** into `bin/ocelli.sh viewer-browser` and its `--list` description, beside the four checks already there.
+- **Owed with this half:** README, `use.html` section 12 and `more.html` `#worker` per AC19, the `postWadoInstance` `cache` option in its option table (pass 3's note). CHANGELOG is written at integration.

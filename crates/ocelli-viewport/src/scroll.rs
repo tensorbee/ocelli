@@ -3,11 +3,13 @@
 //! HLD section 8 is the decoded LRU this type reads. HLD section 22 names
 //! `Dirty.slice` for a change of index. A prefetch insert is not that change.
 //! HLD section 30 is volume brick prefetch and is not this path. The radius
-//! is one, from the F-047 plan.
+//! is one, from the F-047 plan. F-224 adds the source the lookup presents:
+//! the samples come back only when the displayed frame answers for the bytes
+//! and metadata the caller holds.
 
 use alloc::vec::Vec;
 
-use ocelli_cache::{FrameKey, ImageCache};
+use ocelli_cache::{FrameKey, FrameLookup, FrameSource, ImageCache};
 
 /// Why [`StackSequence::samples_for_upload`] returned no samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +18,9 @@ pub enum ScrollError {
     Empty,
     /// The selected key is not in the image cache. No neighbour is returned.
     NotResident,
+    /// The selected frame was decoded from other bytes or metadata than the
+    /// caller now holds, and has been removed. Nothing is uploaded from it.
+    Stale,
 }
 
 /// One stack in the order the caller stored it.
@@ -94,23 +99,27 @@ impl StackSequence {
         self.index = u32::try_from(clamped).unwrap_or(0);
     }
 
-    /// Samples for the selected key only.
+    /// Samples for the selected key only, when it answers for `source`.
     ///
     /// # Errors
     ///
     /// [`ScrollError::Empty`] when the sequence has no frames.
     /// [`ScrollError::NotResident`] when that key is absent. The bytes of a
-    /// neighbour are not returned.
+    /// neighbour are not returned. [`ScrollError::Stale`] when the frame
+    /// under the key was decoded from other bytes or metadata than `source`
+    /// presents, which also removes it from the cache.
     pub fn samples_for_upload<'a>(
         &self,
         cache: &'a mut ImageCache,
+        source: &FrameSource,
     ) -> Result<&'a [u8], ScrollError> {
         let Some(key) = self.displayed_key() else {
             return Err(ScrollError::Empty);
         };
-        match cache.get(&key) {
-            Some(frame) => Ok(frame.samples()),
-            None => Err(ScrollError::NotResident),
+        match cache.get(&key, source) {
+            FrameLookup::Hit(frame) => Ok(frame.samples()),
+            FrameLookup::Miss => Err(ScrollError::NotResident),
+            FrameLookup::Stale { .. } => Err(ScrollError::Stale),
         }
     }
 

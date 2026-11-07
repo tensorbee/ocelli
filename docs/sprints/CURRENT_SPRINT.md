@@ -24,19 +24,20 @@
 | F-221 | E38.31 | Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball | TS | 1w | done |
 | F-222 | E30.7 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | done |
 | F-223 | E38.32 | Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary | All | 3w | pending |
-| F-224 | E5.7 | Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk | All | 3w | pending |
+| F-224 | E5.7 | Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk | All | 3w | done |
 | F-225 | E3.8 | DICOM conformance report: ocelli-dicom checks each value against the VR rules of PS3.5 section 6.2 and Type 1, 1C and 2 presence for seven PS3.3 modules on CR, CT, MR and PET, a finding never carries a value or stops display, @ocelli/core reads the report, and the folder viewer shows a Checks badge and list | All | 4w | in-progress |
 | F-226 | E5.8 | Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left | All | 3w | done |
 | F-227 | E38.33 | Automatic window per series when the file has none: one window from the 1st to 99th nearest-rank percentile of modality values pooled over up to 16 frames spread through the series, each frame through its own rescale, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is | All | 3w | in-progress |
 | F-228 | E38.34 | Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn | All | 2w | in-progress |
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | done |
 | F-230 | E16.6 | Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false | TS | 2w | done |
-| F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | pending |
+| F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | done |
 | F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | done |
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | done |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
+| F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -73,7 +74,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
 
 ## Pulled forward from S47
 
-The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 waits, because it depends on F-231, which is not integrated. Their backlog rows keep sprint S47 until they integrate.
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, and is implemented from the sprint head. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. Their backlog rows keep sprint S47 until they integrate.
 
 ## Questions for the operator
 
@@ -244,6 +245,20 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
   checker, real time natively at both sizes and in Chrome at 720 by 576, and
   synthetic clips with a recorded assessment of the conformance streams.
   F-242 is approved at 8w with no deviation.
+- **A monochrome JPEG-LS frame can draw wrong pixels with no error.** A
+  reviewer saw an Enhanced CT frame under `.80` drawn as flat grey. The vendored
+  `ritk-codecs` run-mode loop raises RUNindex when a run reaches the end of a
+  line on a partial segment, so every later run reads the wrong length, and
+  the scan decoder returns `Ok` from a desynchronised or truncated scan. 916 of
+  1,024 samples were wrong in each frame of the reported file. No corpus row
+  reaches the trigger, which is why every test passed.
+  **Decided by the operator on 2026-11-07:** a new S46 story, done next,
+  patches the vendored scan decoder to T.87 A.7.1, refuses a scan that runs out
+  of data or leaves unread bytes before EOI, refuses by name an LSE preset the
+  decoder does not apply, records the patch and amends D-20, and adds
+  CharLS-encoded trigger fixtures and banded corpus rows. F-243 implements it,
+  E4.13 at 3w, approved with no new deviation. It lands before F-239's codec
+  part, whose `ritk-codecs` patch merges onto it, so F-239 now depends on it.
 
 ## What is carried in
 

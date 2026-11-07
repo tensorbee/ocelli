@@ -86,7 +86,12 @@ export interface BulkSink {
   releaseAllocated?(ticket: number): void;
 }
 
-/** The four integers the numeric `commit_frame` export stores. */
+/** The four integers the numeric `commit_frame` export stores, plus the
+ * selected-frame and cached-frame route fields. `content` is the identity
+ * of the committed bytes and routes the commit to `commit_cached_frame`,
+ * which takes both `stackIndex` and `stackEpoch` beside it: a `content`
+ * without both is refused with `InvalidValue` and commits nothing.
+ */
 export interface FrameCommitMeta {
   readonly viewport: number;
   readonly columns: number;
@@ -94,6 +99,7 @@ export interface FrameCommitMeta {
   readonly generation: number;
   readonly stackIndex?: number;
   readonly stackEpoch?: number;
+  readonly content?: bigint;
 }
 
 /**
@@ -113,6 +119,16 @@ export interface SessionBulkExports extends WasmMemory {
     generation: number,
   ): number;
   commit_selected_frame?(ticket: number, len: number, viewport: number, columns: number, rows: number, index: number, epoch: number): number;
+  commit_cached_frame?(
+    ticket: number,
+    len: number,
+    viewport: number,
+    columns: number,
+    rows: number,
+    index: number,
+    epoch: number,
+    content: bigint,
+  ): number;
 }
 
 /** An immutable frame identity in stored stack order. */
@@ -273,10 +289,26 @@ export function sessionBulkSink(wasm: SessionBulkExports): BulkSink {
       const fields = frameCommitMeta(meta);
       let code;
       if (fields.stackIndex !== undefined && fields.stackEpoch !== undefined) {
-        if (!wasm.commit_selected_frame) {
-          throw new OcelliError("ExportUnavailable", "selected-frame export is unavailable");
+        if (fields.content !== undefined) {
+          if (!wasm.commit_cached_frame) {
+            throw new OcelliError("ExportUnavailable", "cached-frame export is unavailable");
+          }
+          code = wasm.commit_cached_frame(
+            presented,
+            len,
+            fields.viewport,
+            fields.columns,
+            fields.rows,
+            fields.stackIndex,
+            fields.stackEpoch,
+            fields.content,
+          );
+        } else {
+          if (!wasm.commit_selected_frame) {
+            throw new OcelliError("ExportUnavailable", "selected-frame export is unavailable");
+          }
+          code = wasm.commit_selected_frame(presented, len, fields.viewport, fields.columns, fields.rows, fields.stackIndex, fields.stackEpoch);
         }
-        code = wasm.commit_selected_frame(presented, len, fields.viewport, fields.columns, fields.rows, fields.stackIndex, fields.stackEpoch);
       } else code = wasm.commit_frame(
         presented,
         len,
@@ -457,14 +489,27 @@ function frameCommitMeta(meta: unknown): FrameCommitMeta {
     generation?: unknown;
     stackIndex?: unknown;
     stackEpoch?: unknown;
+    content?: unknown;
   };
   const selection = record.stackIndex !== undefined || record.stackEpoch !== undefined;
+  const positioned = record.stackIndex !== undefined && record.stackEpoch !== undefined;
+  // A content id without both of its stack positions would be accepted and
+  // then silently dropped, because only a stack commit fills the cache.
+  // F-230's rule for this key is a refusal, not a silent drop.
+  if (record.content !== undefined && !positioned) {
+    throw new OcelliError(
+      "InvalidValue",
+      "content needs both stackIndex and stackEpoch",
+    );
+  }
+  const cached = positioned && record.content !== undefined;
   return {
     viewport: u32(record.viewport, "viewport"),
     columns: u32(record.columns, "columns"),
     rows: u32(record.rows, "rows"),
     generation: u32(record.generation, "generation"),
     ...(selection ? { stackIndex: u32(record.stackIndex, "stackIndex"), stackEpoch: u32(record.stackEpoch, "stackEpoch") } : {}),
+    ...(cached ? { content: u64(record.content, "content") } : {}),
   };
 }
 
@@ -478,6 +523,67 @@ function u32(value: unknown, name: string): number {
     throw new OcelliError("InvalidValue", `${name} is not a u32`);
   }
   return value;
+}
+
+function u64(value: unknown, name: string): bigint {
+  if (
+    typeof value !== "bigint" ||
+    value < 0n ||
+    value > 0xffff_ffff_ffff_ffffn
+  ) {
+    throw new OcelliError("InvalidValue", `${name} is not a u64`);
+  }
+  return value;
+}
+
+/**
+ * The content id of one frame's encoded bytes, hashed in the core.
+ *
+ * F-231 decision 8. The UID, the transfer syntax UID and the encoded bytes
+ * are written back to back into the bulk slot and `content_id` hashes them
+ * through `ContentId::of`, so there is one FNV-1a in the product and it is
+ * the Rust one. The slot is dropped by the export itself. `undefined` from
+ * the export is a refusal, because `0` is a legitimate id, and this throws
+ * `CommitRefused` for it.
+ */
+export function contentId(
+  wasm: SessionBulkExports & {
+    content_id(ticket: number, len: number, uidLen: number, tsLen: number): bigint | undefined;
+  },
+  sopInstanceUid: string,
+  transferSyntaxUid: string,
+  encoded: Uint8Array,
+): bigint {
+  const uid = new TextEncoder().encode(sopInstanceUid);
+  const transferSyntax = new TextEncoder().encode(transferSyntaxUid);
+  const bytes = new Uint8Array(
+    uid.byteLength + transferSyntax.byteLength + encoded.byteLength,
+  );
+  bytes.set(uid, 0);
+  bytes.set(transferSyntax, uid.byteLength);
+  bytes.set(encoded, uid.byteLength + transferSyntax.byteLength);
+  const ptr = wasm.alloc(bytes.byteLength);
+  if (ptr === 0) {
+    throw new OcelliError("AllocationRefused", "allocation refused");
+  }
+  const ticket = wasm.bulk_ticket();
+  try {
+    // Build the view AFTER the allocation. Use it immediately. Let it go.
+    new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
+    const id = wasm.content_id(
+      ticket,
+      bytes.byteLength,
+      uid.byteLength,
+      transferSyntax.byteLength,
+    );
+    if (id === undefined) {
+      throw new OcelliError("CommitRefused", "content id refused");
+    }
+    return id;
+  } catch (error) {
+    wasm.release_bulk(ticket);
+    throw error;
+  }
 }
 
 /**

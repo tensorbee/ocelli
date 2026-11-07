@@ -1,7 +1,7 @@
 //! F-101 event ring. Kind 6 is presented. Kinds 1 to 5 stay cache events.
 
 use ocelli_cache::{
-    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED,
+    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent,
 };
 use ocelli_viewport::ring::{EventRing, KIND_PRESENTED, RING_CAPACITY};
 
@@ -12,6 +12,15 @@ fn read_u32(bytes: &[u8], at: usize) -> u32 {
     };
     buf.copy_from_slice(slot);
     u32::from_le_bytes(buf)
+}
+
+fn read_u64(bytes: &[u8], at: usize) -> u64 {
+    let mut buf = [0_u8; 8];
+    let Some(slot) = bytes.get(at..at + 8) else {
+        return u64::MAX;
+    };
+    buf.copy_from_slice(slot);
+    u64::from_le_bytes(buf)
 }
 
 #[test]
@@ -69,4 +78,44 @@ fn presented_is_kind_6_and_a_full_ring_drops_the_new_event() {
     assert_eq!(ring.copy_pending(&mut short), 0);
     assert_eq!(ring.pending(), 1);
     assert_eq!(short, [0_u8; 15]);
+}
+
+#[test]
+fn three_hundred_events_into_an_empty_ring_push_256_and_count_44() {
+    // F-231 AC11. 300 events in one burst into an empty ring of 256: 256
+    // are held and 44 are counted in `dropped`, which `copy_pending` writes
+    // into its header at offset 12. Nothing is overwritten and nothing is
+    // swallowed, so the sequence numbers of the held events are still 0 to
+    // 255 even though 300 were assigned.
+    let mut ring = EventRing::new();
+    for _index in 0..300_u64 {
+        ring.push_with_seq(|seq| RingEvent {
+            kind: KIND_PRESSURE,
+            viewport: u32::MAX,
+            seq,
+            payload: [0_u8; 32],
+        });
+    }
+    assert_eq!(ring.pending(), RING_CAPACITY);
+    assert_eq!(ring.dropped(), 44);
+
+    let mut out = vec![0_u8; 16 + 256 * 48];
+    let copied = ring.copy_pending(&mut out);
+    assert_eq!(copied, 16 + 256 * 48);
+    assert_eq!(read_u32(&out, 0), RING_CAPACITY);
+    assert_eq!(read_u32(&out, 12), 44);
+    // Every held event carries the sequence number it was assigned, in
+    // order, and the 44 after them are nowhere in the copy.
+    for index in 0..256_usize {
+        let at = 16 + index * 48;
+        assert_eq!(read_u32(&out, at), KIND_PRESSURE, "event {index}");
+        assert_eq!(read_u32(&out, at + 4), u32::MAX, "event {index}");
+        assert_eq!(
+            read_u64(&out, at + 8),
+            u64::try_from(index).unwrap_or(0),
+            "event {index}"
+        );
+    }
+    assert_eq!(ring.pending(), 0);
+    assert_eq!(ring.copy_pending(&mut out), 16);
 }

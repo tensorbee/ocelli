@@ -462,7 +462,7 @@ module exported six functions and contains Naga. F-039 recorded that module
 at 1,999,061 bytes. `ci/wasm-size-budget.json` records 2,151,196 bytes,
 measured by F-050 on 2026-10-27. F-110 measured the render module at
 2,171,133 bytes on 2026-11-03, inside the 5 percent ceiling, and did not edit
-that file. The current render module exports twenty-four functions. Cold
+that file. The functions the render module exports are listed in `docs/lld/build-targets.md`. Cold
 start was not remeasured. The 2.3 ms figure is still the F-006 measurement of
 the earlier module.
 
