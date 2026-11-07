@@ -386,6 +386,91 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     ) {
         return Err("the letters sentence does not name Patient Orientation".to_owned());
     }
+    // F-213 AC12. The window rows come from the inspect reply, so the page
+    // holds no preset token, no preset number and no modality test of its
+    // own. Bare 1 to 9 choose a row and never the layout.
+    for held in ["data-preset", "-600", "1500", "\"CT\"", "soft_tissue"] {
+        if page.contains(held) {
+            return Err(format!("the page keeps a window of its own: {held}"));
+        }
+    }
+    let keys = function_body(page, "onKey")?;
+    if !keys.contains("event.key >= \"1\" && event.key <= \"9\"")
+        || !keys.contains("chooseRow(vp, Number(event.key));")
+        || keys.contains("setLayout(")
+    {
+        return Err("1 to 9 do not choose a window row".to_owned());
+    }
+    if !keys.contains("y: \"wlregion\"") || !page.contains("data-key=\"Y\"") {
+        return Err("the region window has no key".to_owned());
+    }
+    for read in [
+        "Array.isArray(info.presets) ? info.presets : []",
+        "Array.isArray(info.windows) ? info.windows : []",
+        "Array.isArray(info.voiLuts) ? info.voiLuts : []",
+    ] {
+        if !page.contains(read) {
+            return Err(format!("the window list does not read {read}"));
+        }
+    }
+    // Amendment 2. The file window index is in every viewport's cache key,
+    // is sent as its header, and travels with a linked window.
+    if !function_body(page, "cacheKey")?.contains("\"file\" + fileKeyIndex(image, view)")
+        || !function_body(page, "fileKeyIndex")?
+            .contains("const index = effectiveIndex(image, view);")
+    {
+        return Err("the cache key leaves out the file window index".to_owned());
+    }
+    // Review pass 1, D2. An index is sent only when the frame's own list
+    // has confirmed it.
+    if !function_body(page, "effectiveIndex")?.contains("if (!windowsKnown(image)) return null;") {
+        return Err("an index is sent before the frame's list is known".to_owned());
+    }
+    if !page.contains(
+        "const index = effectiveIndex(image, view);\n    if (index != null && index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
+    ) {
+        return Err("the file window index is not sent".to_owned());
+    }
+    if !function_body(page, "copyWindow")?.contains("vp.windowIndex = index;") {
+        return Err("a linked window copy drops the file window index".to_owned());
+    }
+    // AC17. The region window imports `windowRegion` from the built library
+    // through the import map, and says so when the build is missing.
+    if !page.contains(
+        "<script type=\"importmap\">{\"imports\":{\"@ocelli/core\":\"/lib/ocelli-core/index.js\",\"dcmjs\":\"/lib/dcmjs.js\"}}</script>",
+    ) {
+        return Err("the page has no import map for the library".to_owned());
+    }
+    if !page.contains("import(\"@ocelli/core\")")
+        || !page.contains("core.windowRegion([extent.min, extent.max])")
+    {
+        return Err("the region window does not use windowRegion from the library".to_owned());
+    }
+    if !page.contains("\"The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.\"") {
+        return Err("the page lacks the library sentence".to_owned());
+    }
+    if !page.contains("\"The region window needs dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.\"") {
+        return Err("the page does not name dcmjs when it is what is missing".to_owned());
+    }
+    // The region and the per-frame windows are asked for by file id with
+    // no body, so a frame change never posts the file again.
+    for (route, name) in [
+        ("fetch(\"/region\"", "region"),
+        ("fetch(\"/inspect\"", "inspect"),
+    ] {
+        let at = page
+            .find(route)
+            .ok_or_else(|| format!("the page does not ask for the {name}"))?;
+        let call = page
+            .get(at..)
+            .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
+            .ok_or_else(|| format!("the {name} call does not close"))?;
+        if !call.contains("\"X-Ocelli-File\": id") || call.contains("body") {
+            return Err(format!(
+                "the {name} call is not by id without a body: {call}"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1137,12 +1222,29 @@ fn mono_unusable_window() -> Result<Vec<u8>, String> {
 }
 
 fn mono_with(window: bool, sequences: &[(u16, u16)]) -> Result<Vec<u8>, String> {
+    mono_modality(window, sequences, None)
+}
+
+/// [`mono_with`] with Modality CT, so a preset passes the F-213 modality
+/// check and the refusal a test sees is the one it names.
+fn mono_ct_with(window: bool, sequences: &[(u16, u16)]) -> Result<Vec<u8>, String> {
+    mono_modality(window, sequences, Some("CT"))
+}
+
+fn mono_modality(
+    window: bool,
+    sequences: &[(u16, u16)],
+    modality: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let mut data = Vec::new();
     data.extend(short_le(
         (0x0008, 0x0016),
         *b"UI",
         &ui(b"1.2.840.10008.5.1.4.1.1.2"),
     )?);
+    if let Some(code) = modality {
+        data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad(code))?);
+    }
     data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
     data.extend(short_le(
         (0x0028, 0x0004),
@@ -1279,6 +1381,7 @@ fn a_window_override_maps_stored_50_to_grey_128() -> Result<(), String> {
             window_width: Some(1.0),
             window_function: Some(VoiFunction::LinearExact),
             window_preset: None,
+            window_index: None,
         },
     )
     .map_err(|_| "the window override was refused".to_owned())?;
@@ -1776,8 +1879,9 @@ fn axial_edge_letters() -> Result<(), String> {
 #[test]
 fn a_preset_refuses_a_voi_lut_sequence() -> Result<(), String> {
     // The file has a VOI LUT Sequence. A numeric override may replace it.
-    // A named preset must not. Lung would otherwise draw a window.
-    let file = mono_with(true, &[(0x0028, 0x3010)])?;
+    // A named preset must not. Lung would otherwise draw a window. The file
+    // is a CT, so the refusal is the LUT one and not F-213's modality one.
+    let file = mono_ct_with(true, &[(0x0028, 0x3010)])?;
     match preview_frame(
         &file,
         FrameRequest {
@@ -1795,7 +1899,7 @@ fn a_preset_refuses_a_voi_lut_sequence() -> Result<(), String> {
     }
     // A Modality LUT Sequence is also refused. The preset must not draw
     // the identity slope in its place.
-    let modality = mono_with(true, &[(0x0028, 0x3000)])?;
+    let modality = mono_ct_with(true, &[(0x0028, 0x3000)])?;
     match preview_frame(
         &modality,
         FrameRequest {
@@ -2421,10 +2525,11 @@ fn two_viewers_do_not_serve_each_others_ids() -> Result<(), String> {
 fn a_voi_lut_preset_still_holds_the_frame() -> Result<(), String> {
     // The file has a VOI LUT Sequence. A preset does not replace it, so the
     // first answer is 400 window. The frame is still held. A numeric override
-    // then draws grey 128 from the held frame.
+    // then draws grey 128 from the held frame. The file is a CT, so the
+    // refusal is the LUT one and not F-213's modality one.
     // Stored 50, slope 1, intercept 0, LINEAR_EXACT center 50 width 1.
     // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
-    let file = mono_with(true, &[(0x0028, 0x3010)])?;
+    let file = mono_ct_with(true, &[(0x0028, 0x3010)])?;
     let addr = viewer_on(8 * 1024 * 1024)?;
     let posted = exchange(addr, &http_post_to("/file", "", &file))?;
     let (header, _) = split_http(&posted)?;
@@ -5218,6 +5323,1066 @@ fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
         || header_line(header, "X-Ocelli-Calibration-Column") != Some("0.5")
     {
         return Err(format!("the reply swapped the calibration pair: {header}"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// F-213. Window presets on CT only, every file window by its explanation,
+// and the file window index.
+//
+// PS3.3 C.11.2.1.2.2: Window Center and Window Width are pairs, multiple
+// values are alternative views, and Window Center & Width Explanation
+// (0028,1055) has one value per pair. PS3.3 C.11.2.1.2.1 is the LINEAR
+// function, `c' = c - 0.5`, `w' = w - 1`, `y = ((x - c') / w' + 0.5) * 255`
+// inside the window. `display_index` addresses the largest n with
+// `f32(n) <= y + 0.5`. Every file below is one MONOCHROME2 pixel storing 50
+// with slope 1 and intercept 0, so the modality value is 50 under PS3.3
+// C.11.1, Table C.11-1.
+
+/// One windowed 1 by 1 frame. Each field is written only when it is `Some`.
+#[derive(Default)]
+struct WindowSpec<'a> {
+    modality: Option<&'a str>,
+    centers: Option<&'a str>,
+    widths: Option<&'a str>,
+    explanation: Option<&'a str>,
+    function: Option<&'a str>,
+    /// One VOI LUT Sequence item per entry, with its LUT Explanation.
+    voi_luts: Option<&'a [Option<&'a str>]>,
+}
+
+fn window_file(spec: &WindowSpec<'_>) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    if let Some(modality) = spec.modality {
+        data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad(modality))?);
+    }
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    for (tag, value) in [
+        ((0x0028, 0x0010), 1_u16),
+        ((0x0028, 0x0011), 1),
+        ((0x0028, 0x0100), 16),
+        ((0x0028, 0x0101), 16),
+        ((0x0028, 0x0102), 15),
+        ((0x0028, 0x0103), 0),
+    ] {
+        data.extend(short_le(tag, *b"US", &value.to_le_bytes())?);
+    }
+    if let Some(centers) = spec.centers {
+        data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad(centers))?);
+    }
+    if let Some(widths) = spec.widths {
+        data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad(widths))?);
+    }
+    data.extend(rescale_one()?);
+    if let Some(explanation) = spec.explanation {
+        data.extend(short_le((0x0028, 0x1055), *b"LO", &text_pad(explanation))?);
+    }
+    if let Some(function) = spec.function {
+        data.extend(short_le((0x0028, 0x1056), *b"CS", &text_pad(function))?);
+    }
+    if let Some(items) = spec.voi_luts {
+        let mut body = Vec::new();
+        for explanation in items {
+            let content = match explanation {
+                Some(text) => short_le((0x0028, 0x3003), *b"LO", &text_pad(text))?,
+                None => Vec::new(),
+            };
+            body.extend(item(&content)?);
+        }
+        data.extend(long_le((0x0028, 0x3010), *b"SQ", &body)?);
+    }
+    data.extend(pixels_50()?);
+    part10(data)
+}
+
+/// The AC1 file: centres `40\-600`, widths `400\1500`, LINEAR by default.
+fn two_windows(modality: &str) -> Result<Vec<u8>, String> {
+    window_file(&WindowSpec {
+        modality: Some(modality),
+        centers: Some("40\\-600"),
+        widths: Some("400\\1500"),
+        explanation: Some("WINDOW1\\WINDOW2"),
+        ..WindowSpec::default()
+    })
+}
+
+fn indexed(index: u32) -> FrameRequest {
+    FrameRequest {
+        window_index: Some(index),
+        ..FrameRequest::default()
+    }
+}
+
+fn refused_as(
+    result: Result<Preview, PreviewError>,
+    want: PreviewError,
+    name: &str,
+) -> Result<(), String> {
+    match result {
+        Err(error) if error == want => Ok(()),
+        Err(error) => Err(format!("{name}: refused as {}", error.code())),
+        Ok(preview) => Err(format!(
+            "{name}: drew grey {:?} at centre {}",
+            preview.grey, preview.window_center
+        )),
+    }
+}
+
+#[test]
+fn a_file_window_index_selects_that_pair() -> Result<(), String> {
+    // AC1. Index 0: c' = 39.5, w' = 399, -160 < 50 <= 239, so
+    // y = ((50 - 39.5) / 399 + 0.5) * 255 = 134.21, grey 134.
+    // Index 1: c' = -600.5, w' = 1499, -1350 < 50 <= 149, so
+    // y = ((50 + 600.5) / 1499 + 0.5) * 255 = 238.16, grey 238.
+    // Drawing index 0 for both, or reporting the first pair, is refused.
+    let file = two_windows("CT")?;
+    for (request, grey, center, width, index) in [
+        (FrameRequest::default(), 134_u8, 40.0_f32, 400.0_f32, 0_u32),
+        (indexed(0), 134, 40.0, 400.0, 0),
+        (indexed(1), 238, -600.0, 1500.0, 1),
+    ] {
+        let preview = preview_frame(&file, request)
+            .map_err(|error| format!("index {index} refused as {}", error.code()))?;
+        if only_byte(&preview)? != grey {
+            return Err(format!(
+                "index {index} drew {:?}, wanted {grey}",
+                preview.grey
+            ));
+        }
+        if preview.window_center.to_bits() != center.to_bits()
+            || preview.window_width.to_bits() != width.to_bits()
+            || preview.window_function != "LINEAR"
+        {
+            return Err(format!(
+                "index {index} reported {} {} {}",
+                preview.window_center, preview.window_width, preview.window_function
+            ));
+        }
+        if preview.window_index != Some(index) || preview.window_count != 2 {
+            return Err(format!(
+                "index {index} reported index {:?} of {}",
+                preview.window_index, preview.window_count
+            ));
+        }
+    }
+    // The function header still applies with an index, as it does to the
+    // file window. PS3.3 C.11.2.1.3.2 LINEAR_EXACT at index 1:
+    // ((50 + 600) / 1500 + 0.5) * 255 = 237.99, grey 238. At index 0:
+    // ((50 - 40) / 400 + 0.5) * 255 = 133.875, grey 134.
+    let exact = preview_frame(
+        &file,
+        FrameRequest {
+            window_index: Some(1),
+            window_function: Some(VoiFunction::LinearExact),
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("an index with a function refused as {}", error.code()))?;
+    if exact.window_function != "LINEAR_EXACT"
+        || exact.window_center.to_bits() != (-600.0_f32).to_bits()
+    {
+        return Err("an index with a function did not keep its pair".to_owned());
+    }
+    // A preset and a numeric window report no file index.
+    let preset = preview_frame(
+        &file,
+        FrameRequest {
+            window_preset: Some(WindowPreset::Lung),
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("lung refused as {}", error.code()))?;
+    if preset.window_index.is_some() || preset.window_count != 2 {
+        return Err("a preset reported a file index".to_owned());
+    }
+    // Through the route: the index header, and the two reply headers.
+    let request = http_post_to("/preview", "X-Ocelli-Window-Index: 1\r\n", &file);
+    let response = one_exchange(&request)?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200")
+        || header_line(header, "X-Ocelli-Window-Index") != Some("1")
+        || header_line(header, "X-Ocelli-Window-Count") != Some("2")
+        || header_line(header, "X-Ocelli-Window-Center") != Some("-600")
+        || body != [238]
+    {
+        return Err(format!("the index route answered {header}"));
+    }
+    let lung = one_exchange(&http_post_to(
+        "/preview",
+        "X-Ocelli-Window-Preset: lung\r\n",
+        &file,
+    ))?;
+    let (header, _) = split_http(&lung)?;
+    if header_line(header, "X-Ocelli-Window-Index") != Some("")
+        || header_line(header, "X-Ocelli-Window-Count") != Some("2")
+    {
+        return Err(format!("a preset reply named an index: {header}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_window_index_is_refused_outside_the_pairs() -> Result<(), String> {
+    // AC2. Clamping index 2 to the last pair, or falling to full range,
+    // would draw. Each is the window error before a grey byte.
+    let file = two_windows("CT")?;
+    refused_as(
+        preview_frame(&file, indexed(2)),
+        PreviewError::Window,
+        "index 2",
+    )?;
+    let bare = mono_frame(false)?;
+    refused_as(
+        preview_frame(&bare, indexed(0)),
+        PreviewError::Window,
+        "no window",
+    )?;
+    refused_as(
+        preview_frame(
+            &file,
+            FrameRequest {
+                window_index: Some(0),
+                window_preset: Some(WindowPreset::SoftTissue),
+                ..FrameRequest::default()
+            },
+        ),
+        PreviewError::Window,
+        "index with a preset",
+    )?;
+    refused_as(
+        preview_frame(
+            &file,
+            FrameRequest {
+                window_index: Some(0),
+                window_center: Some(40.0),
+                window_width: Some(400.0),
+                ..FrameRequest::default()
+            },
+        ),
+        PreviewError::Window,
+        "index with a numeric window",
+    )?;
+    // PS3.3 C.11.2.1.2.2 pairs by position. An empty interior centre is
+    // not skipped: index 0 is that empty pair and is refused, and index 1
+    // is the stored 40 and 400, grey 134 as in AC1.
+    let hole = window_file(&WindowSpec {
+        modality: Some("CT"),
+        centers: Some("\\40"),
+        widths: Some("\\400"),
+        ..WindowSpec::default()
+    })?;
+    refused_as(
+        preview_frame(&hole, indexed(0)),
+        PreviewError::Window,
+        "empty pair",
+    )?;
+    let second = preview_frame(&hole, indexed(1))
+        .map_err(|error| format!("the pair after a hole refused as {}", error.code()))?;
+    if only_byte(&second)? != 134 || second.window_count != 2 {
+        return Err("the pair after an empty slot was not index 1".to_owned());
+    }
+    for (header, code) in [
+        ("X-Ocelli-Window-Index: 2\r\n", "window"),
+        ("X-Ocelli-Window-Index: one\r\n", "window"),
+        ("X-Ocelli-Window-Index: -1\r\n", "window"),
+        (
+            "X-Ocelli-Window-Index: 0\r\nX-Ocelli-Window-Preset: lung\r\n",
+            "window",
+        ),
+        (
+            "X-Ocelli-Window-Index: 0\r\nX-Ocelli-Window-Index: 0\r\n",
+            "header",
+        ),
+    ] {
+        let response = one_exchange(&http_post_to("/preview", header, &file))?;
+        let (reply, _) = split_http(&response)?;
+        if !reply.contains("400") || header_line(reply, "X-Ocelli-Error") != Some(code) {
+            return Err(format!("{header:?} answered {reply}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_window_index_keeps_the_voi_lut_policy() -> Result<(), String> {
+    // AC3. PS3.3 C.11.2.1.2.2 lets a renderer offer the VOI LUT and the
+    // window pair as alternatives. Keeping the sequence through a preset
+    // and an index is this project's policy, so index 0 is refused here.
+    // The numeric override still draws, as F-206 made it:
+    // LINEAR_EXACT centre 50 width 1, ((50 - 50) / 1 + 0.5) * 255 = 127.5,
+    // grey 128.
+    let file = window_file(&WindowSpec {
+        modality: Some("CT"),
+        centers: Some("40"),
+        widths: Some("400"),
+        voi_luts: Some(&[Some("Bone LUT")]),
+        ..WindowSpec::default()
+    })?;
+    refused_as(
+        preview_frame(&file, indexed(0)),
+        PreviewError::Window,
+        "index on a LUT",
+    )?;
+    let drawn = preview_frame(
+        &file,
+        FrameRequest {
+            window_center: Some(50.0),
+            window_width: Some(1.0),
+            window_function: Some(VoiFunction::LinearExact),
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("the override refused as {}", error.code()))?;
+    if only_byte(&drawn)? != 128 || drawn.window_index.is_some() {
+        return Err("the override on a LUT file did not draw grey 128".to_owned());
+    }
+    Ok(())
+}
+
+fn field<'a>(json: &'a str, name: &str) -> Result<&'a str, String> {
+    let needle = format!("\"{name}\":");
+    let start = json
+        .find(&needle)
+        .ok_or_else(|| format!("no {name} in {json}"))?
+        + needle.len();
+    let rest = json
+        .get(start..)
+        .ok_or_else(|| format!("{name} is short"))?;
+    let (open, close) = match rest.as_bytes().first() {
+        Some(b'[') => (b'[', b']'),
+        Some(b'{') => (b'{', b'}'),
+        _ => {
+            let end = rest.find([',', '}']).unwrap_or(rest.len());
+            return rest.get(..end).ok_or_else(|| format!("{name} is short"));
+        }
+    };
+    let mut depth = 0_usize;
+    for (at, byte) in rest.bytes().enumerate() {
+        if byte == open {
+            depth += 1;
+        } else if byte == close {
+            depth -= 1;
+            if depth == 0 {
+                return rest.get(..=at).ok_or_else(|| format!("{name} is short"));
+            }
+        }
+    }
+    Err(format!("{name} does not close"))
+}
+
+fn windows_of(file: &[u8]) -> Result<String, String> {
+    let json =
+        inspect_json(file, 0).map_err(|error| format!("inspect refused as {}", error.code()))?;
+    Ok(field(&json, "windows")?.to_owned())
+}
+
+#[test]
+fn inspect_lists_every_window_by_its_explanation() -> Result<(), String> {
+    // AC4. One row per Window Center and Window Width pair in file order.
+    // The label is the explanation at the same position, PS3.3 C.11.2
+    // (0028,1055), or `Window n` counted from 1 when that slot is absent
+    // or empty. Extra explanations are ignored. The centre and width are
+    // the file's DS tokens.
+    let row = |center: &str, width: &str, explanation: &str, label: &str| {
+        format!(
+            "{{\"center\":{center},\"width\":{width},\"explanation\":\"{explanation}\",\"label\":\"{label}\"}}"
+        )
+    };
+    let cases = [
+        (
+            "two explanations",
+            Some("WINDOW1\\WINDOW2"),
+            "40\\-600",
+            "400\\1500",
+            format!(
+                "[{},{}]",
+                row("40", "400", "WINDOW1", "WINDOW1"),
+                row("-600", "1500", "WINDOW2", "WINDOW2")
+            ),
+        ),
+        (
+            "an empty first explanation",
+            Some("\\WINDOW2"),
+            "40\\-600",
+            "400\\1500",
+            format!(
+                "[{},{}]",
+                row("40", "400", "", "Window 1"),
+                row("-600", "1500", "WINDOW2", "WINDOW2")
+            ),
+        ),
+        (
+            "one explanation for two pairs",
+            Some("WINDOW1"),
+            "40\\-600",
+            "400\\1500",
+            format!(
+                "[{},{}]",
+                row("40", "400", "WINDOW1", "WINDOW1"),
+                row("-600", "1500", "", "Window 2")
+            ),
+        ),
+        (
+            "three explanations for two pairs",
+            Some("A\\B\\C"),
+            "40\\-600",
+            "400\\1500",
+            format!(
+                "[{},{}]",
+                row("40", "400", "A", "A"),
+                row("-600", "1500", "B", "B")
+            ),
+        ),
+        (
+            "no explanation",
+            None,
+            "40",
+            "400",
+            format!("[{}]", row("40", "400", "", "Window 1")),
+        ),
+        (
+            "an empty interior centre keeps its slot",
+            Some("FIRST\\SECOND"),
+            "\\40",
+            "\\400",
+            format!(
+                "[{},{}]",
+                row("null", "null", "FIRST", "FIRST"),
+                row("40", "400", "SECOND", "SECOND")
+            ),
+        ),
+    ];
+    for (name, explanation, centers, widths, want) in cases {
+        let file = window_file(&WindowSpec {
+            modality: Some("CT"),
+            centers: Some(centers),
+            widths: Some(widths),
+            explanation,
+            ..WindowSpec::default()
+        })?;
+        let got = windows_of(&file)?;
+        if got != want {
+            return Err(format!("{name}: {got}, wanted {want}"));
+        }
+    }
+    let none = windows_of(&mono_frame(false)?)?;
+    if none != "[]" {
+        return Err(format!("a file with no window listed {none}"));
+    }
+    // PS3.3 C.11.2 (0028,3003). Each VOI LUT Sequence item is listed by its
+    // LUT Explanation, or `Lookup table n`.
+    let lut = window_file(&WindowSpec {
+        modality: Some("CT"),
+        centers: Some("40"),
+        widths: Some("400"),
+        voi_luts: Some(&[Some("Bone LUT"), None]),
+        ..WindowSpec::default()
+    })?;
+    let json = inspect_json(&lut, 0).map_err(|_| "inspect refused the LUT file".to_owned())?;
+    let luts = field(&json, "voiLuts")?;
+    let want = "[{\"explanation\":\"Bone LUT\",\"label\":\"Bone LUT\"},{\"explanation\":\"\",\"label\":\"Lookup table 2\"}]";
+    if luts != want {
+        return Err(format!("voiLuts: {luts}, wanted {want}"));
+    }
+    if field(
+        &inspect_json(&two_windows("CT")?, 0).map_err(|_| "inspect".to_owned())?,
+        "voiLuts",
+    )? != "[]"
+    {
+        return Err("a file with no VOI LUT listed one".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn presets_are_offered_on_ct_only() -> Result<(), String> {
+    // AC5. The numbers are `WindowPreset::center` and `width`, written once
+    // by the local process, so the page keeps no second table.
+    let ct = inspect_json(&two_windows("CT")?, 0).map_err(|_| "inspect CT".to_owned())?;
+    let mut want = String::from("[");
+    for (at, (preset, token, name)) in [
+        (WindowPreset::SoftTissue, "soft_tissue", "Soft tissue"),
+        (WindowPreset::Lung, "lung", "Lung"),
+        (WindowPreset::Bone, "bone", "Bone"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if at > 0 {
+            want.push(',');
+        }
+        want.push_str(&format!(
+            "{{\"token\":\"{token}\",\"name\":\"{name}\",\"center\":{},\"width\":{}}}",
+            preset.center(),
+            preset.width()
+        ));
+    }
+    want.push(']');
+    let got = field(&ct, "presets")?;
+    if got != want {
+        return Err(format!("CT presets: {got}, wanted {want}"));
+    }
+    let mr = inspect_json(&two_windows("MR")?, 0).map_err(|_| "inspect MR".to_owned())?;
+    if field(&mr, "presets")? != "[]" {
+        return Err("an MR offered presets".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_preset_on_mr_is_the_modality_error() -> Result<(), String> {
+    // AC6. The presets are Hounsfield numbers. On MR the local process
+    // refuses, whatever the page does. The same file as CT draws lung:
+    // c' = -600.5, w' = 1499, y = 238.16, grey 238.
+    let mr = two_windows("MR")?;
+    refused_as(
+        preview_frame(
+            &mr,
+            FrameRequest {
+                window_preset: Some(WindowPreset::Lung),
+                ..FrameRequest::default()
+            },
+        ),
+        PreviewError::Modality,
+        "lung on MR",
+    )?;
+    if PreviewError::Modality.code() != "modality"
+        || PreviewError::Modality.to_string()
+            != "these presets are in Hounsfield units and apply to CT only"
+    {
+        return Err("the modality error is not the planned code and sentence".to_owned());
+    }
+    let ct = preview_frame(
+        &two_windows("CT")?,
+        FrameRequest {
+            window_preset: Some(WindowPreset::Lung),
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("lung on CT refused as {}", error.code()))?;
+    if only_byte(&ct)? != 238 {
+        return Err("lung on CT was not grey 238".to_owned());
+    }
+    // A file with no Modality is not CT.
+    let absent = window_file(&WindowSpec {
+        centers: Some("40"),
+        widths: Some("400"),
+        ..WindowSpec::default()
+    })?;
+    refused_as(
+        preview_frame(
+            &absent,
+            FrameRequest {
+                window_preset: Some(WindowPreset::Bone),
+                ..FrameRequest::default()
+            },
+        ),
+        PreviewError::Modality,
+        "bone with no Modality",
+    )?;
+    let response = one_exchange(&http_post_to(
+        "/preview",
+        "X-Ocelli-Window-Preset: lung\r\n",
+        &mr,
+    ))?;
+    let (header, _) = split_http(&response)?;
+    if !header.contains("400") || header_line(header, "X-Ocelli-Error") != Some("modality") {
+        return Err(format!("lung on MR through the route answered {header}"));
+    }
+    // AC7's order. A VOI LUT refusal is reported before the modality one,
+    // so an MR with a VOI LUT Sequence and a preset is the window error.
+    let lut_mr = window_file(&WindowSpec {
+        modality: Some("MR"),
+        centers: Some("40"),
+        widths: Some("400"),
+        voi_luts: Some(&[None]),
+        ..WindowSpec::default()
+    })?;
+    refused_as(
+        preview_frame(
+            &lut_mr,
+            FrameRequest {
+                window_preset: Some(WindowPreset::Lung),
+                ..FrameRequest::default()
+            },
+        ),
+        PreviewError::Window,
+        "lung on an MR with a VOI LUT",
+    )
+}
+
+#[test]
+fn windows_per_frame_follows_the_functional_group_source() -> Result<(), String> {
+    // AC8. The enhanced fixture gives each frame its own Frame VOI LUT item,
+    // so its window comes from a per-frame source and the page must ask
+    // again for each frame. Frame 1's list is its own pair, 50 and 1.
+    let enhanced = enhanced_frames()?;
+    let first = inspect_json(&enhanced, 0).map_err(|_| "inspect frame 0".to_owned())?;
+    if field(&first, "windowsPerFrame")? != "true" {
+        return Err(format!("the enhanced file was not per frame: {first}"));
+    }
+    let second = inspect_json(&enhanced, 1).map_err(|_| "inspect frame 1".to_owned())?;
+    if field(&second, "windows")?
+        != "[{\"center\":50,\"width\":1,\"explanation\":\"\",\"label\":\"Window 1\"}]"
+    {
+        return Err(format!("frame 1 did not list its own window: {second}"));
+    }
+    let single = inspect_json(&two_windows("CT")?, 0).map_err(|_| "inspect single".to_owned())?;
+    if field(&single, "windowsPerFrame")? != "false" {
+        return Err("a single-frame file was per frame".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn inspect_by_id_matches_the_posted_body() -> Result<(), String> {
+    // AC17. The page asks again for a frame by id with no body, so a frame
+    // change never posts the file again. The answer is the body form's.
+    let file = enhanced_frames()?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id = header_line(header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?
+        .to_owned();
+    let by_body = exchange(
+        addr,
+        &http_post_to("/inspect", "X-Ocelli-Frame: 1\r\n", &file),
+    )?;
+    let by_id = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (body_header, body_json) = split_http(&by_body)?;
+    let (id_header, id_json) = split_http(&by_id)?;
+    if !body_header.contains("200") || !id_header.contains("200") || body_json != id_json {
+        return Err(format!(
+            "by id {id_header} differs from the body form {body_header}"
+        ));
+    }
+    // Review pass 1, D1. Once every frame is held the process drops the
+    // posted bytes. The id form must still answer, from metadata the
+    // process keeps for the id's lifetime, and give the same body.
+    for frame in 0..2 {
+        let drawn = exchange(
+            addr,
+            &preview_id(&id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        let (drawn_header, _) = split_http(&drawn)?;
+        if !drawn_header.contains("200") {
+            return Err(format!("frame {frame} did not draw: {drawn_header}"));
+        }
+    }
+    let (files, frames, _) = held_counts(addr)?;
+    if files != 0 || frames != 2 {
+        return Err(format!(
+            "after both frames the process held {files} files and {frames} frames"
+        ));
+    }
+    let after = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (after_header, after_json) = split_http(&after)?;
+    if !after_header.contains("200") || after_json != body_json {
+        return Err(format!(
+            "by id after every frame is held answered {after_header}"
+        ));
+    }
+    let both = exchange(
+        addr,
+        &http_post_to("/inspect", &format!("X-Ocelli-File: {id}\r\n"), &file),
+    )?;
+    let (both_header, _) = split_http(&both)?;
+    if !both_header.contains("400") || header_line(both_header, "X-Ocelli-Error") != Some("header")
+    {
+        return Err(format!("an id with a body answered {both_header}"));
+    }
+    let gone = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {}\r\n", other_generation(&id)?),
+            b"",
+        ),
+    )?;
+    let (gone_header, _) = split_http(&gone)?;
+    if !gone_header.contains("410")
+        || header_line(gone_header, "X-Ocelli-Error") != Some("file-gone")
+    {
+        return Err(format!("an unknown id answered {gone_header}"));
+    }
+    // The kept metadata leaves with the id through F-226's forget path.
+    forget_exchange(addr, "", id.as_bytes())?;
+    let forgotten = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (forgotten_header, _) = split_http(&forgotten)?;
+    if !forgotten_header.contains("410") {
+        return Err(format!("a forgotten id answered {forgotten_header}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_empty_first_window_slot_opens_at_the_first_usable_pair() -> Result<(), String> {
+    // Lead ruling on amendment 6. Centres `\40` and widths `\400`: slot 0 is
+    // empty, slot 1 is 40 and 400. With no index the file opens drawn at the
+    // first slot holding both values, PS3.3 C.11.2.1.2.1 LINEAR:
+    // c' = 39.5, w' = 399, y = ((50 - 39.5) / 399 + 0.5) * 255 = 134.21,
+    // grey 134, reported as index 1. Choosing the empty slot is refused at
+    // its own index.
+    let hole = window_file(&WindowSpec {
+        modality: Some("CT"),
+        centers: Some("\\40"),
+        widths: Some("\\400"),
+        ..WindowSpec::default()
+    })?;
+    let opened = preview_frame(&hole, FrameRequest::default())
+        .map_err(|error| format!("the file opened as {}", error.code()))?;
+    if only_byte(&opened)? != 134
+        || opened.window_center.to_bits() != 40.0_f32.to_bits()
+        || opened.window_index != Some(1)
+        || opened.window_count != 2
+    {
+        return Err(format!(
+            "opened grey {:?} centre {} index {:?}",
+            opened.grey, opened.window_center, opened.window_index
+        ));
+    }
+    refused_as(
+        preview_frame(&hole, indexed(0)),
+        PreviewError::Window,
+        "the empty slot",
+    )?;
+    let response = one_exchange(&http_post_to("/preview", "", &hole))?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200")
+        || header_line(header, "X-Ocelli-Window-Index") != Some("1")
+        || body != [134]
+    {
+        return Err(format!("the route opened {header}"));
+    }
+    Ok(())
+}
+
+/// The enhanced two-frame fixture as RLE Lossless, PS3.5 Annex G.
+///
+/// Each 1 by 1 frame of 16-bit samples is two RLE segments, the most
+/// significant byte first (G.2), each a literal run of one byte: header
+/// byte 0 then the byte (G.3.1). The RLE header is 16 little-endian `u32`,
+/// the segment count then the offsets, so the segments sit at 64 and 66.
+/// Stored 50 is high byte 0 and low byte 50. PS3.5 A.4 Basic Offset Table
+/// carries each frame's first fragment offset.
+fn enhanced_frames_rle() -> Result<Vec<u8>, String> {
+    let plain = enhanced_frames()?;
+    let pixel_at = plain
+        .windows(4)
+        .rposition(|window| window == [0xE0, 0x7F, 0x10, 0x00])
+        .ok_or_else(|| "the fixture has no pixel data".to_owned())?;
+    let mut fragment = Vec::new();
+    fragment.extend_from_slice(&2_u32.to_le_bytes());
+    fragment.extend_from_slice(&64_u32.to_le_bytes());
+    fragment.extend_from_slice(&66_u32.to_le_bytes());
+    fragment.extend_from_slice(&[0_u8; 52]);
+    fragment.extend_from_slice(&[0, 0, 0, 50]);
+    // The Basic Offset Table names both frames: 0, then one 8-byte item
+    // header plus the 68-byte fragment, 76.
+    let mut table = Vec::new();
+    table.extend_from_slice(&0_u32.to_le_bytes());
+    table.extend_from_slice(&76_u32.to_le_bytes());
+    let mut pixels = item(&table)?;
+    for _ in 0..2 {
+        pixels.extend(item(&fragment)?);
+    }
+    pixels.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+    pixels.extend_from_slice(&0xE0DD_u16.to_le_bytes());
+    pixels.extend_from_slice(&0_u32.to_le_bytes());
+    let mut data = plain
+        .get(..pixel_at)
+        .ok_or_else(|| "the fixture is short".to_owned())?
+        .to_vec();
+    // The dataset starts after the 128-byte preamble, `DICM` and the meta.
+    let meta = file_meta("1.2.840.10008.1.2.1")?;
+    let start = 132 + meta.len();
+    let body = data.split_off(start);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.5")?);
+    bytes.extend(body);
+    bytes.extend_from_slice(&0x7FE0_u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0010_u16.to_le_bytes());
+    bytes.extend_from_slice(b"OB");
+    bytes.extend_from_slice(&[0, 0]);
+    bytes.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    bytes.extend(pixels);
+    Ok(bytes)
+}
+
+#[test]
+fn a_compressed_per_frame_multiframe_is_inspected_by_id_after_every_frame_is_held()
+-> Result<(), String> {
+    // Review pass 2, D1 and S1. The kept reply does not depend on the
+    // transfer syntax. Both RLE frames decode to 50 and the enhanced file's
+    // LINEAR_EXACT windows give grey 64 and 128, as in
+    // `an_enhanced_frame_uses_its_functional_group_window`.
+    let file = enhanced_frames_rle()?;
+    for (frame, grey) in [(0_u32, 64_u8), (1, 128)] {
+        let preview = preview_frame(
+            &file,
+            FrameRequest {
+                frame,
+                ..FrameRequest::default()
+            },
+        )
+        .map_err(|error| format!("RLE frame {frame} refused as {}", error.code()))?;
+        if only_byte(&preview)? != grey {
+            return Err(format!("RLE frame {frame} drew {:?}", preview.grey));
+        }
+    }
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id = header_line(header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?
+        .to_owned();
+    // The pool keeps the frame-independent parts once and each frame's
+    // fields beside them, so it holds something, and less than the two
+    // whole replies. Its exact charge is pinned by the unit test
+    // `kept_replies_are_charged_at_their_heap_bytes`.
+    let whole: usize = (0..2)
+        .map(|frame| inspect_json(&file, frame).map(|json| json.len()))
+        .sum::<Result<usize, _>>()
+        .map_err(|_| "inspect refused the RLE file".to_owned())?;
+    let kept = json_number(&held_census(addr)?, "kept")?;
+    if kept == 0 || kept >= whole {
+        return Err(format!(
+            "the pool holds {kept} bytes for two replies of {whole}"
+        ));
+    }
+    for frame in 0..2 {
+        let drawn = exchange(
+            addr,
+            &preview_id(&id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        let (drawn_header, _) = split_http(&drawn)?;
+        if !drawn_header.contains("200") {
+            return Err(format!("RLE frame {frame} by id: {drawn_header}"));
+        }
+    }
+    let (files, frames, _) = held_counts(addr)?;
+    if files != 0 || frames != 2 {
+        return Err(format!(
+            "the process held {files} files and {frames} frames"
+        ));
+    }
+    let by_body = exchange(
+        addr,
+        &http_post_to("/inspect", "X-Ocelli-Frame: 1\r\n", &file),
+    )?;
+    let by_id = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (_, body_json) = split_http(&by_body)?;
+    let (id_header, id_json) = split_http(&by_id)?;
+    if !id_header.contains("200") || id_json != body_json {
+        return Err(format!("the RLE file by id answered {id_header}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_whose_windows_do_not_change_by_frame_keeps_nothing() -> Result<(), String> {
+    // S1. A one-frame file, and a multiframe whose windows are top level,
+    // never ask by id, so neither spends the pool.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    for file in [two_windows("CT")?, tagged_frame(2, &[50, 0, 60, 0])?] {
+        let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+        let (header, _) = split_http(&posted)?;
+        if !header.contains("200") {
+            return Err(format!("the post answered {header}"));
+        }
+    }
+    let kept = json_number(&held_census(addr)?, "kept")?;
+    if kept != 0 {
+        return Err(format!("files without per-frame windows kept {kept} bytes"));
+    }
+    Ok(())
+}
+
+/// Review pass 3, D2. Three 1 by 1 frames storing 50, slope 1 and intercept
+/// 0 in the shared group. Frame 0's per-frame item has no Frame VOI LUT, so
+/// it falls back to the top-level `40\-600`, `400\1500`, `TOPA\TOPB`.
+/// Frames 1 and 2 carry 300 and 1500 explained `F1ONLY` per frame.
+fn late_per_frame() -> Result<Vec<u8>, String> {
+    own_window_frames(&[false, true, true])
+}
+
+/// [`late_per_frame`]'s file with one 1 by 1 frame per entry, each `true`
+/// frame carrying its own `F1ONLY` window and each `false` frame taking the
+/// top-level one.
+fn own_window_frames(own_frames: &[bool]) -> Result<Vec<u8>, String> {
+    let rescale = item(&concat_bytes(&[
+        &short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?,
+        &short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
+    ]))?;
+    let shared = item(&long_le((0x0028, 0x9145), *b"SQ", &rescale)?)?;
+    let own = item(&long_le(
+        (0x0028, 0x9132),
+        *b"SQ",
+        &item(&concat_bytes(&[
+            &short_le((0x0028, 0x1050), *b"DS", &text_pad("300"))?,
+            &short_le((0x0028, 0x1051), *b"DS", &text_pad("1500"))?,
+            &short_le((0x0028, 0x1055), *b"LO", &text_pad("F1ONLY"))?,
+        ]))?,
+    )?)?;
+    let empty = item(&[])?;
+    let per_frame: Vec<u8> = own_frames
+        .iter()
+        .flat_map(|own_window| {
+            if *own_window {
+                own.clone()
+            } else {
+                empty.clone()
+            }
+        })
+        .collect();
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2.1"),
+    )?);
+    data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad("CT"))?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0008),
+        *b"IS",
+        &text_pad(&own_frames.len().to_string()),
+    )?);
+    for (tag, value) in [
+        ((0x0028, 0x0010), 1_u16),
+        ((0x0028, 0x0011), 1),
+        ((0x0028, 0x0100), 16),
+        ((0x0028, 0x0101), 16),
+        ((0x0028, 0x0102), 15),
+        ((0x0028, 0x0103), 0),
+    ] {
+        data.extend(short_le(tag, *b"US", &value.to_le_bytes())?);
+    }
+    data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("40\\-600"))?);
+    data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad("400\\1500"))?);
+    data.extend(short_le((0x0028, 0x1055), *b"LO", &text_pad("TOPA\\TOPB"))?);
+    data.extend(long_le((0x5200, 0x9229), *b"SQ", &shared)?);
+    data.extend(long_le((0x5200, 0x9230), *b"SQ", &per_frame)?);
+    data.extend(long_le(
+        (0x7FE0, 0x0010),
+        *b"OW",
+        &50_u16.to_le_bytes().repeat(own_frames.len()),
+    )?);
+    part10(data)
+}
+
+#[test]
+fn later_frames_with_their_own_windows_are_per_frame() -> Result<(), String> {
+    // Review pass 3, D2. The decision reads every frame, not frame 0's. The
+    // scan of frame 0 says per frame, so the page asks frame 1 for its list,
+    // and the process keeps the replies. Frame 0 lists the top-level pair,
+    // frame 1 its own. Frame 1 at its first window, PS3.3 C.11.2.1.2.1
+    // LINEAR centre 300 width 1500: c' = 299.5, w' = 1499,
+    // ((50 - 299.5) / 1499 + 0.5) * 255 = 85.06, grey 85.
+    let file = late_per_frame()?;
+    let first = inspect_json(&file, 0).map_err(|_| "inspect frame 0".to_owned())?;
+    if field(&first, "windowsPerFrame")? != "true" {
+        return Err(format!("frame 0 did not say per frame: {first}"));
+    }
+    if !field(&first, "windows")?.contains("\"TOPB\"") {
+        return Err(format!("frame 0 lost the top-level list: {first}"));
+    }
+    let second = inspect_json(&file, 1).map_err(|_| "inspect frame 1".to_owned())?;
+    if field(&second, "windows")?
+        != "[{\"center\":300,\"width\":1500,\"explanation\":\"F1ONLY\",\"label\":\"F1ONLY\"}]"
+    {
+        return Err(format!("frame 1 did not list its own window: {second}"));
+    }
+    let drawn = preview_frame(
+        &file,
+        FrameRequest {
+            frame: 1,
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("frame 1 refused as {}", error.code()))?;
+    if only_byte(&drawn)? != 85 {
+        return Err(format!("frame 1 drew {:?}", drawn.grey));
+    }
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    if !header.contains("200") || json_number(&held_census(addr)?, "kept")? == 0 {
+        return Err("the replies of a late per-frame file were not kept".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_middle_frame_alone_with_its_own_window_is_per_frame() -> Result<(), String> {
+    // Review pass 4, S1. Five frames, and only frame 2 carries its own
+    // window. A decision that read only frame 1, only the last frame or only
+    // frame 0 would say no, and the page would name frame 2 with the
+    // top-level label beside its own window.
+    let file = own_window_frames(&[false, false, true, false, false])?;
+    let first = inspect_json(&file, 0).map_err(|_| "inspect frame 0".to_owned())?;
+    if field(&first, "windowsPerFrame")? != "true" {
+        return Err(format!("frame 0 did not say per frame: {first}"));
+    }
+    let middle = inspect_json(&file, 2).map_err(|_| "inspect frame 2".to_owned())?;
+    if field(&middle, "windows")?
+        != "[{\"center\":300,\"width\":1500,\"explanation\":\"F1ONLY\",\"label\":\"F1ONLY\"}]"
+    {
+        return Err(format!("frame 2 did not list its own window: {middle}"));
+    }
+    if !field(
+        &inspect_json(&file, 3).map_err(|_| "inspect frame 3".to_owned())?,
+        "windows",
+    )?
+    .contains("\"TOPB\"")
+    {
+        return Err("frame 3 lost the top-level list".to_owned());
     }
     Ok(())
 }

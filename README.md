@@ -190,9 +190,9 @@ monochrome. It listens on this machine only.
 cargo run --release -p ocelli-folder-viewer
 ```
 
-The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
+The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. A multiframe in which any frame's window comes from a per-frame functional group also keeps every frame's inspect reply, so the page can ask for a frame's window list by file id after the posted bytes are dropped. The parts no frame changes are kept once. No other file keeps one. This pool is outside `OCELLI_CACHE_MIB`, is charged at the bytes it holds, stays under a fixed 16 MiB across every file, and `GET /held` reports it as `kept`. Replies that would pass that cap after the files holding nothing are dropped are not kept, and that file's `/inspect` by id answers 410 once its bytes are gone. A forget drops a file's replies, and so does a file the cache has evicted, when it is next asked for. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
 
-Opening another folder or the synthetic study tells the process to forget the folder the page left. The page sends that folder's file ids to `POST /forget`, and the process drops each posted file and every decoded frame of it, so `GET /held` then counts only the folder now open. A reply for the folder left that arrives late does not post its file again. A decode already running for a forgotten file stores nothing. Its request is still answered, with 410 Gone when its render had to wait for grey room, or 503 if that wait runs out. Each page load sends a random token with every file it posts, and leaving the page sends one short beacon naming that token, so the process forgets every file that page posted and no other page's. A list of ids would not do, because Chromium allows only 64 KiB of beacons in flight at once. A forget that fails is not retried, and the cache budget, which `OCELLI_CACHE_MIB` sets, still bounds what the process holds.
+Opening another folder or the synthetic study tells the process to forget the folder the page left. The page sends that folder's file ids to `POST /forget`, and the process drops each posted file and every decoded frame of it, so `GET /held` then counts only the folder now open. A reply for the folder left that arrives late does not post its file again. A decode already running for a forgotten file stores nothing. Its request is still answered, with 410 Gone when its render had to wait for grey room, or 503 if that wait runs out. Each page load sends a random token with every file it posts, and leaving the page sends one short beacon naming that token, so the process forgets every file that page posted and no other page's. A list of ids would not do, because Chromium allows only 64 KiB of beacons in flight at once. A forget that fails is not retried, and the cache budget, which `OCELLI_CACHE_MIB` sets, and the 16 MiB reply pool still bound what the process holds.
 
 Choosing the same folder again reads its files again, and every grey the page keeps is keyed by the file object that folder choice gave it, never by the file's name, size or time. The series list's thumbnails are keyed by series and drawn again on every open. A file rewritten on disk after the folder was opened is found when the window regains focus, when the page becomes visible again, when a series is selected or when another viewport becomes active. The page then reads one byte of each file of the active series, four at a time, and a file the browser refuses to read is forgotten by the process and shown as "This file changed or was removed on disk after the folder was opened. Open the folder again to see it." In Four images the sentence is in that file's tile and the other tiles still draw. The status line counts such files in the active series. A modification time that moved counts as a change even when the bytes are the same. Three limits hold. A rewrite that keeps the file's modification time is not detected, and the page keeps showing the bytes it already holds until the folder is opened again. A change is noticed at the next focus, return to the page, series selection or change of active viewport, not as it happens. Only Chromium was measured, and other browsers may behave differently.
 
@@ -232,8 +232,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    to its image nearest the source image's position, when both series share a
    Frame of Reference UID and the cosine of the angle between their planes
    is above 0.9, which is under about 26 degrees. Window copies the source's
-   window when a W/L drag ends, on a preset and on Reset. A preset is not sent to a viewport whose image is not
-   CT, and no window is sent to one whose image is not monochrome. Zoom
+   window when a W/L drag ends, on a window row, on a region window and on
+   Reset. A preset is not sent to a viewport whose image the local process
+   does not offer it on, which is any image that is not CT. A file window is
+   sent by its place in the list, and a viewport whose image lists fewer
+   windows shows its first usable one. No window is sent to one whose image is not
+   monochrome. Zoom
    copies the source's zoom over each viewport's own fit, and pan is not
    copied. A click on a series row is a new load and copies nothing.
    Reference lines, on at load, draw a yellow line in each other viewport
@@ -244,18 +248,54 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    and starts at 10.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
-   W/L), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
-   Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
-   view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
-   (Pointer cross, Magnifier, Corners, Orientation letters), the layout
-   (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
+   W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`,
+   Bidirectional `B`, Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`,
+   Text), the view (Invert, Rotate 90, Flip horizontal, Flip vertical), the
+   display (Pointer cross, Magnifier, Corners, Orientation letters), the
+   layout (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
    which shows four neighbouring images in the outlined viewport, Link and
-   Reference lines, which have no key), and Key
-   image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
-   Key image and Headers act on the outlined viewport.
-   Scroll starts active. The right column holds the window presets, the marks
-   and the mouse and key lists. The icons at either end of the top bar, or
-   the `[` and `]` keys, hide and show the two side columns.
+   Reference lines, which have no key), and Key image, Headers, Fit, Reset
+   and Full screen. The view, window, Fit, Reset, Key image and Headers act
+   on the outlined viewport. Scroll starts active. The right column holds
+   the window list, the marks and the mouse and key lists. The icons at
+   either end of the top bar, or the `[` and `]` keys, hide and show the two
+   side columns. On a CT the window list starts with the three presets, Soft
+   tissue, Lung and Bone, and then lists the file's own windows in file
+   order, each named by its Window Center & Width Explanation, or `Window n`
+   when it has none. On any other image it lists the file's windows only.
+   The keys `1` to `9` choose rows 1 to 9, and `0` stays Fit. Each VOI LUT
+   Sequence item is listed as a row that cannot be chosen, because this
+   preview does not apply one, and while a file has one its other rows
+   cannot be chosen either. A multiframe whose windows change per frame
+   lists the shown frame's own, asked for by file id, which the process
+   answers from the replies it keeps for such a file after the posted bytes
+   are dropped. Until that list arrives the frame is drawn at its own first
+   usable window, then at the chosen one. A file is read as changing per
+   frame when any frame's window comes from its own per-frame group, not
+   only frame 0's. Each tile of Four images follows the same rule. While its
+   frame's list is on its way its label gives the WW and WL it is drawn at,
+   and once the list arrives it is drawn at the chosen window and its label
+   names it. A tile of a file that stores no window gives its numbers and
+   says `full range`, as the corner does. A file opens at its first window
+   that has both a centre and a width, and a slot missing either is listed
+   as a row that cannot be chosen. A slice keeps its window, and a file
+   window past the next image's list shows that image's first usable one. A
+   series change and Reset return to the first usable file window. The
+   bottom right corner names the window shown: the preset, the file window's
+   name, `region` or `manual`. A window row or a region window that the
+   local process refuses leaves the image and the window as they were and
+   puts the reason in the sentence line. Region window is a drag of a
+   rectangle. The window then runs from the least to the greatest modality
+   value whose pixel centre is inside it, with padding left out, and keeps
+   the function already shown. The local process finds the two values
+   through `POST /region`, and `windowRegion` from `@ocelli/core` makes the
+   window. The process serves the built `packages/core/dist` under `/lib/`,
+   so run `npm run build -w @ocelli/core` before starting the viewer, or the
+   region window reads unavailable and says so. The library's SR modules
+   import dcmjs, which `npm ci` installs, and the region window names that
+   when it is the part that is missing. Its centre is the middle of that
+   span. cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean
+   and keeps a width of at least 10, so the two can give different windows.
 7. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
@@ -331,7 +371,8 @@ A file that is not a Part 10 DICOM object is skipped and counted. A colour
 frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window
 center and a window width stays on a fixed error sentence. The corner of an
 image that is not monochrome reads `Window not applicable`, and its window
-presets are off. A series of more than 65536 images is not linked: it does
+rows are off. The local process refuses a window preset on an image whose
+Modality is not CT, whatever the page sends. A series of more than 65536 images is not linked: it does
 not scroll with the others and has no reference line.
 
 The page HTML is compiled into the binary. After a change under

@@ -832,6 +832,14 @@ def _forget_check_accepts_a_late_post(box: Sandbox) -> None:
     )
 
 
+def _window_check_accepts_a_stale_grey(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/window.mjs",
+        "    if (want.soft !== undefined && (got.soft !== want.soft || got.lung !== want.lung)) {",
+        "    if (false) {",
+    )
+
+
 def _changed_check_accepts_the_old_image(box: Sandbox) -> None:
     box.substitute(
         "examples/folder-viewer/tests/browser/changed.mjs",
@@ -13976,6 +13984,71 @@ GUARDS: tuple[Guard, ...] = (
               "watched by the `viewer-browser` gate and its CI job. The 410, "
               "beacon count, beacon size, held-after and not-observed "
               "branches have no probe.",
+    ),
+    Guard(
+        id="viewer-browser.window",
+        file="examples/folder-viewer/tests/browser/window.mjs",
+        gate="viewer-browser",
+        spec="F-213 design AC13 and lead amendment 2, the window rows on "
+             "the number keys draw what they name and the file window "
+             "index is part of every viewport's cache key",
+        refuses="A number key whose corner word or grey is not its row's, "
+                "key 5 on the CT drawing key 4's grey, a shorter next list "
+                "that shows a fault or another window than its first, an MR "
+                "that lists a preset row or a key that reaches past its one "
+                "window, a region window that does not read WW 840 WL -380 "
+                "region, a missing library build that does not say so, a "
+                "per-frame multiframe frame that shows a fault before its "
+                "own window list arrives or is not drawn at its own first "
+                "window, a frame change on a fully held multiframe that "
+                "posts the file again, a Four images tile that is not drawn "
+                "at the chosen file window once its frame's list is known or "
+                "whose label does not name that window, a later frame of a "
+                "file whose frame 0 takes the top-level window that is named "
+                "with frame 0's label or shows a fault, a tile whose frame "
+                "list is held back and whose label does not give the WW and "
+                "WL it is drawn at, a multiframe step "
+                "whose process never holds every frame without the posted "
+                "bytes, and a run in which a step was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `windowProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its grey branch.",
+        probes=(
+            Probe(
+                "viewer-browser.window-stale-grey",
+                _window_check_accepts_a_stale_grey,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { EXPECTED, windowProblems } from "
+                    "'./examples/folder-viewer/tests/browser/window.mjs';\n"
+                    "const steps = EXPECTED.map((want) => ({ name: want.name, "
+                    "corner: 'WW 1  WL 1  ' + want.word, soft: want.soft, "
+                    "lung: want.lung, fault: '' }));\n"
+                    "steps[4].soft = 128; steps[4].lung = 0;\n"
+                    "const problems = windowProblems({ steps, mrRows: 1, "
+                    "region: { served: true, corner: 'WW 840  WL -380  "
+                    "region' } });\n"
+                    "if (problems.length === 1 && problems[0].includes('grey "
+                    "128 and 0, wanted 236 and 94')) process.exit(0);\n"
+                    "console.error('window check accepted a stale grey'); "
+                    "process.exit(1);",
+                ),
+                "window check accepted a stale grey",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the grey branch with key 5 showing key 4's "
+              "grey, which is what a cache key without the file window "
+              "index serves. The observation itself needs Chromium and a "
+              "release build of the viewer, which a disposable sandbox does "
+              "not have, so it is watched by the `viewer-browser` gate and "
+              "its CI job. Which region leg runs depends on whether "
+              "`packages/core/dist` is built, and CI does not build it, so "
+              "CI observes the library sentence. The corner, fault, MR row, "
+              "region, `multiframeProblems` and `tileProblems` branches have "
+              "no probe.",
     ),
     Guard(
         id="viewer-browser.changed",

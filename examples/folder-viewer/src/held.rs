@@ -18,7 +18,7 @@ use std::time::Duration;
 use ocelli_cache::{Admission, Budgeted, CacheTier, Lru, Pressure};
 use ocelli_core::Stored;
 
-use crate::preview::HeldFrame;
+use crate::preview::{HeldFrame, KeptReplies};
 
 #[path = "schedule.rs"]
 mod schedule;
@@ -30,6 +30,17 @@ const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 /// Page records kept before a sweep is considered, so a small cache does
 /// not sweep on every post.
 const PAGE_SWEEP_FLOOR: usize = 4096;
+
+/// Most bytes of kept inspect replies across every held id, 16 MiB.
+///
+/// A held multiframe whose windows come from a per-frame functional group
+/// keeps every frame's inspect reply, so `/inspect` by id answers a frame's
+/// window list after the posted bytes leave the cache. No other file keeps
+/// anything. Replies that would pass this cap, after the ids that hold
+/// nothing are dropped, are not kept, and that id's `/inspect` is 410 once
+/// its bytes are gone. The pool is outside `OCELLI_CACHE_MIB` and `GET
+/// /held` reports it as `kept`.
+pub(crate) const KEPT_INSPECT_CAP: usize = 16 * 1024 * 1024;
 const CONNECTION_CAP: usize = 32;
 const PERMITS: usize = 2;
 
@@ -369,6 +380,13 @@ struct CacheState {
     /// The page token each posted id arrived under. A forget removes its
     /// ids, and [`CacheState::sweep_pages`] drops ids that hold nothing.
     pages: BTreeMap<FileId, PageToken>,
+    /// Each held per-frame multiframe's inspect replies, for `/inspect` by
+    /// id. They are not in the LRU, so `take_encoded_if_ready` does not drop
+    /// them. A forget drops them with the id. An id that holds nothing loses
+    /// them when it is asked for, and when the total would pass
+    /// [`KEPT_INSPECT_CAP`].
+    kept: BTreeMap<FileId, Arc<KeptReplies>>,
+    kept_bytes: usize,
     #[cfg(test)]
     reused: usize,
     #[cfg(test)]
@@ -899,6 +917,8 @@ pub(crate) struct MemoryCensus {
     pub(crate) workspace: usize,
     /// Decoded sample bytes on the free list.
     pub(crate) free: usize,
+    /// Bytes of kept per-frame inspect replies, outside the cache budget.
+    pub(crate) kept: usize,
 }
 
 /// What one forget removed. `bytes` is the admitted size of every entry that
@@ -1011,6 +1031,8 @@ impl Viewer {
                     in_flight: BTreeMap::new(),
                     doomed: BTreeSet::new(),
                     pages: BTreeMap::new(),
+                    kept: BTreeMap::new(),
+                    kept_bytes: 0,
                     #[cfg(test)]
                     reused: 0,
                     #[cfg(test)]
@@ -1070,6 +1092,7 @@ impl Viewer {
         let files = state.files;
         let frames = state.frames;
         let free = state.free_bytes;
+        let kept = state.kept_bytes;
         drop(state);
         let permits = lock_mutex(&self.permits.idle);
         let mut workspace = self.permits.out.load(Ordering::Relaxed);
@@ -1093,6 +1116,7 @@ impl Viewer {
             grey_replies,
             workspace,
             free,
+            kept,
         };
         bump_peak(&self.peak_used, census.pressure.used);
         bump_peak(&self.peak_inflight, census.inflight);
@@ -1458,6 +1482,50 @@ impl Viewer {
         true
     }
 
+    /// Keep a just-posted id's per-frame replies for [`Self::kept_reply`],
+    /// charged at [`KeptReplies::bytes`]. Nothing is kept for an id that is
+    /// not held, or past [`KEPT_INSPECT_CAP`].
+    pub(crate) fn keep_inspect(&self, id: FileId, replies: KeptReplies) {
+        let mut state = self.lock_cache();
+        if !state.lru.contains_key(&HeldKey::File(id)) {
+            return;
+        }
+        let len = replies.bytes();
+        if state.kept_bytes.saturating_add(len) > KEPT_INSPECT_CAP {
+            state.sweep_kept();
+        }
+        if state.kept_bytes.saturating_add(len) > KEPT_INSPECT_CAP {
+            return;
+        }
+        state.kept_bytes = state.kept_bytes.saturating_add(len);
+        if let Some(old) = state.kept.insert(id, Arc::new(replies)) {
+            state.kept_bytes = state.kept_bytes.saturating_sub(old.bytes());
+        }
+    }
+
+    /// Frame `frame`'s kept reply for a held id, which outlives its posted
+    /// bytes. An id that holds no posted bytes and no frame any more, because
+    /// the cache evicted them, loses its replies here and answers `None`, so
+    /// `/inspect` agrees with `/preview` that the id is gone.
+    pub(crate) fn kept_reply(&self, id: FileId, frame: u32) -> Option<String> {
+        let mut state = self.lock_cache();
+        let replies = Arc::clone(state.kept.get(&id)?);
+        if !state.holds(id) {
+            if let Some(gone) = state.kept.remove(&id) {
+                state.kept_bytes = state.kept_bytes.saturating_sub(gone.bytes());
+            }
+            return None;
+        }
+        drop(state);
+        replies.reply(frame)
+    }
+
+    /// Bytes the kept-reply pool holds.
+    #[cfg(test)]
+    pub(crate) fn kept_bytes(&self) -> usize {
+        self.lock_cache().kept_bytes
+    }
+
     pub(crate) fn file_bytes(&self, id: FileId) -> Option<Arc<PostedBytes>> {
         let mut state = self.lock_cache();
         match state.lru.get(&HeldKey::File(id))? {
@@ -1632,6 +1700,9 @@ impl CacheState {
         self.drain_recycled();
         for &id in ids {
             self.pages.remove(&id);
+            if let Some(kept) = self.kept.remove(&id) {
+                self.kept_bytes = self.kept_bytes.saturating_sub(kept.bytes());
+            }
             if self.in_flight.contains_key(&id) {
                 self.doomed.insert(id);
             }
@@ -1681,6 +1752,37 @@ impl CacheState {
         let lru = &self.lru;
         self.pages
             .retain(|id, _| framed.contains(id) || lru.contains_key(&HeldKey::File(*id)));
+    }
+
+    /// Whether `id` still holds its posted bytes or any frame.
+    fn holds(&self, id: FileId) -> bool {
+        self.lru.contains_key(&HeldKey::File(id))
+            || self
+                .frame_order
+                .iter()
+                .any(|frame| matches!(frame.key, HeldKey::Frame(held, _) if held == id))
+    }
+
+    /// Drop the kept replies of ids that hold no posted bytes and no frame.
+    fn sweep_kept(&mut self) {
+        let framed: BTreeSet<FileId> = self
+            .frame_order
+            .iter()
+            .filter_map(|frame| match frame.key {
+                HeldKey::Frame(id, _) => Some(id),
+                HeldKey::File(_) => None,
+            })
+            .collect();
+        let lru = &self.lru;
+        let mut freed = 0_usize;
+        self.kept.retain(|id, kept| {
+            let keep = framed.contains(id) || lru.contains_key(&HeldKey::File(*id));
+            if !keep {
+                freed = freed.saturating_add(kept.bytes());
+            }
+            keep
+        });
+        self.kept_bytes = self.kept_bytes.saturating_sub(freed);
     }
 
     /// Count one more decode holding `id`'s posted bytes.
@@ -2075,6 +2177,117 @@ mod tests {
         ImageDimensions, PhotometricInterpretation, PixelRepresentation, SampleLayout, StoredBits,
         StoredPixelDescription,
     };
+
+    const MIB: usize = 1024 * 1024;
+
+    /// A viewer holding one small posted file, and its id.
+    fn kept_viewer(count: usize) -> Result<(Viewer, Vec<FileId>), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 1024 * 1024,
+        });
+        let mut ids = Vec::new();
+        for _ in 0..count {
+            ids.push(
+                viewer
+                    .insert_posted(vec![0_u8; 64], None, None, None)
+                    .ok_or_else(|| "the file was not held".to_owned())?,
+            );
+        }
+        Ok((viewer, ids))
+    }
+
+    /// The cache evicting an id's posted bytes, which leaves it holding nothing.
+    fn evict_file(viewer: &Viewer, id: FileId) {
+        let mut state = viewer.lock_cache();
+        if state.lru.remove(&HeldKey::File(id)).is_some() {
+            state.files = state.files.saturating_sub(1);
+        }
+    }
+
+    #[test]
+    fn kept_replies_stay_under_the_cap() -> Result<(), String> {
+        // Review pass 2, S2. Two 9 MiB sets for two held ids pass the 16 MiB
+        // cap together, so the second is not kept and the counter is the
+        // first's alone.
+        let (viewer, ids) = kept_viewer(2)?;
+        let [first, second] = ids[..] else {
+            return Err("two ids were not held".to_owned());
+        };
+        viewer.keep_inspect(first, KeptReplies::filler(9 * MIB));
+        viewer.keep_inspect(second, KeptReplies::filler(9 * MIB));
+        let nine = KeptReplies::filler(9 * MIB).bytes();
+        if viewer.kept_bytes() != nine || viewer.kept_reply(second, 0).is_some() {
+            return Err(format!("the pool holds {} bytes", viewer.kept_bytes()));
+        }
+        // One set larger than the whole cap is never kept.
+        let (alone, ids) = kept_viewer(1)?;
+        let id = *ids.first().ok_or_else(|| "no id".to_owned())?;
+        alone.keep_inspect(
+            id,
+            KeptReplies::filler(KEPT_INSPECT_CAP.saturating_add(1).min(17 * MIB)),
+        );
+        if alone.kept_bytes() != 0 {
+            return Err("a set past the cap was kept".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_full_pool_sweeps_ids_that_hold_nothing() -> Result<(), String> {
+        // S2. The first id is evicted from the cache, so when the second
+        // would pass the cap the sweep frees the first and the second fits.
+        let (viewer, ids) = kept_viewer(2)?;
+        let [first, second] = ids[..] else {
+            return Err("two ids were not held".to_owned());
+        };
+        viewer.keep_inspect(first, KeptReplies::filler(9 * MIB));
+        evict_file(&viewer, first);
+        viewer.keep_inspect(second, KeptReplies::filler(9 * MIB));
+        let nine = KeptReplies::filler(9 * MIB).bytes();
+        if viewer.kept_bytes() != nine || viewer.lock_cache().kept.contains_key(&first) {
+            return Err(format!(
+                "after the sweep the pool holds {} bytes",
+                viewer.kept_bytes()
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn kept_replies_follow_the_id() -> Result<(), String> {
+        // S2. Nothing is kept for an id the process does not hold. A forget
+        // returns the id's bytes to the counter. N1: an id the cache evicted
+        // answers nothing and frees its bytes when it is asked for.
+        let (viewer, ids) = kept_viewer(2)?;
+        let [forgotten, evicted] = ids[..] else {
+            return Err("two ids were not held".to_owned());
+        };
+        let stranger = FileId {
+            generation: viewer.generation ^ 1,
+            serial: 7,
+        };
+        viewer.keep_inspect(stranger, KeptReplies::filler(MIB));
+        if viewer.kept_bytes() != 0 {
+            return Err("replies were kept for an id that is not held".to_owned());
+        }
+        viewer.keep_inspect(forgotten, KeptReplies::filler(MIB));
+        viewer.forget(&[forgotten]);
+        if viewer.kept_bytes() != 0 {
+            return Err(format!(
+                "a forget left {} bytes counted",
+                viewer.kept_bytes()
+            ));
+        }
+        viewer.keep_inspect(evicted, KeptReplies::filler(MIB));
+        if viewer.kept_reply(evicted, 0).is_none() {
+            return Err("a held id's reply was not kept".to_owned());
+        }
+        evict_file(&viewer, evicted);
+        if viewer.kept_reply(evicted, 0).is_some() || viewer.kept_bytes() != 0 {
+            return Err("an evicted id still answered from the pool".to_owned());
+        }
+        Ok(())
+    }
 
     fn minimal_frame(samples: Vec<u8>, rows: u32, columns: u32) -> Result<HeldFrame, String> {
         let dimensions = ImageDimensions::new(rows, columns)

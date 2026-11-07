@@ -2,7 +2,10 @@
 //!
 //! The page chooses the folder. This crate parses with `parse_part10`,
 //! decodes with the codec registry, and maps samples with `LutChain`.
-//! It does not read a path of its own.
+//! The only paths it reads are the built `@ocelli/core` modules and dcmjs's
+//! ES build, which `GET /lib/` serves by an allowlist of names from fixed
+//! directories of the repository it was built in, for the page's region
+//! window. It reads no path a request names.
 
 #![doc(test(attr(forbid(unsafe_code))))]
 
@@ -23,7 +26,9 @@ pub use corners::{
     person_name_text,
 };
 pub use link::plane_from_token;
-pub use measure::{FREEFORM_POINT_CAP, MeasureShape, measure_frame};
+pub use measure::{
+    FREEFORM_POINT_CAP, MeasureShape, RegionExtent, measure_frame, region_extent_frame,
+};
 pub use preview::{
     FRAME_LIST_CAP, FrameFacts, FrameRequest, Preview, PreviewError, headers_json, inspect_json,
     plane_token, preview_first_frame, preview_frame, window_function_from_token,

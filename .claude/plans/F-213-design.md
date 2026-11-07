@@ -290,7 +290,7 @@ none in this draft. Open question 3 may need one.
 
 ## LLD impact
 
-none for the folder viewer. If open question 3 changes the library rule, `docs/lld/public-api.md` changes with it, in that library story.
+`docs/lld/cache.md`, the kept inspect reply pool outside the budget that the lead ruling after review pass 1 added, and the forget paragraph's bound. Corrected at integration, because this said none for the folder viewer. If open question 3 changes the library rule, `docs/lld/public-api.md` changes with it, in that library story.
 
 ## User-facing documentation impact
 
