@@ -410,8 +410,8 @@ why this crate depends on `ocelli-core`, which `ocelli-pixel` already did.
 `crates/ocelli-wasm/src/session.rs` holds one `ImageCache<CommittedFrame>`
 in the session of the render worker's instance, decision D5 unchanged.
 **The budget is the caller's and the default is 0, which is off.** With a
-budget of 0 nothing is inserted and no cache event is pushed, so a caller
-that never sets one sees the earlier behaviour. Only `commit_cached_frame`
+budget of 0 a commit inserts nothing and pushes no cache event, so a caller
+that never sets one commits as before. Only `commit_cached_frame`
 fills it, which is `commit_selected_frame` plus a content id, keyed by the
 stack's `FrameKey` at the committed index. A commit with no content id, or
 one whose length is not a multiple of 4 and so holds no samples, is
