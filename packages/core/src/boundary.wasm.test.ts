@@ -314,9 +314,7 @@ describe("wasm session boundary", () => {
     // The committed frame is kept: an interaction publish before the
     // refusals and one after hand the stub canvas the same image, each
     // observation counting its blit, so a refusal that cleared or replaced
-    // the retained frame fails the comparison or the count. The plain
-    // publish cannot make the second observation, because a settled
-    // presentation draws idle and blits nothing.
+    // the retained frame fails the comparison or the count.
     installCanvasStubs();
     const wasm = await loadModule();
     const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));

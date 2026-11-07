@@ -1047,8 +1047,8 @@ group("acceptTransferredFrame, HLD 17.2", () => {
     // taken at the handover. `reads` observes the copy count without a
     // spy: the call takes the sink separately from the memory and reads
     // `wasm.memory` exactly once, to build the one view it sets through,
-    // so a duplicated `set` answers 2 and is red, a second reservation is
-    // red on `asked`, and a second commit is red on the route length.
+    // so a duplicated `set` answers 2 and is red, and a second
+    // reservation is red on `asked`.
     const routes = [
       {
         stacked: false,
