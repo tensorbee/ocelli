@@ -11763,8 +11763,8 @@ GUARDS: tuple[Guard, ...] = (
         gate="packages",
         spec="F-217 AC18 in `.claude/plans/F-217-design.md`, the viewer's "
              "`vite build` passing in CI, and the lead decision that a build "
-             "without `crates/ocelli-wasm/pkg` passes and leaves the runtime "
-             "probe to report the core as not built",
+             "without `crates/ocelli-wasm/pkg` passes and leaves the import "
+             "to runtime, where it fails and the core reads as not built",
         refuses="A viewer build that fails with the wasm pkg absent, or that "
                 "then emits a wasm file or drops the runtime import of the "
                 "pkg URL or the fetch probe in front of it. A viewer build "

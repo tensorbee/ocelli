@@ -17,8 +17,11 @@ repository, once with no pkg and once with a stand-in pkg, builds each with
 the repository's own Vite, and reads what was emitted.
 
 Absent: the build passes, no wasm chunk or asset is emitted, and the worker
-chunk keeps the runtime `import()` of the pkg URL and the `fetch()` probe in
-front of it, which is the path that reports the core as not built.
+chunk keeps the runtime `import()` of the pkg URL and the `fetch()` in front
+of it. The core is reported not built because that runtime import fails. The
+`fetch()` does not decide it, because Vite's dev and preview servers answer the
+missing path with the HTML fallback and a 200, so the probe passes. The
+`fetch()` is required here only as part of the worker's emitted shape.
 
 Present: the build passes and the wasm glue and the `.wasm` are emitted as
 their own files, and the worker no longer imports the `/@fs` URL at runtime.
@@ -91,8 +94,19 @@ def _stub_wasm() -> bytes:
 STUB_WASM = _stub_wasm()
 
 
+# The temporary tree's directory prefix. The space is deliberate. The config
+# decodes its URL so that Rollup can load a pkg under a path with a space, and
+# an encoded URL there is ENOENT, so every run of the gate builds under a path
+# that would need encoding.
+TREE_PREFIX = "viewer build-"
+
+
 def wasm_url(base: Path) -> str:
-    """The URL the config defines for a tree rooted at `base`."""
+    """The URL the config defines for a tree rooted at `base`.
+
+    `vite.config.ts` decodes `new URL(..., import.meta.url).pathname`, so the
+    URL is the plain path behind `/@fs`, a space included.
+    """
     return f"/@fs{(base / PKG / 'ocelli_wasm.js').as_posix()}"
 
 
@@ -204,7 +218,7 @@ def main() -> int:
         return 1
 
     problems: list[str] = []
-    with tempfile.TemporaryDirectory(prefix="viewer-build-") as temporary:
+    with tempfile.TemporaryDirectory(prefix=TREE_PREFIX) as temporary:
         work = Path(temporary).resolve()
         for with_pkg in (False, True):
             state = "present" if with_pkg else "absent"
@@ -226,7 +240,8 @@ def main() -> int:
             print(f"  {problem}")
         return 1
     print("OK: the example viewer builds with the wasm pkg absent, keeping "
-          "the runtime probe, and with it present, emitting the wasm chunk")
+          "the runtime import, and with a stand-in pkg present, emitting the "
+          "wasm chunk")
     return 0
 
 
