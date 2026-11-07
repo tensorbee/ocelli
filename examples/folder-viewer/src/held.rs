@@ -2475,6 +2475,54 @@ mod tests {
     }
 
     #[test]
+    fn a_sweep_keeps_an_id_whose_frame_is_held() -> Result<(), String> {
+        // F-226 review pass 5 N1. A one-frame file is posted under `kept` and
+        // its frame stored, so its posted bytes leave and only the frame
+        // holds the id. The budget fits that frame and one 64-byte post, and
+        // the frame is read after each post, so every post evicts the one
+        // before and never the frame. After 3 * PAGE_SWEEP_FLOOR posts under
+        // `churn` the sweep has run, and a forget of `kept` still finds the
+        // frame, because the sweep keeps an id a held frame names.
+        let charge = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 64],
+            1,
+            32,
+        )?)))
+        .bytes();
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: charge.saturating_add(64),
+        });
+        let kept = PageToken::parse("0123456789abcdef0123456789abcdef").ok_or("token")?;
+        let churn = PageToken::parse("fedcba9876543210fedcba9876543210").ok_or("token")?;
+        let mut bytes = vec![7_u8; 32];
+        bytes.shrink_to_fit();
+        let id = viewer
+            .insert_posted(bytes, None, None, Some(kept))
+            .ok_or("the kept file was refused")?;
+        drop(viewer.store_frame(id, 0, minimal_frame(vec![0_u8; 64], 1, 32)?));
+        if viewer.file_bytes(id).is_some() || viewer.census().2 != 1 {
+            return Err("the kept file was not held as its frame alone".to_owned());
+        }
+        for _ in 0..3 * PAGE_SWEEP_FLOOR {
+            let mut post = vec![1_u8; 64];
+            post.shrink_to_fit();
+            let _ = viewer.insert_posted(post, None, None, Some(churn));
+            if !matches!(viewer.preview_source(id, 0), PreviewSource::Hit(_)) {
+                return Err("the kept frame was evicted by the churn".to_owned());
+            }
+        }
+        let recorded = viewer.lock_cache().pages.len();
+        if recorded > PAGE_SWEEP_FLOOR + 2 {
+            return Err(format!("{recorded} page records, so the sweep did not run"));
+        }
+        let gone = viewer.forget_page(kept);
+        if gone.frames != 1 || gone.files != 0 {
+            return Err(format!("the forget of the kept page removed {gone:?}"));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn held_keys_order_file_before_frame() {
         let low = FileId {
             generation: 1,

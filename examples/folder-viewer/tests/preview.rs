@@ -3769,17 +3769,18 @@ fn forget_exchange(addr: SocketAddr, extra: &str, body: &[u8]) -> Result<(String
 #[test]
 fn forget_drops_files_and_frames() -> Result<(), String> {
     // F-226 AC10. Held before the forget, on one viewer of 8 MiB:
-    //   two  a two-frame object, posted, and previewed at frame 0. Frame 1
-    //        is not decoded, so the posted bytes stay beside frame 0.
+    //   two  a three-frame object, posted, and previewed at frames 0 and 1.
+    //        Frame 2 is not decoded, so the posted bytes stay beside them.
     //   one  a one-frame object, posted and never previewed.
     // The body names two, one, the next generation's id for two's serial and
-    // two again. Two posted bodies and one frame were held, so the reply is
-    // files 2, frames 1, and unknown 2 for the other generation and the
+    // two again. Two posted bodies and two frames were held, so the reply is
+    // files 2, frames 2, and unknown 2 for the other generation and the
     // repeat. Each posted body is held at its length, which the census shows
-    // after each post, and the frame's charge is what the census rose by
-    // when frame 0 was stored. Bytes is the sum of the three.
+    // after each post, and the two frames' charges are what the census rose
+    // by when they were stored. Bytes is the sum of the four. Frame 1 is
+    // held so that a forget keeping any frame past 0 fails here.
     let addr = viewer_on(8 * 1024 * 1024)?;
-    let two = tagged_frame(2, &[50, 0, 60, 0])?;
+    let two = tagged_frame(3, &[50, 0, 60, 0, 70, 0])?;
     let one = mono_frame(true)?;
     let two_id = forget_post(addr, &two)?;
     if held_counts(addr)? != (1, 0, two.len()) {
@@ -3796,18 +3797,25 @@ fn forget_drops_files_and_frames() -> Result<(), String> {
             held_counts(addr)?
         ));
     }
-    let drawn = exchange(addr, &preview_id(&two_id, "X-Ocelli-Frame: 0\r\n"))?;
-    if !split_http(&drawn)?.0.starts_with("HTTP/1.1 200 ") {
-        return Err("frame 0 of the two-frame object did not draw".to_owned());
+    for frame in ["0", "1"] {
+        let drawn = exchange(
+            addr,
+            &preview_id(&two_id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        if !split_http(&drawn)?.0.starts_with("HTTP/1.1 200 ") {
+            return Err(format!(
+                "frame {frame} of the three-frame object did not draw"
+            ));
+        }
     }
     let (files, frames, used) = held_counts(addr)?;
-    if files != 2 || frames != 1 || used <= posted {
+    if files != 2 || frames != 2 || used <= posted {
         return Err(format!(
             "after the preview the census was {files} files, {frames} frames, {used} used"
         ));
     }
-    let frame_charge = used - posted;
-    let expected_bytes = two.len() + one.len() + frame_charge;
+    let frame_charges = used - posted;
+    let expected_bytes = two.len() + one.len() + frame_charges;
     let other = other_generation(&two_id)?;
     let body = format!("{two_id}\n{one_id}\n{other}\n{two_id}");
     let (header, reply) = forget_exchange(addr, "", body.as_bytes())?;
@@ -3816,19 +3824,19 @@ fn forget_drops_files_and_frames() -> Result<(), String> {
     {
         return Err(format!("the forget was not a JSON 200: {header}"));
     }
-    let expected = format!("{{\"files\":2,\"frames\":1,\"bytes\":{expected_bytes},\"unknown\":2}}");
+    let expected = format!("{{\"files\":2,\"frames\":2,\"bytes\":{expected_bytes},\"unknown\":2}}");
     if reply != expected {
         return Err(format!("the forget answered {reply}, not {expected}"));
     }
     let after = held_counts(addr)?;
-    if after != (files - 2, frames - 1, used - expected_bytes) {
+    if after != (files - 2, frames - 2, used - expected_bytes) {
         return Err(format!(
             "the census went from {:?} to {after:?}, not down by the reply",
             (files, frames, used)
         ));
     }
     for (name, id) in [("two", &two_id), ("one", &one_id)] {
-        for frame in ["0", "1"] {
+        for frame in ["0", "1", "2"] {
             let gone = exchange(
                 addr,
                 &preview_id(id, &format!("X-Ocelli-Frame: {frame}\r\n")),

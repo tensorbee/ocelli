@@ -54,7 +54,8 @@ const B_FILES = 3;
  * `hide` is `{ ids, beacons, held, other }`: how many ids the first page
  * received, the body length in bytes of each `/forget` request its
  * `pagehide` sent, the files and frames `GET /held` counted afterwards, and
- * the files the second page holds.
+ * the files and frames `GET /held` counted while only the second page held
+ * any, measured before the first page opened its folder.
  *
  * `leave` is `{ held }`, the files and frames `GET /held` counted after the
  * page navigated away.
@@ -97,7 +98,9 @@ export function forgetProblems(seen) {
     for (const bytes of hide.beacons) {
       if (bytes >= BEACON_BYTES) problems.push(`a pagehide beacon carried ${bytes} bytes, not under ${BEACON_BYTES}`);
     }
-    if (hide.held !== hide.other) {
+    if (!(hide.other > 0)) {
+      problems.push("the second page held nothing before the pagehide, so the case shows nothing");
+    } else if (hide.held !== hide.other) {
       problems.push(`after the pagehide GET /held counted ${hide.held} files and frames, not the second page's ${hide.other}`);
     }
   }
@@ -322,6 +325,8 @@ export async function observeHide(url, chromium, folders) {
     await other.locator("#folder").setInputFiles(folders.b);
     await until(() => otherIds.length === B_FILES, "the second page's posts");
     await drawn;
+    const otherCensus = await heldCensus(url);
+    const otherHeld = otherCensus.files + otherCensus.frames;
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.setDefaultTimeout(180000);
     const ids = [];
@@ -342,7 +347,7 @@ export async function observeHide(url, chromium, folders) {
     await until(() => answered.length >= 1, "the beacon reply", 10000).catch(() => {});
     await page.waitForTimeout(500);
     const census = await heldCensus(url);
-    return { ids: ids.length, beacons, held: census.files + census.frames, other: B_FILES };
+    return { ids: ids.length, beacons, held: census.files + census.frames, other: otherHeld };
   } finally {
     await browser.close();
   }
@@ -398,7 +403,8 @@ async function main() {
     seen.late = await withViewer(binary, (url) => observeLate(url, chromium, folders));
     console.log(`late: caught ${seen.late.caught}, answered ${seen.late.lateStatus}, ${seen.late.reposts} posts of A after B opened`);
     seen.hide = await withViewer(binary, (url) => observeHide(url, chromium, folders));
-    console.log(`hide: ${seen.hide.ids} ids, forget requests of ${seen.hide.beacons.join(" and ") || "no"} bytes, then ${seen.hide.held} files and frames held beside the second page's ${seen.hide.other}`);
+    const largest = seen.hide.beacons.length ? Math.max(...seen.hide.beacons) : 0;
+    console.log(`hide: ${seen.hide.ids} ids, ${seen.hide.beacons.length} forget requests, the largest ${largest} bytes, then ${seen.hide.held} files and frames held, the second page's measured ${seen.hide.other}`);
     seen.leave = await withViewer(binary, (url) => observeLeave(url, chromium, folders));
     console.log(`leave: ${seen.leave.held} files and frames held after the page navigated away`);
   } finally {

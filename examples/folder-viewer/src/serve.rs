@@ -2905,6 +2905,136 @@ mod tests {
         expect_status(&again, 410, "a later preview of the forgotten id")
     }
 
+    /// Nothing of the forgotten id is held once the decode has returned.
+    fn nothing_held_after(viewer: &Viewer, what: &str) -> Result<(), String> {
+        let census = census_until(viewer, Duration::from_secs(5), what, |census| {
+            census.inflight == 0
+        })?;
+        if census.files != 0 || census.frames != 0 || census.pressure.used != 0 {
+            return Err(format!(
+                "{what}: after the decode the cache held {} files, {} frames, {} bytes",
+                census.files, census.frames, census.pressure.used
+            ));
+        }
+        Ok(())
+    }
+
+    /// F-226 review pass 5 S1. `/value` on the process server decodes a held
+    /// file that is not yet decoded on a decode worker, through
+    /// `decode_for_value`. Both decode permits are held while the id is
+    /// forgotten, so the decode's store comes after the forget and must not
+    /// undo it. The value is still answered.
+    #[test]
+    fn a_forget_during_a_value_decode_is_not_undone_by_its_store() -> Result<(), String> {
+        let (addr, viewer) = grey_server(8)?;
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let id = post_id(addr, &bytes)?;
+        let first = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the first decode permit was missing")?;
+        let second = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the second decode permit was missing")?;
+        let before = viewer.preview_calls();
+        let value_id = id.clone();
+        let value = std::thread::spawn(move || {
+            let request = format!(
+                "POST /value HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {value_id}\r\nX-Ocelli-Points: 1,1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            read_http(addr, request.as_bytes())
+        });
+        wait_for_preview(&viewer, before)?;
+        let forgot = request_forget(addr, &id)?;
+        expect_status(&forgot, 200, "the forget during the value decode")?;
+        drop(first);
+        drop(second);
+        let reply = value
+            .join()
+            .map_err(|_| "the value thread panicked".to_owned())??;
+        expect_status(&reply, 200, "the value whose id was forgotten")?;
+        nothing_held_after(&viewer, "the value decode")
+    }
+
+    /// F-226 review pass 5 S1. A viewer with no decode workers previews on
+    /// the request thread through `preview_held`. Both permits are held while
+    /// the id is forgotten, and the preview is still served.
+    #[test]
+    fn a_forget_during_a_direct_decode_is_not_undone_by_its_store() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::with_connection_cap(
+            ViewerConfig {
+                cache_bytes: 8 * 1024 * 1024,
+            },
+            8,
+        ));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let id = post_id(addr, &bytes)?;
+        let first = viewer
+            .loan_workspace(&mut || true)
+            .ok_or("the first permit was missing")?;
+        let second = viewer
+            .loan_workspace(&mut || true)
+            .ok_or("the second permit was missing")?;
+        let before = viewer.preview_calls();
+        let preview_id = id.clone();
+        let preview = std::thread::spawn(move || request_preview(addr, &preview_id));
+        wait_for_preview(&viewer, before)?;
+        let forgot = request_forget(addr, &id)?;
+        expect_status(&forgot, 200, "the forget during the direct decode")?;
+        drop(first);
+        drop(second);
+        let reply = preview
+            .join()
+            .map_err(|_| "the preview thread panicked".to_owned())??;
+        expect_status(&reply, 200, "the direct preview whose id was forgotten")?;
+        nothing_held_after(&viewer, "the direct decode")
+    }
+
+    /// F-226 review pass 5 D1. The grey cap is full, so a decode whose id is
+    /// forgotten meanwhile renders into no room and waits. Its frame is not
+    /// stored, so when the wait ends the second round finds the id gone and
+    /// answers 410. Afterwards only the stalls' 3000 by 2900 frame is held.
+    #[test]
+    fn a_forgotten_decode_that_waits_for_grey_answers_gone() -> Result<(), String> {
+        let (addr, viewer) = grey_server(64)?;
+        let small = grey_file(512, 512)?;
+        let small_id = post_id(addr, &small)?;
+        let stalls = fill_grey_cap(addr, &viewer)?;
+        let first = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the first decode permit was missing")?;
+        let second = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the second decode permit was missing")?;
+        let before = viewer.preview_calls();
+        let started = std::time::Instant::now();
+        let waiter = send_late(addr, &id_preview(&small_id, ""))?;
+        wait_for_preview(&viewer, before)?;
+        let forgot = request_forget(addr, &small_id)?;
+        expect_status(&forgot, 200, "the forget before the decode")?;
+        drop(first);
+        drop(second);
+        waiters_reach(&viewer, 1)?;
+        drop(stalls);
+        let text = read_late(waiter, started, "the forgotten waiting preview")?;
+        expect_status(&text, 410, "the forgotten waiting preview")?;
+        replies_settle(&viewer, "after the forgotten wait")?;
+        let census = viewer.memory_census();
+        if census.files != 0 || census.frames != 1 {
+            return Err(format!(
+                "after the wait the cache held {} files and {} frames, not the stalls' one frame",
+                census.files, census.frames
+            ));
+        }
+        let again = request_preview(addr, &small_id)?;
+        expect_status(&again, 410, "a later preview of the forgotten id")
+    }
+
     #[test]
     fn a_reply_reading_a_frame_keeps_it_cached_for_the_next_preview() -> Result<(), String> {
         // Slice 0 is 96 by 128 and slice 1 is the same 24576 sample bytes with
