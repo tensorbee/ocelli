@@ -28,11 +28,12 @@ use ocelli_codec::{
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    DispatchPath, EncapsulatedFrameIndex, MetadataElement, MetadataSet, MetadataValue,
-    MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string, parse_part10,
+    DispatchPath, EncapsulatedFrameIndex, FrameGeometry, MetadataElement, MetadataSet,
+    MetadataValue, MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string,
+    parse_part10,
 };
 use ocelli_pixel::{
-    ByteOrder, ImageDimensions, LutChain, ModalityTransform, PhotometricInterpretation,
+    ByteOrder, ImageDimensions, ImagePlane, LutChain, ModalityTransform, PhotometricInterpretation,
     PresentationLutEvidence, PresentationLutShape, SampleLayout, StoredBits,
     StoredPixelDescription, StoredSampleTable, VoiFunction, VoiTransform,
 };
@@ -82,6 +83,16 @@ const PATIENT_ID: Tag = Tag(0x0010, 0x0020);
 const STUDY_DATE: Tag = Tag(0x0008, 0x0020);
 const STUDY_DESCRIPTION: Tag = Tag(0x0008, 0x1030);
 const ACCESSION: Tag = Tag(0x0008, 0x0050);
+const FRAME_OF_REFERENCE: Tag = Tag(0x0020, 0x0052);
+
+/// The most images the page lists for one file, and the most planes
+/// `inspect_json` writes for it. The page's `FRAME_LIST_CAP` has the same
+/// value, and a page test pins the two.
+pub const FRAME_LIST_CAP: usize = 65536;
+
+/// The longest UID, in characters. PS3.5 Table 6.2-1: UI is "64 bytes
+/// maximum", and PS3.5 9.1 counts every digit, separator and padding.
+pub(crate) const UID_MAX_CHARS: usize = 64;
 const MAX_PIXELS: u32 = 8_192 * 8_192;
 const MAX_HEADER_ROWS: usize = 4096;
 const VALUE_CAP: usize = 1024;
@@ -2434,8 +2445,97 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     push_field(&mut out, "edgeRight", &facts.edge_right, false);
     push_field(&mut out, "edgeTop", &facts.edge_top, false);
     push_field(&mut out, "edgeBottom", &facts.edge_bottom, false);
-    out.push('}');
+    push_field(
+        &mut out,
+        "frameOfReferenceUid",
+        &sendable_uid(optional_text(object, FRAME_OF_REFERENCE).ok().flatten()),
+        false,
+    );
+    out.push_str(",\"planes\":[");
+    for (index, token) in plane_tokens(object, frames).iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        match token {
+            Some(text) => json_string(&mut out, text),
+            None => out.push_str("null"),
+        }
+    }
+    out.push_str("]}");
     Ok(out)
+}
+
+/// The UID as the page may send it back, or `""`.
+///
+/// PS3.5 9.1: a UID is digits and `.` and at most [`UID_MAX_CHARS`]
+/// characters. Anything else is reported empty, so it links nothing rather
+/// than breaking the space-separated `/link` body.
+fn sendable_uid(text: Option<String>) -> String {
+    match text {
+        Some(text)
+            if text.len() <= UID_MAX_CHARS
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b'.') =>
+        {
+            text
+        }
+        _ => String::new(),
+    }
+}
+
+/// One plane token per frame, up to [`FRAME_LIST_CAP`], or `None` where
+/// `FrameGeometry::derive` refused the frame.
+fn plane_tokens(object: &DefaultDicomObject, frames: u32) -> Vec<Option<String>> {
+    let count = usize::try_from(frames).map_or(FRAME_LIST_CAP, |count| count.min(FRAME_LIST_CAP));
+    let Ok(metadata) = project_metadata(object) else {
+        return vec![None; count];
+    };
+    let Ok(multi) = MultiframeMetadata::new(&metadata) else {
+        return vec![None; count];
+    };
+    (0..count)
+        .map(|frame| {
+            FrameGeometry::derive(&multi, frame)
+                .ok()
+                .map(|geometry| plane_token(&geometry.plane()))
+        })
+        .collect()
+}
+
+/// The thirteen numbers of a validated plane, joined by commas.
+///
+/// `Sx,Sy,Sz,Xx,Xy,Xz,Yx,Yy,Yz,rowSpacing,columnSpacing,rows,columns`. `S`
+/// is Image Position (Patient), `X` and `Y` the validated row and column
+/// cosines, and the spacings are in Pixel Spacing's order, row first, PS3.3
+/// 10.7.1.3. Each `f64` is written with `{:e}`, the shortest text that reads
+/// back to the same bits, which never exceeds 24 characters, and each `u32`
+/// with `{}`. The page stores the token and posts it back unread.
+pub fn plane_token(plane: &ImagePlane) -> String {
+    let position = plane.position_vector();
+    let row = plane.orientation.row();
+    let column = plane.orientation.column();
+    let spacing = plane.spacing();
+    let dimensions = plane.dimensions();
+    let numbers = [
+        position.x,
+        position.y,
+        position.z,
+        row.x,
+        row.y,
+        row.z,
+        column.x,
+        column.y,
+        column.z,
+        spacing.row_mm(),
+        spacing.column_mm(),
+    ];
+    let mut out = String::new();
+    for number in numbers {
+        out.push_str(&format!("{number:e},"));
+    }
+    out.push_str(&format!("{},{}", dimensions.rows(), dimensions.columns()));
+    out
 }
 
 /// File meta and data set rows for the headers table.

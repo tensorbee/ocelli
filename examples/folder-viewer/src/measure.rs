@@ -12,8 +12,8 @@
 //!
 //! Page marks are in image-pixel coordinates, where cell `c` covers
 //! `[c, c + 1)` and has its centre at `c + 0.5`. Index space puts that
-//! centre at `c`, so `index = page - 0.5` on both axes, here and nowhere
-//! else. PS3.3 C.7.6.2: Pixel Spacing is the adjacent row spacing, then the
+//! centre at `c`. The shift is `ImagePoint::to_index`, which owns it for
+//! the whole folder viewer. PS3.3 C.7.6.2: Pixel Spacing is the adjacent row spacing, then the
 //! adjacent column spacing, in mm. PS3.3 C.7.6.2.1.1 scales the column index
 //! `i` by the column spacing and the row index `j` by the row spacing, so a
 //! column step is `PixelSpacing[1]` and a row step is `PixelSpacing[0]`.
@@ -298,10 +298,7 @@ pub(crate) fn measure_json(
     let inputs = held.calibration.as_ref().map_err(|error| *error)?;
     let spacing = choose_spacing(inputs)?;
     // The half-pixel shift, once. Every later point is an index point.
-    let index: Vec<Pt<Index>> = points
-        .iter()
-        .map(|point| Pt::new(point.x - 0.5, point.y - 0.5, 0.0))
-        .collect();
+    let index: Vec<Pt<Index>> = points.iter().map(|point| point.to_index()).collect();
     let mut out = String::from("{");
     push_field(&mut out, "shape", shape.token(), true);
     out.push_str(",\"frame\":");

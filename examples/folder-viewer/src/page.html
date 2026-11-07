@@ -240,9 +240,10 @@
   .cell-empty { margin: 0; color: var(--muted); text-align: center; padding: 12px; pointer-events: none; }
   .frame { position: relative; flex: none; }
   .stage { position: absolute; left: 50%; top: 50%; flex: none; }
-  .view, .ink { position: absolute; left: 0; top: 0; }
+  .view, .ink, .ref-lines { position: absolute; left: 0; top: 0; }
   .view { image-rendering: pixelated; }
-  .ink { overflow: visible; }
+  .ink, .ref-lines { overflow: visible; }
+  .ref-lines { pointer-events: none; }
   #empty {
     position: absolute;
     inset: 0;
@@ -553,6 +554,29 @@
   }
   #layout-picker button.on { background: var(--on); border-color: var(--on); }
   #layout-picker p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
+  #link-menu {
+    position: fixed;
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 8px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  #link-menu[hidden] { display: none; }
+  #link-menu button {
+    min-width: 96px;
+    height: 26px;
+    padding: 0 10px;
+    text-align: left;
+    background: var(--raised);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+  }
+  #link-menu button.on { background: var(--on); border-color: var(--on); }
   #tip {
     position: fixed;
     z-index: 9;
@@ -608,6 +632,8 @@
   <symbol id="i-corners" viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><path d="M8 10h6M8 13.5h8"/></symbol>
   <symbol id="i-letters" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 6.5l2.5 5.5-2.5 5.5-2.5-5.5z"/></symbol>
   <symbol id="i-layout" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-reference" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M3 13.5h18" stroke-dasharray="2.5 2"/></symbol>
   <symbol id="i-grid-2" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16M4 12h16"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
   <symbol id="i-headers" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/></symbol>
@@ -668,6 +694,8 @@
   <span class="sep"></span>
   <button type="button" class="icon" id="layout" aria-label="Layout" data-key="G" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-layout"/></svg><span class="sr">Layout</span></button>
   <button type="button" class="icon" id="tile-mode" aria-label="Four images" data-key="Shift G"><svg class="i"><use href="#i-grid-2"/></svg><span class="sr">Four images</span></button>
+  <button type="button" class="icon" id="link" aria-label="Link viewports" aria-haspopup="true" aria-expanded="false"><svg class="i"><use href="#i-link"/></svg><span class="sr">Link viewports</span></button>
+  <button type="button" class="icon active" id="toggle-reference" aria-label="Reference lines" aria-pressed="true"><svg class="i"><use href="#i-reference"/></svg><span class="sr">Reference lines</span></button>
   <span class="spacer"></span>
   <button type="button" class="icon" id="key-image" aria-label="Key image" data-key="K"><svg class="i"><use href="#i-key"/></svg><span class="sr">Key image</span></button>
   <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span></button>
@@ -688,11 +716,17 @@
   <button type="button" role="menuitem" data-columns="3" data-rows="3" aria-label="3 by 3"></button>
   <p id="layout-size">1 by 1</p>
 </div>
+<div id="link-menu" role="menu" aria-label="Link viewports" hidden>
+  <button type="button" role="menuitemcheckbox" id="link-scroll" data-link="scroll" aria-checked="false">Scroll</button>
+  <button type="button" role="menuitemcheckbox" id="link-window" data-link="window" aria-checked="false">Window</button>
+  <button type="button" role="menuitemcheckbox" id="link-zoom" data-link="zoom" aria-checked="false">Zoom</button>
+</div>
 <template id="cell-template">
   <div class="cell">
     <div class="frame" hidden>
       <div class="stage" hidden>
         <canvas class="view"></canvas>
+        <svg class="ref-lines" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
         <svg class="ink" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"></svg>
       </div>
     </div>
@@ -873,6 +907,11 @@ const SENTENCE = {
   "preset-bone": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
   layout: "Choose 1 by 1 up to 3 by 3 viewports. Drag a series onto a viewport, or click a series to open it in the outlined one.",
   "tile-mode": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
+  link: "Link every visible viewport to the outlined one. Scroll, Window and Zoom each start off.",
+  "link-scroll": "The other viewports show their image nearest the outlined one's position, when both series share a Frame of Reference UID and lie in nearly the same plane. The local process chooses the image.",
+  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a preset or Reset. A preset is not sent to an image that is not CT, and no window is sent to an image that is not monochrome.",
+  "link-zoom": "The other viewports take the outlined one's zoom over their own fit. Pan is not copied.",
+  "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
   "source-folder": "Open a folder of DICOM files. The files stay where they are.",
   "toggle-series": "Hide or show the series list.",
@@ -910,6 +949,9 @@ const cellTemplate = document.getElementById("cell-template");
 const layoutButton = document.getElementById("layout");
 const layoutPicker = document.getElementById("layout-picker");
 const layoutSize = document.getElementById("layout-size");
+const linkButton = document.getElementById("link");
+const linkMenu = document.getElementById("link-menu");
+const referenceButton = document.getElementById("toggle-reference");
 const scrubber = document.getElementById("scrub");
 const counter = document.getElementById("counter");
 const tileButton = document.getElementById("tile-mode");
@@ -1008,6 +1050,17 @@ const valueState = {
   shownColumn: -1,
   shownRow: -1
 };
+
+// Linked viewports. The local process chooses where a target moves and
+// where its reference line goes, from the plane tokens `/file` reported.
+// The page stores each token as text and posts it back unread. One request
+// is in flight at a time and the latest state is sent after it returns. A
+// reply applies only while its ticket is the latest.
+const linkState = { busy: false, want: false, ticket: 0 };
+const links = { scroll: false, window: false, zoom: false };
+let showReference = true;
+// One series' listed images as `/link` text, made once per series.
+const linkLists = new WeakMap();
 
 // The viewports. Columns and rows each run 1 to 3, and cells are numbered
 // 0 to 8 row by row. A record is made the first time its cell is shown and
@@ -1148,6 +1201,19 @@ document.addEventListener("pointerdown", (event) => {
   closeLayoutPicker();
 }, true);
 tileButton.addEventListener("click", toggleTileMode);
+linkButton.addEventListener("click", () => {
+  if (linkMenu.hidden) openLinkMenu();
+  else closeLinkMenu();
+});
+for (const button of linkMenu.querySelectorAll("[data-link]")) {
+  button.addEventListener("click", () => setLink(button.dataset.link, !links[button.dataset.link]));
+}
+document.addEventListener("pointerdown", (event) => {
+  if (linkMenu.hidden) return;
+  if (linkMenu.contains(event.target) || linkButton.contains(event.target)) return;
+  closeLinkMenu();
+}, true);
+referenceButton.addEventListener("click", () => setReference(!showReference));
 document.getElementById("key-image").addEventListener("click", toggleKey);
 for (const button of document.querySelectorAll("[data-preset]")) {
   button.addEventListener("click", () => applyPreset(activeViewport(), button.dataset.preset));
@@ -1267,6 +1333,7 @@ function liveSentence(id, text) {
 }
 
 function processGone() {
+  clearAllLines();
   if (status.dataset.gone !== "1") {
     status.dataset.before = status.textContent;
     status.dataset.beforeFault = status.classList.contains("fault") ? "1" : "0";
@@ -1791,8 +1858,12 @@ function loadSeries(vp, key) {
   if (vp.cell === activeCell) syncPresets();
   syncStage(vp);
   syncSeriesRows();
+  clearLine(vp);
   const remembered = positions.get(key);
   showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
+  // A new series in any shown cell needs its line, and a new source moves
+  // the others. One coalesced request covers both.
+  if (cellShown(vp)) scheduleLink();
 }
 
 function currentImage(vp) {
@@ -1901,6 +1972,11 @@ async function showIndex(vp, next) {
       resetValue();
       paintValue();
     }
+    // A line belongs to the image it was computed for.
+    clearLine(vp);
+    // Only the active viewport is a source, so a target moved by a reply
+    // sends nothing back.
+    if (active) scheduleLink();
   }
   vp.liveToken += 1;
   if (vp.tileMode && !gridAllowed(vp)) setTileMode(vp, false, true);
@@ -2292,6 +2368,7 @@ function drawGrey(vp, grey) {
   const viewBox = "0 0 " + grey.width + " " + grey.height;
   if (vp.inkViewBox !== viewBox) {
     dom.ink.setAttribute("viewBox", viewBox);
+    dom.refs.setAttribute("viewBox", viewBox);
     vp.inkViewBox = viewBox;
   }
   syncStage(vp);
@@ -2427,6 +2504,8 @@ function layoutViewport(vp) {
   dom.canvas.style.height = pictureH + "px";
   dom.ink.style.width = pictureW + "px";
   dom.ink.style.height = pictureH + "px";
+  dom.refs.style.width = pictureW + "px";
+  dom.refs.style.height = pictureH + "px";
   const fitted = fitScale(vp);
   vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
   paintOverlays(vp);
@@ -2481,6 +2560,8 @@ function paintOverlays(vp) {
   const width = win ? (win.width == null ? win.widthText : win.width) : (info.windowWidth || "");
   let windowLine = "WW " + width + "  WL " + center;
   if (vp.shownWindow && vp.shownWindow.fullRange && !vp.overrideWindow && !vp.draftWindow && !vp.activePreset) windowLine += "  full range";
+  // The file window describes a picture this page does not show.
+  if (!info.monochrome) windowLine = "Window not applicable";
   assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
 }
 
@@ -2549,6 +2630,8 @@ function resetViewports() {
   resetValue();
   cancelDraft();
   cancelNote();
+  linkState.ticket += 1;
+  linkState.want = false;
   for (const vp of viewports) {
     vp.loadToken += 1;
     vp.tileToken += 1;
@@ -2570,6 +2653,7 @@ function resetViewports() {
     dom.tiles.hidden = true;
     hideFault(vp);
     dom.ink.replaceChildren();
+    clearLine(vp);
     syncStage(vp);
     paintOverlays(vp);
     paintEdges(vp);
@@ -2608,6 +2692,7 @@ function nextUnshownKey() {
 function fitView(vp) {
   vp.fitMode = true;
   layoutViewport(vp);
+  copyZoom(vp);
 }
 
 function resetView(vp) {
@@ -2623,6 +2708,8 @@ function resetView(vp) {
   vp.panY = 0;
   if (vp.cell === activeCell) syncControls();
   showIndex(vp, vp.viewIndex);
+  copyWindow(vp);
+  copyZoom(vp);
 }
 
 function applyPreset(vp, name) {
@@ -2631,6 +2718,7 @@ function applyPreset(vp, name) {
   vp.draftWindow = null;
   if (vp.cell === activeCell) syncPresets();
   showIndex(vp, vp.viewIndex);
+  copyWindow(vp);
 }
 
 function syncPresets() {
@@ -2642,13 +2730,17 @@ function syncPresets() {
 
 function syncPresetAvailability(image) {
   const modality = image && image.info ? String(image.info.modality || "") : "";
-  if (modality === presetModality) return;
-  presetModality = modality;
+  const monochrome = !image || Boolean(image.info && image.info.monochrome);
+  const availability = modality + "\0" + (monochrome ? "1" : "0");
+  if (availability === presetModality) return;
+  presetModality = availability;
   const ct = modality === "CT";
-  for (const button of document.querySelectorAll("[data-preset]")) button.disabled = !ct;
-  presetNote.textContent = !image || ct
-    ? PRESET_HINT
-    : "These presets are in Hounsfield units, so they apply to CT only. Drag with the W/L tool to set a window for " + (modality || "this image") + ".";
+  for (const button of document.querySelectorAll("[data-preset]")) button.disabled = !ct || !monochrome;
+  presetNote.textContent = !monochrome
+    ? "This image is not monochrome, so it has no window to set."
+    : !image || ct
+      ? PRESET_HINT
+      : "These presets are in Hounsfield units, so they apply to CT only. Drag with the W/L tool to set a window for " + (modality || "this image") + ".";
   const vp = activeViewport();
   if (!ct && vp && vp.activePreset) {
     vp.activePreset = null;
@@ -2695,6 +2787,7 @@ function onWheel(event) {
     if (!noteInput.hidden || !modal.hidden || move) return;
     const dy = clamp(pixelDelta(event), -10, 10);
     zoomAt(vp, event.clientX, event.clientY, Math.exp(-dy * 0.01));
+    copyZoom(vp);
     return;
   }
   if (!noteInput.hidden || !modal.hidden) return;
@@ -2895,6 +2988,8 @@ function onPointerMove(event) {
       pointerPlaces = false;
     }
     pointReadout(event);
+    // Outside `pointerPlaces`, so a target clears its own readout.
+    copyZoom(vp);
   } else if (mode === "scroll") {
     drag.moved += event.clientY - drag.y;
     drag.y = event.clientY;
@@ -2970,6 +3065,7 @@ function onPointerUp(event) {
     vp.activePreset = null;
     syncPresets();
     showIndex(vp, vp.viewIndex);
+    copyWindow(vp);
   }
   if (draft && !draft.waiting && SHAPES.includes(mode)) {
     finishDraft(travel);
@@ -4130,6 +4226,11 @@ function onKey(event) {
       layoutButton.focus();
       return;
     }
+    if (!linkMenu.hidden) {
+      closeLinkMenu();
+      linkButton.focus();
+      return;
+    }
     if (!modal.hidden) closeModal();
     if (draft) {
       cancelDraft();
@@ -4196,6 +4297,7 @@ function onKey(event) {
 function zoomCentre(vp, factor) {
   const rect = vp.dom.cell.getBoundingClientRect();
   zoomAt(vp, rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+  copyZoom(vp);
 }
 
 function typingTarget(event) {
@@ -4380,6 +4482,8 @@ function ensureViewport(cell) {
       stage: node.querySelector(".stage"),
       canvas: node.querySelector(".view"),
       ink: node.querySelector(".ink"),
+      refs: node.querySelector(".ref-lines"),
+      refLines: [],
       tiles: node.querySelector(".tiles"),
       empty: node.querySelector(".cell-empty"),
       fault: node.querySelector(".fault"),
@@ -4396,6 +4500,7 @@ function ensureViewport(cell) {
         bottom: node.querySelector(".edge.bottom")
       }
     };
+    makeLineNodes(vp);
     node.addEventListener("dragover", (event) => onCellDragOver(vp, event));
     node.addEventListener("dragleave", (event) => {
       if (!node.contains(event.relatedTarget)) node.classList.remove("drop-target");
@@ -4474,6 +4579,7 @@ function setLayout(columns, rows) {
     vp.draftWindow = null;
     vp.prefetchAbort.abort();
     vp.tileAbort.abort();
+    clearLine(vp);
   }
   // Every cell may have moved, so nothing placed under the pointer for the
   // previous layout is kept. The next pointer move paints it again.
@@ -4490,6 +4596,8 @@ function setLayout(columns, rows) {
   relayout();
   syncSeriesRows();
   markPicker(width, height);
+  // A cell shown again needs its line. With one cell nothing is sent.
+  scheduleLink();
 }
 
 function markPicker(columns, rows) {
@@ -4543,6 +4651,10 @@ function setActive(cell) {
   paintSelection(viewports[cell]);
   syncActiveOutline();
   syncControls();
+  // The new source shows no line of its own, and every other cell's line
+  // is now drawn from it.
+  clearLine(viewports[cell]);
+  scheduleLink();
 }
 
 function syncActiveOutline() {
@@ -4571,6 +4683,239 @@ function syncControls() {
   syncKey();
   syncSeriesRows();
   showSentence();
+}
+
+// Linked viewports. Each function below reads or writes another cell's
+// state only for the link, which F-209 amends F-208's one-cell rule for.
+
+function openLinkMenu() {
+  const box = linkButton.getBoundingClientRect();
+  linkMenu.hidden = false;
+  linkMenu.style.left = clamp(box.left, 6, window.innerWidth - linkMenu.offsetWidth - 6) + "px";
+  linkMenu.style.top = (box.bottom + 6) + "px";
+  linkButton.setAttribute("aria-expanded", "true");
+  const first = linkMenu.querySelector("[data-link]");
+  if (first) first.focus();
+}
+
+function closeLinkMenu() {
+  if (linkMenu.hidden) return;
+  linkMenu.hidden = true;
+  linkButton.setAttribute("aria-expanded", "false");
+}
+
+function setLink(name, on) {
+  links[name] = Boolean(on);
+  for (const button of linkMenu.querySelectorAll("[data-link]")) {
+    const state = links[button.dataset.link];
+    button.classList.toggle("on", state);
+    button.setAttribute("aria-checked", state ? "true" : "false");
+  }
+  linkButton.classList.toggle("active", links.scroll || links.window || links.zoom);
+  // Turning scroll on moves the others to the outlined viewport now.
+  if (name === "scroll" && links.scroll) scheduleLink();
+}
+
+function setReference(on) {
+  showReference = Boolean(on);
+  referenceButton.classList.toggle("active", showReference);
+  referenceButton.setAttribute("aria-pressed", showReference ? "true" : "false");
+  if (showReference) scheduleLink();
+  else clearAllLines();
+}
+
+// The token is the process's text. It is posted back and never read here.
+function planeToken(image) {
+  const planes = image.info.planes;
+  const token = Array.isArray(planes) ? planes[image.frame] : null;
+  return typeof token === "string" && token !== "" ? token : "-";
+}
+
+function frameUid(image) {
+  const uid = image.info.frameOfReferenceUid;
+  return typeof uid === "string" && uid !== "" ? uid : "-";
+}
+
+function linkList(series) {
+  let text = linkLists.get(series);
+  if (text === undefined) {
+    text = series.images.map((image) => " " + frameUid(image) + " " + planeToken(image)).join("");
+    linkLists.set(series, text);
+  }
+  return text;
+}
+
+function linkWanted() {
+  return layout.columns * layout.rows > 1 && (links.scroll || showReference);
+}
+
+// Every schedule in one task is one request, sent once the task is done,
+// so a load that fills several cells asks once.
+function scheduleLink() {
+  if (!linkWanted()) return;
+  linkState.want = true;
+  if (linkState.busy) return;
+  linkState.busy = true;
+  queueMicrotask(sendLink);
+}
+
+// The body names the active viewport as the source and every other shown
+// viewport with a series as a target. A series longer than the process
+// lists is not named, so it is not moved and has no line.
+function linkRequest() {
+  const source = activeViewport();
+  const image = source ? currentImage(source) : null;
+  if (!image) return null;
+  const lines = ["source " + frameUid(image) + " " + planeToken(image)];
+  const sent = [];
+  for (const vp of shownViewports()) {
+    if (vp.cell === activeCell) continue;
+    const series = seriesOf(vp);
+    if (!series || !currentImage(vp) || series.images.length > FRAME_LIST_CAP) {
+      clearLine(vp);
+      continue;
+    }
+    lines.push("target " + vp.cell + " " + vp.viewIndex + " " + (links.scroll ? "1" : "0") + linkList(series));
+    sent.push({ vp, loadToken: vp.loadToken, viewIndex: vp.viewIndex });
+  }
+  if (!sent.length) return null;
+  return { body: lines.join("\n"), sent };
+}
+
+async function sendLink() {
+  try {
+    while (linkState.want) {
+      linkState.want = false;
+      if (!linkWanted()) break;
+      const request = linkRequest();
+      // No source image, or no target: no line can be drawn from the
+      // outlined viewport, so none stays from an earlier source.
+      if (!request) {
+        clearAllLines();
+        continue;
+      }
+      const ticket = ++linkState.ticket;
+      let response = null;
+      try {
+        response = await fetch("/link", { method: "POST", body: request.body });
+      } catch {
+        response = null;
+      }
+      if (!response) {
+        processGone();
+        continue;
+      }
+      processBack();
+      let reply = null;
+      try {
+        reply = response.ok ? await response.json() : null;
+        if (!response.ok) await response.text();
+      } catch {
+        reply = null;
+      }
+      if (ticket !== linkState.ticket) continue;
+      if (!reply) {
+        clearAllLines();
+        continue;
+      }
+      applyLink(reply, request.sent);
+    }
+  } finally {
+    linkState.busy = false;
+  }
+}
+
+// A target is moved and drawn only if nothing moved under it since the
+// request: its series, its image and its place as a target.
+function applyLink(reply, sent) {
+  const targets = Array.isArray(reply.targets) ? reply.targets : [];
+  for (const entry of sent) {
+    const vp = entry.vp;
+    const answer = targets.find((item) => item && item.cell === vp.cell);
+    if (!answer || !cellShown(vp) || vp.cell === activeCell) continue;
+    if (vp.loadToken !== entry.loadToken || vp.viewIndex !== entry.viewIndex) continue;
+    if (links.scroll && Number.isInteger(answer.index) && answer.index !== vp.viewIndex) showIndex(vp, answer.index);
+    drawLine(vp, answer.line);
+  }
+}
+
+// One underlay and one line per cell, made once and reused.
+function makeLineNodes(vp) {
+  const refs = vp.dom.refs;
+  const under = document.createElementNS(SVGNS, "line");
+  const over = document.createElementNS(SVGNS, "line");
+  stroke(under, "#000000", 4);
+  under.setAttribute("opacity", "0.8");
+  stroke(over, INKS[2], 2);
+  refs.append(under, over);
+  vp.dom.refLines = [under, over];
+  refs.style.display = "none";
+}
+
+// The numbers are image pixel units from the process, drawn as they are.
+function drawLine(vp, line) {
+  if (!showReference || !Array.isArray(line) || line.length !== 4 || !line.every(Number.isFinite)) {
+    clearLine(vp);
+    return;
+  }
+  for (const node of vp.dom.refLines) {
+    node.setAttribute("x1", String(line[0]));
+    node.setAttribute("y1", String(line[1]));
+    node.setAttribute("x2", String(line[2]));
+    node.setAttribute("y2", String(line[3]));
+  }
+  vp.dom.refs.style.display = "";
+}
+
+function clearLine(vp) {
+  if (vp && vp.dom && vp.dom.refs.style.display !== "none") vp.dom.refs.style.display = "none";
+}
+
+function clearAllLines() {
+  linkState.ticket += 1;
+  for (const vp of viewports) clearLine(vp);
+}
+
+// A window committed in the active viewport goes to every other shown one
+// that can take it. The target record is set and the target redrawn, so
+// its own `/preview` carries the window. Invert, rotation, flips and pan
+// are not copied.
+function copyWindow(source) {
+  if (!links.window || source.cell !== activeCell) return;
+  const image = currentImage(source);
+  if (!image || !image.info.monochrome) return;
+  const win = source.overrideWindow;
+  const preset = win ? null : source.activePreset;
+  for (const vp of shownViewports()) {
+    if (vp === source) continue;
+    const target = currentImage(vp);
+    if (!target || !target.info.monochrome) continue;
+    // The presets are in Hounsfield units.
+    if (preset && String(target.info.modality || "") !== "CT") continue;
+    vp.overrideWindow = win ? { center: win.center, width: win.width, fn: win.fn } : null;
+    vp.activePreset = preset;
+    vp.draftWindow = null;
+    showIndex(vp, vp.viewIndex);
+  }
+}
+
+// The active viewport's zoom over its fit, for every other shown viewport
+// with a single view. Pan is kept.
+function copyZoom(source) {
+  if (!links.zoom || source.cell !== activeCell) return;
+  if (!source.imageWidth || source.dom.stage.hidden || source.tileMode) return;
+  const fitted = fitScale(source);
+  for (const vp of shownViewports()) {
+    if (vp === source || !currentImage(vp) || !vp.imageWidth) continue;
+    if (vp.tileMode || vp.dom.stage.hidden) continue;
+    if (source.fitMode) {
+      vp.fitMode = true;
+    } else {
+      vp.fitMode = false;
+      vp.scale = fitScale(vp) * source.scale / fitted;
+    }
+    layoutViewport(vp);
+  }
 }
 </script>
 </body>

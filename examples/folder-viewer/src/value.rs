@@ -11,7 +11,7 @@
 //! rotation, flip, zoom and pan.
 
 use dicom_core::Tag;
-use ocelli_core::{Stored, exact_f32_integer};
+use ocelli_core::{Index, Pt, Stored, exact_f32_integer};
 use ocelli_dicom::{
     DefaultDicomObject, MetadataSet, MultiframeMetadata, PaddingRange, read_padding,
 };
@@ -40,6 +40,14 @@ pub(crate) const UNIT_MAX_BYTES: usize = UNIT_MAX_CHARS * char::MAX_LEN_UTF8;
 /// Every integer up to `2^24` is exact in `f32`, which is what `Stored` holds.
 const EXACT_STORED_BITS: u8 = 24;
 
+/// Where the page puts the centre of pixel `c`, as an offset from `c`.
+///
+/// Page marks are in image-pixel coordinates, where cell `c` covers
+/// `[c, c + 1)` and has its centre at `c + 0.5`. Index space puts that
+/// centre at `c`, so `index = page - 0.5` on both axes, here and nowhere
+/// else. This is a change between two local conventions, not DICOM geometry.
+const PAGE_PIXEL_CENTRE: f64 = 0.5;
+
 /// A point in page image-pixel coordinates.
 ///
 /// Cell `c` covers `[c, c + 1)` and its centre is `c + 0.5`. The right and
@@ -50,6 +58,25 @@ pub struct ImagePoint {
     pub x: f64,
     /// Row coordinate, from 0 at the top edge to Rows at the bottom.
     pub y: f64,
+}
+
+impl ImagePoint {
+    /// The index point with the first pixel centre at `0`, on the image
+    /// plane, so `z` is `0`.
+    #[must_use]
+    pub fn to_index(self) -> Pt<Index> {
+        Pt::new(self.x - PAGE_PIXEL_CENTRE, self.y - PAGE_PIXEL_CENTRE, 0.0)
+    }
+
+    /// The page point of an index point. `z` is not a page coordinate and is
+    /// dropped.
+    #[must_use]
+    pub fn from_index(point: Pt<Index>) -> Self {
+        Self {
+            x: point.x + PAGE_PIXEL_CENTRE,
+            y: point.y + PAGE_PIXEL_CENTRE,
+        }
+    }
 }
 
 /// The request-independent inputs of a value, computed once per held frame.

@@ -755,6 +755,14 @@ def _readout_check_accepts_a_survivor(box: Sandbox) -> None:
     )
 
 
+def _link_check_accepts_a_stale_line(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/link.mjs",
+        "  } else if (seen.after.lines !== 0) {",
+        "  } else if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13396,6 +13404,46 @@ GUARDS: tuple[Guard, ...] = (
               "The no-change, no-repaint, drag, image-step, empty-tile, "
               "thrown-layout, faulted-cell and tile-gap branches have no "
               "probe.",
+    ),
+    Guard(
+        id="viewer-browser.link",
+        file="examples/folder-viewer/tests/browser/link.mjs",
+        gate="viewer-browser",
+        spec="F-209 design, a reference line is drawn from the outlined "
+             "viewport's image, and review pass 1 D1",
+        refuses="A reference line that stays displayed after the outlined "
+                "viewport becomes a cell with no image, and a run in which "
+                "no line showed before that change.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `linkProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its stale-line branch.",
+        probes=(
+            Probe(
+                "viewer-browser.link-stale-line",
+                _link_check_accepts_a_stale_line,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { linkProblems } from "
+                    "'./examples/folder-viewer/tests/browser/link.mjs';\n"
+                    "const problems = linkProblems({ name: 'kept', before: "
+                    "{ active: 1, lines: 2 }, after: { active: 5, lines: 2 } "
+                    "});\n"
+                    "if (problems.some((line) => line.includes('stayed with no "
+                    "source image'))) process.exit(0);\n"
+                    "console.error('link check accepted a stale reference "
+                    "line'); process.exit(1);",
+                ),
+                "link check accepted a stale reference line",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the stale-line branch with two lines that "
+              "stayed. The observation itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so it is watched by the `viewer-browser` gate and its CI job. "
+              "The nothing-shown branch has no probe.",
     ),
     Guard(
         id="bench.cold-start",

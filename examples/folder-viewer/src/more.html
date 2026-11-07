@@ -189,9 +189,9 @@ raster.set_interpolation(mode.mode())?;                       // tier C, CpuRast
 
   <section class="feature" id="reference">
     <h2>Reference line and reference cursor</h2>
-    <span class="status done">Implemented as segment geometry. Projection is the caller's.</span>
+    <span class="status done">Implemented. The plane intersection is in the Rust library, and the shell segments take a projected point.</span>
     <p>A reference line shows where the slice in one viewport cuts the image in another, so a reader can tell which axial level a coronal line is at. A reference cursor marks the same patient point in every viewport.</p>
-    <p class="where">Lives in <code>@ocelli/core</code>, <code>packages/core/src/crosshair.ts</code> and <code>packages/core/src/intersection.ts</code>, where <code>overlayGrid</code> lives. The functions take a point already projected into viewport pixels and return segments for the SVG layer.</p>
+    <p class="where">The line where one image plane cuts another lives in <code>ocelli-viewport</code> as <code>link::reference_segment</code>, which the image page of this folder viewer draws its reference lines with through the local process. A crosshair or a reference cursor lives in <code>@ocelli/core</code>, <code>packages/core/src/crosshair.ts</code> and <code>packages/core/src/intersection.ts</code>, where <code>overlayGrid</code> lives. Those functions take a point already projected into viewport pixels and return segments for the SVG layer.</p>
 <pre><code>import { crosshairLines, overlayGrid, referenceCursor, referenceLines } from "@ocelli/core";
 
 // x and y are viewport pixels. Null when the point is outside the viewport.
@@ -203,14 +203,14 @@ const grid = overlayGrid(2, 2, width, height);       // interior lines of a layo
 for (const { x0, y0, x1, y1 } of lines ?? []) {
   // append an SVG line element
 }</code></pre>
-    <p class="tiers">These functions do not project a plane and do not read a frame of reference. The projection from another series comes from the geometry chapter of <a href="/use#geometry">Use</a> or from <code>SyncScene</code> below. This shell code runs the same on every tier.</p>
+    <p class="tiers">The shell functions do not project a plane and do not read a frame of reference. <code>reference_segment</code> projects the plane, and the geometry chapter of <a href="/use#geometry">Use</a> shows it. It is CPU arithmetic and runs the same on every tier, as the shell code does.</p>
   </section>
 
   <section class="feature" id="series">
     <h2>Several series at once</h2>
-    <span class="status part">Partial. Slice sync by patient point is built, and the image page shows several series side by side in its own grid. Linked scroll, synced window and priors are not.</span>
+    <span class="status part">Partial. Slice sync by patient point is built, and the image page shows several series side by side with linked scroll, synced window and synced zoom. Priors are not.</span>
     <p>Reading often means two series side by side: a current scan beside a prior, or two sequences of the same MRI. Scrolling one should move the other to the same anatomy, and a window change may apply to both.</p>
-    <p class="where">Lives in <code>ocelli-volume</code> as <code>HeldPlane</code> and in <code>ocelli-viewport</code> as <code>sync::SyncScene</code>. A scene moves every viewport that shares the source's Frame of Reference UID onto one patient point.</p>
+    <p class="where">Lives in <code>ocelli-volume</code> as <code>HeldPlane</code> and in <code>ocelli-viewport</code> as <code>sync::SyncScene</code> and <code>link</code>. A scene moves every viewport that shares the source's Frame of Reference UID onto one patient point. <code>link::closest_coplanar</code> chooses the nearest image in a stack of planes that need not be uniform, which is what the image page scrolls with.</p>
 <pre><code>use glam::DVec3;
 use ocelli_core::{Pt, World};
 use ocelli_viewport::sync::SyncScene;
@@ -231,7 +231,7 @@ for change in scene.set_point(1, point)? {
     let (id, index) = (change.id, change.index);
 }</code></pre>
     <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
-    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its viewports do not follow each other. Not built: linked scroll and synced window as shell features, and prior study lookup. The example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
+    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>npm run dev</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
 
   <section class="feature" id="mpr">
