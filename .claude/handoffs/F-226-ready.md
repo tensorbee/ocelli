@@ -1,0 +1,8 @@
+# F-226 ready for integration
+
+**Branch**: `work/f-226-xai`
+**Base**: `0d73651e26e73e167e8f1d5c6d71453631c790dc`
+**Head**: `a96b92fa9b4de79d74f56c2d54d7996b70158fb4`
+**Files touched**: `README.md bin/ocelli.sh crates/ocelli-cache/src/brick.rs crates/ocelli-cache/src/image.rs crates/ocelli-cache/src/lib.rs crates/ocelli-cache/src/lru.rs crates/ocelli-cache/tests/bricks.rs crates/ocelli-cache/tests/image_cache.rs crates/ocelli-cache/tests/invariants.rs crates/ocelli-viewport/src/boundary.rs crates/ocelli-viewport/tests/typegen.rs docs/lld/cache.md docs/lld/events.md docs/lld/public-api.md docs/lld/viewport.md docs/runbooks/guard-verification.md examples/folder-viewer/src/held.rs examples/folder-viewer/src/more.html examples/folder-viewer/src/page.html examples/folder-viewer/src/serve.rs examples/folder-viewer/src/use.html examples/folder-viewer/tests/browser/forget.mjs examples/folder-viewer/tests/preview.rs packages/core/src/events.test.ts packages/core/src/events.ts packages/core/src/generated.ts packages/core/src/index.ts scripts/guards/catalogue.py .claude/plans/F-226-design.md .claude/reviews/F-226-working-pass-1.md .claude/reviews/F-226-working-pass-2.md .claude/reviews/F-226-working-pass-3.md .claude/reviews/F-226-working-pass-4.md .claude/reviews/F-226-working-pass-5.md .claude/reviews/F-226-working-pass-6.md .claude/reviews/F-226-working-pass-7.md .claude/reviews/F-226-working-pass-8.md .claude/reviews/F-226-working-pass-9.md .claude/reviews/F-226-working-pass-10.md`
+**Review**: `.claude/reviews/F-226-working-pass-10.md, 0 defects, 0 smells, 0 nitpicks`
+**Verify tree**: `9e9effef9af272511cdef152bd666b56e0342c1e`
