@@ -16,7 +16,9 @@ use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
     PreviewSource, Viewer, ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
 };
+use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
 use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json};
+use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
     render_held, reset_phases, validate_frame_request,
@@ -384,6 +386,11 @@ fn route(
         }
         ("POST", "/measure") => {
             let reply = measure_route(viewer, &request, stream);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/link") => {
+            let reply = link_route(&request);
             retire_request_body(charge, request.body);
             (reply, None)
         }
@@ -1371,6 +1378,18 @@ fn measure_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>)
     }
 }
 
+/// `POST /link`: where linked viewports move and where their lines go.
+///
+/// The body carries every plane the answer needs, so this process holds
+/// nothing between requests and reads no file. A body it would not write is
+/// `400` with `X-Ocelli-Error: link`.
+fn link_route(request: &Request) -> Reply {
+    match link_json(&request.body) {
+        Ok(json) => bare(200, "application/json; charset=utf-8", json.into_bytes()),
+        Err(_) => text_reply(400, Some("link"), "the link request is not usable"),
+    }
+}
+
 /// ASCII `x,y` pairs separated by one space, each number a finite decimal,
 /// at most [`FREEFORM_POINT_CAP`] pairs. Anything else is `None`. The count
 /// each shape takes is checked by the caller.
@@ -1868,6 +1887,13 @@ fn read_request(
     };
     let parsed = parse_header(&header).map_err(ReadStop::Reply)?;
     let declared = match parsed.length {
+        Some(value) if parsed.path == "/link" && value > LINK_BODY_CAP => {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("link"),
+                "the link request is too large",
+            )));
+        }
         Some(value) if parsed.path == "/measure" && value > MEASURE_BODY_CAP => {
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -2192,6 +2218,39 @@ const MAX_POINTS: usize = 64;
 /// Longest `/measure` body, 256 KiB. A longer one is refused from its
 /// declared length, before any of it is read.
 const MEASURE_BODY_CAP: usize = 256 * 1024;
+
+/// Decimal digits of `value`.
+const fn digits(value: usize) -> usize {
+    let mut count = 1;
+    let mut rest = value / 10;
+    while rest > 0 {
+        count += 1;
+        rest /= 10;
+    }
+    count
+}
+
+/// One listed image at its longest: a space, a UID, a space and a token.
+const LINK_IMAGE_MAX: usize = 1 + UID_MAX_CHARS + 1 + TOKEN_MAX_CHARS;
+/// `source <uid> <plane>` and its newline.
+const LINK_SOURCE_LINE_MAX: usize = SOURCE_WORD.len() + 1 + UID_MAX_CHARS + 1 + TOKEN_MAX_CHARS + 1;
+/// `target <cell> <shown> <scroll>`, `FRAME_LIST_CAP` images and a newline.
+const LINK_TARGET_LINE_MAX: usize = TARGET_WORD.len()
+    + 1
+    + digits(CELLS - 1)
+    + 1
+    + digits(FRAME_LIST_CAP - 1)
+    + 1
+    + 1
+    + FRAME_LIST_CAP * LINK_IMAGE_MAX
+    + 1;
+/// Every shown cell but the active one is a target.
+const LINK_TARGETS: usize = CELLS - 1;
+/// Longest `/link` body. A longer one is refused from its declared length,
+/// before any of it is read. Its terms are the grammar in `link.rs`.
+const LINK_BODY_CAP: usize = LINK_SOURCE_LINE_MAX + LINK_TARGETS * LINK_TARGET_LINE_MAX;
+const _: () = assert!(LINK_BODY_CAP < BODY_CAP);
+const _: () = assert!(COUNT_FIELD_CHARS >= digits(FRAME_LIST_CAP - 1));
 
 fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut lines = header.split("\r\n");

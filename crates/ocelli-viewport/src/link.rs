@@ -20,7 +20,9 @@
 use glam::DVec3;
 use ocelli_core::{Index, Pt, World};
 use ocelli_pixel::ImagePlane;
-use ocelli_volume::FrameOfReferenceUid;
+/// The UID type the rule takes, re-exported so a caller of this module does
+/// not need its own dependency on `ocelli-volume`.
+pub use ocelli_volume::FrameOfReferenceUid;
 
 /// cornerstone3D 5.8.2 `areViewportsCoplanar`: `abs(dot) > 0.9`.
 pub const COPLANAR_DOT: f64 = 0.9;
