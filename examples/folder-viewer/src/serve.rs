@@ -1653,15 +1653,21 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
     let frame = request.frame.frame;
     let page = request.page;
     let body = request.body;
+    // The one inspection of the post, run by a decode worker for the process
+    // server and in place otherwise, so both paths run the same code.
+    let inspect = move |body: Vec<u8>| {
+        let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
+        (result, replies, body)
+    };
     let inspected = if let Some(slot) = charge.slot.as_ref() {
         let worker = slot.worker();
         let retire = slot.retire();
         slot.call(move || {
-            let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
+            let (result, replies, body) = inspect(body);
             (result, replies, body, Some(worker), Some(retire))
         })
     } else {
-        let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
+        let (result, replies, body) = inspect(body);
         Some((result, replies, body, None, None))
     };
     let Some((result, replies, body, worker, retire)) = inspected else {
@@ -2810,7 +2816,8 @@ mod tests {
         let viewer = Viewer::new(ViewerConfig {
             cache_bytes: 8 * 1024 * 1024,
         });
-        let body = crate::preview::tests::per_frame_file(12);
+        let uid = "2.25.213101";
+        let body = crate::preview::tests::per_frame_file_as(12, uid);
         let capacity = body.capacity();
         let mut charge = BodyCharge {
             viewer: &viewer,
@@ -2818,7 +2825,6 @@ mod tests {
             counted: false,
             slot: None,
         };
-        crate::preview::reset_inspect_work();
         let reply = file_route(
             &viewer,
             Request {
@@ -2838,7 +2844,7 @@ mod tests {
             },
             &mut charge,
         );
-        let work = crate::preview::inspect_work();
+        let work = crate::preview::inspect_work(uid);
         if reply.status != 200 || viewer.kept_bytes() == 0 {
             return Err(format!(
                 "the post answered {} and kept nothing",
@@ -2848,6 +2854,48 @@ mod tests {
         if work != (1, 1) {
             return Err(format!(
                 "one post projected and built planes {work:?} times"
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_pooled_file_post_parses_and_builds_its_planes_once() -> Result<(), String> {
+        // Review pass 5, S1. The process server runs every bodied post on a
+        // decode worker. The counter is read across threads, so this sees the
+        // worker's work, through the shipping `Viewer::server` and a socket.
+        let uid = "2.25.213102";
+        let body = crate::preview::tests::per_frame_file_as(12, uid);
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        }));
+        let served = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, served);
+        });
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let mut request = format!(
+            "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(&body);
+        stream
+            .write_all(&request)
+            .map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        if !reply.starts_with(b"HTTP/1.1 200 ") || viewer.kept_bytes() == 0 {
+            return Err("the pooled post was refused or kept nothing".to_owned());
+        }
+        let work = crate::preview::inspect_work(uid);
+        if work != (1, 1) {
+            return Err(format!(
+                "one pooled post projected and built planes {work:?} times"
             ));
         }
         Ok(())

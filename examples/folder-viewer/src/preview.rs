@@ -1624,27 +1624,44 @@ fn codecs() -> Result<Registry, PreviewError> {
 
 fn project_metadata(object: &DefaultDicomObject) -> Result<MetadataSet, PreviewError> {
     #[cfg(test)]
-    INSPECT_WORK.with(|work| work.set((work.get().0.saturating_add(1), work.get().1)));
+    note_inspect_work(optional_text(object, SOP_INSTANCE).ok().flatten(), true);
     project_elements(object.iter())
 }
 
+/// Whole-object metadata projections and plane-list builds, by the SOP
+/// Instance UID of the object they were made for, on every thread. A test
+/// gives its file a UID of its own, so tests running at once and a decode
+/// worker's thread do not hide or add work.
 #[cfg(test)]
-thread_local! {
-    /// Whole-object metadata projections and plane-list builds on this
-    /// thread, so a test can pin how often one post does each.
-    static INSPECT_WORK: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+static INSPECT_WORK: LazyLock<Mutex<std::collections::HashMap<String, (u64, u64)>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+fn note_inspect_work(uid: Option<String>, projection: bool) {
+    let Some(uid) = uid else {
+        return;
+    };
+    let mut work = INSPECT_WORK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let entry = work.entry(uid).or_insert((0, 0));
+    if projection {
+        entry.0 = entry.0.saturating_add(1);
+    } else {
+        entry.1 = entry.1.saturating_add(1);
+    }
 }
 
-/// Zero this thread's [`INSPECT_WORK`].
+/// The projections and plane-list builds made for the object whose SOP
+/// Instance UID is `uid`, from any thread.
 #[cfg(test)]
-pub(crate) fn reset_inspect_work() {
-    INSPECT_WORK.with(|work| work.set((0, 0)));
-}
-
-/// This thread's projections and plane-list builds since the last reset.
-#[cfg(test)]
-pub(crate) fn inspect_work() -> (u64, u64) {
-    INSPECT_WORK.with(Cell::get)
+pub(crate) fn inspect_work(uid: &str) -> (u64, u64) {
+    INSPECT_WORK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(uid)
+        .copied()
+        .unwrap_or((0, 0))
 }
 
 fn project_item(
@@ -3307,7 +3324,13 @@ fn sendable_uid(text: Option<String>) -> String {
 /// `FrameGeometry::derive` refused the frame.
 fn plane_tokens(metadata: &MetadataSet, frames: u32) -> Vec<Option<String>> {
     #[cfg(test)]
-    INSPECT_WORK.with(|work| work.set((work.get().0, work.get().1.saturating_add(1))));
+    note_inspect_work(
+        metadata
+            .get(SOP_INSTANCE)
+            .and_then(MetadataElement::semantic_text)
+            .and_then(|parts| parts.first().map(|part| (*part).to_owned())),
+        false,
+    );
     let count = frame_list_len(frames);
     let Ok(multi) = MultiframeMetadata::new(metadata) else {
         return vec![None; count];
@@ -3695,7 +3718,7 @@ fn file_order_pixels(object: &DefaultDicomObject, little: bool) -> Result<Vec<u8
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{
-        INSPECT_WORK, borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, inspect_post,
+        borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, inspect_post, inspect_work,
         per_frame_replies, preview_frame, split_pixel_payload,
     };
 
@@ -3732,6 +3755,12 @@ pub(crate) mod tests {
     /// An N-frame 1 by 1 enhanced CT whose every frame carries its own
     /// Frame VOI LUT item, centre 40 and width 400.
     pub(crate) fn per_frame_file(frames: usize) -> Vec<u8> {
+        per_frame_file_as(frames, "2.25.213000")
+    }
+
+    /// [`per_frame_file`] with SOP Instance UID `uid`, which
+    /// [`inspect_work`] counts by.
+    pub(crate) fn per_frame_file_as(frames: usize, uid: &str) -> Vec<u8> {
         let mut meta = Vec::new();
         meta.extend(element(0x0002, 0x0001, b"OB", &[0, 1]));
         meta.extend(element(0x0002, 0x0010, b"UI", b"1.2.840.10008.1.2.1\0"));
@@ -3756,6 +3785,11 @@ pub(crate) mod tests {
                 .concat(),
             ),
         ));
+        let mut sop = uid.as_bytes().to_vec();
+        if sop.len() % 2 == 1 {
+            sop.push(0);
+        }
+        bytes.extend(element(0x0008, 0x0018, b"UI", &sop));
         bytes.extend(element(0x0008, 0x0060, b"CS", b"CT"));
         bytes.extend(element(0x0028, 0x0002, b"US", &1_u16.to_le_bytes()));
         bytes.extend(element(0x0028, 0x0004, b"CS", &padded("MONOCHROME2")));
@@ -3824,12 +3858,12 @@ pub(crate) mod tests {
         // per-frame window and spacing fields.
         let mut work = Vec::new();
         for frames in [4_usize, 12] {
-            INSPECT_WORK.with(|cell| cell.set((0, 0)));
-            let (reply, kept) = inspect_post(&per_frame_file(frames), 0, usize::MAX);
+            let uid = format!("2.25.21300{frames}");
+            let (reply, kept) = inspect_post(&per_frame_file_as(frames, &uid), 0, usize::MAX);
             if reply.is_err() || kept.is_none() {
                 return Err(format!("{frames} frames gave no reply or kept nothing"));
             }
-            work.push(INSPECT_WORK.with(std::cell::Cell::get));
+            work.push(inspect_work(&uid));
         }
         if !matches!(work[..], [(1, 1), (1, 1)]) {
             return Err(format!(

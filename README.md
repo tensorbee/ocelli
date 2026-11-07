@@ -246,54 +246,54 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    and starts at 10.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
-   W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
-   Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
-   view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
-   (Pointer cross, Magnifier, Corners, Orientation letters), the layout
-   (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
+   W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`,
+   Bidirectional `B`, Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`,
+   Text), the view (Invert, Rotate 90, Flip horizontal, Flip vertical), the
+   display (Pointer cross, Magnifier, Corners, Orientation letters), the
+   layout (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
    which shows four neighbouring images in the outlined viewport, Link and
-   Reference lines, which have no key), and Key
-   image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
-   Key image and Headers act on the outlined viewport.
-   Scroll starts active. The right column holds the window list, the marks
-   and the mouse and key lists. The icons at either end of the top bar, or
-   the `[` and `]` keys, hide and show the two side columns. On a CT the
-   window list starts with the three presets, Soft tissue, Lung and Bone,
-   and then lists the file's own windows in file order, each named by its
-   Window Center & Width Explanation, or `Window n` when it has none. On any
-   other image it lists the file's windows only. The keys `1` to `9` choose
-   rows 1 to 9, and `0` stays Fit. Each VOI LUT Sequence item is listed as a
-   row that cannot be chosen, because this preview does not apply one, and
-   while a file has one its other rows cannot be chosen either. A multiframe
-   whose windows change per frame lists the shown frame's own, asked for by
-   file id, which the process answers from the replies it keeps for such a
-   file after the posted bytes are dropped. Until that list arrives the frame
-   is drawn at its own first usable window, then at the chosen one. A file is
-   read as changing per frame when any frame's window comes from its own
-   per-frame group, not only frame 0's. Each tile of Four images follows the
-   same rule. While its frame's list is on its way its label gives the WW and
-   WL it is drawn at, and once the list arrives it is drawn at the chosen
-   window and its label names it. A tile of a file that stores no window
-   gives its numbers and says `full range`, as the corner does. A file opens at its first window that has both a centre and a
-   width, and a slot missing either is listed as a row that cannot be
-   chosen. A slice keeps its window, and a file window past the next
-   image's list shows that image's first usable one. A series change and
-   Reset return to the first usable file window. The bottom right corner names the window shown:
-   the preset, the file window's name, `region` or `manual`. A window row
-   or a region window that the local process refuses leaves the image and
-   the window as they were and puts the reason in the sentence line. Region
-   window is a drag of a
+   Reference lines, which have no key), and Key image, Headers, Fit, Reset
+   and Full screen. The view, window, Fit, Reset, Key image and Headers act
+   on the outlined viewport. Scroll starts active. The right column holds
+   the window list, the marks and the mouse and key lists. The icons at
+   either end of the top bar, or the `[` and `]` keys, hide and show the two
+   side columns. On a CT the window list starts with the three presets, Soft
+   tissue, Lung and Bone, and then lists the file's own windows in file
+   order, each named by its Window Center & Width Explanation, or `Window n`
+   when it has none. On any other image it lists the file's windows only.
+   The keys `1` to `9` choose rows 1 to 9, and `0` stays Fit. Each VOI LUT
+   Sequence item is listed as a row that cannot be chosen, because this
+   preview does not apply one, and while a file has one its other rows
+   cannot be chosen either. A multiframe whose windows change per frame
+   lists the shown frame's own, asked for by file id, which the process
+   answers from the replies it keeps for such a file after the posted bytes
+   are dropped. Until that list arrives the frame is drawn at its own first
+   usable window, then at the chosen one. A file is read as changing per
+   frame when any frame's window comes from its own per-frame group, not
+   only frame 0's. Each tile of Four images follows the same rule. While its
+   frame's list is on its way its label gives the WW and WL it is drawn at,
+   and once the list arrives it is drawn at the chosen window and its label
+   names it. A tile of a file that stores no window gives its numbers and
+   says `full range`, as the corner does. A file opens at its first window
+   that has both a centre and a width, and a slot missing either is listed
+   as a row that cannot be chosen. A slice keeps its window, and a file
+   window past the next image's list shows that image's first usable one. A
+   series change and Reset return to the first usable file window. The
+   bottom right corner names the window shown: the preset, the file window's
+   name, `region` or `manual`. A window row or a region window that the
+   local process refuses leaves the image and the window as they were and
+   puts the reason in the sentence line. Region window is a drag of a
    rectangle. The window then runs from the least to the greatest modality
    value whose pixel centre is inside it, with padding left out, and keeps
    the function already shown. The local process finds the two values
    through `POST /region`, and `windowRegion` from `@ocelli/core` makes the
    window. The process serves the built `packages/core/dist` under `/lib/`,
-   so run `npm run build -w @ocelli/core` before starting the viewer, or the region window
-   reads unavailable and says so. The library's SR modules import dcmjs,
-   which `npm ci` installs, and the region window names that when it is the
-   part that is missing. Its centre is the middle of that span.
-   cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean and
-   keeps a width of at least 10, so the two can give different windows.
+   so run `npm run build -w @ocelli/core` before starting the viewer, or the
+   region window reads unavailable and says so. The library's SR modules
+   import dcmjs, which `npm ci` installs, and the region window names that
+   when it is the part that is missing. Its centre is the middle of that
+   span. cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean
+   and keeps a width of at least 10, so the two can give different windows.
 7. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways

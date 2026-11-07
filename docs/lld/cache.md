@@ -190,16 +190,15 @@ on the free list, beside `used`.
 
 One more pool sits outside the budget. A multiframe in which any frame's
 window comes from a per-frame functional group keeps every frame's inspect
-reply in
-`CacheState::kept`, so `POST /inspect` by id answers a frame's window list
-after `take_encoded_if_ready` drops the posted bytes. The replies are
-computed from the parsed data set by `per_frame_replies`, so every transfer
-syntax keeps them the same way. `inspect_post` parses the file once per
-`POST /file` and takes both the scan reply and the kept set from one
-`InspectParts`, which projects the metadata and builds the
-frame-independent fields and the plane list once, and
-only each frame's spacing, edge and window fields per frame, so a post is
-linear in the frame count. `KeptReplies` keeps the shared parts once beside
+reply in `CacheState::kept`, so `POST /inspect` by id answers a frame's window
+list after `take_encoded_if_ready` drops the posted bytes. `inspect_post`
+parses the file once per `POST /file`, on a decode worker for the process
+server and in place otherwise, and takes both the scan reply and the kept set
+from one `InspectParts`. That projects the metadata and builds the
+frame-independent fields and the plane list once, from the parsed data set, so
+every transfer syntax keeps the replies the same way. `kept_replies` then
+builds only each frame's spacing, edge and window fields per frame, so a post
+is linear in the frame count. `KeptReplies` keeps the shared parts once beside
 those per-frame fields, and the pool is charged at `KeptReplies::bytes`, the
 heap bytes its strings and frame list own. No other file keeps anything.
 The pool is not in the LRU and stays under `KEPT_INSPECT_CAP`, 16 MiB across
