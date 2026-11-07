@@ -241,3 +241,10 @@ Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-
 - **Position, not header scanning.** The attribute is accepted only as the first line after the crate's leading `//!`, `//` and blank lines, exactly as written. Every root already places it there. The reviewer's string and block comment shapes join the header test and go red on the current reader.
 - **N1 is pinned.** A test fails when the line a finding reports is not the line the probe found.
 - **What the floor checks today is stated.** The workspace has no doctests, so the prose says the floor checks the attribute is present and that it acts on the first doctest anyone writes.
+
+### Lead ruling after review pass 5
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-5.md`, which showed that Python's line splitting and rustc's disagree on nine separators, so a `//` comment could carry the attribute text.
+
+- **The root is read as rustc reads it.** It is decoded from its bytes as UTF-8 and split on LF only, with one trailing CR removed.
+- **The header fails closed on anything but printable ASCII and tab.** A root whose lines, down to and including the attribute line, hold any other character is refused, with a message naming the line. This deliberately refuses harmless headers such as a copyright sign, because naming separators one at a time would leave every unnamed one open. A later change may not narrow this rule to a list of separators.
