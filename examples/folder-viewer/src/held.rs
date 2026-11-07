@@ -8,7 +8,7 @@
 //! Cached frames and free buffers share one budget. A decode of that length
 //! takes a parked buffer when there is one, and allocates otherwise.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -150,8 +150,59 @@ pub(crate) enum PreviewSource {
     Gone,
     /// The decoded frame.
     Hit(Arc<CachedFrame>),
-    /// Posted bytes. The cache keeps this `Arc` until the frame is stored.
-    Shared(Arc<PostedBytes>),
+    /// Posted bytes. The cache keeps its own `Arc` until the frame is stored.
+    Shared(SharedBytes),
+}
+
+impl PreviewSource {
+    /// The decode's place in its id's in-flight count, when bytes were
+    /// handed out. See [`SharedBytes::take_flight`].
+    pub(crate) fn take_flight(&mut self) -> Option<Flight> {
+        match self {
+            Self::Shared(shared) => shared.take_flight(),
+            Self::Gone | Self::Hit(_) => None,
+        }
+    }
+}
+
+/// Posted bytes handed to one decode, and that decode's place in the id's
+/// in-flight count.
+pub(crate) struct SharedBytes {
+    bytes: Arc<PostedBytes>,
+    flight: Option<Flight>,
+}
+
+impl SharedBytes {
+    /// The decode's place in the count. The caller keeps it until the frame
+    /// is stored or the decode is given up, so a forget made meanwhile is not
+    /// undone by the store. Left here, it is released when the bytes drop.
+    pub(crate) fn take_flight(&mut self) -> Option<Flight> {
+        self.flight.take()
+    }
+}
+
+impl std::ops::Deref for SharedBytes {
+    type Target = PostedBytes;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
+    }
+}
+
+/// One decode of an id whose posted bytes `preview_source` handed out.
+///
+/// Drop takes it out of the id's count. The last one out for an id that was
+/// forgotten meanwhile takes the id out of the doomed set, so both stay
+/// bounded by the decodes in flight. Never dropped under the cache lock.
+pub(crate) struct Flight {
+    cache: Arc<Mutex<CacheState>>,
+    id: FileId,
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        lock_mutex(&self.cache).land(self.id);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -287,6 +338,13 @@ struct CacheState {
     /// Oldest frame at the front. A hit moves its key to the back.
     frame_order: VecDeque<TrackedFrame>,
     recycle_rx: Receiver<Vec<u8>>,
+    /// Decodes holding each id's posted bytes, counted where
+    /// `preview_source` hands them out and released when the decode's
+    /// [`Flight`] drops after its store.
+    in_flight: BTreeMap<FileId, u32>,
+    /// Ids forgotten while a decode held their bytes. `store_frame_with`
+    /// stores nothing for them. An id leaves when its count reaches zero.
+    doomed: BTreeSet<FileId>,
     #[cfg(test)]
     reused: usize,
     #[cfg(test)]
@@ -819,6 +877,20 @@ pub(crate) struct MemoryCensus {
     pub(crate) free: usize,
 }
 
+/// What one forget removed. `bytes` is the admitted size of every entry that
+/// left, so `GET /held`'s `used` drops by exactly that.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Forgotten {
+    /// Posted files removed.
+    pub(crate) files: usize,
+    /// Decoded frames removed.
+    pub(crate) frames: usize,
+    /// Bytes the removed entries were admitted at.
+    pub(crate) bytes: usize,
+    /// Ids that held nothing.
+    pub(crate) unknown: usize,
+}
+
 /// One inflight snapshot taken on the request path.
 #[cfg(test)]
 #[derive(Clone, Debug)]
@@ -912,6 +984,8 @@ impl Viewer {
                     limit: config.cache_bytes,
                     frame_order: VecDeque::new(),
                     recycle_rx,
+                    in_flight: BTreeMap::new(),
+                    doomed: BTreeSet::new(),
                     #[cfg(test)]
                     reused: 0,
                     #[cfg(test)]
@@ -1172,7 +1246,14 @@ impl Viewer {
             PreviewSource::Hit(held)
         } else {
             match state.lru.get(&HeldKey::File(id)) {
-                Some(Held::File(bytes)) => PreviewSource::Shared(Arc::clone(bytes)),
+                Some(Held::File(bytes)) => {
+                    let bytes = Arc::clone(bytes);
+                    let flight = state.take_off(id, &self.cache.inner);
+                    PreviewSource::Shared(SharedBytes {
+                        bytes,
+                        flight: Some(flight),
+                    })
+                }
                 Some(Held::Frame(_)) | None => PreviewSource::Gone,
             }
         };
@@ -1205,6 +1286,12 @@ impl Viewer {
         });
         let key = HeldKey::Frame(id, index);
         let mut state = self.lock_cache();
+        if state.doomed.contains(&id) {
+            // Forgotten while this decode ran. The frame answers its own
+            // request and is not stored.
+            drop(state);
+            return value;
+        }
         state.drain_recycled();
         state.reserve_for_insert(charged);
         let admission = state.lru.insert(key, Held::Frame(Arc::clone(&value)));
@@ -1271,16 +1358,49 @@ impl Viewer {
         }
     }
 
-    /// Remove a posted file and its cached frames, as eviction would.
-    #[cfg(test)]
-    pub(crate) fn forget_file(&self, id: FileId, frames: u32) {
-        for index in 0..frames {
-            let _ = self.evict_frame_to_free_list(id, index);
-        }
+    /// Forget every id in `ids`: its posted bytes and every frame of it.
+    ///
+    /// Explicit release, not eviction. The frames leave through the
+    /// bookkeeping eviction uses, `forget_frame` and `reclaim_held`, so the
+    /// frame order, the counts and the free list are as if the id had never
+    /// been held. An id that held nothing, another generation's id or a
+    /// repeat, counts as unknown.
+    pub(crate) fn forget(&self, ids: &[FileId]) -> Forgotten {
+        let mut forgotten = Forgotten::default();
+        let mut posted = Vec::new();
         let mut state = self.lock_cache();
-        if state.lru.remove(&HeldKey::File(id)).is_some() {
-            state.files = state.files.saturating_sub(1);
+        state.drain_recycled();
+        for &id in ids {
+            if state.in_flight.contains_key(&id) {
+                state.doomed.insert(id);
+            }
+            let mut held = false;
+            if let Some(file) = state.lru.remove(&HeldKey::File(id)) {
+                held = true;
+                forgotten.files = forgotten.files.saturating_add(1);
+                forgotten.bytes = forgotten.bytes.saturating_add(file.bytes());
+                state.files = state.files.saturating_sub(1);
+                posted.push(file);
+            }
+            let frames = state
+                .lru
+                .remove_range(HeldKey::Frame(id, 0)..=HeldKey::Frame(id, u32::MAX));
+            for (key, frame) in frames {
+                held = true;
+                forgotten.frames = forgotten.frames.saturating_add(1);
+                forgotten.bytes = forgotten.bytes.saturating_add(frame.bytes());
+                state.forget_frame(&key);
+                state.frames = state.frames.saturating_sub(1);
+                state.reclaim_held(frame);
+            }
+            if !held {
+                forgotten.unknown = forgotten.unknown.saturating_add(1);
+            }
         }
+        drop(state);
+        // Posted bytes go back to the worker that allocated them, outside the lock.
+        drop(posted);
+        forgotten
     }
 
     /// Stop the decode workers. Slots are still granted and jobs go unsent.
@@ -1485,6 +1605,28 @@ fn frame_sample_cost(len: usize) -> usize {
 }
 
 impl CacheState {
+    /// Count one more decode holding `id`'s posted bytes.
+    fn take_off(&mut self, id: FileId, cache: &Arc<Mutex<CacheState>>) -> Flight {
+        let count = self.in_flight.entry(id).or_insert(0);
+        *count = count.saturating_add(1);
+        Flight {
+            cache: Arc::clone(cache),
+            id,
+        }
+    }
+
+    /// One decode of `id` is done. The last one takes `id` out of both sets.
+    fn land(&mut self, id: FileId) {
+        let Some(count) = self.in_flight.get_mut(&id) else {
+            return;
+        };
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            self.in_flight.remove(&id);
+            self.doomed.remove(&id);
+        }
+    }
+
     fn drain_recycled(&mut self) {
         while let Ok(buffer) = self.recycle_rx.try_recv() {
             self.park_if_fits(buffer);
@@ -2020,6 +2162,207 @@ mod tests {
             }
             Lookup::Gone => {
                 return Err("the decoded frame was not what lookup returned".to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    /// Wait until `preview_source` has been called `count` times.
+    fn wait_for_preview_calls(viewer: &Viewer, count: u64) -> Result<(), String> {
+        let started = std::time::Instant::now();
+        while viewer.preview_calls() < count {
+            if started.elapsed() > Duration::from_secs(5) {
+                return Err("the decode did not reach the posted bytes".to_owned());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_forget_during_a_decode_is_not_undone_by_its_store() -> Result<(), String> {
+        // F-226 AC12. Synthetic slice 0, 128 columns by 96 rows, is posted.
+        // Both permits are held inside `with_workspace` until the test
+        // releases them. A decode takes the posted bytes through
+        // `preview_source` and waits for a permit, as `/preview` does on the
+        // direct path. The id is forgotten while it waits, then the permits
+        // are released. The decode still returns its frame, so its reply is
+        // served, and its store inserts nothing. It keeps its flight until
+        // after the store, as every route does, and the last flight out
+        // leaves no id in either set.
+        let viewer = Arc::new(Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        }));
+        let bytes = crate::slice(0).ok_or("no synthetic slice")?;
+        let posted = bytes.len();
+        let id = viewer
+            .insert_file(bytes)
+            .ok_or("the synthetic slice was not held")?;
+        let entered = Arc::new(std::sync::Barrier::new(PERMITS + 1));
+        let release = Arc::new(std::sync::Barrier::new(PERMITS + 1));
+        let mut holders = Vec::new();
+        for _ in 0..PERMITS {
+            let viewer = Arc::clone(&viewer);
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            holders.push(std::thread::spawn(move || {
+                viewer.with_workspace(|_| {
+                    entered.wait();
+                    release.wait();
+                });
+            }));
+        }
+        entered.wait();
+        let decoding = Arc::clone(&viewer);
+        let decode = std::thread::spawn(move || -> Result<(u32, u32), String> {
+            let PreviewSource::Shared(mut shared) = decoding.preview_source(id, 0) else {
+                return Err("the posted bytes were not handed to the decode".to_owned());
+            };
+            let flight = shared.take_flight();
+            let held = decoding
+                .with_workspace(|workspace| {
+                    let mut samples = Vec::new();
+                    crate::preview::decode_held(
+                        shared.as_slice(),
+                        0,
+                        &mut workspace.native,
+                        &mut samples,
+                        &mut |_| {},
+                        &mut |_| Vec::new(),
+                    )
+                })
+                .map_err(|error| format!("slice 0 was refused: {}", error.code()))?;
+            drop(shared);
+            let frame = decoding.store_frame(id, 0, held);
+            drop(flight);
+            Ok((frame.width, frame.height))
+        });
+        wait_for_preview_calls(&viewer, 1)?;
+        let forgotten = viewer.forget(&[id]);
+        let expected = Forgotten {
+            files: 1,
+            frames: 0,
+            bytes: posted,
+            unknown: 0,
+        };
+        release.wait();
+        for holder in holders {
+            holder
+                .join()
+                .map_err(|_| "a permit holder panicked".to_owned())?;
+        }
+        let served = decode
+            .join()
+            .map_err(|_| "the decode panicked".to_owned())??;
+        if forgotten != expected {
+            return Err(format!(
+                "the forget removed {forgotten:?}, not {expected:?}"
+            ));
+        }
+        if served != (128, 96) {
+            return Err(format!("the decode returned a {served:?} frame"));
+        }
+        let (pressure, files, frames) = viewer.census();
+        if files != 0 || frames != 0 || pressure.used != 0 {
+            return Err(format!(
+                "after the decode the cache held {files} files, {frames} frames, {} bytes",
+                pressure.used
+            ));
+        }
+        let state = viewer.lock_cache();
+        if !state.doomed.is_empty() || !state.in_flight.is_empty() {
+            return Err(format!(
+                "{} doomed and {} in flight after the decode",
+                state.doomed.len(),
+                state.in_flight.len()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Frame serials held, in the frame order, oldest first.
+    fn frame_serials(viewer: &Viewer) -> Vec<u64> {
+        let state = viewer.lock_cache();
+        state
+            .frame_order
+            .iter()
+            .filter_map(|frame| match frame.key {
+                HeldKey::Frame(id, _) => Some(id.serial),
+                HeldKey::File(_) => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_forgotten_file_leaves_the_cache_as_if_never_held() -> Result<(), String> {
+        // F-226, the lead's amendment. On `forgot`, file 9 is posted and its
+        // frame 0 of two is stored, so the bytes and one frame are held, and
+        // then 9 is forgotten. `fresh` never holds 9. Both then store frames
+        // 1 to 4 of 64 sample bytes into a budget of three such frames, so
+        // the fourth store evicts frame 1. The two must agree on files,
+        // frames, used bytes, the frame order and which frames survive.
+        let charge = Held::Frame(Arc::new(CachedFrame::plain(minimal_frame(
+            vec![0_u8; 64],
+            1,
+            32,
+        )?)))
+        .bytes();
+        let budget = charge.saturating_mul(3);
+        let forgot = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let fresh = Viewer::new(ViewerConfig {
+            cache_bytes: budget,
+        });
+        let posted = forgot
+            .insert_file(vec![7_u8; 32])
+            .ok_or("the posted bytes were refused")?;
+        let mut first = minimal_frame(vec![0_u8; 64], 1, 32)?;
+        first.frames = 2;
+        drop(forgot.store_frame(posted, 0, first));
+        if forgot.census().1 != 1 || forgot.census().2 != 1 {
+            return Err("the bytes and frame 0 were not both held".to_owned());
+        }
+        let gone = forgot.forget(&[posted]);
+        if gone.files != 1 || gone.frames != 1 || gone.unknown != 0 {
+            return Err(format!("the forget removed {gone:?}"));
+        }
+        if !frame_serials(&forgot).is_empty() {
+            return Err("the frame order kept the forgotten frame".to_owned());
+        }
+        for viewer in [&forgot, &fresh] {
+            for serial in 1..=4 {
+                let id = FileId {
+                    generation: viewer.generation,
+                    serial,
+                };
+                drop(viewer.store_frame(id, 0, minimal_frame(vec![0_u8; 64], 1, 32)?));
+            }
+        }
+        let (forgot_pressure, forgot_files, forgot_frames) = forgot.census();
+        let (fresh_pressure, fresh_files, fresh_frames) = fresh.census();
+        if (forgot_files, forgot_frames, forgot_pressure.used)
+            != (fresh_files, fresh_frames, fresh_pressure.used)
+        {
+            return Err(format!(
+                "forgot held {forgot_files} files {forgot_frames} frames {} bytes, fresh {fresh_files} {fresh_frames} {}",
+                forgot_pressure.used, fresh_pressure.used
+            ));
+        }
+        let order = frame_serials(&forgot);
+        if order != frame_serials(&fresh) || order != [2, 3, 4] {
+            return Err(format!(
+                "the frame order was {order:?} after the forget and {:?} without it",
+                frame_serials(&fresh)
+            ));
+        }
+        for viewer in [&forgot, &fresh] {
+            let first = FileId {
+                generation: viewer.generation,
+                serial: 1,
+            };
+            if !matches!(viewer.lookup_frame(first, 0), Lookup::Gone) {
+                return Err("the oldest frame was not the one evicted".to_owned());
             }
         }
         Ok(())

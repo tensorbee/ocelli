@@ -14,7 +14,8 @@ use ocelli_pixel::VoiFunction;
 
 use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
-    PreviewSource, Viewer, ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
+    PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey, retire_bytes,
+    with_decode_workspace,
 };
 use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
 use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json};
@@ -401,6 +402,11 @@ fn route(
         }
         ("POST", "/headers") => {
             let reply = headers_route(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/forget") => {
+            let reply = forget_route(viewer, &request);
             retire_request_body(charge, request.body);
             (reply, None)
         }
@@ -1017,10 +1023,13 @@ fn preview_held_on_worker(
     let mut decoded_here = false;
     let mut found = Some(found);
     for _ in 0..GREY_ROUNDS {
-        let found = match found.take() {
+        let mut found = match found.take() {
             Some(found) => found,
             None => viewer.preview_source(id, request.frame),
         };
+        // Kept to the end of this round, after the frame is stored, so a
+        // forget made during the decode is not undone by the store.
+        let _flight = found.take_flight();
         let home = match &found {
             PreviewSource::Hit(frame) => frame.worker(),
             PreviewSource::Shared(bytes) => bytes.worker(),
@@ -1248,9 +1257,12 @@ fn preview_held(
         PreviewSource::Hit(held) => {
             render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
         }
-        PreviewSource::Shared(bytes) => {
+        PreviewSource::Shared(mut bytes) => {
             // The posted file stays in the cache for the whole decode.
-            // The sample buffer is inflight only until it is stored.
+            // The sample buffer is inflight only until it is stored. The
+            // flight is kept until after the store, so a forget made during
+            // the decode is not undone by it.
+            let _flight = bytes.take_flight();
             let mut samples = Vec::new();
             let mut sample_charge = 0_usize;
             let cache = viewer.cache_handle();
@@ -1443,9 +1455,12 @@ fn decode_for_value(
     viewer: &Viewer,
     id: FileId,
     frame: u32,
-    bytes: Arc<crate::held::PostedBytes>,
+    mut bytes: SharedBytes,
     stream: Option<&TcpStream>,
 ) -> Result<Option<Arc<CachedFrame>>, PreviewError> {
+    // Kept until this returns, after the store, so a forget made during the
+    // decode is not undone by it.
+    let _flight = bytes.take_flight();
     let mut live = || stream.is_none_or(peer_open);
     if viewer.schedules() {
         let Some(permit) = viewer.acquire_decode(bytes.worker(), &mut live) else {
@@ -1581,6 +1596,49 @@ fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
         };
     }
     json_or_error(headers_json(&request.body))
+}
+
+/// `POST /forget`: drop held files and every frame of them, named by id.
+///
+/// The body is ids, one `<generation>.<serial>` per line, LF separated, at
+/// most [`FORGET_LINES`] of them. Every line is parsed before anything is
+/// removed, so a body with one line that is not an id forgets nothing and is
+/// `400` with `X-Ocelli-Error: forget`. The reply counts what left, and
+/// `unknown` counts the ids that held nothing.
+fn forget_route(viewer: &Viewer, request: &Request) -> Reply {
+    if request.file_id.is_some() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a forget request names its ids in the body",
+        );
+    }
+    let Some(ids) = parse_forget_ids(&request.body) else {
+        return text_reply(400, Some("forget"), "the forget list is not usable");
+    };
+    let forgotten = viewer.forget(&ids);
+    let body = format!(
+        "{{\"files\":{},\"frames\":{},\"bytes\":{},\"unknown\":{}}}",
+        forgotten.files, forgotten.frames, forgotten.bytes, forgotten.unknown
+    );
+    bare(200, "application/json", body.into_bytes())
+}
+
+/// Every line of `body` as an id, or `None` when one line is not an id or
+/// there are more than [`FORGET_LINES`]. An empty body names no id.
+fn parse_forget_ids(body: &[u8]) -> Option<Vec<FileId>> {
+    if body.is_empty() {
+        return Some(Vec::new());
+    }
+    let text = std::str::from_utf8(body).ok()?;
+    let mut ids = Vec::new();
+    for line in text.split('\n') {
+        if ids.len() == FORGET_LINES {
+            return None;
+        }
+        ids.push(FileId::parse(line)?);
+    }
+    Some(ids)
 }
 
 fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
@@ -1892,6 +1950,13 @@ fn read_request(
                 400,
                 Some("link"),
                 "the link request is too large",
+            )));
+        }
+        Some(value) if parsed.path == "/forget" && value > FORGET_BODY_CAP => {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("forget"),
+                "the forget list is too long",
             )));
         }
         Some(value) if parsed.path == "/measure" && value > MEASURE_BODY_CAP => {
@@ -2218,6 +2283,19 @@ const MAX_POINTS: usize = 64;
 /// Longest `/measure` body, 256 KiB. A longer one is refused from its
 /// declared length, before any of it is read.
 const MEASURE_BODY_CAP: usize = 256 * 1024;
+
+/// Most ids one `/forget` body may name.
+const FORGET_LINES: usize = 65_536;
+
+/// Longest id line: two `u64` in at most sixteen hex digits, the dot and the LF.
+const FORGET_LINE_MAX: usize = 16 + 1 + 16 + 1;
+
+/// Longest `/forget` body, 4 MiB. A longer one is refused from its declared
+/// length, before any of it is read. [`FORGET_LINES`] ids of the longest
+/// form fit inside it, so the line count is the cap a valid body meets.
+const FORGET_BODY_CAP: usize = 4 * 1024 * 1024;
+const _: () = assert!(FORGET_LINES * FORGET_LINE_MAX <= FORGET_BODY_CAP);
+const _: () = assert!(FORGET_BODY_CAP < BODY_CAP);
 
 /// Decimal digits of `value`.
 const fn digits(value: usize) -> usize {
@@ -2743,6 +2821,62 @@ mod tests {
             ));
         }
         Ok(())
+    }
+
+    fn request_forget(addr: std::net::SocketAddr, body: &str) -> Result<String, String> {
+        let request = format!(
+            "POST /forget HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        read_http(addr, request.as_bytes())
+    }
+
+    /// F-226 AC12 on the process server, where a preview decodes on a
+    /// decode worker. Both decode permits are held, so a preview that has
+    /// taken the posted bytes waits for one. The id is forgotten over HTTP
+    /// while it waits. Once the permits are free the preview is still served,
+    /// and nothing of the id is held afterwards.
+    #[test]
+    fn a_forget_during_a_pooled_decode_is_not_undone_by_its_store() -> Result<(), String> {
+        let (addr, viewer) = grey_server(8)?;
+        let bytes = slice(0).ok_or("synthetic slice 0 was absent")?;
+        let posted = bytes.len();
+        let id = post_id(addr, &bytes)?;
+        let first = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the first decode permit was missing")?;
+        let second = viewer
+            .acquire_decode(None, &mut || true)
+            .ok_or("the second decode permit was missing")?;
+        let before = viewer.preview_calls();
+        let preview_id = id.clone();
+        let preview = std::thread::spawn(move || request_preview(addr, &preview_id));
+        wait_for_preview(&viewer, before)?;
+        let forgot = request_forget(addr, &id)?;
+        let expected = format!("{{\"files\":1,\"frames\":0,\"bytes\":{posted},\"unknown\":0}}");
+        if !status_is(&forgot, 200) || !forgot.ends_with(&expected) {
+            return Err(format!("the forget during the decode answered {forgot}"));
+        }
+        drop(first);
+        drop(second);
+        let reply = preview
+            .join()
+            .map_err(|_| "the preview thread panicked".to_owned())??;
+        expect_status(&reply, 200, "the preview whose id was forgotten")?;
+        let census = census_until(
+            &viewer,
+            Duration::from_secs(5),
+            "the forgotten id",
+            |census| census.inflight == 0,
+        )?;
+        if census.files != 0 || census.frames != 0 || census.pressure.used != 0 {
+            return Err(format!(
+                "after the decode the cache held {} files, {} frames, {} bytes",
+                census.files, census.frames, census.pressure.used
+            ));
+        }
+        let again = request_preview(addr, &id)?;
+        expect_status(&again, 410, "a later preview of the forgotten id")
     }
 
     #[test]
@@ -3880,7 +4014,7 @@ mod tests {
         let waiter = send_late(addr, &id_preview(&small_id, ""))?;
         waiters_reach(&viewer, 1)?;
         let id = FileId::parse(&small_id).ok_or("the small id did not parse")?;
-        viewer.forget_file(id, 1);
+        let _ = viewer.forget(&[id]);
         drop(stalls);
         let text = read_late(waiter, started, "the waiting preview")?;
         expect_status(&text, 410, "the waiting preview")?;

@@ -3729,3 +3729,207 @@ fn inspect_writes_at_most_the_frame_list_of_planes() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// F-226. Post `file` and return the id the process gave it.
+fn forget_post(addr: SocketAddr, file: &[u8]) -> Result<String, String> {
+    let posted = exchange(addr, &http_post_to("/file", "", file))?;
+    let (header, _) = split_http(&posted)?;
+    header_line(header, "X-Ocelli-File")
+        .map(str::to_owned)
+        .ok_or_else(|| "the file id was missing".to_owned())
+}
+
+/// The same serial under the next generation, which this process never issued.
+fn other_generation(id: &str) -> Result<String, String> {
+    let (generation, serial) = id
+        .split_once('.')
+        .ok_or_else(|| "the file id had no dot".to_owned())?;
+    let generation =
+        u64::from_str_radix(generation, 16).map_err(|_| "the generation was not hex".to_owned())?;
+    Ok(format!("{:x}.{serial}", generation.wrapping_add(1)))
+}
+
+/// `files`, `frames` and `used` from `GET /held`.
+fn held_counts(addr: SocketAddr) -> Result<(usize, usize, usize), String> {
+    let census = held_census(addr)?;
+    Ok((
+        json_number(&census, "files")?,
+        json_number(&census, "frames")?,
+        json_number(&census, "used")?,
+    ))
+}
+
+fn forget_exchange(addr: SocketAddr, extra: &str, body: &[u8]) -> Result<(String, String), String> {
+    let reply = exchange(addr, &http_post_to("/forget", extra, body))?;
+    let (header, body) = split_http(&reply)?;
+    let body = std::str::from_utf8(body).map_err(|_| "the forget reply was not text".to_owned())?;
+    Ok((header.to_owned(), body.to_owned()))
+}
+
+#[test]
+fn forget_drops_files_and_frames() -> Result<(), String> {
+    // F-226 AC10. Held before the forget, on one viewer of 8 MiB:
+    //   two  a two-frame object, posted, and previewed at frame 0. Frame 1
+    //        is not decoded, so the posted bytes stay beside frame 0.
+    //   one  a one-frame object, posted and never previewed.
+    // The body names two, one, the next generation's id for two's serial and
+    // two again. Two posted bodies and one frame were held, so the reply is
+    // files 2, frames 1, and unknown 2 for the other generation and the
+    // repeat. Each posted body is held at its length, which the census shows
+    // after each post, and the frame's charge is what the census rose by
+    // when frame 0 was stored. Bytes is the sum of the three.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let two = tagged_frame(2, &[50, 0, 60, 0])?;
+    let one = mono_frame(true)?;
+    let two_id = forget_post(addr, &two)?;
+    if held_counts(addr)? != (1, 0, two.len()) {
+        return Err(format!(
+            "after one post the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    let one_id = forget_post(addr, &one)?;
+    let posted = two.len() + one.len();
+    if held_counts(addr)? != (2, 0, posted) {
+        return Err(format!(
+            "after two posts the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    let drawn = exchange(addr, &preview_id(&two_id, "X-Ocelli-Frame: 0\r\n"))?;
+    if !split_http(&drawn)?.0.starts_with("HTTP/1.1 200 ") {
+        return Err("frame 0 of the two-frame object did not draw".to_owned());
+    }
+    let (files, frames, used) = held_counts(addr)?;
+    if files != 2 || frames != 1 || used <= posted {
+        return Err(format!(
+            "after the preview the census was {files} files, {frames} frames, {used} used"
+        ));
+    }
+    let frame_charge = used - posted;
+    let expected_bytes = two.len() + one.len() + frame_charge;
+    let other = other_generation(&two_id)?;
+    let body = format!("{two_id}\n{one_id}\n{other}\n{two_id}");
+    let (header, reply) = forget_exchange(addr, "", body.as_bytes())?;
+    if !header.starts_with("HTTP/1.1 200 ")
+        || header_line(&header, "Content-Type") != Some("application/json")
+    {
+        return Err(format!("the forget was not a JSON 200: {header}"));
+    }
+    let expected = format!("{{\"files\":2,\"frames\":1,\"bytes\":{expected_bytes},\"unknown\":2}}");
+    if reply != expected {
+        return Err(format!("the forget answered {reply}, not {expected}"));
+    }
+    let after = held_counts(addr)?;
+    if after != (files - 2, frames - 1, used - expected_bytes) {
+        return Err(format!(
+            "the census went from {:?} to {after:?}, not down by the reply",
+            (files, frames, used)
+        ));
+    }
+    for (name, id) in [("two", &two_id), ("one", &one_id)] {
+        for frame in ["0", "1"] {
+            let gone = exchange(
+                addr,
+                &preview_id(id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+            )?;
+            if !split_http(&gone)?.0.starts_with("HTTP/1.1 410 ") {
+                return Err(format!(
+                    "{name} frame {frame} was still served after the forget"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn forget_refusals() -> Result<(), String> {
+    // F-226 AC11. Every line is parsed before anything is removed, so a held
+    // id before a bad line stays held. The census is read after each refusal.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let file = mono_frame(true)?;
+    let id = forget_post(addr, &file)?;
+    let held = held_counts(addr)?;
+    if held != (1, 0, file.len()) {
+        return Err(format!("the posted file was held as {held:?}"));
+    }
+    let refusals: [(&str, String, &str, &str); 4] = [
+        ("a malformed line", format!("{id}\nnot-an-id"), "", "forget"),
+        ("an empty line", format!("{id}\n"), "", "forget"),
+        ("an uppercase id", id.to_uppercase(), "", "forget"),
+        (
+            "a file id header",
+            id.clone(),
+            "X-Ocelli-File: 0.0\r\n",
+            "header",
+        ),
+    ];
+    for (name, body, extra, code) in &refusals {
+        let (header, _) = forget_exchange(addr, extra, body.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some(code)
+        {
+            return Err(format!("{name} was not 400 {code}: {header}"));
+        }
+        if held_counts(addr)? != held {
+            return Err(format!(
+                "{name} changed the census to {:?}",
+                held_counts(addr)?
+            ));
+        }
+    }
+    // One line past 65,536, every one of them the held id, is refused from
+    // the count and forgets nothing. At 65,536 the id is forgotten once and
+    // the other 65,535 lines are repeats.
+    let over = vec![id.as_str(); 65_537].join("\n");
+    let (header, _) = forget_exchange(addr, "", over.as_bytes())?;
+    if !header.starts_with("HTTP/1.1 400 ")
+        || header_line(&header, "X-Ocelli-Error") != Some("forget")
+    {
+        return Err(format!("65,537 lines were not 400 forget: {header}"));
+    }
+    if held_counts(addr)? != held {
+        return Err("65,537 lines changed the census".to_owned());
+    }
+    // A declared length one byte over 4 MiB is refused before any body is read.
+    let long = exchange(
+        addr,
+        b"POST /forget HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4194305\r\n\r\n",
+    )?;
+    let (long_header, _) = split_http(&long)?;
+    if !long_header.starts_with("HTTP/1.1 400 ")
+        || header_line(long_header, "X-Ocelli-Error") != Some("forget")
+    {
+        return Err(format!(
+            "a 4 MiB and one byte forget was not 400 forget: {long_header}"
+        ));
+    }
+    let (header, reply) = forget_exchange(addr, "", b"")?;
+    if !header.starts_with("HTTP/1.1 200 ")
+        || reply != "{\"files\":0,\"frames\":0,\"bytes\":0,\"unknown\":0}"
+    {
+        return Err(format!("an empty forget answered {header} {reply}"));
+    }
+    if held_counts(addr)? != held {
+        return Err("an empty forget changed the census".to_owned());
+    }
+    let at_cap = vec![id.as_str(); 65_536].join("\n");
+    let (header, reply) = forget_exchange(addr, "", at_cap.as_bytes())?;
+    let expected = format!(
+        "{{\"files\":1,\"frames\":0,\"bytes\":{},\"unknown\":65535}}",
+        file.len()
+    );
+    if !header.starts_with("HTTP/1.1 200 ") || reply != expected {
+        return Err(format!(
+            "65,536 lines answered {header} {reply}, not {expected}"
+        ));
+    }
+    if held_counts(addr)? != (0, 0, 0) {
+        return Err(format!(
+            "the census after the forget was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    Ok(())
+}
