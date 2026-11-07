@@ -318,7 +318,7 @@ unconditional `expect("is_last not found")` in the DHT branch of JPEG
 reconstruction, filed upstream as jxl-oxide issue 512, and under the release
 profile's `panic = "abort"` that panic ends the process. No Ocelli path calls
 `reconstruct_jpeg` or any other `jxl-jbr` entry point, so the reconstruction
-route through `JpegDecoder::baseline()`, which section 10.19's note would
+route through `JpegDecoder::baseline()`, which PS3.5 10.19's note would
 make byte-identical to the `.50` source, is not built. A `.111` frame is
 refused by the registry, before any byte reaches `jxl-oxide`. A released
 dependency that fixes the defect turns the syntax on in its own story.
@@ -385,7 +385,8 @@ the colour stage applies no second conversion. One sample reports
 | Width or height differing from Columns or Rows | codestream header | `FrameMismatch` |
 | Colour channels differing from Samples per Pixel | codestream header | `FrameMismatch` |
 | More than one keyframe | after load | `FrameMismatch` |
-| A VarDCT frame, or `xyb_encoded`, under `.110` | after load | `FrameMismatch` |
+| A VarDCT frame under `.110` | after load | `FrameMismatch` |
+| `xyb_encoded` under `.110` | codestream header | `FrameMismatch` |
 | A sample outside the stored range | after render | `UnsupportedPixelFormat` |
 | Bytes after the codestream, except one `0x00` pad on an odd length | after load | `TrailingData` |
 
@@ -437,8 +438,8 @@ story links `ocelli-codec` into a wasm module. Neither `ocelli-wasm` nor
 `ocelli-native` reaches `ocelli-codec`, so both shipped size budgets are
 unchanged by this family. If that link happens, `alloc-stdlib` enters the
 closure and ships no licence file, so F-220's generator would need a pinned
-text in `ci/notices/sources.toml`. The other sixteen closure crates carry
-licence files or allow-listed declarations.
+text in `ci/notices/sources.toml`. Every other crate that closure adds carries
+a licence file or an allow-listed declaration.
 
 ## Known does not mean available
 

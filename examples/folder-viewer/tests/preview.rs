@@ -540,8 +540,8 @@ fn a_jpegxl_lossless_frame_draws() -> Result<(), String> {
     // fragment carries the one trailing NULL pad of an odd item value. Its
     // stored values are measured from the fixture's reference ramp
     // jpegxl_reference_mono12_u16le.raw: 64 by 96 samples, minimum 0 first and
-    // maximum 4095 last. No window is declared, so the full-range rule of
-    // PS3.3 C.11.2.1.3.2 maps the minimum to grey 0 and the maximum to 255.
+    // maximum 4095 last. No window is declared, so the full-range rule maps
+    // the minimum to grey 0 and the maximum to 255.
     let file = jpegxl_frame(
         "jpegxl_lossless_12.jxl",
         "1.2.840.10008.1.2.4.110",
@@ -575,6 +575,45 @@ fn a_jpegxl_colour_frame_refuses_not_monochrome() -> Result<(), String> {
         Err(PreviewError::NotMonochrome) => Ok(()),
         Ok(_) => Err("a JPEG XL colour frame was drawn".to_owned()),
         Err(error) => Err(format!("a JPEG XL colour frame was refused as {error}")),
+    }?;
+    // The same codestream under MONOCHROME2 pins the Samples per Pixel gate
+    // itself. The sample-layout check accepts one sample of MONOCHROME2, so
+    // with the Samples per Pixel gate gone this file reaches decode and comes
+    // back as a decode refusal instead of NotMonochrome.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        3,
+        "MONOCHROME2",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a three-sample MONOCHROME2 frame was drawn".to_owned()),
+        Err(error) => Err(format!(
+            "a three-sample MONOCHROME2 frame was refused as {error}"
+        )),
+    }
+}
+
+#[test]
+fn a_single_sample_colour_photometric_refuses_not_monochrome() -> Result<(), String> {
+    // One sample carrying a three-sample Photometric Interpretation. The
+    // Photometric Interpretation gate refuses every term but the two
+    // monochrome ones before the codestream is read, so this refusal is that
+    // gate's alone: the Samples per Pixel gate sees one sample and passes
+    // the file.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "RGB",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a single-sample RGB frame was drawn".to_owned()),
+        Err(error) => Err(format!("a single-sample RGB frame was refused as {error}")),
     }
 }
 

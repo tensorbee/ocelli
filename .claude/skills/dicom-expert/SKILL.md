@@ -123,9 +123,10 @@ records are in `docs/spikes/`.
 
 ### JPEG XL pixel values
 
-PS3.5 8.2.15: the codestream's own bit depth is the stored precision, the
-three syntaxes allow 1 to 24 bits stored, and Photometric Interpretation is
-`MONOCHROME1`, `MONOCHROME2`, `XYB`, `YBR_RCT`, `RGB` or, for `.111`,
+PS3.5 8.2.15 Table 8.2.15-1: the codestream's own bit depth is the stored
+precision, the monochrome `.110` and `.112` rows allow 1 to 24 bits stored,
+their colour rows 8 to 24, every `.111` row 8, and Photometric Interpretation
+is `MONOCHROME1`, `MONOCHROME2`, `XYB`, `YBR_RCT`, `RGB` or, for `.111`,
 `YBR_FULL_422`. **TRAP: do not rescale a sub-16-bit sample to the container.**
 `jxl-oxide`'s `write_to_buffer::<u16>` maps a 12-bit stored 13 to 208, because
 13 times 65,535 over 4,095 is 208.05. Read integer grids sample by sample as
