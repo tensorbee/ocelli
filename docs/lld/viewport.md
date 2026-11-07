@@ -327,7 +327,8 @@ product. The index is `index_to_world().inverse()`, the pattern
 `placement::frame_shift` uses. The arithmetic is `f64` CPU arithmetic, so
 tiers A, B and C give the same answer.
 
-The folder viewer's `POST /link` is the one caller today. It sends each plane
+The folder viewer's `POST /link` is the one caller of the geometry functions
+today, and `SyncScene` also calls `same_frame_of_reference`. It sends each plane
 as a token of thirteen numbers written by the local process and rebuilds it
 through the `ocelli-pixel` constructors, and the page draws the returned line
 in image pixel units, one half pixel from index space.

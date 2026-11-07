@@ -3612,3 +3612,120 @@ fn the_page_links_viewports() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// A tilted plane at height `z`: row (1,0,0), column (0,0.96,0.28), Pixel
+/// Spacing `1\1`, 13 rows and 128 columns. 0.96^2 + 0.28^2 = 1.
+fn tilted_token(z: &str) -> String {
+    format!("0e0,0e0,{z},1e0,0e0,0e0,0e0,9.6e-1,2.8e-1,1e0,1e0,13,128")
+}
+
+#[test]
+fn link_route_draws_the_line_on_the_moved_image() -> Result<(), String> {
+    // Plan row 297: the line is computed against the image the target will
+    // show. The tilted normal is (1,0,0) x (0,0.96,0.28) = (0,-0.28,0.96),
+    // dot 0.96 with the axial source's (0,0,1), which is above 0.9, so the
+    // stack at z = 0, 5 and 10 scrolls. The source is at z = 5, distances
+    // 5, 0 and 5, so it moves from image 0 to image 1.
+    // On image 1, S = (0,0,5), the plane is -0.28 y + 0.96 z = 4.8. The
+    // source corners at z = 5 meet it at y = 0. TL - BL is (0,-1,0) after
+    // normalising, dot 0.28 with the normal, so the edges are TL to BL and
+    // TR to BR, cut at (0,0,5) and (63.5,0,5). P - S is (0,0,0) and
+    // (63.5,0,0). The target's column spacing is 1 mm, so column 0 and
+    // 63.5 on row 0, which the page draws at (0.5,0.5) and (64,0.5).
+    // On the shown image 0 the plane is -0.28 y + 0.96 z = 0, cut at
+    // y = 4.8 / 0.28 = 17.142857..., row 17.142857 * 0.96 + 5 * 0.28 =
+    // 17.857142..., so a line left on image 0 would be at 18.357....
+    let source = axial_token("5e0");
+    let body = format!(
+        "source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {} 2.25.44000 {} 2.25.44000 {}",
+        tilted_token("0e0"),
+        tilted_token("5e0"),
+        tilted_token("1e1")
+    );
+    for (name, addr) in link_viewers()? {
+        expect_link(
+            addr,
+            name,
+            &body,
+            r#"{"targets":[{"cell":1,"index":1,"line":[0.5,0.5,64,0.5],"reason":""}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_names_the_scroll_refusal_first() -> Result<(), String> {
+    // `C` with one row at row spacing 0, PS3.3 10.7.1.3's single-row case.
+    // Scroll is refused as not coplanar, dot 0, and the line as degenerate.
+    // The scroll refusal is named.
+    let source = axial_token("5e0");
+    let flat = "0e0,2e1,3e1,1e0,0e0,0e0,0e0,0e0,-1e0,0e0,5e-1,1,128";
+    let body = format!("source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {flat}");
+    for (name, addr) in link_viewers()? {
+        expect_link(
+            addr,
+            name,
+            &body,
+            r#"{"targets":[{"cell":1,"index":null,"line":null,"reason":"not-coplanar"}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_refuses_a_target_past_the_frame_list() -> Result<(), String> {
+    // A target lists at most FRAME_LIST_CAP images, as the page does. One
+    // more is refused whole, although it is far inside LINK_BODY_CAP.
+    let source = axial_token("5e0");
+    let at_cap = format!(
+        "source - {source}\ntarget 1 0 0{}",
+        " - -".repeat(FRAME_LIST_CAP)
+    );
+    let over = format!("{at_cap} - -");
+    for (name, addr) in link_viewers()? {
+        let (header, _) = post_link(addr, at_cap.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 200 ") {
+            return Err(format!(
+                "{name}: FRAME_LIST_CAP images were refused: {header}"
+            ));
+        }
+        let (header, _) = post_link(addr, over.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some("link")
+        {
+            return Err(format!("{name}: one image past the cap was read: {header}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn inspect_writes_at_most_the_frame_list_of_planes() -> Result<(), String> {
+    // An object declaring 65537 frames. The page lists 65536 of them, and
+    // `inspect_json` writes one plane entry for each of those and no more.
+    let two = tagged_frame(2, &[0, 0, 0, 0])?;
+    let declared: &[u8] = &[0x28, 0x00, 0x08, 0x00, b'I', b'S', 2, 0, b'2', b' '];
+    let wider: &[u8] = &[
+        0x28, 0x00, 0x08, 0x00, b'I', b'S', 6, 0, b'6', b'5', b'5', b'3', b'7', b' ',
+    ];
+    let at = two
+        .windows(declared.len())
+        .position(|window| window == declared)
+        .ok_or_else(|| "no Number of Frames element".to_owned())?;
+    let mut file = two.get(..at).ok_or_else(|| "prefix".to_owned())?.to_vec();
+    file.extend_from_slice(wider);
+    file.extend_from_slice(
+        two.get(at + declared.len()..)
+            .ok_or_else(|| "suffix".to_owned())?,
+    );
+    let json = inspect_json(&file, 0).map_err(|_| "inspect refused 65537 frames".to_owned())?;
+    if !json.contains("\"frames\":65537") {
+        return Err("the object does not declare 65537 frames".to_owned());
+    }
+    let planes = planes_field(&json)?;
+    let entries = planes.matches("null").count();
+    if entries != FRAME_LIST_CAP {
+        return Err(format!("{entries} plane entries for 65537 frames"));
+    }
+    Ok(())
+}

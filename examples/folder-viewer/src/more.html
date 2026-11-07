@@ -203,7 +203,7 @@ const grid = overlayGrid(2, 2, width, height);       // interior lines of a layo
 for (const { x0, y0, x1, y1 } of lines ?? []) {
   // append an SVG line element
 }</code></pre>
-    <p class="tiers">The shell functions do not project a plane and do not read a frame of reference. <code>reference_segment</code> does both, and the geometry chapter of <a href="/use#geometry">Use</a> shows it. It is CPU arithmetic and runs the same on every tier, as the shell code does.</p>
+    <p class="tiers">The shell functions do not project a plane and do not read a frame of reference. <code>reference_segment</code> projects the plane, and the geometry chapter of <a href="/use#geometry">Use</a> shows it. It is CPU arithmetic and runs the same on every tier, as the shell code does.</p>
   </section>
 
   <section class="feature" id="series">

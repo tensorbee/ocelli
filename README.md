@@ -221,8 +221,8 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    with the outlined viewport as the source. Scroll moves each other viewport
    to its image nearest the source image's position, when both series share a
    Frame of Reference UID and the cosine of the angle between their planes
-   is above 0.9, which is under about 26 degrees. Window copies the source's window when a W/L drag ends, on a
-   preset and on Reset. A preset is not sent to a viewport whose image is not
+   is above 0.9, which is under about 26 degrees. Window copies the source's
+   window when a W/L drag ends, on a preset and on Reset. A preset is not sent to a viewport whose image is not
    CT, and no window is sent to one whose image is not monochrome. Zoom
    copies the source's zoom over each viewport's own fit, and pan is not
    copied. A click on a series row is a new load and copies nothing.

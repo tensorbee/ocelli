@@ -4788,7 +4788,12 @@ async function sendLink() {
       linkState.want = false;
       if (!linkWanted()) break;
       const request = linkRequest();
-      if (!request) continue;
+      // No source image, or no target: no line can be drawn from the
+      // outlined viewport, so none stays from an earlier source.
+      if (!request) {
+        clearAllLines();
+        continue;
+      }
       const ticket = ++linkState.ticket;
       let response = null;
       try {

@@ -169,7 +169,8 @@ run_gate() {
                    return 1
                  fi
                  node examples/folder-viewer/tests/browser/aspect.mjs &&
-                 node examples/folder-viewer/tests/browser/readout.mjs ;;
+                 node examples/folder-viewer/tests/browser/readout.mjs &&
+                 node examples/folder-viewer/tests/browser/link.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&

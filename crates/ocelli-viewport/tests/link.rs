@@ -301,3 +301,99 @@ fn near(point: Pt<Index>, column: f64, row: f64, name: &str) -> Result<(), Strin
         ))
     }
 }
+
+/// Both sides of `PLANE_EPSILON`, for the parallel test on the normals and
+/// for the perpendicular test that chooses the edge pair. The cosines are
+/// rational, `(m^2 - 1) / (m^2 + 1)` and `2m / (m^2 + 1)`, so every expected
+/// point below is an exact fraction, written out.
+mod epsilon {
+    use super::{LinkError, near, plane, reference_segment};
+
+    /// `m` to the pair `((m^2 - 1) / (m^2 + 1), 2m / (m^2 + 1))`, unit length.
+    fn rational(m: f64) -> (f64, f64) {
+        let square = m * m;
+        ((square - 1.0) / (square + 1.0), 2.0 * m / (square + 1.0))
+    }
+
+    #[test]
+    fn a_dot_just_above_1_less_epsilon_is_parallel() -> Result<(), String> {
+        // Source axial, normal (0,0,1). Target row (1,0,0), column (0,c,s),
+        // normal (0,-s,c), so the dot is c. m = 50 gives c = 2499 / 2501 =
+        // 0.99920..., above 1 - 1e-3 = 0.999.
+        let (c, s) = rational(50.0);
+        let target = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, c, s], 1.0, 1.0, 13, 128)?;
+        let source = super::axial(5.0)?;
+        if reference_segment(&source, &target) != Err(LinkError::Parallel) {
+            return Err("a dot of 0.99920 was not parallel".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_dot_just_below_1_less_epsilon_has_a_line() -> Result<(), String> {
+        // m = 40 gives c = 1599 / 1601 = 0.99875..., below 0.999, so there
+        // is a line. Target position 0, spacing 1\1. The source is axial at
+        // z = 5 (corners from Δi = 0.5, Δj = 0.7). TL - BL is (0,-66.5,0),
+        // dot with (0,-s,c) is 66.5 s, s = 80 / 1601, so not perpendicular
+        // and the edges are TL to BL and TR to BR. The plane is -s y + c z
+        // = 0, so y = 5 c / s = 5 * 1599 / 80 = 1599 / 16 = 99.9375, at
+        // x = 0 and x = 63.5. Column i = x / 1. Row j = (P - S).Y / 1 =
+        // 99.9375 c + 5 s = (159800.0625 + 400) / 1601 = 1601 / 16 =
+        // 100.0625.
+        let (c, s) = rational(40.0);
+        let target = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, c, s], 1.0, 1.0, 13, 128)?;
+        let (start, end) = reference_segment(&super::axial(5.0)?, &target)
+            .map_err(|error| format!("refused: {error:?}"))?;
+        near(start, 0.0, 100.0625, "start")?;
+        near(end, 63.5, 100.0625, "end")
+    }
+
+    /// A sagittal-like source at `10\0\30`, 13 rows at 2.5 mm and 96 columns
+    /// at 0.7 mm, with row (0,p,q) and column (0,q,-p). Its normal is
+    /// (-1,0,0), dot 0 with `C`'s (0,1,0), so it is never parallel to `C`.
+    /// TL - BL is -12 * 2.5 * column, normalised (0,-q,p), whose dot with
+    /// (0,1,0) is -q, so `q` alone decides the edge pair.
+    fn tilted_sagittal(m: f64) -> Result<super::ImagePlane, String> {
+        let (p, q) = rational(m);
+        plane(
+            [10.0, 0.0, 30.0],
+            [0.0, p, q],
+            [0.0, q, -p],
+            2.5,
+            0.7,
+            13,
+            96,
+        )
+    }
+
+    #[test]
+    fn an_edge_just_inside_epsilon_is_perpendicular() -> Result<(), String> {
+        // m = 4000: q = 8000 / 16000001 = 4.99999969e-4, below 1e-3, so the
+        // edges are TL to TR and BL to BR. TL (10,0,30), TR = TL + 66.5
+        // (0,p,q), BL = TL + 30 (0,q,-p). TL to TR meets y = 20 at
+        // t = 20 / (66.5 p), z = 30 + 20 q / p. BL to BR meets it at
+        // z = 30 - 30 p + q (20 - 30 q) / p. In `C`, i = 10 / 0.5 = 20 and
+        // j = (30 - z) / 2.5, so j = -8 q / p = -64000 / 15999999 =
+        // -0.00400000025000002 and j = (12 - 8 q) / p = 191936012 /
+        // 15999999 = 11.9960014997501.
+        let (start, end) = reference_segment(&tilted_sagittal(4000.0)?, &super::coronal()?)
+            .map_err(|error| format!("refused: {error:?}"))?;
+        near(start, 20.0, -64000.0 / 15_999_999.0, "start")?;
+        near(end, 20.0, 191_936_012.0 / 15_999_999.0, "end")
+    }
+
+    #[test]
+    fn an_edge_just_outside_epsilon_is_not_perpendicular() -> Result<(), String> {
+        // m = 1000: q = 2000 / 1000001 = 1.999998e-3, above 1e-3, so the
+        // edges are TL to BL and TR to BR. TL to BL meets y = 20 at
+        // t = 20 / (30 q), z = 30 - 20 p / q, so j = 8 p / q =
+        // 8 * 999999 / 2000 = 3999.996. TR to BR meets it at
+        // t = (20 - 66.5 p) / (30 q), z = 30 + 66.5 q - p (20 - 66.5 p) / q,
+        // so j = (20 p - 66.5) / (2.5 q) = -93000173 / 10000 = -9300.0173.
+        // i = 20 on both.
+        let (start, end) = reference_segment(&tilted_sagittal(1000.0)?, &super::coronal()?)
+            .map_err(|error| format!("refused: {error:?}"))?;
+        near(start, 20.0, 3999.996, "start")?;
+        near(end, 20.0, -9300.0173, "end")
+    }
+}
