@@ -63,7 +63,8 @@ fn samples_for(photometric: PhotometricInterpretation) -> u8 {
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => 3,
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => 3,
     }
 }
 
@@ -491,6 +492,36 @@ fn the_two_jpeg_2000_transform_spaces_are_the_codec_s_to_invert() {
         );
         assert!(resolved.is_ok(), "{resolved:?}");
     }
+}
+
+/// PS3.3 C.7.6.3.1.2 names `XYB` and gives no conversion matrix. The JPEG XL
+/// decoder owns the conversion. A preserved report must not invent one.
+#[test]
+fn xyb_is_codec_owned() {
+    assert_eq!(
+        native_interleaved(PhotometricInterpretation::Xyb),
+        Err(PixelError::CodecOwnedColorTransform)
+    );
+    let resolved = require_ok!(ColorTransform::resolve(
+        require_ok!(layout(
+            PhotometricInterpretation::Xyb,
+            Some(PlanarConfiguration::Interleaved)
+        )),
+        PixelDataEncoding::Encapsulated,
+        DecodedPhotometric::Rgb,
+        DecodedLayout::Interleaved,
+        None,
+    ));
+    // Stored 10, 20, 30 stay 10, 20, 30. There is no matrix to apply.
+    let mut out = [Rgb::BLACK; 1];
+    assert_eq!(
+        resolved.map_into(&stored(&[10.0, 20.0, 30.0]), &mut out, 1),
+        Ok(())
+    );
+    let Some(pixel) = out.first().copied() else {
+        return;
+    };
+    assert_rgb_close(pixel, (10.0, 20.0, 30.0));
 }
 
 /// Stage 3 and stage 4 partition the photometric interpretations exactly.

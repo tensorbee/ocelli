@@ -575,6 +575,32 @@ Repository bootstrap. Nothing is published.
   `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
   and `reference_segment`, and `SyncScene` now uses the same UID rule. The
   corner of an image that is not monochrome reads `Window not applicable`.
+- Release by series and by volume. `ImageCache::release_series` releases
+  every frame of one series and returns one `Released` event, which the ring
+  carries as the new kind 7, `cache.released`, with the series, the frame
+  count and the bytes. `BrickCache::release_volume` releases every brick of
+  every level of one volume and returns a `ReleaseSummary`. Both go through
+  the new `Lru::remove_range`, an explicit release that is not an eviction.
+  `@ocelli/core` decodes `cache.released` and lists it in `UNMAPPED_EVENTS`,
+  because cornerstone3D 5.8.2 reports a removed image per image. The cache
+  has no study, so a study is released by its owner's series and volumes.
+  The local folder viewer now forgets the folder it left. Opening another
+  folder or the synthetic study sends that folder's ids to the new
+  `POST /forget`, and leaving the page sends one short beacon naming a
+  per-load page token, so `GET /held` counts only what is open. A late reply
+  for the folder left does not post its file again, and a decode already
+  running for a forgotten file stores nothing.
+- JPEG XL decoding. `register_jpegxl_decoders` registers a sixth decoder
+  family in `ocelli-codec` for JPEG XL Lossless, `1.2.840.10008.1.2.4.110`,
+  and JPEG XL, `.112`, through `jxl-oxide` with default features off.
+  Lossless frames decode to their exact stored values and lossy frames are
+  quantised to Bits Stored. JPEG XL JPEG Recompression, `.111`, is known and
+  unavailable until an upstream panic, jxl-oxide issue 512, is fixed. A
+  signed, ICC, HDR, oriented or extra-channel frame is refused as
+  unavailable, and a frame of more than one keyframe is refused as a
+  mismatch, rather than drawn. `XYB` is a recognised
+  Photometric Interpretation whose colour conversion the codec owns. The
+  local folder viewer opens monochrome `.110` and `.112` frames.
 
 ### Changed
 
@@ -586,3 +612,16 @@ Repository bootstrap. Nothing is published.
   or `TypeError` from a view over wasm memory still passes through.
 - `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
   the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.
+- A contributor's `bin/ocelli.sh gate native` builds the `+simd128`
+  codec verification modules with the flag on every crate, so each
+  dependency's `simd128` code paths are compiled, and two new steps refuse a
+  SIMD module holding no SIMD instruction and a plain module holding any. The
+  modules hold SIMD loads, stores and constants and no lane arithmetic.
+  Nothing published changes.

@@ -342,6 +342,7 @@ fn photometric_from(value: PhotometricInterpretation) -> PhotometricDto {
         PhotometricInterpretation::YbrPartial422 => PhotometricDto::YbrPartial422,
         PhotometricInterpretation::YbrIct => PhotometricDto::YbrIct,
         PhotometricInterpretation::YbrRct => PhotometricDto::YbrRct,
+        PhotometricInterpretation::Xyb => PhotometricDto::Xyb,
     }
 }
 
@@ -356,6 +357,7 @@ fn photometric_dto(value: PhotometricDto) -> PhotometricInterpretation {
         PhotometricDto::YbrPartial422 => PhotometricInterpretation::YbrPartial422,
         PhotometricDto::YbrIct => PhotometricInterpretation::YbrIct,
         PhotometricDto::YbrRct => PhotometricInterpretation::YbrRct,
+        PhotometricDto::Xyb => PhotometricInterpretation::Xyb,
     }
 }
 
@@ -512,6 +514,8 @@ enum PhotometricDto {
     YbrIct,
     #[serde(rename = "ybr_rct")]
     YbrRct,
+    #[serde(rename = "xyb")]
+    Xyb,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

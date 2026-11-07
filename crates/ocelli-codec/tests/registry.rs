@@ -11,7 +11,8 @@ use ocelli_codec::{
     Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
     FrameDesc, FrameDescError, FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
     PixelRepresentation, Registry, RegistryError, register_htj2k_decoders, register_jpeg_decoders,
-    register_jpeg2000_decoders, register_jpegls_decoders, register_native_and_rle_decoders,
+    register_jpeg2000_decoders, register_jpegls_decoders, register_jpegxl_decoders,
+    register_native_and_rle_decoders,
 };
 
 type TestResult = Result<(), Box<dyn Error>>;
@@ -89,7 +90,7 @@ fn built_in_catalogue_starts_known_but_unavailable() {
     let registry = Registry::new();
     let distinct: HashSet<_> = KNOWN_TRANSFER_SYNTAXES.iter().copied().collect();
 
-    assert_eq!(KNOWN_TRANSFER_SYNTAXES.len(), 16);
+    assert_eq!(KNOWN_TRANSFER_SYNTAXES.len(), KNOWN_SYNTAX_COUNT);
     assert_eq!(distinct.len(), KNOWN_TRANSFER_SYNTAXES.len());
     assert!(KNOWN_TRANSFER_SYNTAXES.iter().all(|uid| !uid.is_empty()));
     assert!(
@@ -421,20 +422,27 @@ fn high_bit_must_equal_bits_stored_minus_one() {
     );
 }
 
-/// Deflated Explicit VR Little Endian, the one known syntax no decoder in this
-/// crate claims.
+/// Deflated Explicit VR Little Endian. Known, and no decoder in this crate
+/// claims it. PS3.5 A.5 deflates the whole data set.
 const DEFLATED: &str = "1.2.840.10008.1.2.1.99";
+
+/// PS3.5 Annex A membership this catalogue carries.
+const KNOWN_SYNTAX_COUNT: usize = 19;
+/// Syntaxes a fully registered build can decode.
+const AVAILABLE_SYNTAX_COUNT: usize = 17;
+/// Syntaxes that stay known and unregistered.
+const UNAVAILABLE_SYNTAX_COUNT: usize = 2;
 
 #[test]
 fn every_decoder_family_registers_into_one_registry_without_collision() -> TestResult {
     // Each family's own test asserts that its registration is atomic and that
     // its own UIDs become available. **None of them registers more than one
     // family**, so the property that matters at the crate level is asserted
-    // here: the five coexist, they partition the known catalogue, and no two
+    // here: the six coexist, they partition the known catalogue, and no two
     // claim the same UID.
     //
     // Registration refuses a collision rather than overwriting, deviation
-    // D-19, so a sixth family claiming a UID an existing one owns would fail
+    // D-19, so a seventh family claiming a UID an existing one owns would fail
     // at run time in whatever order a caller happened to register. This test
     // is what makes that fail at build time instead.
     let mut registry = Registry::new();
@@ -443,6 +451,7 @@ fn every_decoder_family_registers_into_one_registry_without_collision() -> TestR
     register_jpeg2000_decoders(&mut registry)?;
     register_jpegls_decoders(&mut registry)?;
     register_htj2k_decoders(&mut registry)?;
+    register_jpegxl_decoders(&mut registry)?;
 
     let mut available = Vec::new();
     let mut unavailable = Vec::new();
@@ -454,20 +463,38 @@ fn every_decoder_family_registers_into_one_registry_without_collision() -> TestR
         }
     }
 
-    // Fifteen of the sixteen. The exception is named rather than counted
-    // around, because a count alone would hide which one moved.
-    assert_eq!(unavailable, vec![DEFLATED]);
-    assert_eq!(available.len(), KNOWN_TRANSFER_SYNTAXES.len() - 1);
+    // Seventeen available. Two stay known and unregistered. The names are
+    // asserted, because a count alone would hide which one moved.
+    assert_eq!(KNOWN_TRANSFER_SYNTAXES.len(), KNOWN_SYNTAX_COUNT);
+    assert_eq!(available.len(), AVAILABLE_SYNTAX_COUNT);
+    assert_eq!(unavailable.len(), UNAVAILABLE_SYNTAX_COUNT);
+    assert_eq!(unavailable, vec![DEFLATED, JPEGXL_RECOMPRESSION]);
+    assert_eq!(available.len() + unavailable.len(), KNOWN_SYNTAX_COUNT);
 
-    // Deflated Explicit VR Little Endian is unavailable BY DESIGN and not by
-    // omission. PS3.5 A.5 deflates the whole data set rather than a frame, so
-    // it is a parser route owned by `ocelli-dicom` under deviation D-18 and
-    // F-025 deliberately left its UID unclaimed here. Asserting the reason
-    // rather than the number is what stops a later story from "fixing" it.
+    // Deflated Explicit VR Little Endian is unavailable by design. PS3.5 A.5
+    // deflates the whole data set rather than a frame, so it is a parser
+    // route owned by `ocelli-dicom` under deviation D-18.
     assert_eq!(registry.capability(DEFLATED), Capability::KnownUnavailable);
     assert_eq!(
         registry.decoder(DEFLATED).err(),
         Some(CodecError::KnownUnavailable)
+    );
+    // JPEG XL JPEG Recompression is unavailable by design. `jxl-jbr` 0.2.1
+    // `src/reconstruct.rs:457` panics with `expect("is_last not found")` in
+    // the DHT branch of JPEG reconstruction. No adapter claims the UID, so
+    // decode refuses before any byte reaches `jxl-oxide`.
+    assert_eq!(
+        registry.capability(JPEGXL_RECOMPRESSION),
+        Capability::KnownUnavailable
+    );
+    let refusal = match registry.decoder(JPEGXL_RECOMPRESSION) {
+        Err(error) => error,
+        Ok(_) => return Err(".111 registered a decoder".into()),
+    };
+    assert_eq!(refusal, CodecError::KnownUnavailable);
+    assert_eq!(
+        refusal.to_string(),
+        "known DICOM transfer syntax has no registered decoder"
     );
     Ok(())
 }
@@ -496,5 +523,49 @@ fn registering_a_family_twice_refuses_and_leaves_the_others_intact() -> TestResu
         registry.capability("1.2.840.10008.1.2.4.90"),
         Capability::KnownUnavailable
     );
+    Ok(())
+}
+
+const JPEGXL_LOSSLESS: &str = "1.2.840.10008.1.2.4.110";
+const JPEGXL_RECOMPRESSION: &str = "1.2.840.10008.1.2.4.111";
+const JPEGXL: &str = "1.2.840.10008.1.2.4.112";
+
+#[test]
+fn registering_jpegxl_twice_refuses() -> TestResult {
+    // A second registration reports the first claimed UID. `.110` and `.112`
+    // stay available. `.111` stays known and unregistered.
+    let mut registry = Registry::new();
+    register_jpegxl_decoders(&mut registry)?;
+    assert_eq!(
+        register_jpegxl_decoders(&mut registry),
+        Err(RegistryError::AlreadyRegistered {
+            uid: JPEGXL_LOSSLESS
+        })
+    );
+    assert_eq!(registry.capability(JPEGXL_LOSSLESS), Capability::Available);
+    assert_eq!(registry.capability(JPEGXL), Capability::Available);
+    assert_eq!(
+        registry.capability(JPEGXL_RECOMPRESSION),
+        Capability::KnownUnavailable
+    );
+    Ok(())
+}
+
+#[test]
+fn preflight_is_atomic() -> TestResult {
+    // The catalogue knows `.110` and `.112` and does not know `.111`.
+    // Preflight refuses `.111` before `.110` or `.112` is registered.
+    let mut registry = Registry::with_known(&[JPEGXL_LOSSLESS, JPEGXL])?;
+    assert_eq!(
+        register_jpegxl_decoders(&mut registry),
+        Err(RegistryError::UnknownTransferSyntax {
+            uid: JPEGXL_RECOMPRESSION
+        })
+    );
+    assert_eq!(
+        registry.capability(JPEGXL_LOSSLESS),
+        Capability::KnownUnavailable
+    );
+    assert_eq!(registry.capability(JPEGXL), Capability::KnownUnavailable);
     Ok(())
 }

@@ -15,6 +15,7 @@
 //! still no `wgpu` dependency, because this crate never sees a texture, only
 //! its size.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
@@ -27,12 +28,13 @@ pub mod telemetry;
 pub mod tier;
 
 pub use brick::{
-    Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickSample, BrickWidth, VolumeId,
+    Brick, BrickCache, BrickError, BrickGrid, BrickKey, BrickSample, BrickWidth, ReleaseSummary,
+    VolumeId,
 };
 pub use image::{
     CacheEvent, CacheEvents, DecodedFrame, FrameKey, HandoffError, HandoffMeta, ImageCache,
-    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, RingEvent,
-    SeriesId,
+    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED,
+    RingEvent, SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
 pub use profile::{LoadProfile, LoadSpec, profile_load};

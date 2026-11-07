@@ -3,6 +3,8 @@
 //! The page posts either the token `synthetic` or Part 10 bytes. This crate
 //! does not write those bytes to disk and does not log them.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod bytes;
 mod calibration;
 mod interpolate;

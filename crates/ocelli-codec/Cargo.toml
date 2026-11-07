@@ -19,6 +19,10 @@ oxideav-core.workspace = true
 oxideav-mjpeg.workspace = true
 openjph-core.workspace = true
 ritk-codecs.workspace = true
+jxl-oxide.workspace = true
+jxl-render.workspace = true
+jxl-bitstream.workspace = true
+jxl-oxide-common.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true

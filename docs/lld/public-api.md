@@ -15,7 +15,7 @@ wire carries. The wire lives in `ocelli-viewport`, `ocelli-wasm` and
 command, state and ring numbers. It holds the eleven command ids and payload
 lengths, the VOI function, preset, colormap and invert bytes, the flag bits,
 the `ViewportState` and `RingHeader` layouts, the event stride and field
-offsets, and the six ring kinds. `snapshot.rs` is the one definition of the
+offsets, and the seven ring kinds. `snapshot.rs` is the one definition of the
 snapshot magic, version and error codes. `crates/ocelli-viewport/tests/typegen.rs`
 writes `packages/core/src/generated.ts` from both and compares the committed
 file byte for byte. A change to a Rust payload length or a struct field fails

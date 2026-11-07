@@ -1,10 +1,12 @@
-//! The decoded tier's value type, its cache, and the events an insert emits.
+//! The decoded tier's value type, its cache, and the events an insert or a
+//! release emits.
 //!
 //! HLD section 8: "Decoded frames sit in an LRU sized by the caller." F-031
 //! built the `Lru` and deviation D-24 widened its return to `Admission`, so the
 //! three outcomes stay distinguishable. This module is the caller section 20
-//! means: it converts an `Admission` into one `CacheEvent` per outcome, and it
-//! encodes an event into section 17.3's 48-byte envelope.
+//! means: it converts an `Admission` into one `CacheEvent` per outcome, a
+//! release into `Released`, and it encodes an event into section 17.3's
+//! 48-byte envelope.
 //!
 //! **No ring is built here and nothing reaches JavaScript.** Section 17.3's
 //! ring is F-101 in S16. This story stops at the tested encoding, which the
@@ -223,11 +225,11 @@ impl Budgeted for DecodedFrame {
     }
 }
 
-/// One thing an insert did to the decoded tier.
+/// One thing an insert or a release did to the decoded tier.
 ///
-/// Three variants because `Admission` has three fields, which is the whole
-/// reason deviation D-24 exists. Collapsing them throws away what F-031 was
-/// built to preserve.
+/// One per `Admission` field, which is the whole reason deviation D-24
+/// exists, and `Released` from `release_series`. Collapsing them throws
+/// away what F-031 was built to preserve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheEvent {
     /// A live entry removed to make room for another.
@@ -251,11 +253,23 @@ pub enum CacheEvent {
         /// The bytes it would have cost.
         bytes: usize,
     },
+    /// Every frame of one series, released by the caller. One event per
+    /// series and not one per frame, so a 1,693-frame series cannot fill a
+    /// ring drained once per frame. Nothing is emitted when the series held
+    /// nothing.
+    Released {
+        /// The series that was released.
+        series: SeriesId,
+        /// How many frames left. Saturates at `u32::MAX`.
+        frames: u32,
+        /// The bytes they were admitted at, summed.
+        bytes: usize,
+    },
 }
 
-/// Event kind for [`CacheEvent::Evicted`]. One range for this crate's kinds,
-/// with F-034's telemetry kinds beside these. No registry this sprint, which
-/// the S12 design round decided for F-032 and F-034 together.
+/// Event kind for [`CacheEvent::Evicted`]. This crate's kinds are 1 to 5 and
+/// 7, with the viewport's presented kind 6 between. No registry this sprint,
+/// which the S12 design round decided for F-032 and F-034 together.
 pub const KIND_EVICTED: u32 = 1;
 /// Event kind for [`CacheEvent::Displaced`].
 pub const KIND_DISPLACED: u32 = 2;
@@ -268,6 +282,9 @@ pub const KIND_REFUSED: u32 = 3;
 pub const KIND_PRESSURE: u32 = 4;
 /// Event kind for a budget change. F-034, pinned the same way.
 pub const KIND_BUDGET_CHANGED: u32 = 5;
+/// Event kind for [`CacheEvent::Released`]. F-226. One series release, not
+/// one per frame, pinned the same way as the five above it.
+pub const KIND_RELEASED: u32 = 7;
 
 /// Section 17.3's `Event`, field for field. 48 bytes.
 ///
@@ -276,35 +293,55 @@ pub const KIND_BUDGET_CHANGED: u32 = 5;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct RingEvent {
-    /// Which event this is. One of this crate's `KIND_` constants.
+    /// Which event this is. A cache event carries one of this crate's
+    /// `KIND_` constants. Kind 6, a presented frame, is
+    /// `ocelli_viewport::boundary::KIND_PRESENTED`.
     pub kind: u32,
     /// The viewport the event belongs to, or `u32::MAX` for a cache event.
     pub viewport: u32,
     /// The ring-wide sequence number the caller assigned.
     pub seq: u64,
-    /// The event payload. For a cache event, the key and byte count.
+    /// The event payload. For a keyed cache event, the key and byte count,
+    /// and for `Released`, the series, frames and bytes.
     pub payload: [u8; 32],
 }
 
 impl CacheEvent {
-    /// The key and byte count every variant carries.
-    fn parts(&self) -> (u32, FrameKey, usize) {
-        match *self {
+    /// Encode into section 17.3's envelope with the caller's sequence number.
+    ///
+    /// The keyed events carry `series` as `u64`, `instance` and `frame` as
+    /// `u32`, and `bytes` as `u64`, little-endian, in that order, with the
+    /// last eight bytes reserved and zeroed. `Released` carries `series` as
+    /// `u64`, `frames` as `u32`, a zero `u32` where `frame` sits, and
+    /// `bytes` as `u64`, so every kind `encode` writes keeps `bytes` at
+    /// offset 16.
+    /// Little-endian is not a choice: wasm32 is little-endian and section
+    /// 17.1 says the wire format is.
+    pub fn encode(&self, seq: u64) -> RingEvent {
+        let mut payload = [0_u8; 32];
+        let (kind, key, bytes) = match *self {
+            Self::Released {
+                series,
+                frames,
+                bytes,
+            } => {
+                payload[0..8].copy_from_slice(&series.0.to_le_bytes());
+                payload[8..12].copy_from_slice(&frames.to_le_bytes());
+                // The zero u32 at 12 is what keeps `bytes` at 16 for every
+                // kind. The last eight bytes stay reserved zeros.
+                payload[16..24]
+                    .copy_from_slice(&u64::try_from(bytes).unwrap_or(u64::MAX).to_le_bytes());
+                return RingEvent {
+                    kind: KIND_RELEASED,
+                    viewport: u32::MAX,
+                    seq,
+                    payload,
+                };
+            }
             Self::Evicted { key, bytes } => (KIND_EVICTED, key, bytes),
             Self::Displaced { key, bytes } => (KIND_DISPLACED, key, bytes),
             Self::Refused { key, bytes } => (KIND_REFUSED, key, bytes),
-        }
-    }
-
-    /// Encode into section 17.3's envelope with the caller's sequence number.
-    ///
-    /// The payload is `series` as `u64`, `instance` and `frame` as `u32`, and
-    /// `bytes` as `u64`, little-endian, in that order, with the last eight
-    /// bytes reserved and zeroed. Little-endian is not a choice: wasm32 is
-    /// little-endian and section 17.1 says the wire format is.
-    pub fn encode(&self, seq: u64) -> RingEvent {
-        let (kind, key, bytes) = self.parts();
-        let mut payload = [0_u8; 32];
+        };
         payload[0..8].copy_from_slice(&key.series.0.to_le_bytes());
         payload[8..12].copy_from_slice(&key.instance.to_le_bytes());
         payload[12..16].copy_from_slice(&key.frame.to_le_bytes());
@@ -318,10 +355,11 @@ impl CacheEvent {
     }
 }
 
-/// The events one `ImageCache::insert` produced, in the order they happened.
+/// The events one `ImageCache::insert` or `ImageCache::release_series`
+/// produced, in the order they happened.
 ///
-/// Built on the insert path, which is a decode-path call and not a render-loop
-/// call, so building this value allocates as `Lru::insert` already does.
+/// Built on the insert and release paths, which are not render-loop calls, so
+/// building this value allocates as `Lru::insert` already does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheEvents {
     events: Vec<CacheEvent>,
@@ -334,12 +372,12 @@ impl CacheEvents {
         &self.events
     }
 
-    /// Whether the insert displaced, evicted and refused nothing.
+    /// Whether nothing was displaced, evicted, refused or released.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
 
-    /// How many events the insert produced.
+    /// How many events the insert or release produced.
     pub fn len(&self) -> usize {
         self.events.len()
     }
@@ -401,6 +439,29 @@ impl ImageCache {
     /// Explicitly release a frame. Not an eviction, and emits no event.
     pub fn remove(&mut self, key: &FrameKey) -> Option<DecodedFrame> {
         self.decoded.remove(key)
+    }
+
+    /// Release every frame of `series`. One `Released` event, or none when
+    /// nothing was held.
+    ///
+    /// The range ends at the series' own last key and not at the next
+    /// series' first, so nothing of a neighbour series leaves. A repeat
+    /// call finds nothing held and emits nothing.
+    pub fn release_series(&mut self, series: SeriesId) -> CacheEvents {
+        let released = self
+            .decoded
+            .remove_range(FrameKey::new(series, 0, 0)..=FrameKey::new(series, u32::MAX, u32::MAX));
+        let mut events = CacheEvents::default();
+        if !released.is_empty() {
+            let frames = u32::try_from(released.len()).unwrap_or(u32::MAX);
+            let bytes = released.iter().map(|(_, frame)| frame.bytes()).sum();
+            events.events.push(CacheEvent::Released {
+                series,
+                frames,
+                bytes,
+            });
+        }
+        events
     }
 
     /// The decoded tier's pressure signal. Telemetry, not a use.
@@ -485,5 +546,40 @@ mod handoff_tests {
                 actual: 1,
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod released_tests {
+    use super::{CacheEvent, KIND_RELEASED, SeriesId};
+
+    /// The same hand-written byte style as `handoff_tests`' `WIRE`. series
+    /// `0x0102_0304_0506_0708` little-endian is `08 07 06 05 04 03 02 01`.
+    /// `frames` `0xA0B0_C0D0` little-endian is `D0 C0 B0 A0`. A zero `u32`
+    /// sits at 12. `524_288 = 0x0008_0000`, eight bytes little-endian, is
+    /// `00 00 08 00 00 00 00 00`. The last eight bytes are reserved zeros.
+    #[test]
+    fn a_released_event_encodes_the_series_release_payload() {
+        let event = CacheEvent::Released {
+            series: SeriesId(0x0102_0304_0506_0708),
+            frames: 0xA0B0_C0D0,
+            bytes: 524_288,
+        }
+        .encode(9);
+        assert_eq!(event.kind, KIND_RELEASED);
+        assert_eq!(KIND_RELEASED, 7);
+        assert_eq!(event.viewport, u32::MAX);
+        assert_eq!(event.seq, 9);
+        assert_eq!(
+            event.payload[0..8],
+            [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        );
+        assert_eq!(event.payload[8..12], [0xD0, 0xC0, 0xB0, 0xA0]);
+        assert_eq!(event.payload[12..16], [0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(
+            event.payload[16..24],
+            [0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+        assert!(event.payload[24..].iter().all(|byte| *byte == 0));
     }
 }

@@ -31,6 +31,20 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 
+# HLD section 27.1's rust table, landed by F-232. `forbid` and not the
+# section's literal `deny`: an inner `allow` silences a deny and cannot
+# silence a forbid, and neither allowed file of 27.2 R5 exists yet, so
+# nothing needs the exception. Cargo passes the table to rustc for every
+# target of every member that inherits it, so this one line is a forbid at
+# each lib, bin, test and example root. The sequence for the first story that
+# writes one of the two allowed files is recorded in
+# scripts/unsafe_allowlist_check.py's docstring and in docs/lld/guards.md.
+# scripts/unsafe_allowlist_check.py stays beside it in the `unsafe` gate,
+# because the table does not reach the vendored packages or the trybuild
+# files, which it audits.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 # HLD section 15.2's dependency list, no longer verbatim. Section 15.2 gives
 # five entries and this block has more.
 #
@@ -171,6 +185,22 @@ trybuild = "1"
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = "0.10"
+
+# F-229, deviation D-28. Direct pins because dicom-rs routes JPEG XL through
+# its inventory registry, which HLD section 21 says does not work on wasm.
+# Default features stay off so the pins gate does not see Rayon. `jxl-render`
+# is direct because `jxl-oxide` does not re-export `ImageBuffer`.
+jxl-oxide = { version = "=0.12.6", default-features = false }
+jxl-render = { version = "=0.12.4", default-features = false }
+# F-229, lead amendment after review pass 3. The pre-check parses the header
+# with the dependency's own parser, reached through `jxl-oxide`'s own
+# re-export of `ImageHeader`, so `jxl-image` is not direct. `jxl-oxide` does
+# not re-export the `Bitstream` that header is parsed from or the `Bundle`
+# trait that defines `parse`, so `jxl-bitstream` and `jxl-oxide-common` are
+# direct. Both are already locked as `jxl-oxide` dependencies at these
+# versions, so the closure does not change.
+jxl-bitstream = { version = "=1.1.0", default-features = false }
+jxl-oxide-common = { version = "=1.0.0", default-features = false }
 
 # DICOM-RS FEATURES, HLD section 15.2. Disable default features. The defaults
 # are rayon and simd, and the gdcm feature is native-only. On wasm you want

@@ -4,6 +4,8 @@
 //! decodes with the codec registry, and maps samples with `LutChain`.
 //! It does not read a path of its own.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod corners;
 mod link;
 mod measure;

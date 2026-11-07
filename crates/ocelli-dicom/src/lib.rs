@@ -9,6 +9,8 @@
 //! F-192 orders a bag of frames into display groups and reads cine timing.
 //! F-193 reads overlay planes and display shutters.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod dicomweb;
 mod frame_geometry;
 mod frame_index;

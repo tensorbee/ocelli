@@ -586,6 +586,208 @@ fn a_post_without_a_length_is_refused() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn a_jpegxl_lossless_frame_draws() -> Result<(), String> {
+    // PS3.5 A.4.12: one codestream in one fragment of an OB Pixel Data whose
+    // File Meta names JPEG XL Lossless. The codestream is the tracked 12-bit
+    // lossless fixture beside the adapter's own tests, 87 bytes, so the
+    // fragment carries the one trailing NULL pad of an odd item value. Its
+    // stored values are measured from the fixture's reference ramp
+    // jpegxl_reference_mono12_u16le.raw: 64 by 96 samples, minimum 0 first and
+    // maximum 4095 last. No window is declared, so the full-range rule maps
+    // the minimum to grey 0 and the maximum to 255.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_12.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "MONOCHROME2",
+        12,
+    )?;
+    let preview = preview_first_frame(&file)
+        .map_err(|error| format!("the JPEG XL lossless frame was refused: {error}"))?;
+    assert_eq!(preview.width, 96);
+    assert_eq!(preview.height, 64);
+    assert_eq!(preview.grey.len(), 64 * 96);
+    assert_eq!(preview.grey.first().copied(), Some(0));
+    assert_eq!(preview.grey.last().copied(), Some(255));
+    Ok(())
+}
+
+#[test]
+fn a_jpegxl_colour_frame_refuses_not_monochrome() -> Result<(), String> {
+    // The colour fixture is three samples of eight bits. Samples per Pixel 3
+    // is refused before any decode, the same refusal every colour frame gets,
+    // because this preview draws monochrome frames only.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        3,
+        "RGB",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a JPEG XL colour frame was drawn".to_owned()),
+        Err(error) => Err(format!("a JPEG XL colour frame was refused as {error}")),
+    }?;
+    // The same codestream under MONOCHROME2 pins the Samples per Pixel gate
+    // itself. The sample-layout check accepts one sample of MONOCHROME2, so
+    // with the Samples per Pixel gate gone this file reaches decode and comes
+    // back as a decode refusal instead of NotMonochrome.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        3,
+        "MONOCHROME2",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a three-sample MONOCHROME2 frame was drawn".to_owned()),
+        Err(error) => Err(format!(
+            "a three-sample MONOCHROME2 frame was refused as {error}"
+        )),
+    }
+}
+
+#[test]
+fn a_single_sample_colour_photometric_refuses_not_monochrome() -> Result<(), String> {
+    // One sample carrying a three-sample Photometric Interpretation. The
+    // Photometric Interpretation gate refuses every term but the two
+    // monochrome ones before the codestream is read, so this refusal is that
+    // gate's alone: the Samples per Pixel gate sees one sample and passes
+    // the file.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "RGB",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a single-sample RGB frame was drawn".to_owned()),
+        Err(error) => Err(format!("a single-sample RGB frame was refused as {error}")),
+    }
+}
+
+#[test]
+fn every_registration_in_codecs_decodes_a_monochrome_frame() -> Result<(), String> {
+    // One file per registration function in codecs(), so dropping any one
+    // register_* call leaves that call's UIDs known but unavailable and its
+    // file refused with PreviewError::Decode, which turns this test red.
+    // Expected values are hand-computed or read from the fixture reference,
+    // none from a previous run of this preview.
+    //
+    // RLE Lossless, PS3.5 G.2 and G.3.1: a 64 byte header naming one segment
+    // at offset 64, then one literal run of count 3 carrying the samples
+    // 10, 20, 30 and 40, padded to even length with one zero byte. Full range
+    // over 10 to 40 maps them to grey 0, 85, 170 and 255.
+    let mut rle = Vec::new();
+    rle.extend_from_slice(&1_u32.to_le_bytes());
+    rle.extend_from_slice(&64_u32.to_le_bytes());
+    rle.resize(64, 0);
+    rle.extend_from_slice(&[3, 10, 20, 30, 40, 0]);
+    let preview = preview_first_frame(&encapsulated_frame(
+        &rle,
+        "1.2.840.10008.1.2.5",
+        1,
+        4,
+        1,
+        "MONOCHROME2",
+        8,
+    )?)
+    .map_err(|error| format!("the RLE Lossless frame was refused: {error}"))?;
+    assert_eq!(preview.grey, vec![0, 85, 170, 255]);
+
+    // JPEG lossless process 14, UID .57. The codec suite hand-computes this
+    // fixture's four samples as 0, 2047, 2048 and 4095 from PS3.5 Annex F,
+    // so they come from the standard and not from the decoder. Full range
+    // maps the first to grey 0 and the last to grey 255.
+    let preview = preview_first_frame(&encapsulated_frame(
+        include_bytes!(
+            "../../../crates/ocelli-codec/tests/fixtures/jpeg_lossless_process14_12bit.jpg"
+        ),
+        "1.2.840.10008.1.2.4.57",
+        1,
+        4,
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG lossless frame was refused: {error}"))?;
+    assert_eq!(preview.grey.first(), Some(&0));
+    assert_eq!(preview.grey.last(), Some(&255));
+
+    // JPEG 2000 lossless, UID .90. The codec suite states that this fixture
+    // repeats the boundary values 0, 2047, 2048 and 4095 across a 64 by 64
+    // frame, so its grey minimum is 0 and its grey maximum is 255.
+    let preview = preview_first_frame(&encapsulated_frame(
+        include_bytes!("../../../crates/ocelli-codec/tests/fixtures/jpeg2000_lossless_u12.j2k"),
+        "1.2.840.10008.1.2.4.90",
+        64,
+        64,
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG 2000 frame was refused: {error}"))?;
+    assert_eq!(preview.grey.len(), 64 * 64);
+    assert_eq!(preview.grey.iter().min(), Some(&0));
+    assert_eq!(preview.grey.iter().max(), Some(&255));
+
+    // JPEG-LS lossless and HTJ2K lossless, UIDs .80 and .201. The codec suite
+    // reproduces the uncompressed corpus ramp from both fixtures byte for
+    // byte, a 64 by 96 unsigned 16-bit ramp whose first sample is 0 and whose
+    // last is 65535. Full range maps those to grey 0 and 255.
+    for (uid, codestream, name) in [
+        (
+            "1.2.840.10008.1.2.4.80",
+            &include_bytes!(
+                "../../../crates/ocelli-codec/tests/fixtures/jpegls_corpus_lossless.jls"
+            )[..],
+            "JPEG-LS",
+        ),
+        (
+            "1.2.840.10008.1.2.4.201",
+            &include_bytes!(
+                "../../../crates/ocelli-codec/tests/fixtures/htj2k_corpus_lossless.j2c"
+            )[..],
+            "HTJ2K",
+        ),
+    ] {
+        let preview = preview_first_frame(&encapsulated_frame(
+            codestream,
+            uid,
+            64,
+            96,
+            1,
+            "MONOCHROME2",
+            16,
+        )?)
+        .map_err(|error| format!("the {name} frame was refused: {error}"))?;
+        assert_eq!(preview.width, 96);
+        assert_eq!(preview.height, 64);
+        assert_eq!(preview.grey.len(), 64 * 96);
+        assert_eq!(preview.grey.first(), Some(&0));
+        assert_eq!(preview.grey.last(), Some(&255));
+    }
+
+    // JPEG XL Lossless, UID .110, the same file `a_jpegxl_lossless_frame_draws`
+    // previews. It is listed here so all six registrations have a file.
+    let preview = preview_first_frame(&jpegxl_frame(
+        "jpegxl_lossless_12.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG XL frame was refused: {error}"))?;
+    assert_eq!(preview.grey.first(), Some(&0));
+    assert_eq!(preview.grey.last(), Some(&255));
+    Ok(())
+}
+
 fn only_byte(preview: &Preview) -> Result<u8, String> {
     if preview.grey.len() != 1 {
         return Err("the frame is not one pixel".to_owned());
@@ -808,6 +1010,93 @@ fn part10(data: Vec<u8>) -> Result<Vec<u8>, String> {
     bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
     bytes.extend(data);
     Ok(bytes)
+}
+
+fn part10_as(data: Vec<u8>, transfer_syntax: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta(transfer_syntax)?);
+    bytes.extend(data);
+    Ok(bytes)
+}
+
+/// One encapsulated frame around a tracked JPEG XL fixture.
+///
+/// The wrapper has the measured shape of the corpus JPEG XL rows: Pixel Data
+/// OB of undefined length, a Basic Offset Table item carrying its one offset,
+/// one Fragment Item holding the codestream padded to even length, and the
+/// Sequence Delimitation Item.
+fn jpegxl_frame(
+    fixture: &str,
+    uid: &str,
+    samples: u16,
+    photometric: &str,
+    bits_stored: u16,
+) -> Result<Vec<u8>, String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/ocelli-codec/tests/fixtures")
+        .join(fixture);
+    let codestream =
+        std::fs::read(&path).map_err(|_| format!("{} is not readable", path.display()))?;
+    encapsulated_frame(&codestream, uid, 64, 96, samples, photometric, bits_stored)
+}
+
+/// One encapsulated frame around a codestream, in the wrapper shape described
+/// on `jpegxl_frame`.
+fn encapsulated_frame(
+    codestream: &[u8],
+    uid: &str,
+    rows: u16,
+    columns: u16,
+    samples: u16,
+    photometric: &str,
+    bits_stored: u16,
+) -> Result<Vec<u8>, String> {
+    let bits_allocated: u16 = if bits_stored > 8 { 16 } else { 8 };
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &samples.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(photometric))?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0100),
+        *b"US",
+        &bits_allocated.to_le_bytes(),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0101),
+        *b"US",
+        &bits_stored.to_le_bytes(),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0102),
+        *b"US",
+        &(bits_stored - 1).to_le_bytes(),
+    )?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    let mut fragment = codestream.to_vec();
+    if fragment.len() % 2 == 1 {
+        fragment.push(0);
+    }
+    let mut pixels = item(&0_u32.to_le_bytes())?;
+    pixels.extend_from_slice(&item(&fragment)?);
+    pixels.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+    pixels.extend_from_slice(&0xE0DD_u16.to_le_bytes());
+    pixels.extend_from_slice(&0_u32.to_le_bytes());
+    let mut element = Vec::new();
+    element.extend_from_slice(&0x7FE0_u16.to_le_bytes());
+    element.extend_from_slice(&0x0010_u16.to_le_bytes());
+    element.extend_from_slice(b"OB");
+    element.extend_from_slice(&[0, 0]);
+    element.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    element.extend_from_slice(&pixels);
+    data.extend(element);
+    part10_as(data, uid)
 }
 
 fn mono_unusable_window() -> Result<Vec<u8>, String> {
@@ -3780,6 +4069,334 @@ fn inspect_writes_at_most_the_frame_list_of_planes() -> Result<(), String> {
     let entries = planes.matches("null").count();
     if entries != FRAME_LIST_CAP {
         return Err(format!("{entries} plane entries for 65537 frames"));
+    }
+    Ok(())
+}
+
+/// F-226. Post `file` and return the id the process gave it.
+fn forget_post(addr: SocketAddr, file: &[u8]) -> Result<String, String> {
+    let posted = exchange(addr, &http_post_to("/file", "", file))?;
+    let (header, _) = split_http(&posted)?;
+    header_line(header, "X-Ocelli-File")
+        .map(str::to_owned)
+        .ok_or_else(|| "the file id was missing".to_owned())
+}
+
+/// The same serial under the next generation, which this process never issued.
+fn other_generation(id: &str) -> Result<String, String> {
+    let (generation, serial) = id
+        .split_once('.')
+        .ok_or_else(|| "the file id had no dot".to_owned())?;
+    let generation =
+        u64::from_str_radix(generation, 16).map_err(|_| "the generation was not hex".to_owned())?;
+    Ok(format!("{:x}.{serial}", generation.wrapping_add(1)))
+}
+
+/// `files`, `frames` and `used` from `GET /held`.
+fn held_counts(addr: SocketAddr) -> Result<(usize, usize, usize), String> {
+    let census = held_census(addr)?;
+    Ok((
+        json_number(&census, "files")?,
+        json_number(&census, "frames")?,
+        json_number(&census, "used")?,
+    ))
+}
+
+fn forget_exchange(addr: SocketAddr, extra: &str, body: &[u8]) -> Result<(String, String), String> {
+    let reply = exchange(addr, &http_post_to("/forget", extra, body))?;
+    let (header, body) = split_http(&reply)?;
+    let body = std::str::from_utf8(body).map_err(|_| "the forget reply was not text".to_owned())?;
+    Ok((header.to_owned(), body.to_owned()))
+}
+
+#[test]
+fn forget_drops_files_and_frames() -> Result<(), String> {
+    // F-226 AC10. Held before the forget, on one viewer of 8 MiB:
+    //   two  a three-frame object, posted, and previewed at frames 0 and 1.
+    //        Frame 2 is not decoded, so the posted bytes stay beside them.
+    //   one  a one-frame object, posted and never previewed.
+    // The body names two, one, the next generation's id for two's serial and
+    // two again. Two posted bodies and two frames were held, so the reply is
+    // files 2, frames 2, and unknown 2 for the other generation and the
+    // repeat. Each posted body is held at its length, which the census shows
+    // after each post, and the two frames' charges are what the census rose
+    // by when they were stored. Bytes is the sum of the four. Frame 1 is
+    // held so that a forget keeping frame 1 fails here.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let two = tagged_frame(3, &[50, 0, 60, 0, 70, 0])?;
+    let one = mono_frame(true)?;
+    let two_id = forget_post(addr, &two)?;
+    if held_counts(addr)? != (1, 0, two.len()) {
+        return Err(format!(
+            "after one post the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    let one_id = forget_post(addr, &one)?;
+    let posted = two.len() + one.len();
+    if held_counts(addr)? != (2, 0, posted) {
+        return Err(format!(
+            "after two posts the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    for frame in ["0", "1"] {
+        let drawn = exchange(
+            addr,
+            &preview_id(&two_id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        if !split_http(&drawn)?.0.starts_with("HTTP/1.1 200 ") {
+            return Err(format!(
+                "frame {frame} of the three-frame object did not draw"
+            ));
+        }
+    }
+    let (files, frames, used) = held_counts(addr)?;
+    if files != 2 || frames != 2 || used <= posted {
+        return Err(format!(
+            "after the preview the census was {files} files, {frames} frames, {used} used"
+        ));
+    }
+    let frame_charges = used - posted;
+    let expected_bytes = two.len() + one.len() + frame_charges;
+    let other = other_generation(&two_id)?;
+    let body = format!("{two_id}\n{one_id}\n{other}\n{two_id}");
+    let (header, reply) = forget_exchange(addr, "", body.as_bytes())?;
+    if !header.starts_with("HTTP/1.1 200 ")
+        || header_line(&header, "Content-Type") != Some("application/json; charset=utf-8")
+    {
+        return Err(format!("the forget was not a JSON 200: {header}"));
+    }
+    let expected = format!("{{\"files\":2,\"frames\":2,\"bytes\":{expected_bytes},\"unknown\":2}}");
+    if reply != expected {
+        return Err(format!("the forget answered {reply}, not {expected}"));
+    }
+    let after = held_counts(addr)?;
+    if after != (files - 2, frames - 2, used - expected_bytes) {
+        return Err(format!(
+            "the census went from {:?} to {after:?}, not down by the reply",
+            (files, frames, used)
+        ));
+    }
+    for (name, id) in [("two", &two_id), ("one", &one_id)] {
+        for frame in ["0", "1", "2"] {
+            let gone = exchange(
+                addr,
+                &preview_id(id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+            )?;
+            if !split_http(&gone)?.0.starts_with("HTTP/1.1 410 ") {
+                return Err(format!(
+                    "{name} frame {frame} was still served after the forget"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn forget_refusals() -> Result<(), String> {
+    // F-226 AC11. Every line is parsed before anything is removed, so a held
+    // id before a bad line stays held. The census is read after each refusal.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let file = mono_frame(true)?;
+    let id = forget_post(addr, &file)?;
+    let held = held_counts(addr)?;
+    if held != (1, 0, file.len()) {
+        return Err(format!("the posted file was held as {held:?}"));
+    }
+    let refusals: [(&str, String, &str, &str); 4] = [
+        ("a malformed line", format!("{id}\nnot-an-id"), "", "forget"),
+        ("an empty line", format!("{id}\n"), "", "forget"),
+        ("an uppercase id", id.to_uppercase(), "", "forget"),
+        (
+            "a file id header",
+            id.clone(),
+            "X-Ocelli-File: 0.0\r\n",
+            "header",
+        ),
+    ];
+    for (name, body, extra, code) in &refusals {
+        let (header, _) = forget_exchange(addr, extra, body.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some(code)
+        {
+            return Err(format!("{name} was not 400 {code}: {header}"));
+        }
+        if held_counts(addr)? != held {
+            return Err(format!(
+                "{name} changed the census to {:?}",
+                held_counts(addr)?
+            ));
+        }
+    }
+    // One line past 65,536, every one of them the held id, is refused from
+    // the count and forgets nothing. At 65,536 the id is forgotten once and
+    // the other 65,535 lines are repeats.
+    let over = vec![id.as_str(); 65_537].join("\n");
+    let (header, _) = forget_exchange(addr, "", over.as_bytes())?;
+    if !header.starts_with("HTTP/1.1 400 ")
+        || header_line(&header, "X-Ocelli-Error") != Some("forget")
+    {
+        return Err(format!("65,537 lines were not 400 forget: {header}"));
+    }
+    if held_counts(addr)? != held {
+        return Err("65,537 lines changed the census".to_owned());
+    }
+    // A declared length one byte over 4 MiB is refused before any body is read.
+    let long = exchange(
+        addr,
+        b"POST /forget HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4194305\r\n\r\n",
+    )?;
+    let (long_header, _) = split_http(&long)?;
+    if !long_header.starts_with("HTTP/1.1 400 ")
+        || header_line(long_header, "X-Ocelli-Error") != Some("forget")
+    {
+        return Err(format!(
+            "a 4 MiB and one byte forget was not 400 forget: {long_header}"
+        ));
+    }
+    let (header, reply) = forget_exchange(addr, "", b"")?;
+    if !header.starts_with("HTTP/1.1 200 ")
+        || reply != "{\"files\":0,\"frames\":0,\"bytes\":0,\"unknown\":0}"
+    {
+        return Err(format!("an empty forget answered {header} {reply}"));
+    }
+    if held_counts(addr)? != held {
+        return Err("an empty forget changed the census".to_owned());
+    }
+    let at_cap = vec![id.as_str(); 65_536].join("\n");
+    let (header, reply) = forget_exchange(addr, "", at_cap.as_bytes())?;
+    let expected = format!(
+        "{{\"files\":1,\"frames\":0,\"bytes\":{},\"unknown\":65535}}",
+        file.len()
+    );
+    if !header.starts_with("HTTP/1.1 200 ") || reply != expected {
+        return Err(format!(
+            "65,536 lines answered {header} {reply}, not {expected}"
+        ));
+    }
+    if held_counts(addr)? != (0, 0, 0) {
+        return Err(format!(
+            "the census after the forget was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    Ok(())
+}
+
+/// Post `file` under the page token `page` and return its id.
+fn page_post(addr: SocketAddr, file: &[u8], page: &str) -> Result<String, String> {
+    let posted = exchange(
+        addr,
+        &http_post_to("/file", &format!("X-Ocelli-Page: {page}\r\n"), file),
+    )?;
+    let (header, _) = split_http(&posted)?;
+    header_line(header, "X-Ocelli-File")
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the file posted under {page} had no id: {header}"))
+}
+
+#[test]
+fn forget_by_page_drops_only_that_pages_files() -> Result<(), String> {
+    // F-226 AC15 as the lead restated it, on the process side. Page `left`
+    // posts a one-frame object and previews it, so only its frame is held,
+    // and posts a second one-frame object that is never previewed, so its
+    // bytes are held. Page `stays` posts a third. `page <left>` forgets the
+    // frame and the bytes, files 1 and frames 1, and leaves the third
+    // object exactly as held. The tokens are 32 lowercase hex digits.
+    let left = "0123456789abcdef0123456789abcdef";
+    let stays = "fedcba9876543210fedcba9876543210";
+    let unknown = "00000000000000000000000000000001";
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let drawn_file = mono_frame(true)?;
+    let posted_file = mono_frame(false)?;
+    let kept_file = tagged_frame(1, &50_u16.to_le_bytes())?;
+    let drawn = page_post(addr, &drawn_file, left)?;
+    let preview = exchange(addr, &preview_id(&drawn, ""))?;
+    if !split_http(&preview)?.0.starts_with("HTTP/1.1 200 ") {
+        return Err("the left page's file did not draw".to_owned());
+    }
+    let (_, _, drawn_used) = held_counts(addr)?;
+    let posted = page_post(addr, &posted_file, left)?;
+    let kept = page_post(addr, &kept_file, stays)?;
+    let before = held_counts(addr)?;
+    if before != (2, 1, drawn_used + posted_file.len() + kept_file.len()) {
+        return Err(format!("before the forget the census was {before:?}"));
+    }
+    let refusals = [
+        (
+            "a short token",
+            "page 0123456789abcdef0123456789abcde".to_owned(),
+        ),
+        ("a long token", format!("page {left}0")),
+        (
+            "an uppercase token",
+            format!("page {}", left.to_uppercase()),
+        ),
+        ("a token and an id", format!("page {left}\n{kept}")),
+        ("no space", format!("page{left}")),
+    ];
+    for (name, body) in &refusals {
+        let (header, _) = forget_exchange(addr, "", body.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some("forget")
+        {
+            return Err(format!("{name} was not 400 forget: {header}"));
+        }
+        if held_counts(addr)? != before {
+            return Err(format!("{name} changed the census"));
+        }
+    }
+    let zeros = "{\"files\":0,\"frames\":0,\"bytes\":0,\"unknown\":0}";
+    let (header, reply) = forget_exchange(addr, "", format!("page {unknown}").as_bytes())?;
+    if !header.starts_with("HTTP/1.1 200 ") || reply != zeros || held_counts(addr)? != before {
+        return Err(format!("an unknown token answered {header} {reply}"));
+    }
+    let (header, reply) = forget_exchange(addr, "", format!("page {left}").as_bytes())?;
+    let expected = format!(
+        "{{\"files\":1,\"frames\":1,\"bytes\":{},\"unknown\":0}}",
+        drawn_used + posted_file.len()
+    );
+    if !header.starts_with("HTTP/1.1 200 ") || reply != expected {
+        return Err(format!(
+            "the page forget answered {header} {reply}, not {expected}"
+        ));
+    }
+    if held_counts(addr)? != (1, 0, kept_file.len()) {
+        return Err(format!(
+            "after the page forget the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    for (name, id) in [("drawn", &drawn), ("posted", &posted)] {
+        let gone = exchange(addr, &preview_id(id, ""))?;
+        if !split_http(&gone)?.0.starts_with("HTTP/1.1 410 ") {
+            return Err(format!("the {name} file of the left page was still served"));
+        }
+    }
+    let again = forget_exchange(addr, "", format!("page {left}").as_bytes())?;
+    if again.1 != zeros {
+        return Err(format!("a second page forget answered {}", again.1));
+    }
+    let bad_post = exchange(
+        addr,
+        &http_post_to("/file", "X-Ocelli-Page: not-a-token\r\n", &kept_file),
+    )?;
+    let (bad_header, _) = split_http(&bad_post)?;
+    if !bad_header.starts_with("HTTP/1.1 400 ")
+        || header_line(bad_header, "X-Ocelli-Error") != Some("header")
+    {
+        return Err(format!(
+            "a malformed page token on /file was accepted: {bad_header}"
+        ));
+    }
+    if held_counts(addr)? != (1, 0, kept_file.len()) {
+        return Err("a refused post changed the census".to_owned());
+    }
+    let survivor = exchange(addr, &preview_id(&kept, ""))?;
+    if !split_http(&survivor)?.0.starts_with("HTTP/1.1 200 ") {
+        return Err("the staying page's file was not served".to_owned());
     }
     Ok(())
 }
