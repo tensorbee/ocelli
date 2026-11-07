@@ -1,6 +1,6 @@
 # F-238, Native build without wgpu's Metal backend
 
-**Status**: draft
+**Status**: approved
 **Epic ref**: E19.7
 **Sprint**: S47
 **Estimate**: 2w
@@ -136,3 +136,12 @@ Likely one new row, numbered when this plan is approved: the shipped native buil
 - **Q1, which build is Metal-free.** Affects AC1, AC3. Options: **O1, recommended**, a cargo feature, default on, that the shipped native archive turns off, so development and `gate gpu` keep Metal. O2, Metal removed from every native build, which loses tier A on the macOS development host (fact 5). O3, ship no macOS native archive. Owner: the lead in the S47 design round.
 - **Q2, `gles` on Apple.** Fact 3 shows wgpu-hal's `gles` names `objc2`. Options: drop `gles` from the Apple shipped build as well, leaving tier C on macOS, or measure that `gles` on Apple compiles only the base `objc2` crate and decide whether that crate carries the same redistribution question. Owner: the lead, after a measurement in this story.
 - **Q3, the deviation row.** Whether the shipped feature set and the macOS tier outcome need a new row beside D-27. Owner: the lead at approval.
+
+## Lead decisions, pulled forward into S46
+
+Made by the sprint lead on 2026-11-07 under the operator's answer of 2026-11-06 (native build without Metal) and the operator's decision of 2026-11-07 to pull bounded S47 work forward into S46 while implementer slots are idle.
+
+- **Q1, O1.** A cargo feature, on by default, that the shipped native archive turns off, so development builds and `gate gpu` keep Metal and tier A on the macOS host.
+- **Q2.** The story measures which `objc2` crates `gles` on Apple pulls in. If any reaches the shipped Apple graph, `gles` is dropped from the shipped Apple build too and that build resolves tier C, which reports unavailable for GPU features rather than producing a different result. The measurement and the outcome are recorded.
+- **Q3.** If the shipped macOS build resolves a lower tier than development, a new deviation row beside D-27 is written in this story with that fact, numbered when written.
+- **Order.** This story depends on F-233, which is not integrated. It is built on F-233's branch, which carries F-229 and F-232, and integrates after them.

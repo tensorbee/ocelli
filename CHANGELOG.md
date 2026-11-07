@@ -575,6 +575,21 @@ Repository bootstrap. Nothing is published.
   `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
   and `reference_segment`, and `SyncScene` now uses the same UID rule. The
   corner of an image that is not monochrome reads `Window not applicable`.
+- Release by series and by volume. `ImageCache::release_series` releases
+  every frame of one series and returns one `Released` event, which the ring
+  carries as the new kind 7, `cache.released`, with the series, the frame
+  count and the bytes. `BrickCache::release_volume` releases every brick of
+  every level of one volume and returns a `ReleaseSummary`. Both go through
+  the new `Lru::remove_range`, an explicit release that is not an eviction.
+  `@ocelli/core` decodes `cache.released` and lists it in `UNMAPPED_EVENTS`,
+  because cornerstone3D 5.8.2 reports a removed image per image. The cache
+  has no study, so a study is released by its owner's series and volumes.
+  The local folder viewer now forgets the folder it left. Opening another
+  folder or the synthetic study sends that folder's ids to the new
+  `POST /forget`, and leaving the page sends one short beacon naming a
+  per-load page token, so `GET /held` counts only what is open. A late reply
+  for the folder left does not post its file again, and a decode already
+  running for a forgotten file stores nothing.
 
 ### Changed
 

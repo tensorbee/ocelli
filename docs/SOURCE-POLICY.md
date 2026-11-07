@@ -94,6 +94,41 @@ libraries those dependencies bundle. It does not cover tools that are
 downloaded or installed on a developer or CI host and never redistributed.
 Playwright browsers, ffmpeg, git, bash and CI images are in that second group.
 
+## Patents, and the video decoders a shipped artefact may contain
+
+Everything above is about copyright: what may be read, and what may be
+depended on. This section is about patents, which that test does not touch. A
+permissive licence on a decoder's source says nothing about the patents its
+codec is covered by.
+
+**No shipped artefact contains a software H.264 or HEVC decoder.** A shipped
+artefact is anything a release publishes or a user installs: the wasm modules,
+the native binaries and the npm packages. H.264 and HEVC streams are decoded
+through the browser's decoder, WebCodecs `VideoDecoder`, or the platform's,
+and a build where neither can decode a stream refuses it by name. This holds
+for a dependency, a vendored crate, a bundled package and code written here
+alike, and it holds for a fallback used only when the browser has no decoder.
+Host tools that are never redistributed, ffmpeg among them, are outside it as
+they are outside "What a dependency is".
+
+**MPEG-2 video is decoded in Rust, by the operator's decision of
+2026-11-07.** F-242 writes that decoder from ITU-T H.262 and adds no
+dependency. What the decision relies on, as read by the lead on 2026-11-07
+and **marked for verification**: the MPEG-2 patent pool's published list
+dated 1 January 2026, administered by Via LA, formerly MPEG LA, states that
+the last United States patent expired on 13 February 2018 and that patents
+remain active only in Malaysia. A third-party tracker of that list names two
+Malaysian patents, MY 163465-A and MY 177139-A, with possible expiry in 2032
+and 2035. A pool list also says nothing about patents held outside the pool.
+F-242's plan carries the full assessment and its open questions.
+
+Any other codec covered by a patent pool, video or audio, enters a shipped
+artefact only with a written assessment in its story's plan and the
+operator's recorded decision, recorded in this section.
+
+**The operator may take counsel on any of this, and none of it is legal
+advice.** It records an engineering decision and what it was based on.
+
 ## Extensions to the table
 
 A source assessed after this policy was written gets a row here, in the same

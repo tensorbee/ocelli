@@ -26,7 +26,7 @@
 | F-223 | E38.32 | Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary | All | 3w | pending |
 | F-224 | E5.7 | Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk | All | 3w | pending |
 | F-225 | E3.8 | DICOM conformance report: ocelli-dicom checks each value against the VR rules of PS3.5 section 6.2 and Type 1, 1C and 2 presence for seven PS3.3 modules on CR, CT, MR and PET, a finding never carries a value or stops display, @ocelli/core reads the report, and the folder viewer shows a Checks badge and list | All | 4w | in-progress |
-| F-226 | E5.8 | Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left | All | 3w | pending |
+| F-226 | E5.8 | Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left | All | 3w | done |
 | F-227 | E38.33 | Automatic window per series when the file has none: one window from the 1st to 99th nearest-rank percentile of modality values pooled over up to 16 frames spread through the series, each frame through its own rescale, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is | All | 3w | in-progress |
 | F-228 | E38.34 | Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn | All | 2w | in-progress |
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | in-progress |
@@ -35,6 +35,8 @@
 | F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
+| F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
+| F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -68,6 +70,10 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+
+## Pulled forward from S47
+
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 waits, because it depends on F-231, which is not integrated. Their backlog rows keep sprint S47 until they integrate.
 
 ## Questions for the operator
 
@@ -184,6 +190,53 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   says.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story builds
   every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim. F-233 implements it.
+- **A colour series in the folder viewer shows a fault, not an image.** Every
+  frame that is not `MONOCHROME1` or `MONOCHROME2` stops at
+  `PreviewError::NotMonochrome` in `examples/folder-viewer/src/preview.rs`,
+  and the page shows "this preview shows monochrome frames only". The library
+  already has the colour stage, F-030's `ColorTransform` in `ocelli-pixel`.
+  **Decided by the operator on 2026-11-07:** the folder viewer previews RGB,
+  YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR frames with
+  Planar Configuration through that stage and the decoder's reported output
+  space, so the colour arithmetic exists once in the library. F-239
+  implements it, scheduled first in the folder viewer chain, ahead of F-212.
+  F-212 now depends on it.
+  **F-239's design questions answered by the operator on 2026-11-07:** each
+  decoder reports its own output length, F-239 also decodes multi-component
+  JPEG 2000 and HTJ2K with their component transforms, window and invert act
+  on each colour channel as cornerstone3D 5.8.2 does, a region on a colour
+  frame reports R, G and B statistics, colour above 8 bits and palette entries
+  above 255 are scaled by one `ocelli-pixel` rule, and a file with an ICC
+  profile is drawn with a sentence that the profile was not applied. F-240
+  applies matrix and tone-curve ICC profiles after F-239, filed the same day.
+  **Answered by the operator later on 2026-11-07:** the vendored JPEG 2000
+  crates are patched with recorded provenance, HTJ2K first, the ICC subset is
+  built with no dependency, a profile outside it is drawn and named, neither
+  story may grow the wasm build or slow the viewer, and cornerstone3D 5.8.2 is
+  the floor that both stories must meet or beat on a measured axis. Both plans
+  are approved, with deviations D-29, D-30 and D-31. F-239 is 12w in a codec
+  part and a viewer part, and F-240 is 5w.
+- **No decoder handles DICOM video.** After F-239 a `YBR_PARTIAL_420` frame is
+  refused by name, and the sixteen MPEG-2, H.264 and HEVC transfer syntaxes of
+  PS3.6 are not in the codec registry's known list. cornerstone3D 5.8.2 plays
+  video only through a server's `/rendered` resource in an HTML `<video>`
+  element, and fails on a local file.
+  **Decided by the operator on 2026-11-07:** file a video story now, at least
+  what cornerstone3D does for video in the folder viewer and the library and
+  better on a measured axis. F-241 is filed for S47 at 12w, E4.11, with a draft
+  plan. Its nine questions, among them the decode route, the patent position
+  and MPEG-2, are open for the operator, each with the lead's recommendation.
+  **Answered by the operator later on 2026-11-07:** H.264 and HEVC decode
+  through WebCodecs in a worker on both targets, with the stream demuxed in
+  Rust and the colour converted once in `ocelli-pixel`, and no shipped artefact
+  may contain a software H.264 or HEVC decoder, now a section of
+  `docs/SOURCE-POLICY.md`. The stream's own colour description wins over
+  PS3.3's matrix when present. The `VideoFrame` held in the worker for one
+  copy is deviation D-32. F-241 is approved at 12w in a library part and a
+  viewer part. MPEG-2 is decoded in Rust by F-242, filed for S48 at 7w, E4.12,
+  with a draft plan whose six questions are open for the operator, the
+  patent position among them, because the pool's list still names patents
+  active in Malaysia.
 
 ## What is carried in
 

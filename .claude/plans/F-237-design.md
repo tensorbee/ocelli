@@ -1,6 +1,6 @@
 # F-237, The wasm module ships outside the @ocelli/core tarball
 
-**Status**: draft
+**Status**: approved
 **Epic ref**: E19.6
 **Sprint**: S47
 **Estimate**: 1w
@@ -131,3 +131,12 @@ None expected. The HLD names no distribution route.
   Deferral leaves `/release` refusing at item 6.
 - **Q2, the build identity form.** Affects AC3. Options: a version and git SHA written into the package by the build, or a digest of the `.wasm` compared to a fresh build at release. Owner: the lead.
 - **Q3, the decode module.** `pkg-decode` is a second module (fact 2). Whether it ships, and where. Owner: the lead.
+
+## Lead decisions, pulled forward into S46
+
+Made by the sprint lead on 2026-11-07 under the operator's answer of 2026-11-06 (change the release rule) and the operator's decision of 2026-11-07 to pull bounded S47 work forward into S46 while implementer slots are idle.
+
+- **Q1, O1.** The module ships as a separate npm package, `@ocelli/wasm`, built by `wasm-pack` from `crates/ocelli-wasm`, carrying the two notice files, versioned with `@ocelli/core` and declared by it as a peer dependency at the same version. `gate packages` proves it the way it proves the others.
+- **Q2.** The build writes the package version and the git SHA of HEAD into the package, and `/release` refuses unless that SHA is the tag's and the `.wasm` digest equals a fresh build of that SHA. If the measured build is not byte-reproducible, the story stops and reports rather than relaxing the check.
+- **Q3.** `pkg-decode` ships in the same package as a second module file, under the same identity rule.
+- **Order.** This story depends on F-228, which is not integrated. It is built on F-228's branch and integrates after it.

@@ -363,7 +363,7 @@ function onFrame() {
   requestAnimationFrame(onFrame);
 }
 requestAnimationFrame(onFrame);</code></pre>
-    <p>The ring carries six kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed and presented. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code> and <code>frame.presented</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
+    <p>The ring carries seven kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed, presented and released. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code>, <code>frame.presented</code> and <code>cache.released</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
 
     <h3 id="js-state"><span class="num">5.4</span>Reading state</h3>
     <p><code>copy_state()</code> returns a copied 96 byte block. <code>readViewportState</code> reads it into plain numbers and returns <code>null</code> for any other length.</p>
@@ -731,6 +731,20 @@ let mut cache: Lru&lt;u64, Frame&gt; = Lru::new(CacheTier::Decoded, 64 * 1024 * 
 let Admission { evicted, displaced, refused } = cache.insert(7, Frame(bytes));
 let band = cache.pressure().band();     // Low, Elevated or Critical</code></pre>
     <p>An eviction, a replacement and a refusal are three different outcomes, and <code>Admission</code> is the only thing that tells them apart, so it is <code>#[must_use]</code>. The bands sit at one half and nine tenths of the budget. The value types in the library are <code>DecodedFrame</code> and <code>Brick</code> in <code>ocelli-cache</code> and <code>Volume</code> in <code>ocelli-volume</code>.</p>
+    <p>Leaving a series releases all of its frames in one call, and leaving a volume releases every brick of every level. Neither is an eviction. <code>release_series</code> returns one <code>Released</code> event for the series, which the ring carries as <code>cache.released</code>, and nothing when the series held nothing. <code>release_volume</code> returns a <code>ReleaseSummary</code>, because volumes and bricks have no ring event.</p>
+<pre><code>use ocelli_cache::{BrickCache, CacheEvent, ImageCache, SeriesId, VolumeId};
+use ocelli_volume::{VolumeCache, VolumeKey};
+
+let events = images.release_series(SeriesId(5));       // images: ImageCache
+for event in events.events() {
+    if let CacheEvent::Released { series, frames, bytes } = event {
+        // one event for the whole series, `bytes` left the budget
+    }
+}
+let gone = bricks.release_volume(VolumeId(2));          // bricks: BrickCache
+let _ = (gone.entries, gone.bytes);                     // every level of volume 2
+let _ = volumes.remove(&amp;VolumeKey { series: SeriesId(5) }); // volumes: VolumeCache</code></pre>
+    <p>The cache has no study. A study is released by whoever owns it calling <code>release_series</code> for each of its series, <code>VolumeCache::remove</code> for each of its volumes and <code>release_volume</code> for each of its bricked volumes. This folder viewer releases by file instead: opening another folder or the synthetic study sends the left folder's ids to <code>POST /forget</code>, which drops each file and every frame of it from the local process.</p>
     <p><code>ocelli_volume::group_volumes</code> splits decoded frames by frame of reference and orientation together, so a localiser mixed with axials is two candidates. <code>Volume::assemble</code> then refuses a candidate that is not one volume.</p>
 <pre><code>use ocelli_volume::{group_volumes, FrameOfReferenceUid, Volume};
 
