@@ -1134,8 +1134,9 @@ for (const color of INKS) {
 
 folderInput.addEventListener("change", () => {
   // Copied first, because the reset empties the list. The reset lets the
-  // same folder be chosen again, which Chromium otherwise reports as no
-  // change.
+  // same folder be chosen again, because a file input whose new selection
+  // equals its current one may fire no change. That was not measured, and
+  // the reset is harmless either way.
   const files = Array.from(folderInput.files || []);
   folderInput.value = "";
   if (!files.length) return;

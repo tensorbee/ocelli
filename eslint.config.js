@@ -473,7 +473,9 @@ const config = tseslint.config(
     // the pointer readout. They run under node and hand Playwright callbacks
     // that read the page's DOM and call four of the page's own top-level
     // functions by name. The readout check wraps `paintSelection` to inject
-    // a throw and replaces `requestGrey` to make the main preview fail.
+    // a throw and replaces `requestGrey` to make the main preview fail. The
+    // changed-file check reads the id the page holds for a file through
+    // `seriesByKey` and `filePosts`, before it rewrites that file.
     files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
     languageOptions: {
       globals: {
@@ -486,6 +488,8 @@ const config = tseslint.config(
         activeViewport: "readonly",
         paintSelection: "readonly",
         dropCache: "readonly",
+        seriesByKey: "readonly",
+        filePosts: "readonly",
         Event: "readonly",
         window: "readonly",
       },

@@ -309,7 +309,7 @@ function collectIds(page, sink) {
  */
 function firstId(page) {
   return page.evaluate(() => {
-    const series = seriesByKey.get(viewports[0].seriesKey);
+    const series = seriesByKey.get(activeViewport().seriesKey);
     return (series && filePosts.get(series.images[0].file)) || "";
   });
 }
@@ -322,13 +322,18 @@ async function until(test, what, limit = 30000) {
   }
 }
 
-/** Opens `set` and waits for a preview of an id this open was given, and its paint. */
+/**
+ * Opens `set` and waits for a preview of an id this open was given, and its
+ * paint. A page that answers from a grey it kept from the last open asks for
+ * no preview, so that wait gives up after 5 s and the canvas comparison that
+ * follows names the stale grey.
+ */
 async function openAndDraw(page, sink, set, before) {
   const known = new Set(sink);
   const drawn = page.waitForResponse((response) => {
     const id = response.request().headers()["x-ocelli-file"];
     return response.url().endsWith("/preview") && response.status() === 200 && Boolean(id) && !known.has(id);
-  }, { timeout: 30000 });
+  }, { timeout: 5000 }).catch(() => null);
   await page.locator("#folder").setInputFiles(set.folder);
   await until(() => sink.length >= before + set.paths.length, "the folder's posts");
   await drawn;
@@ -342,18 +347,18 @@ async function openAndDraw(page, sink, set, before) {
 
 /** Counts every `Blob.prototype.arrayBuffer` call the page makes. */
 function countReads() {
-  const original = Blob.prototype.arrayBuffer;
+  const original = window.Blob.prototype.arrayBuffer;
   const state = { reads: 0, bytes: 0, inFlight: 0, peak: 0, first: 0, last: 0 };
   window.__f224Reads = state;
-  Blob.prototype.arrayBuffer = function countedArrayBuffer() {
+  window.Blob.prototype.arrayBuffer = function countedArrayBuffer() {
     state.reads += 1;
     state.bytes += this.size;
     state.inFlight += 1;
     if (state.inFlight > state.peak) state.peak = state.inFlight;
-    if (!state.first) state.first = performance.now();
+    if (!state.first) state.first = window.performance.now();
     return original.call(this).finally(() => {
       state.inFlight -= 1;
-      state.last = performance.now();
+      state.last = window.performance.now();
     });
   };
 }
@@ -413,7 +418,7 @@ export async function observeChanged(url, chromium, set) {
     const heldAfter = await heldCount(url);
     const oldStatus = oldId ? await previewStatus(url, oldId) : 0;
     await page.keyboard.press("ArrowDown");
-    await until(async () => (await faultText(page)) === "" && (await page.evaluate(() => viewports[0].viewIndex)) === 1, "image 2 shown", 5000).catch(() => {});
+    await until(async () => (await faultText(page)) === "" && (await page.evaluate(() => activeViewport().viewIndex)) === 1, "image 2 shown", 5000).catch(() => {});
     await page.waitForTimeout(300);
     const otherFault = await faultText(page);
     const otherCanvas = await canvasGrey(page);
