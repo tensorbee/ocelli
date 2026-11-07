@@ -14,6 +14,11 @@
 //!
 //! F-035 adds [`HandoffMeta`] beside [`FrameKey`]. It carries the frame
 //! identity and the sample length of a section 24 transfer, and no samples.
+//!
+//! F-224 adds the decoded tier's validity check. Each held frame carries the
+//! [`ContentId`] of the bytes it was decoded from, and a lookup answers only
+//! when that identity, the description and the plane match what the caller
+//! presents.
 
 use alloc::vec::Vec;
 
@@ -55,6 +60,52 @@ impl FrameKey {
             frame,
         }
     }
+}
+
+/// The identity of the bytes one frame was decoded from.
+///
+/// FNV-1a 64 over the length-prefixed SOP Instance UID, the transfer syntax
+/// UID and the encoded bytes, in that order, each length a little-endian
+/// `u64`. The UID is in the input because WADO-RS frame retrieval returns
+/// pixel bytes with no UID in them, and the transfer syntax because the same
+/// bytes decode differently under two syntaxes. The length prefixes make the
+/// field boundaries unambiguous. The prime is odd, so every fold step is a
+/// bijection of `u64` and a change confined to one byte position always
+/// changes the value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContentId(pub u64);
+
+impl ContentId {
+    /// The FNV-1a 64 offset basis, the state before the first byte.
+    pub const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    /// The FNV-1a 64 prime.
+    pub const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    /// Hash the three fields with their lengths prefixed.
+    ///
+    /// A length that does not fit `u64` cannot occur on any target this
+    /// crate builds, and the saturating fallback keeps that impossible case
+    /// a value rather than a panic.
+    #[must_use]
+    pub fn of(sop_instance_uid: &[u8], transfer_syntax_uid: &[u8], encoded: &[u8]) -> Self {
+        let mut hash = Self::FNV_OFFSET_BASIS;
+        for field in [sop_instance_uid, transfer_syntax_uid, encoded] {
+            let len = u64::try_from(field.len()).unwrap_or(u64::MAX);
+            hash = fold(hash, &len.to_le_bytes());
+            hash = fold(hash, field);
+        }
+        Self(hash)
+    }
+}
+
+/// Fold `bytes` into `hash` one byte at a time, FNV-1a: `(hash XOR byte) *
+/// prime`, wrapping. This is the primitive [`ContentId::of`] composes and
+/// what the reference vectors in the tests below are written against.
+fn fold(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(ContentId::FNV_PRIME);
+    }
+    hash
 }
 
 /// Identity and sample length for one section 24 transfer.
@@ -383,9 +434,69 @@ impl CacheEvents {
     }
 }
 
+/// What a lookup presents: the identity of the bytes, the description and
+/// the plane the caller now holds.
+///
+/// The description and the plane are compared exactly, not hashed, because a
+/// re-process can correct Pixel Spacing or Image Position and keep both the
+/// UID and the pixel bytes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameSource {
+    /// The content id of the encoded bytes.
+    pub content: ContentId,
+    /// The stored pixel description the caller holds.
+    pub description: StoredPixelDescription,
+    /// The image plane the caller holds.
+    pub plane: ImagePlane,
+}
+
+/// The three answers a lookup can give.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FrameLookup<'a> {
+    /// The frame under the key answers for the presented source.
+    Hit(&'a DecodedFrame),
+    /// No frame is held under the key.
+    Miss,
+    /// A frame from other bytes or metadata was held and has been removed.
+    /// `bytes` is the sample length it was admitted at, so a caller can
+    /// count what left. A second identical stale lookup is a miss.
+    Stale { bytes: usize },
+}
+
+/// One held frame and the identity of the bytes it was decoded from.
+///
+/// This is the `Lru`'s value type, so [`Budgeted::bytes`] is the frame's own
+/// byte count and every admitted size and event payload is what it was
+/// before the identity moved into the lookup.
+struct HeldFrame {
+    content: ContentId,
+    frame: DecodedFrame,
+}
+
+impl HeldFrame {
+    /// Whether this frame answers for `source`: the same bytes' identity,
+    /// the same description and the same plane.
+    fn matches(&self, source: &FrameSource) -> bool {
+        self.content == source.content
+            && self.frame.description() == source.description
+            && self.frame.plane() == source.plane
+    }
+}
+
+impl Budgeted for HeldFrame {
+    /// The allocated size of the sample buffer.
+    fn bytes(&self) -> usize {
+        self.frame.bytes()
+    }
+}
+
 /// The decoded tier: decoded frames in an `Lru` sized by the caller.
+///
+/// Each held frame carries the [`ContentId`] of the bytes it was decoded
+/// from, and a lookup answers only when that identity, the description and
+/// the plane match what the caller presents.
 pub struct ImageCache {
-    decoded: Lru<FrameKey, DecodedFrame>,
+    decoded: Lru<FrameKey, HeldFrame>,
 }
 
 impl ImageCache {
@@ -396,12 +507,18 @@ impl ImageCache {
         }
     }
 
-    /// Insert a frame and return the events the caller must emit.
+    /// Insert a frame decoded from bytes whose identity is `content`, and
+    /// return the events the caller must emit.
     ///
     /// The evicted entries are converted in the order `Admission` returned
     /// them, least recently used first.
-    pub fn insert(&mut self, key: FrameKey, frame: DecodedFrame) -> CacheEvents {
-        let admission = self.decoded.insert(key, frame);
+    pub fn insert(
+        &mut self,
+        key: FrameKey,
+        content: ContentId,
+        frame: DecodedFrame,
+    ) -> CacheEvents {
+        let admission = self.decoded.insert(key, HeldFrame { content, frame });
         let mut events = CacheEvents::default();
         if let Some(displaced) = admission.displaced {
             events.events.push(CacheEvent::Displaced {
@@ -424,9 +541,32 @@ impl ImageCache {
         events
     }
 
-    /// Read a frame. Reading is a use, so it becomes the most recently used.
-    pub fn get(&mut self, key: &FrameKey) -> Option<&DecodedFrame> {
-        self.decoded.get(key)
+    /// Read the frame under `key` that answers for `source`.
+    ///
+    /// Reading is a use, so a hit becomes the most recently used. A frame
+    /// held under the key from other bytes or other metadata is removed and
+    /// reported as [`FrameLookup::Stale`] with the sample length it was
+    /// admitted at. The removal is explicit and emits no event. Validation
+    /// precedes the return, so a lookup never serves a frame that does not
+    /// answer for the source it was given.
+    pub fn get(&mut self, key: &FrameKey, source: &FrameSource) -> FrameLookup<'_> {
+        let entry = self.decoded.get(key);
+        let Some(held) = entry else {
+            return FrameLookup::Miss;
+        };
+        let stale = !held.matches(source);
+        // The reference is not used past this line, so on the stale path the
+        // map is free to take back. The reference that escapes on the hit
+        // path is taken by a second read, because a loan that may escape
+        // into the return cannot be the one the removal ended.
+        if stale {
+            let bytes = self.decoded.remove(key).map_or(0, |h| h.frame.bytes());
+            return FrameLookup::Stale { bytes };
+        }
+        match self.decoded.get(key) {
+            Some(held) => FrameLookup::Hit(&held.frame),
+            None => FrameLookup::Miss,
+        }
     }
 
     /// Whether the key is live. This is not a use, so it does not change
@@ -438,7 +578,7 @@ impl ImageCache {
 
     /// Explicitly release a frame. Not an eviction, and emits no event.
     pub fn remove(&mut self, key: &FrameKey) -> Option<DecodedFrame> {
-        self.decoded.remove(key)
+        self.decoded.remove(key).map(|held| held.frame)
     }
 
     /// Release every frame of `series`. One `Released` event, or none when
@@ -545,6 +685,35 @@ mod handoff_tests {
                 expected: 0,
                 actual: 1,
             })
+        );
+    }
+}
+
+#[cfg(test)]
+mod content_id_tests {
+    use super::{ContentId, fold};
+
+    #[test]
+    fn fixture_fnv1a_reference_vectors() {
+        // The IETF FNV draft's test vectors for the 64-bit FNV-1a variant,
+        // over the private fold because `ContentId::of` always adds the
+        // length prefixes. Each expected value is from the draft and not
+        // from this implementation.
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b""),
+            0xcbf2_9ce4_8422_2325
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"a"),
+            0xaf63_dc4c_8601_ec8c
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"foobar"),
+            0x8594_4171_f739_67e8
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"abc"),
+            0xe71f_a219_0541_574b
         );
     }
 }

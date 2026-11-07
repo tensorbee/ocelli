@@ -610,6 +610,28 @@ Repository bootstrap. Nothing is published.
   whose Anatomical Orientation Type is `QUADRUPED` shows none. A scale bar
   in each viewport follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice
   rule and reads the same calibration as the length tool.
+- Frame identity in the decoded tier. `ContentId::of` is a 64-bit FNV-1a
+  over the length-prefixed SOP Instance UID, transfer syntax UID and encoded
+  bytes, and `FrameSource` is what a lookup presents, that id with the
+  frame's stored pixel description and image plane. `ImageCache::get` answers
+  `FrameLookup::Hit` only when all three match the held frame, and otherwise
+  removes it and answers `Stale` with the bytes released, so a frame decoded
+  from one object is never returned to a caller holding another in the same
+  slot. A stale removal is an explicit release and emits no event.
+  `FrameKey` and the stack, handoff and event wire formats are unchanged.
+  `DicomwebClient` and `postWadoInstance` take an optional `cache`, the fetch
+  cache mode sent on every request, one of `"no-cache"`, `"no-store"`,
+  `"reload"` and `"default"`. `"force-cache"` and `"only-if-cached"` are
+  refused with `DicomwebError` code `InvalidRequest`, because both can serve
+  a stale response.
+- The local folder viewer reads a folder again when the same folder is
+  chosen again, and keys every grey it keeps by the file object that choice
+  gave it rather than by name, size and time. A file rewritten on disk with a
+  new modification time is found when the window regains focus, the page
+  becomes visible, a series is selected or another viewport becomes active.
+  The page then forgets it in the local process and shows a sentence in its
+  place. A rewrite that keeps the modification time is not detected, and only
+  Chromium was measured.
 
 ### Changed
 
@@ -634,3 +656,13 @@ Repository bootstrap. Nothing is published.
   SIMD module holding no SIMD instruction and a plain module holding any. The
   modules hold SIMD loads, stores and constants and no lane arithmetic.
   Nothing published changes.
+- `ImageCache::insert` takes the frame's `ContentId` beside its key,
+  `ImageCache::get` takes a `FrameSource` and returns a `FrameLookup` rather
+  than an `Option`, and `StackSequence::samples_for_upload` takes a
+  `FrameSource` and can fail with the new `ScrollError::Stale`. A caller
+  passes the identity of the bytes it decoded.
+- `DicomwebClient` now sends every request with the fetch cache mode
+  `"no-cache"` unless its `cache` option says otherwise. It used to send no
+  mode, so a browser applied `"default"` and could serve a re-processed
+  object from its HTTP cache by heuristic freshness without asking the
+  server. A server with validators answers an unchanged object with 304.

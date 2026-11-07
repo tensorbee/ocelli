@@ -1,6 +1,6 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055, F-X004, F-209
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055, F-X004, F-209, F-224
 **Last updated:** 2026-11-07
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
@@ -152,8 +152,11 @@ before that index. ICC stays unavailable.
 It does not read image position, instance number or slice location.
 `scroll_by` adds a signed delta and clamps to the list. It does not wrap.
 An empty sequence has no index. `samples_for_upload` calls `ImageCache::get`
-for the selected key only. A miss is `NotResident` and returns no neighbour
-bytes. An empty sequence is `Empty`.
+for the selected key only, with the `FrameSource` of the bytes and metadata
+the caller now holds. A hit returns the frame's own samples. A miss is
+`NotResident` and returns no neighbour bytes. A frame held under the key from
+other bytes or other metadata is `Stale` and has been removed by the lookup.
+An empty sequence is `Empty`.
 
 Prefetch radius is one. `prefetch_keys` is the index minus one and the index
 plus one, when those indices exist. It does not decode and it does not

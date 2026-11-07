@@ -391,7 +391,7 @@ writeFrame({ memory }, sessionBulkSink(session), sampleBytes, {
     <p>For this call the session object needs the module's <code>commit_frame</code> export too. <code>holdSessionBytes(wasm, bytes, previousTicket)</code> copies a whole response into the session's one bulk slot and returns its ticket without parsing it. That slot is the only bulk allocation, so other writes refuse until <code>release_bulk</code> drops the ticket.</p>
 
     <h3 id="js-dicomweb"><span class="num">5.6</span>DICOMweb</h3>
-    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes five options.</p>
+    <p><code>DicomwebClient</code> is a bounded QIDO-RS, WADO-RS and WADO-URI GET client. Its constructor takes six options.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Option</th><th>Type</th></tr></thead>
       <tbody>
@@ -400,6 +400,7 @@ writeFrame({ memory }, sessionBulkSink(session), sampleBytes, {
         <tr><td><code>fetch</code></td><td><code>typeof fetch</code>, so authentication stays yours</td></tr>
         <tr><td><code>wasm</code></td><td><code>WasmMemory</code>, an object with <code>memory</code></td></tr>
         <tr><td><code>sink</code></td><td><code>DicomwebResponseSink</code>, with <code>alloc(len)</code> and <code>commit_dicomweb_response(ptr, len, kind)</code></td></tr>
+        <tr><td><code>cache</code></td><td><code>DicomwebCacheMode</code>, optional, the fetch cache mode of every request. <code>"no-cache"</code> by default, which revalidates a stored response with the server before using it. <code>"no-store"</code>, <code>"reload"</code> and <code>"default"</code> are accepted, and <code>"default"</code> opts in to the browser's heuristic freshness. Any other value, <code>"force-cache"</code> and <code>"only-if-cached"</code> among them, is refused at construction with <code>DicomwebError</code> code <code>InvalidRequest</code></td></tr>
       </tbody>
     </table></div>
     <p>Each method validates its UIDs, fetches with the right <code>Accept</code> header, checks the content type and copies the body into memory once. It resolves to nothing. The body reaches you through the sink, with a <code>kind</code> object whose <code>type</code> is <code>qido-json</code>, <code>wado-uri-part10</code>, <code>wado-rs-instances</code> or <code>wado-rs-frames</code>.</p>
@@ -444,6 +445,20 @@ try {
 }</code></pre>
     <p>That sink is the caller's, because the wasm session has no <code>commit_dicomweb_response</code> export yet. The Rust parser for these bodies exists as <code>ocelli_dicom::DicomwebSource</code>, shown in the Rust chapter, but no wasm export joins the two today.</p>
     <p><code>postWadoInstance</code> wraps exactly this pattern for one instance. The example viewer uses it to hand a WADO-RS body to its worker.</p>
+    <p>It takes eight options, and an option it does not know is refused with <code>OcelliError</code> code <code>UnknownOption</code>.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Option</th><th>Type</th></tr></thead>
+      <tbody>
+        <tr><td><code>studiesServiceUrl</code></td><td><code>string</code>, passed to the client</td></tr>
+        <tr><td><code>wadoUriUrl</code></td><td><code>string</code>, passed to the client</td></tr>
+        <tr><td><code>fetch</code></td><td><code>typeof fetch</code>, passed to the client</td></tr>
+        <tr><td><code>studyUid</code></td><td><code>string</code>, the Study Instance UID</td></tr>
+        <tr><td><code>seriesUid</code></td><td><code>string</code>, the Series Instance UID</td></tr>
+        <tr><td><code>instanceUid</code></td><td><code>string</code>, the SOP Instance UID</td></tr>
+        <tr><td><code>post</code></td><td><code>(bytes: Uint8Array, boundary: string) =&gt; void</code>, called once with the response body and its multipart boundary</td></tr>
+        <tr><td><code>cache</code></td><td><code>DicomwebCacheMode</code>, optional, passed to the client, so <code>"no-cache"</code> when it is left out</td></tr>
+      </tbody>
+    </table></div>
 <pre><code>import { postWadoInstance } from "@ocelli/core";
 
 await postWadoInstance({
@@ -744,7 +759,20 @@ for event in events.events() {
 let gone = bricks.release_volume(VolumeId(2));          // bricks: BrickCache
 let _ = (gone.entries, gone.bytes);                     // every level of volume 2
 let _ = volumes.remove(&amp;VolumeKey { series: SeriesId(5) }); // volumes: VolumeCache</code></pre>
+    <p>A key is the caller's slot, and it says nothing about which bytes fill it. So <code>ImageCache</code> keeps beside each frame the <code>ContentId</code> of the bytes it was decoded from, FNV-1a 64 over the length-prefixed SOP Instance UID, transfer syntax UID and encoded bytes. A lookup presents a <code>FrameSource</code>, and it is a hit only when that id, the stored pixel description and the image plane all equal the held frame's. Anything else removes the held frame and answers <code>Stale</code> with the bytes that left, without an event, so a re-processed object put in the same slot is never served the old frame. The decoded tier saves a decode and never a fetch, so whether the bytes are fresh is the transport's question, which <code>DicomwebClient</code>'s <code>cache</code> option answers.</p>
+<pre><code>use ocelli_cache::{ContentId, FrameKey, FrameLookup, FrameSource, ImageCache, SeriesId};
+
+let key = FrameKey::new(SeriesId(5), 0, 0);
+let content = ContentId::of(sop_uid, transfer_syntax_uid, &amp;encoded);
+let _ = images.insert(key, content, frame);              // images: ImageCache
+let source = FrameSource { content, description, plane };
+match images.get(&amp;key, &amp;source) {
+    FrameLookup::Hit(frame) =&gt; {}                        // decoded from these bytes
+    FrameLookup::Miss =&gt; {}
+    FrameLookup::Stale { bytes } =&gt; {}                   // other bytes or metadata, now removed
+}</code></pre>
     <p>The cache has no study. A study is released by whoever owns it calling <code>release_series</code> for each of its series, <code>VolumeCache::remove</code> for each of its volumes and <code>release_volume</code> for each of its bricked volumes. This folder viewer releases by file instead: opening another folder or the synthetic study sends the left folder's ids to <code>POST /forget</code>, which drops each file and every frame of it from the local process.</p>
+    <p>The page keys every grey it keeps by the file object a folder choice gave it, so choosing the same folder again reads the files again. A file rewritten on disk after the folder was opened is found when the window regains focus, when the page becomes visible again, when a series is selected or when another viewport becomes active, by reading one byte of each file of the active series, four at a time. A file the browser refuses to read is forgotten through <code>POST /forget</code>, and its viewport, or its tile in Four images, reads "This file changed or was removed on disk after the folder was opened. Open the folder again to see it." A modification time that moved counts as a change even when the bytes are the same. A rewrite that keeps the modification time is not detected, and the held image stays until the folder is opened again. A change is noticed at the next focus, return to the page, series selection or change of active viewport. Only Chromium was measured.</p>
     <p><code>ocelli_volume::group_volumes</code> splits decoded frames by frame of reference and orientation together, so a localiser mixed with axials is two candidates. <code>Volume::assemble</code> then refuses a candidate that is not one volume.</p>
 <pre><code>use ocelli_volume::{group_volumes, FrameOfReferenceUid, Volume};
 

@@ -832,6 +832,30 @@ def _forget_check_accepts_a_late_post(box: Sandbox) -> None:
     )
 
 
+def _changed_check_accepts_the_old_image(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (changed.fault !== CHANGED_SENTENCE) {",
+        "    if (false) {",
+    )
+
+
+def _changed_check_accepts_claimed_detection(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (restored.fault !== \"\") {",
+        "    if (false) {",
+    )
+
+
+def _changed_check_accepts_a_whole_file_read(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (probe.bytes !== probe.files) {",
+        "    if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13952,6 +13976,96 @@ GUARDS: tuple[Guard, ...] = (
               "watched by the `viewer-browser` gate and its CI job. The 410, "
               "beacon count, beacon size, held-after and not-observed "
               "branches have no probe.",
+    ),
+    Guard(
+        id="viewer-browser.changed",
+        file="examples/folder-viewer/tests/browser/changed.mjs",
+        gate="viewer-browser",
+        spec="F-224 design AC13 to AC17, the folder viewer refuses to show "
+             "a file that changed on disk",
+        refuses="A file rewritten with a later modification time whose image "
+                "the viewport still shows after a focus, a status line that "
+                "does not count it, a process that still holds it or "
+                "answers other than 410 for its id, another image of the "
+                "series that does not draw, a folder chosen again whose "
+                "canvas is not the process grey of the new bytes, a rewrite "
+                "with its modification time restored that the page marks or "
+                "whose held image it drops before a new open, a held reply of "
+                "the old bytes that is painted or kept after the change, a "
+                "thumbnail still drawn from a changed file, a four-image view "
+                "where a changed tile lacks the sentence or an unchanged tile "
+                "does not draw, a status that counts another series after a "
+                "viewport becomes active or an activation that does not find "
+                "a change, a series selection that does not read one byte of "
+                "each file at most four at a time in under 1 s, and a run in "
+                "which a case was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `changedProblems`, which the script prints and "
+               "exits 1 on, and the probes below drive three of its branches.",
+        probes=(
+            Probe(
+                "viewer-browser.changed-old-image",
+                _changed_check_accepts_the_old_image,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ changed: { fault: '' "
+                    "} });\n"
+                    "if (problems.some((line) => line.includes('not the "
+                    "changed-file sentence'))) process.exit(0);\n"
+                    "console.error('changed check accepted the old image of a "
+                    "changed file'); process.exit(1);",
+                ),
+                "changed check accepted the old image of a changed file",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.changed-claimed-detection",
+                _changed_check_accepts_claimed_detection,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ restored: { fault: "
+                    "'marked' } });\n"
+                    "if (problems.some((line) => line.includes('detection the "
+                    "page does not claim'))) process.exit(0);\n"
+                    "console.error('changed check accepted detection of a "
+                    "restored modification time'); process.exit(1);",
+                ),
+                "changed check accepted detection of a restored modification "
+                "time",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.changed-whole-file",
+                _changed_check_accepts_a_whole_file_read,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ probe: { files: 3, "
+                    "reads: 3, bytes: 1200, peak: 4, ms: 5 } });\n"
+                    "if (problems.some((line) => line.includes('not one "
+                    "each'))) process.exit(0);\n"
+                    "console.error('changed check accepted a probe that reads "
+                    "whole files'); process.exit(1);",
+                ),
+                "changed check accepted a probe that reads whole files",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the old-image, restored-detection and "
+              "whole-file branches. The observation itself needs Chromium "
+              "and a release build of the viewer, which a disposable sandbox "
+              "does not have, so it is watched by the `viewer-browser` gate "
+              "and its CI job. The status, held count, 410, other-image, "
+              "chosen-again, restored-grey, held-reply, thumbnail, tile, "
+              "two-cell, read count, width, time and not-observed branches "
+              "have no probe.",
     ),
     Guard(
         id="bench.cold-start",

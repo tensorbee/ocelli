@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   DicomwebClient,
   DicomwebError,
+  OcelliError,
+  type DicomwebClientOptions,
   type DicomwebResponseKind,
   type DicomwebResponseSink,
   type WasmMemory,
@@ -75,6 +77,47 @@ function ok(body: BodyInit, contentType: string): Response {
     status: 200,
     headers: { "Content-Type": contentType },
   });
+}
+
+/** One valid response per request kind, so every kind reaches its commit. */
+function okForAnyKind(input: RequestInfo | URL): Response {
+  const path = new URL(String(input)).pathname;
+  if (path.endsWith("/frames/1")) {
+    return ok(
+      "frames",
+      'multipart/related; type="application/octet-stream"; boundary=frame-edge',
+    );
+  }
+  if (path.endsWith("/2.25.3")) {
+    return ok(
+      "instance",
+      'multipart/related; type="application/dicom"; boundary="instance-edge"',
+    );
+  }
+  if (path === "/wado") {
+    return ok("part10", "application/dicom");
+  }
+  return ok("[]", "application/dicom+json");
+}
+
+/**
+ * Options with one key the public type rejects. The own property is still
+ * there at run time, which is what the constructor reads.
+ */
+function optionsWith(
+  fetcher: typeof fetch,
+  key: string,
+  value: unknown,
+): DicomwebClientOptions {
+  const fixture = responseSink();
+  return {
+    studiesServiceUrl: "https://example.test/dicomweb/",
+    wadoUriUrl: "https://example.test/wado",
+    fetch: fetcher,
+    wasm: fixture.wasm,
+    sink: fixture.sink,
+    [key]: value,
+  } as DicomwebClientOptions;
 }
 
 describe("DicomwebClient, DICOM PS3.18 2026c", () => {
@@ -458,6 +501,93 @@ describe("DicomwebClient, DICOM PS3.18 2026c", () => {
         ),
       ).rejects.toMatchObject({ code: "InvalidRequest" });
     }
+    expect(calls).toBe(0);
+  });
+
+  it("sends the cache mode on every request", async () => {
+    const inits: Array<RequestInit | undefined> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      inits.push(init);
+      return okForAnyKind(input);
+    };
+    const everyKind = async (client: DicomwebClient): Promise<void> => {
+      await client.searchStudies();
+      await client.searchSeries("2.25.1");
+      await client.searchInstances("2.25.1", "2.25.2");
+      await client.retrieveInstance("2.25.1", "2.25.2", "2.25.3");
+      await client.retrieveFrames(
+        "2.25.1",
+        "2.25.2",
+        "2.25.3",
+        [1],
+        "application/octet-stream",
+      );
+      await client.retrieveWadoUri("2.25.1", "2.25.2", "2.25.3");
+    };
+
+    // No cache option. Every request asks the server before a stored
+    // response is used, which is the "no-cache" mode and not the Fetch
+    // default that RFC 9111's heuristic freshness can serve stale.
+    const { client } = makeClient(fetcher);
+    await everyKind(client);
+    expect(inits).toHaveLength(6);
+    for (const init of inits) {
+      expect(init?.cache, "without the option").toBe("no-cache");
+    }
+
+    // Each accepted value is sent unchanged, on every kind.
+    for (const cache of ["no-cache", "no-store", "reload", "default"] as const) {
+      inits.length = 0;
+      const fixture = responseSink();
+      const explicit = new DicomwebClient({
+        studiesServiceUrl: "https://example.test/dicomweb/",
+        wadoUriUrl: "https://example.test/wado",
+        fetch: fetcher,
+        wasm: fixture.wasm,
+        sink: fixture.sink,
+        cache,
+      });
+      await everyKind(explicit);
+      for (const init of inits) {
+        expect(init?.cache, cache).toBe(cache);
+      }
+    }
+  });
+
+  it("refuses a cache mode that can serve a stale response", () => {
+    let calls = 0;
+    const fetcher: typeof fetch = async () => {
+      calls += 1;
+      return ok("[]", "application/dicom+json");
+    };
+    for (const cache of ["force-cache", "only-if-cached", "nocache"]) {
+      let caught: unknown;
+      try {
+        new DicomwebClient(optionsWith(fetcher, "cache", cache));
+      } catch (error: unknown) {
+        caught = error;
+      }
+      expect(caught, cache).toBeInstanceOf(DicomwebError);
+      if (!(caught instanceof DicomwebError)) {
+        throw new Error(`expected DicomwebError for ${cache}`);
+      }
+      expect(caught.code, cache).toBe("InvalidRequest");
+    }
+
+    // A misspelled key is F-230's own-key refusal, which names the key, and
+    // not a transport class.
+    let typo: unknown;
+    try {
+      new DicomwebClient(optionsWith(fetcher, "cahce", "no-store"));
+    } catch (error: unknown) {
+      typo = error;
+    }
+    expect(typo).toBeInstanceOf(OcelliError);
+    if (!(typo instanceof OcelliError)) {
+      throw new Error("expected OcelliError for the misspelled key");
+    }
+    expect(typo.code).toBe("UnknownOption");
+    expect(typo.option).toBe("cahce");
     expect(calls).toBe(0);
   });
 });

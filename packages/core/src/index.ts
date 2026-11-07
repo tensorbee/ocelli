@@ -52,6 +52,7 @@ export { OcelliError } from "./ocelli-error.js";
 export { postWadoInstance } from "./instance-bytes.js";
 export type { WadoInstanceRequest } from "./instance-bytes.js";
 export type {
+  DicomwebCacheMode,
   DicomwebClientOptions,
   DicomwebErrorCode,
   QidoSearchOptions,

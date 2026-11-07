@@ -14,6 +14,10 @@
 //! upload takes that brick by value and drops it after the copy. There is
 //! still no `wgpu` dependency, because this crate never sees a texture, only
 //! its size.
+//!
+//! F-224 adds the decoded tier's frame identity: `ContentId`, `FrameSource`
+//! and `FrameLookup` in `image`, so a held frame is served only for the
+//! bytes it was decoded from.
 
 #![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
@@ -32,9 +36,9 @@ pub use brick::{
     VolumeId,
 };
 pub use image::{
-    CacheEvent, CacheEvents, DecodedFrame, FrameKey, HandoffError, HandoffMeta, ImageCache,
-    KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED, KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED,
-    RingEvent, SeriesId,
+    CacheEvent, CacheEvents, ContentId, DecodedFrame, FrameKey, FrameLookup, FrameSource,
+    HandoffError, HandoffMeta, ImageCache, KIND_BUDGET_CHANGED, KIND_DISPLACED, KIND_EVICTED,
+    KIND_PRESSURE, KIND_REFUSED, KIND_RELEASED, RingEvent, SeriesId,
 };
 pub use lru::{Admission, Budgeted, Lru};
 pub use profile::{LoadProfile, LoadSpec, profile_load};

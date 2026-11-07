@@ -65,7 +65,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs and forget.mjs (F-208, F-209, F-226)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs and changed.mjs (F-208, F-209, F-226, F-224)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -161,7 +161,10 @@ run_gate() {
     # still each hide the readout, and a move shows it again. F-209's
     # reference line check follows, then F-226's forget check: the process
     # forgets the folder the page left, a late reply does not post the old
-    # file again, and leaving the page forgets the folder open. Chained on
+    # file again, and leaving the page forgets the folder open. F-224's
+    # changed-file check is last: a file rewritten on disk after the folder
+    # was opened is refused rather than shown, choosing the folder again
+    # shows the new bytes, and the probe reads one byte a file. Chained on
     # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
     # the viewer, so it is outside the floor. The CI step that runs it is the
     # `viewer-browser` job, which installs both.
@@ -174,7 +177,8 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/aspect.mjs &&
                  node examples/folder-viewer/tests/browser/readout.mjs &&
                  node examples/folder-viewer/tests/browser/link.mjs &&
-                 node examples/folder-viewer/tests/browser/forget.mjs ;;
+                 node examples/folder-viewer/tests/browser/forget.mjs &&
+                 node examples/folder-viewer/tests/browser/changed.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
