@@ -215,3 +215,12 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 - **Doctests are code.** The scanner reads the Rust code fences of doc comments as code and reports `unsafe` there, because no lint table reaches a doctest. The documents say exactly which targets the lint reaches and that the scanner covers doctests.
 - **A weakening attribute is found with any whitespace or comment between `#` and `[`.**
 - **The two `guards-deep` lint-policy probes are corrected here.** Their expected `#[path]` count is the one measured on the tree, because the floor and the sprint gate run them.
+
+### Lead rulings after review pass 2
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-2.md`, which measured that rustdoc compiles fences the scanner reads as prose.
+
+- **Fail closed in doc text.** Every line of doc text, meaning `///`, `//!`, `/** */`, `/*! */` and the string of a `#[doc = ...]` or `#![doc = ...]` attribute, is scanned as code for the `unsafe` keyword, except inside a fence that rustdoc would not compile. Prose that only names the word is not a finding, so the scanner reports `unsafe` in doc text only where it is followed by `{`, `fn`, `impl`, `trait` or `extern`, the forms that compile.
+- **A fence is non-Rust only by rustdoc's rule.** Backtick and tilde fences are both read. A fence is skipped only when its info string carries a word rustdoc does not recognise as a Rust attribute and no `rust` word. The recognised list is taken from rustdoc's documentation for the pinned toolchain, and the implementer cites the page. An indented block, a block quote or a fence split by a plain comment line needs no special case under this rule, because skipping is the only thing a fence can cause.
+- **The unclosed-fence branch is pinned by a test.** One red-first test per recognised tag class, plus tilde, `#[doc]` and indented forms.
+- **Prose states the rule.** Every sentence that claims doctest coverage says exactly this rule and nothing wider. The two `#[path]` probe notes say one module landed and the planted module is the third.
