@@ -177,7 +177,8 @@ DICOM files on this machine, use the local series page below.
 
 `examples/folder-viewer` lists series from a folder you choose and shows them
 in up to nine viewports, from 1 by 1 to 3 by 3. Each viewport has its own
-series, image, zoom, pan and window. It listens on this machine only.
+series, image, zoom, pan and window, and Link can make the others follow the
+outlined one's scroll, window and zoom. It listens on this machine only.
 
 ```bash
 cargo run --release -p ocelli-folder-viewer
@@ -215,7 +216,20 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    that series keeps its view. Opening a folder
    puts the series with the most images in the first viewport and the next
    series in list order into each other viewport. A viewport with no series
-   reads "Drag a series here."
+   reads "Drag a series here." Link opens three switches, Scroll, Window and
+   Zoom, which are off at load and act on every visible viewport as one set,
+   with the outlined viewport as the source. Scroll moves each other viewport
+   to its image nearest the source image's position, when both series share a
+   Frame of Reference UID and the cosine of the angle between their planes
+   is above 0.9, which is under about 26 degrees. Window copies the source's window when a W/L drag ends, on a
+   preset and on Reset. A preset is not sent to a viewport whose image is not
+   CT, and no window is sent to one whose image is not monochrome. Zoom
+   copies the source's zoom over each viewport's own fit, and pan is not
+   copied. A click on a series row is a new load and copies nothing.
+   Reference lines, on at load, draw a yellow line in each other viewport
+   where the source image's plane cuts it, when both share a Frame of
+   Reference UID and the planes are not parallel. The local process chooses
+   the image and computes the line, through `ocelli_viewport::link`.
 5. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
    and starts at 10.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
@@ -224,8 +238,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
    view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
    (Pointer cross, Magnifier, Corners, Orientation letters), the layout
-   (Layout `G`, which opens a 3 by 3 picker, and Four images `Shift G`,
-   which shows four neighbouring images in the outlined viewport), and Key
+   (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
+   which shows four neighbouring images in the outlined viewport, Link and
+   Reference lines, which have no key), and Key
    image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
    Key image and Headers act on the outlined viewport.
    Scroll starts active. The right column holds the window presets, the marks
@@ -294,7 +309,10 @@ does not draw. Use explains the JavaScript, React and Rust calls.
 
 A file that is not a Part 10 DICOM object is skipped and counted. A colour
 frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window
-center and a window width stays on a fixed error sentence.
+center and a window width stays on a fixed error sentence. The corner of an
+image that is not monochrome reads `Window not applicable`, and its window
+presets are off. A series of more than 65536 images is not linked: it does
+not scroll with the others and has no reference line.
 
 The page HTML is compiled into the binary. After a change under
 `examples/folder-viewer`, build again and start that new process.

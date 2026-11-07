@@ -681,6 +681,19 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p><code>ocelli_viewport::link</code> links two viewports from their planes. <code>same_frame_of_reference</code> is true only when both Frame of Reference UIDs are present and equal, so a missing UID links nothing. <code>closest_coplanar</code> answers the index in a target stack whose Image Position (Patient) is nearest the source's, keeping the lower index on a tie, and is <code>LinkError::NotCoplanar</code> when the absolute dot product of the source normal and the shown target normal is not above <code>COPLANAR_DOT</code>, 0.9. <code>reference_segment</code> answers where the source plane cuts the target, as two points in the target's index space with the first pixel centre at 0, and is <code>LinkError::Parallel</code> when the absolute dot product is above <code>1 - PLANE_EPSILON</code>. Both are <code>LinkError::Degenerate</code> for a point or distance that is not finite, and <code>reference_segment</code> is too for a target with a zero spacing on its single row or column. The two constants are cornerstone3D 5.8.2's. <code>SyncScene</code> uses the same UID rule.</p>
+<pre><code>use ocelli_viewport::link::{
+    closest_coplanar, reference_segment, same_frame_of_reference, FrameOfReferenceUid, LinkError,
+};
+
+if same_frame_of_reference(Some(&amp;source_uid), Some(&amp;target_uid)) {
+    let next = closest_coplanar(&amp;source_plane, &amp;shown_plane, &amp;target_planes)?;
+    match reference_segment(&amp;source_plane, &amp;target_planes[next]) {
+        Ok((start, end)) =&gt; { /* column x and row y in the target's index space */ }
+        Err(LinkError::Parallel) =&gt; {}
+        Err(_) =&gt; {}
+    }
+}</code></pre>
     <p>PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as the Imager Pixel Spacing, so an equal pair takes the imager path. The pair is equal when both halves agree within <code>ocelli_core::SPACING_EQUALITY_MM</code>, the same rule <code>ImagerAgrees</code> uses. With a magnification factor the source is <code>"imager-spacing"</code>. With none it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A factor that is present but not finite, or not strictly positive, is refused, as it is without Pixel Spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
