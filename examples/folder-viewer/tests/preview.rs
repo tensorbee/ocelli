@@ -3529,3 +3529,86 @@ fn long_exchange(addr: SocketAddr, request: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|error| error.to_string())?;
     Ok(response)
 }
+
+/// The text of `function <name>(` up to the first line that is `}`.
+fn function_body<'a>(page: &'a str, name: &str) -> Result<&'a str, String> {
+    let at = page
+        .find(&format!("\nfunction {name}("))
+        .ok_or_else(|| format!("the page has no {name}"))?;
+    page.get(at..)
+        .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| format!("{name} does not close"))
+}
+
+#[test]
+fn the_page_links_viewports() -> Result<(), String> {
+    // AC15. The page text is read, not executed. B1 to B3 are separate.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    for needle in [
+        "fetch(\"/link\"",
+        "id=\"link\"",
+        "id=\"link-menu\"",
+        "id=\"link-scroll\"",
+        "id=\"link-window\"",
+        "id=\"link-zoom\"",
+        "id=\"toggle-reference\"",
+        "class=\"ref-lines\"",
+        "Window not applicable",
+        "This image is not monochrome, so it has no window to set.",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the page does not link viewports: {needle}"));
+        }
+    }
+    // The line layer is a sibling of ink inside the stage, before it, so
+    // marks draw over the line and nothing that rebuilds ink erases it.
+    let template_at = page
+        .find("<template id=\"cell-template\">")
+        .ok_or_else(|| "no cell template".to_owned())?;
+    let template = page
+        .get(template_at..)
+        .and_then(|rest| rest.find("</template>").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the template does not close".to_owned())?;
+    let refs = template
+        .find("<svg class=\"ref-lines\"")
+        .ok_or_else(|| "the template has no line layer".to_owned())?;
+    let ink = template
+        .find("<svg class=\"ink\"")
+        .ok_or_else(|| "the template has no ink".to_owned())?;
+    let ink_close = template
+        .get(refs..)
+        .and_then(|rest| rest.find("</svg>"))
+        .map(|end| refs + end);
+    if refs > ink || ink_close.is_none_or(|end| end > ink) {
+        return Err("the line layer is not a sibling before ink".to_owned());
+    }
+    if function_body(page, "renderInk")?.contains("ref-lines")
+        || function_body(page, "renderInk")?.contains(".refs")
+    {
+        return Err("renderInk writes the line layer".to_owned());
+    }
+    // The page never reads a plane token: no `.planes[` is followed by a
+    // `.split(` on the same line, and no token is split anywhere.
+    for line in page.lines() {
+        if let Some(at) = line.find(".planes[")
+            && line.get(at..).is_some_and(|rest| rest.contains(".split("))
+        {
+            return Err(format!("the page splits a plane token: {line}"));
+        }
+    }
+    if page.contains("token.split(") || page.contains("planeToken(image).split(") {
+        return Err("the page splits a plane token".to_owned());
+    }
+    // No key is bound for the link, so F-213 keeps the digits.
+    if function_body(page, "onKey")?.contains("setLink(")
+        || function_body(page, "onKey")?.contains("setReference(")
+    {
+        return Err("onKey binds a link key".to_owned());
+    }
+    Ok(())
+}
