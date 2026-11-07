@@ -128,10 +128,11 @@ const META = { viewport: 1, columns: 1, rows: 1, generation: 1 };
  * Node has no `OffscreenCanvas` or `ImageData`. `publishCpuCanvas` needs both
  * to retain and blit a frame, so this test supplies the smallest objects the
  * wasm side reads: a canvas with width, height and a 2d context, and an
- * `ImageData` with a clamped array. `putImageData` is a no-op because the
- * observation is the event, not the pixels. The globals are installed once
- * for the file and do not affect the other tests, which never call the CPU
- * canvas exports.
+ * `ImageData` with a clamped array. `putImageData` records the blitted image
+ * and counts the blits, which is how the transferred-frame test observes the
+ * kept frame's pixels across its refusals. The globals are installed by the
+ * tests that call the CPU canvas exports, and the recording changes nothing
+ * they observe: those tests read the drained ring, never the recording.
  */
 class StubImageData {
   readonly data: Uint8ClampedArray;
@@ -142,8 +143,15 @@ class StubImageData {
 }
 
 class StubContext {
-  putImageData(...args: unknown[]): void {
-    void args;
+  /** The image of the latest blit, null before the first. */
+  lastImage: StubImageData | null = null;
+  /** How many times the wasm side blitted. */
+  blits = 0;
+
+  putImageData(image: unknown, ...rest: unknown[]): void {
+    void rest;
+    this.blits += 1;
+    this.lastImage = image instanceof StubImageData ? image : null;
   }
 }
 
@@ -155,6 +163,20 @@ class StubCanvas {
   getContext(kind: string): StubContext | null {
     return kind === "2d" ? this.context : null;
   }
+
+  /** The blit recording, for the kept-frame comparison in the transferred-frame test. */
+  get recording(): StubContext {
+    return this.context;
+  }
+}
+
+/** The blitted pixels of a stub canvas, failing the test if nothing blitted. */
+function blittedPixels(canvas: StubCanvas): number[] {
+  const image = canvas.recording.lastImage;
+  if (image === null) {
+    throw new Error("the publish did not blit");
+  }
+  return Array.from(image.data);
 }
 
 function installCanvasStubs(): void {
@@ -288,8 +310,14 @@ describe("wasm session boundary", () => {
     // copy of the writeStack test above. With the epoch writeStack
     // returned and the current index the frame commits, and a stale epoch
     // or a different index is the coded refusal. The slot is released by
-    // the session inside the refused export, so bulk_ticket() answers 0
-    // and the committed frame at slice 0 is kept.
+    // the session inside the refused export, so bulk_ticket() answers 0.
+    // The committed frame is kept: an interaction publish before the
+    // refusals and one after hand the stub canvas the same image, each
+    // observation counting its blit, so a refusal that cleared or replaced
+    // the retained frame fails the comparison or the count. The plain
+    // publish cannot make the second observation, because a settled
+    // presentation draws idle and blits nothing.
+    installCanvasStubs();
     const wasm = await loadModule();
     const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));
     const epoch = writeStack(wasm, keys);
@@ -298,6 +326,8 @@ describe("wasm session boundary", () => {
     const meta = { series: 5, instance: 0, frame: 0, bytes: 4 };
     const target = { viewport: 1, columns: 1, rows: 1, generation: 1 };
     const sliceIndex = () => readViewportState(wasm.copy_state())?.sliceIndex;
+    const canvas = new StubCanvas();
+    wasm.bindCpuCanvas(canvas, 80, 40, 1);
 
     acceptTransferredFrame(
       { memory: wasm.memory },
@@ -308,6 +338,9 @@ describe("wasm session boundary", () => {
     );
     expect(wasm.bulk_ticket()).toBe(0);
     expect(sliceIndex()).toBe(0);
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(1);
+    const kept = blittedPixels(canvas);
 
     expect(
       codeOf(() =>
@@ -335,6 +368,10 @@ describe("wasm session boundary", () => {
     ).toBe("CommitRefused");
     expect(wasm.bulk_ticket()).toBe(0);
     expect(sliceIndex()).toBe(0);
+
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(2);
+    expect(blittedPixels(canvas)).toEqual(kept);
 
     // The refusals leave the slot free, so the next current transfer
     // commits through the same caller.
