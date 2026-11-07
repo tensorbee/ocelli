@@ -11,6 +11,7 @@
 //! row reads "Types, coordinate spaces, geometry primitives, error model. No
 //! I/O." It is re-exported the same way.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 pub mod error;

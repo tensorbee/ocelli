@@ -210,6 +210,10 @@ class Tokenizer(StagedIndex):
             'pub const AFTER_A_CHAR: &str = "unsafe";\n'
             "// unsafe inside a line comment\n"
             "/// unsafe inside a doc comment\n"
+            # N2, review pass 2. `////` is a divider comment, which
+            # rustdoc does not read as documentation, so an `unsafe {` on
+            # one is still not a finding.
+            "//// unsafe { 0 }\n"
             "/* /* unsafe */ unsafe */\n"
             "pub const IN_AN_IDENTIFIER: usize = is_unsafe;\n"
             "pub fn r#unsafe() {}\n")
@@ -258,6 +262,107 @@ class Tokenizer(StagedIndex):
             self.assertEqual(code, 1)
             self.assertIn("unsafe_code` lowered", output)
 
+    def test_unsafe_attribute_is_reported(self):
+        # D1, review pass 1. `#[unsafe(no_mangle)]` is edition 2024's only
+        # accepted spelling and rustc refuses it with "declaration of a
+        # `no_mangle` function", so the attribute body is code and not a
+        # suppression. The old scanner dropped every token between `#[` and
+        # `]`, which also blinded the vendored count to the same shape.
+        for source in ('#[unsafe(no_mangle)]\npub fn planted() -> i32 { 0 }\n',
+                       '#[unsafe(export_name = "planted")]\npub fn f() {}\n',
+                       '#[cfg_attr(all(), unsafe(no_mangle))]\n'
+                       'pub fn planted() -> i32 { 0 }\n'):
+            self.write("crates/example/tests/ui/planted.rs", source)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("crates/example/tests/ui/planted.rs:1", output)
+
+    def test_unterminated_attribute_is_refused(self):
+        # D1, review pass 1. An attribute still open at end of file is a
+        # lexically broken file. The old scanner returned without a refusal,
+        # so every `unsafe` after an unclosed `#[` was hidden.
+        for source in ("#[cfg(any())\npub unsafe fn planted() {}\n",
+                       "#[derive(\npub fn g() { unsafe { 1 } }\n"):
+            self.write("crates/example/tests/ui/planted.rs", source)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("crates/example/tests/ui/planted.rs:1", output)
+            self.assertIn("unterminated attribute", output)
+
+    def test_weakening_attribute_with_space_or_comment_is_refused(self):
+        # S1, review pass 1. `#`, an optional `!` and `[` are three tokens,
+        # and Rust allows whitespace and comments between any two of them.
+        # rustc 1.97.1 compiled `# [allow(unsafe_code)] mod m` holding an
+        # unsafe block with warnings only, so the refusal must find the
+        # spaced spellings and not only the tight one.
+        for attribute in ("# [allow(unsafe_code)]\npub fn clean() {}\n",
+                          "#! [allow(unsafe_code)]\npub fn clean() {}\n",
+                          "#/**/[allow(unsafe_code)]\npub fn clean() {}\n"):
+            self.write("crates/example/tests/ui/planted.rs", attribute)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("unsafe_code` lowered", output)
+
+    def test_line_count_survives_trivia_inside_an_attribute_opener(self):
+        # N1, review passes 2 to 4. The newline between `#` and `[` is
+        # counted once the `[` is found, so a finding after the attribute
+        # names its own line. Without that the planted block is reported
+        # one line early.
+        self.write(
+            "crates/example/src/lib.rs",
+            "#\n"                                   # line 1
+            "[allow(dead_code)]\n"                  # line 2
+            "pub fn planted() { unsafe { 0 }; }\n") # line 3, refused
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/example/src/lib.rs:3:", output)
+        self.assertNotIn("crates/example/src/lib.rs:2:", output)
+
+    def test_doc_text_is_comment_text(self):
+        # Lead ruling after review pass 3. A doctest is refused by rustc,
+        # through `#![doc(test(attr(forbid(unsafe_code))))]` at each member
+        # library root, which scripts/lint_policy_check.py checks present.
+        # The scanner does not read doc text, so `unsafe` in a doc comment
+        # or a doc attribute's string, fenced or not, is not a finding here.
+        self.write(
+            "crates/example/src/lib.rs",
+            "/// ```\n"
+            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
+            "/// ```\n"
+            "//! unsafe fn f() {}\n"
+            "/** ```\n"
+            " * unsafe { 0 }\n"
+            " * ``` */\n"
+            "/*! ```\n"
+            "unsafe { 0 }\n"
+            "``` */\n"
+            '#[doc = "```\\nlet _x = unsafe { 0 };\\n```"]\n'
+            '#[doc = r#"unsafe impl Send for X {}"#]\n'
+            "pub fn clean() {}\n")
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 0, output)
+
+    def test_code_after_doc_text_is_still_read(self):
+        # Doc comments are skipped whole, as comments, so the code after
+        # one is code. A doc string holding a quote does not open a string
+        # that blanks the planted line, and neither does a block doc
+        # comment holding one.
+        self.write(
+            "crates/example/src/lib.rs",
+            '/// say "\n'                                  # line 1
+            '/** say " */\n'                              # line 2
+            '#[doc = "say \\""]\n'                       # line 3
+            "pub fn planted() { unsafe { 0 }; }\n"        # line 4, refused
+            'pub const S: &str = "x";\n')
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/example/src/lib.rs:4", output)
 
 if __name__ == "__main__":
     unittest.main()

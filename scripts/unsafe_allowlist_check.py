@@ -24,14 +24,29 @@ nested block comments, string literals, byte strings, C strings, raw
 strings of any hash count in their byte and C forms, character and byte
 literals, lifetimes and labels, and raw identifiers, and reports `unsafe`
 only as a keyword token: `r#unsafe` is an identifier and is not reported.
-An unterminated literal or comment is a refusal naming the file and the
-line the construct starts on, never a blank to the end of the file.
+The token is reported inside an attribute too, where `#[unsafe(no_mangle)]`
+is edition 2024's spelling and rustc refuses it. An unterminated literal,
+comment or attribute is a refusal naming the file and the line the
+construct starts on, never a blank to the end of the file.
 
 It also refuses an attribute that weakens `unsafe_code`: an allow, an
-expect or a warn of the lint, inner or outer, in any tracked Rust file.
-The workspace table is `forbid` since F-232, so rustc refuses those too,
-and this refusal is what keeps the trybuild files and the vendored
-packages, which no lint table reaches, honest about the same rule.
+expect or a warn of the lint, inner or outer, in every tracked Rust file
+outside `vendor/`. The workspace table is `forbid` since F-232, so rustc
+refuses those too, and this refusal is what keeps the trybuild files,
+which no lint table reaches, honest about the same rule. The vendored
+packages are audited by their recorded counts instead, and an allow
+inside one lowers nothing because no lint table reaches them.
+
+Doc text is comment text here. A doc comment is skipped whole like any
+other comment, and a doc attribute's string like any other string, so
+`unsafe` in a doctest is not reported by this scanner. Doctests are
+enforced by rustc instead: every workspace member library root carries
+`#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects into
+each doctest of that crate, and `scripts/lint_policy_check.py` refuses a
+member library root without it. F-232 measured that attribute under the
+pinned toolchain against every doctest shape the third review found this
+scanner missing, and rustc refused every one rustdoc compiled. An
+`ignore` doctest is never compiled, so it holds no code that runs.
 
 ## The first story that writes an allowed file
 
@@ -160,8 +175,9 @@ def _scan_raw_string(text: str, i: int, hashes: int,
     `hashes` is the count in the opening delimiter, which is part of the
     delimiter and not decoration: `r#"a " b"#` holds a quote and
     `br##"x "# y"##` holds one and ends in one. A closing quote followed by
-    MORE hashes than the opening is rustc error E0766, so it is refused
-    rather than read as a terminator or as body text.
+    MORE hashes than the opening is refused, as rustc 1.97.1 refuses it
+    with "too many `#` when terminating raw string", rather than read as
+    a terminator or as body text.
     """
     n = len(text)
     start_line = line
@@ -176,7 +192,8 @@ def _scan_raw_string(text: str, i: int, hashes: int,
             if found == hashes:
                 return j, line
             if found > hashes:
-                raise LexError(start_line, "unterminated raw string literal")
+                raise LexError(start_line,
+                               "too many `#` when terminating raw string")
             i += 1
             continue
         if c == "\n":
@@ -229,13 +246,77 @@ def _scan_quote(text: str, i: int, line: int) -> tuple[int, int]:
     raise LexError(line, "unterminated character literal")
 
 
+def _skip_trivia(text: str, i: int, line: int) -> tuple[int, int]:
+    """Past whitespace and comments, which Rust allows between tokens.
+
+    Doc comments are comments here too, read by rustdoc and not by this
+    scanner. An unterminated block comment raises `LexError` naming the
+    line it starts on.
+    """
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif c in " \t\r":
+            i += 1
+        elif c == "/":
+            nxt = text[i + 1] if i + 1 < n else ""
+            if nxt == "/":
+                # `//` ends at the newline. The quote of a `// say "`
+                # comment is text and opens nothing.
+                end = text.find("\n", i + 2)
+                i = n if end == -1 else end
+            elif nxt == "*":
+                i, line = _block_comment(text, i, line)
+            else:
+                break
+        else:
+            break
+    return i, line
+
+
+def _block_comment(text: str, i: int, line: int) -> tuple[int, int]:
+    """Consume one block comment. `text[i]` is its opening `/`.
+
+    Block comments nest, so `/* /* unsafe */ unsafe */` is one comment and
+    neither half is code. Returns the index and line just past the closing
+    `*/`. An unterminated comment raises `LexError` naming the line it
+    starts on.
+    """
+    n = len(text)
+    start_line = line
+    depth = 1
+    i += 2
+    while depth and i < n:
+        if text[i] == "/" and i + 1 < n and text[i + 1] == "*":
+            depth += 1
+            i += 2
+        elif text[i] == "*" and i + 1 < n and text[i + 1] == "/":
+            depth -= 1
+            i += 2
+        else:
+            if text[i] == "\n":
+                line += 1
+            i += 1
+    if depth:
+        raise LexError(start_line, "unterminated block comment")
+    return i, line
+
+
 def scan(text: str) -> tuple[list[int], list[int]]:
     """One left-to-right pass over Rust source.
 
     Returns the line numbers of `unsafe` keyword tokens and of attributes
-    weakening `unsafe_code`. Raises `LexError` for an unterminated literal or
-    comment. Comments and literals are skipped whole rather than blanked, so
-    nothing after one is ever read as code or the reverse.
+    weakening `unsafe_code`. Raises `LexError` for an unterminated literal,
+    comment or attribute. Comments and literals are skipped whole rather
+    than blanked, so nothing after one is ever read as code or the reverse.
+
+    `unsafe` is reported inside an attribute too: `#[unsafe(no_mangle)]` is
+    edition 2024's spelling and rustc refuses it. Doc text is not read, as
+    the module docstring states: a doctest is refused by rustc through the
+    library root's doctest attribute, not by this scanner.
     """
     unsafe_lines: list[int] = []
     weakening: list[int] = []
@@ -250,54 +331,33 @@ def scan(text: str) -> tuple[list[int], list[int]]:
     attr_line = 0
     attr_names: list[str] = []
     while i < n:
+        i, line = _skip_trivia(text, i, line)
+        if i >= n:
+            break
         c = text[i]
-        if c == "\n":
-            line += 1
-            i += 1
-        elif c in " \t\r":
-            i += 1
-        elif c == "/":
-            nxt = text[i + 1] if i + 1 < n else ""
-            if nxt == "/":
-                # `//`, `///` and `//!` all end at the newline. The quote of
-                # a `// say "` comment is text and opens nothing.
-                end = text.find("\n", i + 2)
-                i = n if end == -1 else end
-            elif nxt == "*":
-                # Block comments nest, so `/* /* unsafe */ unsafe */` is one
-                # comment and neither half is code.
-                start_line = line
-                depth = 1
-                i += 2
-                while depth and i < n:
-                    if text[i] == "/" and i + 1 < n and text[i + 1] == "*":
-                        depth += 1
-                        i += 2
-                    elif text[i] == "*" and i + 1 < n and text[i + 1] == "/":
-                        depth -= 1
-                        i += 2
-                    else:
-                        if text[i] == "\n":
-                            line += 1
-                        i += 1
-                if depth:
-                    raise LexError(start_line, "unterminated block comment")
-            else:
-                i += 1
+        if c == "/":
+            i += 1  # a lone slash is punctuation, not a comment
         elif c == '"':
             i, line = _scan_string(text, i, line)
         elif c == "'":
             i, line = _scan_quote(text, i, line)
         elif c == "#":
-            j = i + 1
+            # `#`, an optional `!` and `[` are three tokens, and Rust allows
+            # whitespace and comments between any two of them, so
+            # `# [allow(unsafe_code)]` and `#/**/[allow(unsafe_code)]` are
+            # spellings of the attribute the weakening refusal must find.
+            # The line counter is only committed when the `[` follows,
+            # because the trivia is re-read otherwise.
+            j, probe_line = _skip_trivia(text, i + 1, line)
             if j < n and text[j] == "!":
-                j += 1
+                j, probe_line = _skip_trivia(text, j + 1, probe_line)
             if j < n and text[j] == "[":
                 if attr_depth == 0:
                     attr_names = []
                     attr_line = line
                 attr_depth += 1
                 i = j + 1
+                line = probe_line
             else:
                 i += 1
         elif c == "[":
@@ -334,14 +394,23 @@ def scan(text: str) -> tuple[list[int], list[int]]:
                     i, line = _scan_string(text, end, line)
             elif word == "b" and nxt == "'":
                 i, line = _scan_quote(text, end, line)
-            elif word == "unsafe" and not attr_depth:
+            elif word == "unsafe":
+                # Inside an attribute too: `#[unsafe(no_mangle)]` and
+                # `#[cfg_attr(x, unsafe(no_mangle))]` are `unsafe` code
+                # rustc refuses, so the token is reported wherever it is.
                 unsafe_lines.append(line)
             elif attr_depth:
                 attr_names.append(word)
             i = max(i, end)
         else:
             i += 1
-    return unsafe_lines, weakening
+    if attr_depth:
+        # An attribute still open at end of file is a lexically broken
+        # file. Skipping it silently would hide every `unsafe` after the
+        # unclosed `#[`, which is the blank-to-EOF shape this scanner
+        # exists to refuse.
+        raise LexError(attr_line, "unterminated attribute")
+    return sorted(unsafe_lines), sorted(weakening)
 
 
 def rust_files(staged: bool) -> list[Path]:

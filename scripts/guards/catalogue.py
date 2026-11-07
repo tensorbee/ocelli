@@ -3647,6 +3647,29 @@ def _lint_policy_uninherited(box: Sandbox) -> None:
                    "[lints]\nworkspace = true", "")
 
 
+def _doctest_forbid_behind_a_separator(box: Sandbox) -> None:
+    """The attribute text inside a `//` comment, behind U+2028. F-232.
+
+    rustc ends a `//` comment at LF only, so `// F-232.`, U+2028 and the
+    attribute text are one comment and the root forbids nothing, while
+    `str.splitlines` read two lines and accepted it, review pass 5's D1.
+    """
+    attribute = "#![doc(test(attr(forbid(unsafe_code))))]\n"
+    box.substitute(_a_crate_root(box), attribute,
+                   "// F-232.\u2028" + attribute)
+
+
+def _doctest_forbid_removed(box: Sandbox) -> None:
+    """One member library root without the doctest forbid. F-232.
+
+    The crate is read rather than named, the first under `crates/` with a
+    `src/lib.rs`, and only the attribute line is removed, so the table, the
+    script and every other root are as they were.
+    """
+    box.substitute(_a_crate_root(box),
+                   "#![doc(test(attr(forbid(unsafe_code))))]\n", "")
+
+
 def _unsafe_code_at_deny(box: Sandbox) -> None:
     """The row the guard requires at forbid, written one level weaker.
 
@@ -4503,9 +4526,15 @@ def _clean_crate_root_outside_the_member(box: Sandbox) -> None:
     where it is, unread by cargo and still read by the rglob, which is the
     state that would make a guard refusing the SHAPE rather than the attribute
     look correct.
+
+    The moved root carries `#![doc(test(attr(forbid(unsafe_code))))]`, since
+    F-232 a part of a clean library root, so the state stays legitimate and
+    the probe still isolates the layout.
     """
     member, manifest, relative = _a_crate_root_the_manifest_moves(box)
-    box.write("probe-root/lib.rs", "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.write("probe-root/lib.rs",
+              "#![doc(test(attr(forbid(unsafe_code))))]\n"
+              "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.substitute(manifest, "[lints]",
                    f'[lib]\npath = "{relative}"\n\n[lints]')
 
@@ -7560,8 +7589,15 @@ GUARDS: tuple[Guard, ...] = (
                   "`unsafe` outside the allow-list (HLD section 27.2 R5)",
                   note="The probe appends to a crate that is neither of the "
                        "two R5 names. It deliberately does NOT test "
-                       "`is_unsafe` or `unsafe` in a doc comment, which are "
-                       "facts about the current regex rather than about R5. "
+                       "`is_unsafe` or `unsafe` in a doc comment. The "
+                       "tokenizer's cases are covered by the unit tests and "
+                       "the `unsafe.after-*` probes. A doctest holding "
+                       "`unsafe` is refused by rustc through each member "
+                       "library root's "
+                       "`#![doc(test(attr(forbid(unsafe_code))))]`, which "
+                       "the lint policy check refuses the absence of and "
+                       "`lint-policy.doctest-forbid-removed` probes, and "
+                       "the scanner reads doc text as comment text. "
                        "The fragment is the refusal HEADER and not the bare "
                        "words `outside the allow-list`, which the guard's OK "
                        "line also contains: with an accept probe that would "
@@ -7668,8 +7704,10 @@ GUARDS: tuple[Guard, ...] = (
                   note="F-232's second refusal. The workspace table is "
                        "forbid, so rustc refuses an allow, an expect or a "
                        "warn of `unsafe_code` as well. This half keeps the "
-                       "trybuild files and the vendored packages honest, "
-                       "which no lint table reaches."),
+                       "trybuild files honest, which no lint table reaches. "
+                       "The vendored packages are audited by their recorded "
+                       "counts, and an allow inside one lowers nothing "
+                       "because no lint table reaches them."),
         ),
     ),
 
@@ -11850,8 +11888,11 @@ GUARDS: tuple[Guard, ...] = (
                 "one of those lints back to sleep with an inner allow, by "
                 "name or through a group that contains it, and, since "
                 "F-232, an `unsafe_code` row below 'forbid' in "
-                "[workspace.lints.rust] and an `unsafe` gate that no longer "
-                "runs scripts/unsafe_allowlist_check.py beside it.",
+                "[workspace.lints.rust], an `unsafe` gate that no longer "
+                "runs scripts/unsafe_allowlist_check.py beside it, and a "
+                "member library root without "
+                "`#![doc(test(attr(forbid(unsafe_code))))]`, which is what "
+                "refuses `unsafe` in a doctest.",
         claims=("*",),
         probes=(
             Probe("lint-policy.weakened", _lint_policy_weakened,
@@ -11882,6 +11923,31 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/lint_policy_check.py"),
                   "does not inherit the workspace lint table",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.doctest-forbid-removed",
+                  _doctest_forbid_removed,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and does not carry",
+                  needs="cargo", profile="deep",
+                  note="F-232. The [workspace.lints.rust] table does not "
+                       "reach a doctest, so each member library root "
+                       "carries `#![doc(test(attr(forbid(unsafe_code))))]`, "
+                       "which rustdoc injects into every doctest of the "
+                       "crate. One root loses the line and nothing else "
+                       "moves. The workspace has no doctests today, so the "
+                       "floor checks the attribute is present, and it acts "
+                       "on the first doctest anyone writes."),
+            Probe("lint-policy.doctest-forbid-behind-a-separator",
+                  _doctest_forbid_behind_a_separator,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "holds a character other than printable ASCII and tab",
+                  needs="cargo", profile="deep",
+                  note="F-232, review pass 5. The root is split at LF "
+                       "only, as rustc ends a `//` comment, and a head "
+                       "line holding anything but printable ASCII and tab "
+                       "is refused naming the line, so CR, NEL, U+2028 and "
+                       "the other separators Python splits at cannot hide "
+                       "the attribute text inside a comment. The unit tests "
+                       "carry one case per separator."),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
@@ -12247,7 +12313,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
@@ -12258,8 +12324,10 @@ GUARDS: tuple[Guard, ...] = (
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
-                       "`produce` already follows one path module, so the "
-                       "planted module is the second.",
+                       "The tree follows two `#[path]` modules, `produce` "
+                       "and `held.rs` (F-210), so the planted module is the "
+                       "third. The count is the one measured on the F-232 "
+                       "tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -12293,7 +12361,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
@@ -12301,8 +12369,10 @@ GUARDS: tuple[Guard, ...] = (
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
-                       "read. `produce` already follows one path module, so "
-                       "the planted module is the second.",
+                       "read. The tree follows two `#[path]` modules, "
+                       "`produce` and `held.rs` (F-210), so the planted "
+                       "module is the third. The count is the one measured "
+                       "on the F-232 tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
@@ -12378,6 +12448,16 @@ GUARDS: tuple[Guard, ...] = (
                        "`#[path]`: it names a file clippy compiles and this "
                        "pass did not read, which is exactly the state the "
                        "group-allow measurement above was taken in.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unreadable-library-root",
+                  _crate_root_the_guard_cannot_open,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and could not be read",
+                  note="F-232. The same missing `[lib] path` as "
+                       "`lint-policy.unreadable-crate-root`, read by the "
+                       "doctest attribute check. A library root it cannot "
+                       "open is an unknown, and an unknown is not a forbid, "
+                       "so it is refused rather than skipped.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cap-lints-allow",
                   _cap_lints_allow,

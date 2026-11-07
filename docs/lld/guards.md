@@ -1112,17 +1112,47 @@ mechanisms are required now.** `Cargo.toml` carries
 section's literal `deny` because an inner `allow` silences a deny and cannot
 silence a forbid, and F-232 measured the whole workspace clean under it, the
 lib, bin, test and example roots included, with no exception for the two
-allowed files because neither exists yet. The lint covers every target of
-every member. `scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate
-beside it because the lint does not reach the vendored packages or the
-trybuild files, which the script audits, and because the script was one
-string regex away from the blindness F-229 measured. The check refuses a
-table below `forbid` naming `forbid`, and refuses the script dropped from
-the `unsafe` gate even with the table present. Its scanner is a
-left-to-right tokenizer since F-232, not a strip-and-search: it reports
-`unsafe` only as a keyword token, refuses an unterminated literal or comment
-naming the file and line, and refuses an allow, an expect or a warn of
-`unsafe_code` in any tracked Rust file. The sequence for the first story
+allowed files because neither exists yet. The lint covers every lib, bin,
+test, bench, example and build script target of every member. It does not
+reach doctests, which rustdoc compiles without the table. Doctests are
+enforced by rustc through a third piece: every member library root
+carries `#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects
+into each doctest of that crate, and this check refuses a member library
+root, found from `cargo metadata`, that does not carry that exact line as
+the first line after its leading `//!`, `//` and blank lines. The root is
+read as bytes decoded as UTF-8 and split at LF only, one trailing CR
+removed, which is where rustc ends a `//` comment. A root holding anything
+but printable ASCII and tab on those lines or the attribute line is refused
+naming the line, because a CR, NEL, U+2028 or another separator Python
+splits at would hide the attribute text inside a comment rustc reads as
+one line.
+F-232 measured the attribute under the pinned 1.97.1 toolchain against
+every doctest shape the third review found the scanner missing, the
+`rust2015` to `rust2024` fence tags, `no_run`, indented, block-quoted and
+list-marker code, a fence on the `/*!` line, `unsafe` before a newline or
+a comment, `#[unsafe(export_name)]`, `cfg_attr` doc, escaped doc strings,
+`concat!`, `include_str!` and macro doc, and every compiled one failed,
+with error E0453 for an inner `allow`, `warn` or `expect` of
+`unsafe_code` in the doctest. An `ignore` doctest is not compiled at all,
+and a `compile_fail` one passes because the forbid makes it fail to
+compile, so neither produces a binary. The workspace has no doctests
+today, so what the floor checks is that the attribute is present, and
+`lint-policy.doctest-forbid-removed` removes it from one root and goes
+red. It acts on the first doctest anyone writes, which
+`cargo test --workspace` in the floor then compiles under it.
+`scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate beside the
+table because the lint does not reach the vendored packages or the
+trybuild files, which the script audits, and because the script was
+one string regex away from the blindness F-229 measured. The check
+refuses a table below `forbid` naming `forbid`, and refuses the
+script dropped from the `unsafe` gate even with the table present. Its
+scanner is a left-to-right tokenizer since F-232, not a strip-and-search:
+it reports `unsafe` only as a keyword token, inside an attribute as well,
+reads doc comments and doc strings as comment and string text and leaves
+doctests to the attribute, refuses an unterminated literal, comment or
+attribute naming the file and line, and refuses an allow, an expect or a
+warn of `unsafe_code` in every tracked Rust file outside `vendor/`, where
+the recorded counts are the audit. The sequence for the first story
 that writes one of the two allowed files, recorded in the scanner's
 docstring, is to move the table to `deny`, add `#![forbid(unsafe_code)]` to
 every other crate root, put `#[allow(unsafe_code)]` on that one `mod`

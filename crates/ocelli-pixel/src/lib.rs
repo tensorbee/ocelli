@@ -7,6 +7,7 @@
 //! F-029 added the presentation stage and F-030 added the colour stage, so all
 //! four of PS3.3 C.11's stages now live in this crate and nowhere else.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
