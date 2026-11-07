@@ -150,7 +150,7 @@ scripts/guards/catalogue.py, ci/guard-probe-budget.json, docs/runbooks/guard-ver
 docs/lld/guards.md
 ```
 
-No crate source file is written. That keeps F-232 clear of every in-flight story that writes a crate root. The catalogue, budget and runbook are shared with every story that adds a probe, so F-232 re-records the budget and regenerates the runbook on the tree it is based on, after F-229. **F-233 follows F-232** for the same three files. No GPU, browser or corpus.
+After the pass 3 ruling F-232 writes one attribute line into every member library root, so it merges after the stories that write those roots and keeps the line through each merge. The catalogue, budget and runbook are shared with every story that adds a probe, so F-232 re-records the budget and regenerates the runbook on the tree it is based on, after F-229. **F-233 follows F-232** for the same three files. No GPU, browser or corpus.
 
 ## Verification and evidence reuse
 
@@ -233,3 +233,11 @@ Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-
 - **A guard checks the attribute is present.** The lint policy check refuses a member library root without that exact attribute, and a catalogue probe removes it from one crate and goes red. `cargo test --workspace`, which the floor runs, compiles the doctests, so the attribute is exercised on every floor run.
 - **The scanner stops reading doc text.** The fence and doc-string logic is removed, and the scanner states that doctests are enforced by the attribute and not by it. Its handling of attributes, raw strings and weakening attributes from passes 1 and 2 stays.
 - **Prose states exactly this.** Every coverage sentence, including the `unsafe.third-file` note, says what enforces doctests and nothing wider.
+
+### Lead ruling after review pass 4
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-4.md`.
+
+- **Position, not header scanning.** The attribute is accepted only as the first line after the crate's leading `//!`, `//` and blank lines, exactly as written. Every root already places it there. The reviewer's string and block comment shapes join the header test and go red on the current reader.
+- **N1 is pinned.** A test fails when the line a finding reports is not the line the probe found.
+- **What the floor checks today is stated.** The workspace has no doctests, so the prose says the floor checks the attribute is present and that it acts on the first doctest anyone writes.
