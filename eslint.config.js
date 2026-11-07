@@ -475,7 +475,8 @@ const config = tseslint.config(
     // functions by name. The readout check wraps `paintSelection` to inject
     // a throw and replaces `requestGrey` to make the main preview fail. The
     // changed-file check reads the id the page holds for a file through
-    // `seriesByKey` and `filePosts`, before it rewrites that file.
+    // `seriesByKey` and `filePosts`, before it rewrites that file, and counts
+    // that file's grey keys through `fileSerials` and `cache`.
     files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
     languageOptions: {
       globals: {
@@ -490,6 +491,8 @@ const config = tseslint.config(
         dropCache: "readonly",
         seriesByKey: "readonly",
         filePosts: "readonly",
+        fileSerials: "readonly",
+        cache: "readonly",
         Event: "readonly",
         window: "readonly",
       },

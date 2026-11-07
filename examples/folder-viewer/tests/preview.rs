@@ -4105,6 +4105,12 @@ fn the_page_keys_pixels_by_file_and_probes_for_changes() -> Result<(), String> {
     if !function_body(page, "loadSeries")?.contains("if (vp.cell === activeCell) probeActive();") {
         return Err("a series selection does not probe".to_owned());
     }
+    // Activating another viewport counts and probes its series, as a series
+    // selection does.
+    let activate = function_body(page, "setActive")?;
+    if !activate.contains("noteChanged();") || !activate.contains("probeActive();") {
+        return Err("activating a viewport does not count and probe its series".to_owned());
+    }
     if !page.contains("window.addEventListener(\"focus\", probeActive);") {
         return Err("a window focus does not probe".to_owned());
     }

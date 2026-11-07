@@ -301,6 +301,15 @@
     text-shadow: 0 1px 2px #000000;
     pointer-events: none;
   }
+  /* A changed file's tile carries the changed-file sentence in its middle. */
+  .tiles .tile-label.changed {
+    top: 50%;
+    bottom: auto;
+    width: 90%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    white-space: normal;
+  }
   .overlay, .edge, #cross-read {
     position: absolute;
     color: #f0f0f0;
@@ -2134,6 +2143,13 @@ async function pumpMain(vp) {
         // superseded by that viewport. This one still wants it, so it asks
         // again under its own request.
         if (error && error.name === "AbortError") continue;
+        // In tile mode the changed tile carries the sentence, so the other
+        // tiles stay on screen.
+        if (vp.tileMode && error && error.name === "FileChanged") {
+          hideFault(vp);
+          syncStage(vp);
+          break;
+        }
         showFault(vp, error instanceof Error ? error.message : "the frame could not be shown");
         break;
       }
@@ -2198,6 +2214,8 @@ function seriesFiles(series) {
 }
 
 // Reads one byte of each file of the active series, PROBE_WIDTH at a time.
+// It runs on focus, on a return to a visible page, on a series selection in
+// the active viewport and when another viewport becomes active.
 // The browser refuses to read a picked file whose modification time moved
 // after it was picked, and that refusal is the only change the page can see.
 // A rewrite that keeps the modification time reads without error and is not
@@ -2246,7 +2264,8 @@ async function probeFiles(files, generation) {
 
 // A file found changed is forgotten by the process, loses its greys and
 // its thumbnail, and every shown viewport on it is drawn again, which shows
-// FILE_CHANGED because `ensureFile` refuses the file from now on.
+// FILE_CHANGED because `ensureFile` refuses the file from now on. A single
+// view shows it in place of the image, and a tile view in that file's tile.
 function markChanged(file) {
   if (changedFiles.has(file)) return;
   changedFiles.add(file);
@@ -2643,6 +2662,7 @@ async function paintTiles(vp) {
     const node = nodes[index];
     const image = series && series.images[vp.viewIndex + index];
     labels[index].textContent = image ? "Image " + (vp.viewIndex + index + 1) : "";
+    labels[index].classList.remove("changed");
     if (!image || !image.info.monochrome) {
       node.width = 1;
       node.height = 1;
@@ -2669,6 +2689,11 @@ async function paintTiles(vp) {
     } catch (error) {
       if (error && error.name === "AbortError") return;
       if (token !== vp.tileToken) return;
+      // A changed file says so in its own tile, and the other tiles draw.
+      if (error && error.name === "FileChanged") {
+        labels[index].textContent = FILE_CHANGED;
+        labels[index].classList.add("changed");
+      }
       node.width = 1;
       node.height = 1;
       sizeTile(node);
@@ -4895,6 +4920,10 @@ function setActive(cell) {
   // is now drawn from it.
   clearLine(viewports[cell]);
   scheduleLink();
+  // The active series is the one the status counts and the probe reads, so
+  // activating a cell does what selecting a series does.
+  noteChanged();
+  probeActive();
 }
 
 function syncActiveOutline() {

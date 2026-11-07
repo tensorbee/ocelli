@@ -14,6 +14,16 @@
 //             is the limit decision 11 states: after a focus the page marks
 //             nothing and the old image stays. Choosing the folder again
 //             shows the new bytes.
+//   late      every preview reply is held after the process answered, image
+//             1 is inverted, file 0 is found changed, and the replies are let
+//             through. The sentence must show and no grey of file 0 may stay.
+//   thumb     the file the series thumbnail was drawn from changes. The
+//             thumbnail must go black and image 1 must still draw.
+//   tiles     in the four-image view file 1 changes, then file 0. Each
+//             changed tile must carry the sentence and the others must draw.
+//   cells     two cells on two series. Activating the other cell must drop
+//             the first series' count, and must find a change in its own
+//             series with no focus.
 //   probe     a folder of 1,693 files, one series. A click on the series row
 //             must read one byte of each file, at most four at a time, in
 //             under 1 s.
@@ -68,7 +78,7 @@ function grey16(canvas, grey) {
 }
 
 /**
- * `seen` is `{ changed, restored, probe }`.
+ * `seen` is `{ changed, restored, late, thumb, tiles, cells, probe }`.
  *
  * `changed` is `{ fault, focusCanvas, focusStatus, heldBefore, heldAfter,
  * oldStatus, otherFault, otherCanvas, otherGrey, reopenFault, reopenCanvas,
@@ -81,6 +91,19 @@ function grey16(canvas, grey) {
  * again. Canvas and grey values are one per sampled point.
  *
  * `restored` is `{ fault, status, canvas, oldGrey, reopenCanvas, newGrey }`.
+ *
+ * `late` is `{ caught, fault, keys }`: whether a preview of file 0 was held,
+ * the viewport's fault text after the release, and file 0's grey keys left.
+ *
+ * `thumb` is `{ before, after, fault }`, the thumbnail's red sum before and
+ * after the change and image 1's fault text.
+ *
+ * `tiles` is `{ second, first }`, each `{ hidden, widths, labels, fault }`
+ * after file 1 and then file 0 changed.
+ *
+ * `cells` is `{ aStatus, bQuiet, bFault, bStatus }`, the status with A's
+ * change, the status once B's cell was active, and B's fault and status after
+ * B's file changed and its cell was activated again.
  *
  * `probe` is `{ files, reads, bytes, peak, ms }`, the reads one series
  * selection made, their summed length, the most in flight at once and the
@@ -132,6 +155,52 @@ export function changedProblems(seen) {
     }
     for (const line of grey16(restored.canvas, restored.oldGrey)) problems.push(`the held image after the restored rewrite ${line}`);
     for (const line of grey16(restored.reopenCanvas, restored.newGrey)) problems.push(`image 1 after the restored rewrite and a new open ${line}`);
+  }
+  const late = seen && seen.late;
+  if (!late) {
+    problems.push("the held reply case was not observed");
+  } else {
+    if (!late.caught) problems.push("no preview of file 0 was held, so the late reply case shows nothing");
+    if (late.fault !== CHANGED_SENTENCE) {
+      problems.push(`after a held reply of the old bytes was let through the viewport showed "${late.fault}", not the changed-file sentence`);
+    }
+    if (late.keys !== 0) problems.push(`a held reply of the old bytes left ${late.keys} grey keys of file 0 in the cache`);
+  }
+  const thumb = seen && seen.thumb;
+  if (!thumb) {
+    problems.push("the thumbnail case was not observed");
+  } else {
+    if (!(thumb.before > 0)) problems.push("the thumbnail was never drawn, so the case shows nothing");
+    if (thumb.after !== 0) problems.push(`the thumbnail drawn from the changed file still showed it, red sum ${thumb.after}`);
+    if (thumb.fault !== "") problems.push(`image 1, whose file did not change, showed "${thumb.fault}"`);
+  }
+  const tiles = seen && seen.tiles;
+  if (!tiles || !tiles.second || !tiles.first) {
+    problems.push("the tile case was not observed");
+  } else {
+    const expect = [
+      ["file 1 changed", tiles.second, [EDGE, 1, EDGE, EDGE]],
+      ["files 0 and 1 changed", tiles.first, [1, 1, EDGE, EDGE]],
+    ];
+    for (const [name, state, widths] of expect) {
+      if (state.hidden) problems.push(`with ${name} the tiles were hidden`);
+      if (state.fault !== "") problems.push(`with ${name} the viewport showed "${state.fault}" over the tiles`);
+      for (let at = 0; at < widths.length; at += 1) {
+        const changed = widths[at] === 1;
+        if ((state.widths || [])[at] !== widths[at]) problems.push(`with ${name} tile ${at + 1} was ${(state.widths || [])[at]} wide, not ${widths[at]}`);
+        if (changed && (state.labels || [])[at] !== CHANGED_SENTENCE) problems.push(`with ${name} tile ${at + 1} read "${(state.labels || [])[at]}", not the changed-file sentence`);
+        if (!changed && (state.labels || [])[at] === CHANGED_SENTENCE) problems.push(`with ${name} tile ${at + 1}, whose file did not change, read the changed-file sentence`);
+      }
+    }
+  }
+  const cells = seen && seen.cells;
+  if (!cells) {
+    problems.push("the two-cell case was not observed");
+  } else {
+    if (!String(cells.aStatus || "").endsWith(CHANGED_STATUS)) problems.push(`with A's file changed the status read "${cells.aStatus}"`);
+    if (String(cells.bQuiet || "").includes("changed")) problems.push(`after B's cell became active the status read "${cells.bQuiet}" for a series with no changed file`);
+    if (cells.bFault !== CHANGED_SENTENCE) problems.push(`activating B's cell after its file changed showed "${cells.bFault}", not the changed-file sentence`);
+    if (!String(cells.bStatus || "").endsWith(CHANGED_STATUS)) problems.push(`activating B's cell after its file changed left the status "${cells.bStatus}"`);
   }
   const probe = seen && seen.probe;
   if (!probe) {
@@ -236,11 +305,33 @@ function writeFolder(root, name, tag, count) {
   return { folder, paths, tag };
 }
 
-/** File 0 of `set` gets the rewritten bytes and the modification time `stamp`. */
-function rewriteFirst(set, stamp) {
-  const path = set.paths[0];
-  writeFileSync(path, slice(`${set.tag}.1`, `${set.tag}.0`, 1, true));
+/** File `index` of `set` gets the rewritten bytes and the modification time `stamp`. */
+function rewriteFile(set, index, stamp) {
+  const path = set.paths[index];
+  writeFileSync(path, slice(`${set.tag}.${index + 1}`, `${set.tag}.0`, index + 1, true));
   utimesSync(path, stamp, stamp);
+}
+
+function rewriteFirst(set, stamp) {
+  rewriteFile(set, 0, stamp);
+}
+
+/** Two series of `count` files each in one folder, `a` then `b`. */
+function writeTwoSeries(root, name, tagA, tagB, count) {
+  const folder = join(root, name);
+  mkdirSync(folder);
+  const series = [];
+  for (const [prefix, tag] of [["a", tagA], ["b", tagB]]) {
+    const paths = [];
+    for (let k = 0; k < count; k += 1) {
+      const path = join(folder, `${prefix}-${k}.dcm`);
+      writeFileSync(path, slice(`${tag}.${k + 1}`, `${tag}.0`, k + 1, false));
+      utimesSync(path, STAMP, STAMP);
+      paths.push(path);
+    }
+    series.push({ folder, paths, tag });
+  }
+  return { folder, a: series[0], b: series[1], count: 2 * count };
 }
 
 /**
@@ -286,10 +377,40 @@ async function canvasGrey(page) {
   }, POINTS);
 }
 
-async function faultText(page) {
-  return page.evaluate(() => {
-    const node = document.querySelector('.cell[data-cell="0"] .fault');
+async function faultText(page, cell = 0) {
+  return page.evaluate((at) => {
+    const node = document.querySelector(`.cell[data-cell="${at}"] .fault`);
     return node && !node.hidden ? node.textContent || "" : "";
+  }, cell);
+}
+
+function statusText(page) {
+  return page.evaluate(() => document.getElementById("status").textContent || "");
+}
+
+/** Each tile's canvas width and label, and whether the grid is hidden, in cell 0. */
+function tileState(page) {
+  return page.evaluate(() => {
+    const tiles = document.querySelector('.cell[data-cell="0"] .tiles');
+    const canvases = Array.from(tiles.querySelectorAll("canvas"));
+    const labels = Array.from(tiles.querySelectorAll(".tile-label"));
+    return {
+      hidden: tiles.hidden,
+      widths: canvases.map((node) => node.width),
+      labels: labels.map((node) => node.textContent || ""),
+    };
+  });
+}
+
+/** The summed red channel of the first series row's thumbnail. */
+function thumbSum(page) {
+  return page.evaluate(() => {
+    const node = document.querySelector("#series-list button canvas");
+    if (!node) return -1;
+    const data = node.getContext("2d").getImageData(0, 0, node.width, node.height).data;
+    let sum = 0;
+    for (let at = 0; at < data.length; at += 4) sum += data[at];
+    return sum;
   });
 }
 
@@ -494,6 +615,154 @@ export async function observeProbe(url, chromium, set) {
   }
 }
 
+/**
+ * Every preview reply is held after the process answered, while image 1 is
+ * inverted, which is a new grey key. File 0 is then found changed, and the
+ * replies are let through. They carry the old bytes, so none may be painted
+ * or kept.
+ */
+export async function observeLate(url, chromium, set) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(countReads);
+    const sink = [];
+    collectIds(page, sink);
+    await page.goto(url);
+    await openAndDraw(page, sink, set, 0);
+    await quiet(page);
+    const oldId = await firstId(page);
+    const serial = await page.evaluate(() => fileSerials.get(seriesByKey.get(activeViewport().seriesKey).images[0].file));
+    let holding = true;
+    let caught = false;
+    const held = [];
+    await page.route("**/preview", async (route) => {
+      if (!holding) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      if (route.request().headers()["x-ocelli-file"] === oldId) caught = true;
+      held.push({ route, response });
+    });
+    await page.keyboard.press("i");
+    await until(() => caught, "a held preview of file 0", 5000).catch(() => {});
+    rewriteFirst(set, STAMP + 5);
+    await focus(page);
+    await until(async () => (await statusText(page)).endsWith(CHANGED_STATUS), "the change counted", 5000).catch(() => {});
+    holding = false;
+    for (const entry of held) await entry.route.fulfill({ response: entry.response });
+    await page.waitForTimeout(500);
+    await quiet(page);
+    const fault = await faultText(page);
+    const keys = await page.evaluate((prefix) => Array.from(cache.keys()).filter((key) => key.startsWith(prefix)).length, `${serial}\0`);
+    return { caught, fault, keys };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** The thumbnail is drawn from the middle file, which then changes. */
+export async function observeThumb(url, chromium, set) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(countReads);
+    const sink = [];
+    collectIds(page, sink);
+    await page.goto(url);
+    await openAndDraw(page, sink, set, 0);
+    await until(async () => (await thumbSum(page)) > 0, "the thumbnail drawn").catch(() => {});
+    await quiet(page);
+    const before = await thumbSum(page);
+    rewriteFile(set, Math.floor(set.paths.length / 2), STAMP + 5);
+    await focus(page);
+    await until(async () => (await statusText(page)).endsWith(CHANGED_STATUS), "the change counted", 5000).catch(() => {});
+    await quiet(page);
+    const after = await thumbSum(page);
+    const fault = await faultText(page);
+    return { before, after, fault };
+  } finally {
+    await browser.close();
+  }
+}
+
+/** The four-image view, file 1 changed and then file 0. */
+export async function observeTiles(url, chromium, set) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(countReads);
+    const sink = [];
+    collectIds(page, sink);
+    await page.goto(url);
+    await openAndDraw(page, sink, set, 0);
+    await quiet(page);
+    await page.keyboard.press("Shift+G");
+    await until(async () => (await tileState(page)).widths.every((width) => width === EDGE), "four tiles drawn").catch(() => {});
+    rewriteFile(set, 1, STAMP + 5);
+    await focus(page);
+    await until(async () => (await tileState(page)).labels[1] === CHANGED_SENTENCE, "tile 2's sentence", 5000).catch(() => {});
+    await quiet(page);
+    const second = { ...(await tileState(page)), fault: await faultText(page) };
+    rewriteFile(set, 0, STAMP + 5);
+    await focus(page);
+    await until(async () => (await tileState(page)).labels[0] === CHANGED_SENTENCE, "tile 1's sentence", 5000).catch(() => {});
+    await quiet(page);
+    await page.waitForTimeout(300);
+    const first = { ...(await tileState(page)), fault: await faultText(page) };
+    return { second, first };
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Two cells on two series. A's file changes and is counted. Activating
+ * B's cell must drop the count, and after B's file changes, activating B's
+ * cell again must find it with no focus.
+ */
+export async function observeCells(url, chromium, set) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(countReads);
+    const sink = [];
+    collectIds(page, sink);
+    await page.goto(url);
+    const drawn = page.waitForResponse((response) => response.url().endsWith("/preview") && response.status() === 200, { timeout: 30000 });
+    await page.locator("#folder").setInputFiles(set.folder);
+    await until(() => sink.length >= set.count, "the folder's posts");
+    await drawn;
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await page.locator("#layout").click();
+    await page.locator('#layout-picker [data-columns="2"][data-rows="1"]').click();
+    await until(() => page.evaluate(() => {
+      const view = document.querySelector('.cell[data-cell="1"] canvas.view');
+      return Boolean(view && view.width === 8);
+    }), "cell 2 drawn");
+    await quiet(page);
+    rewriteFirst(set.a, STAMP + 5);
+    await focus(page);
+    await until(async () => (await statusText(page)).endsWith(CHANGED_STATUS), "A's change counted", 5000).catch(() => {});
+    const aStatus = await statusText(page);
+    await page.locator('.cell[data-cell="1"]').click();
+    await quiet(page);
+    const bQuiet = await statusText(page);
+    rewriteFirst(set.b, STAMP + 5);
+    await page.locator('.cell[data-cell="0"]').click();
+    await quiet(page);
+    await page.locator('.cell[data-cell="1"]').click();
+    await until(async () => (await faultText(page, 1)) !== "", "B's sentence", 5000).catch(() => {});
+    await quiet(page);
+    const bFault = await faultText(page, 1);
+    const bStatus = await statusText(page);
+    return { aStatus, bQuiet, bFault, bStatus };
+  } finally {
+    await browser.close();
+  }
+}
+
 async function withViewer(binary, body) {
   const server = await startViewer(binary);
   try {
@@ -512,11 +781,23 @@ async function main() {
     const changedSet = writeFolder(root, "changed", "2.25.2241", SMALL_FILES);
     const restoredSet = writeFolder(root, "restored", "2.25.2242", SMALL_FILES);
     const probeSet = writeFolder(root, "probe", "2.25.2243", PROBE_FILES);
+    const lateSet = writeFolder(root, "late", "2.25.2244", SMALL_FILES);
+    const thumbSet = writeFolder(root, "thumb", "2.25.2245", SMALL_FILES);
+    const tileSet = writeFolder(root, "tiles", "2.25.2246", 5);
+    const cellSet = writeTwoSeries(root, "cells", "2.25.2247", "2.25.2248", 2);
     seen.changed = await withViewer(binary, (url) => observeChanged(url, chromium, changedSet));
     const kept = seen.changed.focusCanvas.filter((value, index) => value === seen.changed.oldGrey[index]).length;
     console.log(`changed: viewport "${seen.changed.fault}", the canvas after the focus held the old grey at ${kept} of ${POINTS.length} points, status "${seen.changed.focusStatus}", held ${seen.changed.heldBefore} then ${seen.changed.heldAfter} files and frames, old id ${seen.changed.oldStatus}, image 2 "${seen.changed.otherFault}", chosen again "${seen.changed.reopenFault}"`);
     seen.restored = await withViewer(binary, (url) => observeRestored(url, chromium, restoredSet));
     console.log(`restored: viewport "${seen.restored.fault}", status "${seen.restored.status}"`);
+    seen.late = await withViewer(binary, (url) => observeLate(url, chromium, lateSet));
+    console.log(`late: held ${seen.late.caught}, viewport "${seen.late.fault}", ${seen.late.keys} grey keys of file 0`);
+    seen.thumb = await withViewer(binary, (url) => observeThumb(url, chromium, thumbSet));
+    console.log(`thumb: red sum ${seen.thumb.before} then ${seen.thumb.after}, image 1 "${seen.thumb.fault}"`);
+    seen.tiles = await withViewer(binary, (url) => observeTiles(url, chromium, tileSet));
+    console.log(`tiles: file 1 changed ${seen.tiles.second.widths.join(" ")}, then file 0 ${seen.tiles.first.widths.join(" ")}, fault "${seen.tiles.first.fault}"`);
+    seen.cells = await withViewer(binary, (url) => observeCells(url, chromium, cellSet));
+    console.log(`cells: A "${seen.cells.aStatus}", B active "${seen.cells.bQuiet}", B changed "${seen.cells.bFault}"`);
     seen.probe = await withViewer(binary, (url) => observeProbe(url, chromium, probeSet));
     console.log(`probe: ${seen.probe.reads} reads of ${seen.probe.bytes} bytes for ${seen.probe.files} files, at most ${seen.probe.peak} in flight, ${seen.probe.ms} ms`);
   } finally {

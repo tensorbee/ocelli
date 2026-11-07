@@ -13562,10 +13562,15 @@ GUARDS: tuple[Guard, ...] = (
                 "series that does not draw, a folder chosen again whose "
                 "canvas is not the process grey of the new bytes, a rewrite "
                 "with its modification time restored that the page marks or "
-                "whose held image it drops before a new open, a series "
-                "selection that does not read one byte of each file at most "
-                "four at a time in under 1 s, and a run in which a case was "
-                "not observed.",
+                "whose held image it drops before a new open, a held reply of "
+                "the old bytes that is painted or kept after the change, a "
+                "thumbnail still drawn from a changed file, a four-image view "
+                "where a changed tile lacks the sentence or an unchanged tile "
+                "does not draw, a status that counts another series after a "
+                "viewport becomes active or an activation that does not find "
+                "a change, a series selection that does not read one byte of "
+                "each file at most four at a time in under 1 s, and a run in "
+                "which a case was not observed.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -13630,8 +13635,9 @@ GUARDS: tuple[Guard, ...] = (
               "and a release build of the viewer, which a disposable sandbox "
               "does not have, so it is watched by the `viewer-browser` gate "
               "and its CI job. The status, held count, 410, other-image, "
-              "chosen-again, restored-grey, read count, width, time and "
-              "not-observed branches have no probe.",
+              "chosen-again, restored-grey, held-reply, thumbnail, tile, "
+              "two-cell, read count, width, time and not-observed branches "
+              "have no probe.",
     ),
     Guard(
         id="bench.cold-start",
