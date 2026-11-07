@@ -3048,8 +3048,10 @@ async function refreshFrameWindows(image) {
     }
     image.frameWindowsFailed = true;
   }
+  // The frame's own list can move a viewport's file window back to the
+  // first, so each viewport showing it asks again under its new key.
   for (const vp of shownViewports()) {
-    if (currentImage(vp) === image) paintOverlays(vp);
+    if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
   }
   syncWindowList();
 }

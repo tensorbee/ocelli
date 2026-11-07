@@ -443,7 +443,10 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     }
     // The region and the per-frame windows are asked for by file id with
     // no body, so a frame change never posts the file again.
-    for (route, name) in [("fetch(\"/region\"", "region"), ("fetch(\"/inspect\"", "inspect")] {
+    for (route, name) in [
+        ("fetch(\"/region\"", "region"),
+        ("fetch(\"/inspect\"", "inspect"),
+    ] {
         let at = page
             .find(route)
             .ok_or_else(|| format!("the page does not ask for the {name}"))?;
@@ -452,7 +455,9 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
             .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
             .ok_or_else(|| format!("the {name} call does not close"))?;
         if !call.contains("\"X-Ocelli-File\": id") || call.contains("body") {
-            return Err(format!("the {name} call is not by id without a body: {call}"));
+            return Err(format!(
+                "the {name} call is not by id without a body: {call}"
+            ));
         }
     }
     Ok(())

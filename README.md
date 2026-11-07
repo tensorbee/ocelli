@@ -269,9 +269,10 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    file id. A slice keeps its window, and a file window past the next
    image's list shows that image's first. A series change and Reset return
    to the first file window. The bottom right corner names the window shown:
-   the preset, the file window's name, `region` or `manual`. A window the
-   local process refuses leaves the image and the window as they were and
-   puts the reason in the sentence line. Region window is a drag of a
+   the preset, the file window's name, `region` or `manual`. A window row
+   or a region window that the local process refuses leaves the image and
+   the window as they were and puts the reason in the sentence line. Region
+   window is a drag of a
    rectangle. The window then runs from the least to the greatest modality
    value whose pixel centre is inside it, with padding left out, and keeps
    the function already shown. The local process finds the two values

@@ -48,6 +48,13 @@ describe("manipulation tools", () => {
     const every = [-1024, -1023, -1022, -1020, -1019, -1018];
     expect(windowRegion([-1024, -1018])).toEqual({ centre: -1021, width: 6 });
     expect(windowRegion(every)).toEqual({ centre: -1021, width: 6 });
+    // Those six are symmetric, so their mean is also -1021. With Pixel
+    // Padding Value 0 the stored 0 is left out and five remain, -1023 to
+    // -1018. Centre (-1023 + -1018) / 2 is -1020.5 and width is 5, while
+    // their mean is -5102 / 5 = -1020.4, so a mean centre fails here.
+    const padded = [-1023, -1022, -1020, -1019, -1018];
+    expect(windowRegion([-1023, -1018])).toEqual({ centre: -1020.5, width: 5 });
+    expect(windowRegion(padded)).toEqual({ centre: -1020.5, width: 5 });
   });
 
   it("an empty region and a non-finite sample are refused", () => {
