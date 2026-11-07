@@ -1123,10 +1123,13 @@ check refuses a table below `forbid` naming `forbid`, and refuses the
 script dropped from the `unsafe` gate even with the table present. Its
 scanner is a left-to-right tokenizer since F-232, not a strip-and-search:
 it reports `unsafe` only as a keyword token, inside an attribute as well,
-reads the `rust` tagged and untagged code fences of doc comments as code
-because rustdoc compiles and runs them as doctests and no lint table
-reaches them, refuses an unterminated literal, comment or attribute naming
-the file and line, and refuses an allow, an expect or a warn of
+reads doc text as code, `unsafe` followed by `{`, `fn`, `impl`, `trait`
+or `extern` outside fences and every keyword token inside a backtick or
+tilde fence whose info string rustdoc would compile, a fence being
+skipped only when its info string carries a word rustdoc does not
+recognise as a Rust attribute and no `rust` word, because no lint table
+reaches a doctest, refuses an unterminated literal, comment or attribute
+naming the file and line, and refuses an allow, an expect or a warn of
 `unsafe_code` in every tracked Rust file outside `vendor/`, where the
 recorded counts are the audit. The sequence for the first story
 that writes one of the two allowed files, recorded in the scanner's

@@ -264,8 +264,10 @@ bench, example and build script target of every workspace member. It does
 not reach the doctests, which rustdoc compiles without it, the vendored
 packages or the trybuild files, and the script reaches every tracked `.rs`
 file and was one string regex away from the blindness F-229 measured. Its
-scanner reads the `rust` tagged and untagged code fences of doc comments
-as code, which is what covers the doctests. This check requires BOTH: a
+scanner reads doc text as code, `unsafe` followed by `{`, `fn`, `impl`,
+`trait` or `extern` outside fences and every keyword token inside a
+backtick or tilde fence whose info string rustdoc would compile, which is
+what covers the doctests. This check requires BOTH: a
 table below `forbid` is refused naming `forbid`, and the script dropped
 from the `unsafe` gate is refused even with the table present.
 
@@ -1809,7 +1811,9 @@ def main() -> int:
     # rustdoc compiles without it, the vendored packages and the trybuild
     # files. The script reaches every tracked `.rs` file and was one string
     # regex away from the blindness F-229 measured, and its scanner reads
-    # doc comment code fences as code, which covers the doctests. Dropping
+    # doc text as code, `unsafe` followed by `{`, `fn`, `impl`, `trait` or
+    # `extern` outside fences and every keyword token inside a fence
+    # rustdoc would compile, which covers the doctests. Dropping
     # either half is refused on its own.
     lint_level = rust.get("unsafe_code")
     if lint_level is None or STRENGTH.get(lint_level, 0) < STRENGTH["forbid"]:

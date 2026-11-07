@@ -12143,10 +12143,10 @@ GUARDS: tuple[Guard, ...] = (
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
-                       "`produce` already follows one path module, so the "
-                       "planted module is the second. The count is the one "
-                       "measured on the F-232 tree, where a third `#[path]` "
-                       "module had landed since the probe was written.",
+                       "The tree follows two `#[path]` modules, `produce` "
+                       "and `held.rs` (F-210), so the planted module is the "
+                       "third. The count is the one measured on the F-232 "
+                       "tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -12188,11 +12188,10 @@ GUARDS: tuple[Guard, ...] = (
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
-                       "read. `produce` already follows one path module, so "
-                       "the planted module is the second. The count is the "
-                       "one measured on the F-232 tree, where a third "
-                       "`#[path]` module had landed since the probe was "
-                       "written.",
+                       "read. The tree follows two `#[path]` modules, "
+                       "`produce` and `held.rs` (F-210), so the planted "
+                       "module is the third. The count is the one measured "
+                       "on the F-232 tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
