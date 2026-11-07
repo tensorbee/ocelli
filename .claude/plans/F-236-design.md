@@ -167,7 +167,7 @@ Re-read by the lead on 2026-11-07 on `sprint/s46` at `eb0f81b3`, after F-231 int
 |----|-------------------------------|--------------------|-------------------------------|------------------------|
 | AC7 | Both keys and `content` current. Through `sessionBulkSink` over a mock, `commit_cached_frame` receives the seven numbers and the bigint. On the built module with a budget set, the transferred frame commits and `frame_resident` for that index, epoch, content and extent answers 1 | `bulk.test.ts` and `boundary.wasm.test.ts`, "a transferred frame with content is committed and cached" | Forwarding the two stack keys and dropping `content`, which commits and leaves the cache empty | Implementation |
 | AC8 | Size, under "Size and speed" below | `bin/ocelli.sh gate wasm` on base and tip | A budget edited to make room | Implementation |
-| AC9 | Speed, under "Size and speed" below | `bulk.test.ts`, one `alloc` and one copy per call | A second copy or a second allocation | Implementation |
+| AC9 | Speed, under "Size and speed" below | `bulk.test.ts`, one `alloc` and one copy per call | A second copy by `set` or `slice` through any typed-array view or of the transferred buffer, or a second allocation | Implementation |
 
 AC6's old-source RED covers AC7 as well as AC1 and AC5.
 
@@ -207,3 +207,11 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward into S46 
 - **D1, AC5's pixel comparison.** After `bindCpuCanvas`, the case submits a `Fit` to the canvas size and a narrow `SetWindow` so that the committed value changes the blit. A control commit of a different value is asserted to change the pixels, so the comparison is shown able to fail. The refusal case must then go red at the pixel comparison under a mutant whose refusal branch commits the refused frame anyway.
 - **D2, AC9's one copy.** AC9 keeps its wording. The test counts copies, not views: it spies on `Uint8Array.prototype.set` for calls whose target buffer is the wasm memory's buffer, and on `Uint8Array.prototype.slice`, restores both, and asserts one copy in total. It must go red on a second `set` through the same view, two `set` calls through one saved buffer, a defensive `slice`, and a duplicated `set` line. The `countingMemory` doc and the AC9 comment then claim only what the counter counts.
 - **Still owed at completion.** AC8's and AC9's base and tip sizes and AC6's RED go in the handoff. The `typescript-packaging.md` order and the CHANGELOG entry are the lead's completion edits.
+
+### Lead ruling after review pass 3
+
+AC9's copy half has been raised three passes running, narrower each time, so this ruling closes its scope.
+
+- **S1.** The counter takes pass 3's scratch-tested form: spies on the shared typed-array prototype's `set` and `slice`, counting a `set` whose target is wasm memory or whose source is the transferred buffer, and on `ArrayBuffer.prototype.slice` for `this === buffer` only, all restored in `finally`. It is red on the four ruled forms and on `buffer.slice(0)`, a staging copy and an `Int8Array` copy, and green on the tip.
+- **AC9's wording.** The rejected implementation reads "a second copy by `set` or `slice` through any typed-array view or of the transferred buffer". The test comment says once that a constructor copy, `Uint8Array.from` and `structuredClone` are outside what a prototype spy sees. No further copy form reopens AC9.
+- **N1 taken.**
