@@ -396,6 +396,22 @@ let _keep = parsed;
 that boundary. The shell sends typed commands down and drains one event ring
 per animation frame.
 
+The wasm session keeps committed frames in a cache whose budget the caller
+sets, and the default is zero, which is off. `setFrameBudget(wasm, bytes)`
+moves it. A commit that carries a `content` id with its `stackIndex` and
+`stackEpoch` fills the cache, and a commit that carries a `content` id
+without both is refused with `InvalidValue` and commits nothing.
+`frameResident` and `showResident` read it back without the bytes crossing
+the boundary again. Under a wrong epoch `showResident` returns false at any
+index. Under the current epoch it answers only for the slice the viewport has
+selected, another index throws the coded `CommitRefused`, and at the selected
+index a miss or a stale entry returns false.
+`releaseSeries` and `releaseStudy` release the named series, one
+`cache.released` event per series that held frames, a series with nothing
+cached emits no event, and a release that crosses a pressure band pushes
+`cache.pressure` after `cache.released`. The displayed frame is outside the
+cache and stays on screen through a release.
+
 In a browser, use the workspace packages `@ocelli/core` and `@ocelli/react`.
 
 `@ocelli/core` depends on dcmjs 0.52.2, which declares adm-zip 0.5.17 as a

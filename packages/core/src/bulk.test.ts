@@ -2,18 +2,34 @@ import { describe as group, expect, it } from "vitest";
 
 import {
   acceptTransferredFrame,
+  contentId,
   exportDecodedFrame,
   transferredFrameMessage,
   writeDicomwebResponse,
   writeFrame,
   writeCommands,
   writeStack,
+  sessionBulkSink,
   type BulkSink,
   type DicomwebResponseKind,
   type DicomwebResponseSink,
   type HandoffMeta,
   type WasmMemory,
 } from "./bulk.js";
+import { OcelliError } from "./ocelli-error.js";
+
+/** The refusal code of one drive, or a marker when nothing was refused. */
+function codeOf(drive: () => unknown): string {
+  try {
+    drive();
+  } catch (error) {
+    if (error instanceof OcelliError) {
+      return error.code;
+    }
+    throw error;
+  }
+  return "no refusal";
+}
 
 it("command writes acquire memory after allocation growth and never write on refusal", () => {
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -744,4 +760,267 @@ it("writes each stack key as little-endian series, instance and frame", () => {
     0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0x09, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
     0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
   ]);
+});
+
+it("contentId writes uid, transfer syntax and encoded back to back and hashes through the export", () => {
+  // F-231 decision 8. The three fields go into the slot back to back and
+  // the two lengths name the first two, so the core's one FNV-1a sees the
+  // same field boundaries the Rust caller writes. The value is F-224 AC2's,
+  // returned here by the stub rather than recomputed in TypeScript.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const at = 1024;
+  let seen: number[] = [];
+  let lengths: readonly number[] = [];
+  let released = 0;
+  const wasm = {
+    memory,
+    alloc(len: number) {
+      expect(len).toBe(28);
+      return at;
+    },
+    bulk_ticket() { return 77; },
+    release_bulk(ticket: number) {
+      released = ticket;
+      return 1;
+    },
+    commit_frame() { return 0; },
+    content_id(ticket: number, len: number, uidLen: number, tsLen: number): bigint | undefined {
+      expect(ticket).toBe(77);
+      lengths = [len, uidLen, tsLen];
+      seen = Array.from(new Uint8Array(memory.buffer, at, len));
+      return 0x49e8_b650_ff1c_d3f1n;
+    },
+  };
+  const encoded = new Uint8Array([0, 1, 2, 3]);
+  expect(contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", encoded)).toBe(
+    0x49e8_b650_ff1c_d3f1n,
+  );
+  const uid = new TextEncoder().encode("1.2.3");
+  const transferSyntax = new TextEncoder().encode("1.2.840.10008.1.2.1");
+  expect(lengths).toEqual([uid.byteLength + transferSyntax.byteLength + 4, uid.byteLength, transferSyntax.byteLength]);
+  expect(seen).toEqual([...uid, ...transferSyntax, 0, 1, 2, 3]);
+  // The export dropped the slot, so nothing is released after the answer.
+  expect(released).toBe(0);
+});
+
+it("contentId throws CommitRefused on an undefined export answer and drops the slot", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let released = 0;
+  const wasm = {
+    memory,
+    alloc() { return 1024; },
+    bulk_ticket() { return 77; },
+    release_bulk(ticket: number) {
+      released = ticket;
+      return 1;
+    },
+    commit_frame() { return 0; },
+    content_id(): bigint | undefined {
+      return undefined;
+    },
+  };
+  expect(() => contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", new Uint8Array([0]))).toThrow(
+    OcelliError,
+  );
+  try {
+    contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", new Uint8Array([0]));
+  } catch (error) {
+    expect((error as OcelliError).code).toBe("CommitRefused");
+  }
+  // The catch's release drops the ticket the alloc captured.
+  expect(released).toBe(77);
+});
+
+it("contentId refuses an allocation of zero", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const wasm = {
+    memory,
+    alloc() { return 0; },
+    bulk_ticket() { return 0; },
+    release_bulk() { return 0; },
+    commit_frame() { return 0; },
+    content_id(): bigint | undefined {
+      return undefined;
+    },
+  };
+  expect(codeOf(() => contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", new Uint8Array()))).toBe(
+    "AllocationRefused",
+  );
+});
+
+it("routes a stack commit with a content id to commit_cached_frame", () => {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let routed: bigint | undefined;
+  let cachedCalls = 0;
+  const wasm = {
+    memory,
+    alloc() { return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { return 0; },
+    commit_selected_frame() { return 0; },
+    commit_cached_frame(
+      _ticket: number,
+      _len: number,
+      _viewport: number,
+      _columns: number,
+      _rows: number,
+      _index: number,
+      _epoch: number,
+      content: bigint,
+    ): number {
+      cachedCalls += 1;
+      routed = content;
+      return 1;
+    },
+  };
+  const sink = sessionBulkSink(wasm);
+  const held = sink.alloc(4);
+  expect(held).not.toBe(0);
+  const ticket = sink.allocationTicket?.() ?? 0;
+  const code = sink.commitAllocated?.(ticket, 4, {
+    viewport: 1,
+    columns: 2,
+    rows: 3,
+    generation: 0,
+    stackIndex: 1,
+    stackEpoch: 4,
+    content: 0x1_0000_0001n,
+  });
+  expect(code).toBe(1);
+  expect(cachedCalls).toBe(1);
+  expect(routed).toBe(0x1_0000_0001n);
+  // The ticket is consumed either way.
+  expect(sink.allocationTicket?.()).toBe(0);
+});
+
+it("routes a contentless stack commit to commit_selected_frame as before", () => {
+  let selected = 0;
+  let cached = 0;
+  const wasm = {
+    memory: new WebAssembly.Memory({ initial: 1 }),
+    alloc() { return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { return 0; },
+    commit_selected_frame() {
+      selected += 1;
+      return 1;
+    },
+    commit_cached_frame() {
+      cached += 1;
+      return 1;
+    },
+  };
+  const sink = sessionBulkSink(wasm);
+  const held = sink.alloc(4);
+  expect(held).not.toBe(0);
+  const ticket = sink.allocationTicket?.() ?? 0;
+  const code = sink.commitAllocated?.(ticket, 4, {
+    viewport: 1,
+    columns: 2,
+    rows: 3,
+    generation: 0,
+    stackIndex: 1,
+    stackEpoch: 4,
+  });
+  expect(code).toBe(1);
+  expect(selected).toBe(1);
+  expect(cached).toBe(0);
+});
+
+it("refuses a content id without both stack positions before any export call", () => {
+  // D2. A commit that carries content without both stackIndex and
+  // stackEpoch would be accepted and then silently dropped, because only
+  // a stack commit fills the cache. F-230's rule for the key is a refusal
+  // with InvalidValue before the allocation, so no export is called and
+  // the ticket is never taken. Only the no-position case depends on that
+  // guard. Without it, a lone stackIndex or stackEpoch would still be
+  // refused by the u32 check.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let calls = 0;
+  const wasm = {
+    memory,
+    alloc() { calls += 1; return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { calls += 1; return 1; },
+    commit_selected_frame() { calls += 1; return 1; },
+    commit_cached_frame() { calls += 1; return 1; },
+  };
+  const sink = sessionBulkSink(wasm);
+  const bytes = new Uint8Array(4);
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        stackIndex: 1,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(
+    codeOf(() =>
+      writeFrame(wasm, sink, bytes, {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 0,
+        stackEpoch: 4,
+        content: 0x1_0000_0001n,
+      }),
+    ),
+  ).toBe("InvalidValue");
+  expect(calls).toBe(0);
+});
+
+it("validates a content id as a u64 before any export call", () => {
+  // S2. FrameCommitMeta.content's validation was unwatched: a value above
+  // the u64 bound or one that is not a bigint at all reached the export,
+  // where wasm-bindgen wraps or throws a TypeError instead of F-230's
+  // InvalidValue. Removing the upper bound or the validation turns this
+  // red.
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let calls = 0;
+  const wasm = {
+    memory,
+    alloc() { calls += 1; return 4096; },
+    bulk_ticket() { return 9; },
+    release_bulk() { return 1; },
+    commit_frame() { calls += 1; return 1; },
+    commit_selected_frame() { calls += 1; return 1; },
+    commit_cached_frame() { calls += 1; return 1; },
+  };
+  const sink = sessionBulkSink(wasm);
+  const bytes = new Uint8Array(4);
+  for (const content of [2n ** 64n, -1n, 1.5]) {
+    expect(
+      codeOf(() =>
+        writeFrame(wasm, sink, bytes, {
+          viewport: 1,
+          columns: 1,
+          rows: 1,
+          generation: 0,
+          stackIndex: 1,
+          stackEpoch: 4,
+          content,
+        }),
+      ),
+    ).toBe("InvalidValue");
+  }
+  expect(calls).toBe(0);
 });

@@ -419,7 +419,7 @@ ticket = holdSessionBytes(wasm, new Uint8Array(message.bytes), ticket);
 // Several decode workers, each its own wasm instance. No SharedArrayBuffer.
 const pool = openDecodePool(owner, DEFAULT_DECODE_WORKERS, (index) =&gt; new Worker(url));
 pool?.close();</code></pre>
-    <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, and a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>. Not built: decoding that envelope in the worker, its frame cache and a render of that frame. The example worker publishes one stored sample to prove the path. <code>cache.released</code> reports a series released by the Rust <code>ImageCache::release_series</code>, and no shipped session produces it yet. The worker's own frame cache, and the <code>releaseSeries</code> and <code>releaseStudy</code> calls over it, arrive with F-231.</p>
+    <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>, and the render session's own frame cache. Not built: decoding that envelope in the worker and a render of that frame. The decode workers own their instances and no session cache of their own. The example worker publishes one stored sample to prove the path. The session's <code>releaseSeries</code> releases a series from that cache and reports it as <code>cache.released</code>.</p>
   </section>
 
   <section class="feature" id="documents">

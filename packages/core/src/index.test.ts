@@ -26,6 +26,7 @@ import { coreAvailable, VERSION } from "./index.js";
 const PUBLISHED: readonly string[] = [
   // ./bulk.js, HLD 17.2 and section 24
   "acceptTransferredFrame",
+  "contentId",
   "exportDecodedFrame",
   "transferredFrameMessage",
   "holdSessionBytes",
@@ -34,6 +35,13 @@ const PUBLISHED: readonly string[] = [
   "writeFrame",
   "writeCommands",
   "writeStack",
+  // ./frame-cache.js, F-231
+  "frameResident",
+  "releaseSeries",
+  "releaseStudy",
+  "requestFramePressure",
+  "setFrameBudget",
+  "showResident",
   // ./dicomweb.js, PS3.18 sections 9.1.2, 10.4, and 10.6
   "DicomwebClient",
   "DicomwebError",

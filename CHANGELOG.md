@@ -632,6 +632,29 @@ Repository bootstrap. Nothing is published.
   The page then forgets it in the local process and shows a sentence in its
   place. A rewrite that keeps the modification time is not detected, and only
   Chromium was measured.
+- The wasm session's own frame cache. The session keeps committed stack
+  frames in an `ImageCache` whose budget the caller sets with
+  `setFrameBudget`, in bytes, and the default is 0, which is off, so a
+  caller that never sets one gets the earlier behaviour. A frame enters the
+  cache only through a commit that carries `FrameCommitMeta.content`, the
+  frame's `ContentId`, beside `stackIndex` and `stackEpoch`, and
+  `contentId(wasm, sopInstanceUid, transferSyntaxUid, encoded)` computes that
+  id in the core. A `content` without both stack keys is refused with
+  `OcelliError` code `InvalidValue`. `frameResident` asks whether a slice is
+  held for those bytes and that extent without counting as a use.
+  `showResident` draws a held frame at the selected slice, answers `false`
+  for a miss or a stale entry, and throws `CommitRefused` for any other
+  index. `releaseSeries` empties one series and `releaseStudy` empties the
+  caller's list of series, one call per series. The session now produces
+  `cache.evicted`, `cache.displaced`, `cache.refused`, `cache.pressure`,
+  `cache.budgetChanged` and `cache.released` in the ring, and a pressure
+  reading carries the evictions and refusals since the previous one.
+  `requestFramePressure` asks for a reading. The displayed frame is held
+  outside the budget. `ocelli-cache` gains `CommittedFrame` and
+  `CommittedSource`, `ImageCache` becomes generic over its value with
+  `DecodedFrame` as the default, `ImageCache::set_budget` moves the budget
+  and returns the evictions, and `Lru::peek` reads a value without marking
+  it used.
 
 ### Changed
 

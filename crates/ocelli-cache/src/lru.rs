@@ -269,6 +269,17 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
         self.entries.contains_key(key)
     }
 
+    /// Read the value under `key` without marking it used.
+    ///
+    /// `get` ticks, so a caller that only wants to know what is held would
+    /// move the eviction order by asking. This is `contains_key` with the
+    /// value: it changes no tick and no byte, which is what makes a query
+    /// that is not a use expressible at all.
+    #[must_use]
+    pub fn peek(&self, key: &K) -> Option<&V> {
+        self.entries.get(key).map(|entry| &entry.value)
+    }
+
     /// This tier's pressure signal. Telemetry, not a use.
     #[must_use]
     pub fn pressure(&self) -> Pressure {
