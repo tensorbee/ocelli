@@ -23,7 +23,9 @@ pub use corners::{
     person_name_text,
 };
 pub use link::plane_from_token;
-pub use measure::{FREEFORM_POINT_CAP, MeasureShape, measure_frame};
+pub use measure::{
+    FREEFORM_POINT_CAP, MeasureShape, RegionExtent, measure_frame, region_extent_frame,
+};
 pub use preview::{
     FRAME_LIST_CAP, FrameFacts, FrameRequest, Preview, PreviewError, headers_json, inspect_json,
     plane_token, preview_first_frame, preview_frame, window_function_from_token,
