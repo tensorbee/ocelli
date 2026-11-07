@@ -216,7 +216,7 @@ impl std::ops::Deref for SharedBytes {
 ///
 /// Drop takes it out of the id's count. The last one out for an id that was
 /// forgotten meanwhile takes the id out of the doomed set, so both stay
-/// bounded by the decodes in flight. Never dropped under the cache lock.
+/// bounded by the requests in flight. Never dropped under the cache lock.
 pub(crate) struct Flight {
     cache: Arc<Mutex<CacheState>>,
     id: FileId,

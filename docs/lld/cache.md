@@ -262,8 +262,9 @@ finds the id gone and answers 410 Gone, as F-216 does for any file forgotten
 during that wait, or 503 if the wait itself runs out. Each decode's place in the count is a `Flight` that the
 route keeps until after its store, on the direct path, the decode workers
 and `/value` and `/measure`, and the last one out for an id takes it out of
-both sets. A flight lasts the whole request, including a wait for grey
-room, so both sets are bounded by the requests in flight, which F-216 caps
+both sets. A flight lasts from the lookup that hands out the posted bytes until
+after the store, and on the decode workers through the grey wait that
+follows it, so both sets are bounded by the requests in flight, which F-216 caps
 at 32 connections.
 
 The page forgets. Every open, a folder or the synthetic study, sends the
