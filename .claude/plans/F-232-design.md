@@ -75,7 +75,7 @@ Expected after this story: the scanner names the planted line, and `cargo check 
 
 ## Scope, API and compatibility
 
-In scope: `Cargo.toml` `[workspace.lints.rust]`, `scripts/unsafe_allowlist_check.py`, `scripts/tests/test_unsafe_allowlist_check.py`, `scripts/lint_policy_check.py`, the `unsafe` and `lint-policy` guard entries and probes in `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`, `docs/lld/guards.md`.
+In scope: `Cargo.toml` `[workspace.lints.rust]`, `scripts/unsafe_allowlist_check.py`, `scripts/tests/test_unsafe_allowlist_check.py`, `scripts/lint_policy_check.py`, `scripts/tests/test_guard_readers.py`, one attribute line in each of the 16 member library roots, the `unsafe` and `lint-policy` guard entries and probes in `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`, `docs/lld/guards.md`.
 
 Non-goals: the vendored counts, which stay 104 and 0 and are re-derived by the new tokenizer rather than re-recorded. Writing `ring.rs` or `cast.rs`. `cargo deny` advisories, which the operator accepted as a known risk.
 
@@ -117,7 +117,7 @@ Not applicable. No runtime resource.
 | AC12 | rustc refuses relaxation. A planted `#![allow(unsafe_code)]` in a lib root fails `cargo check` with error E0453 | recorded in the handoff | `deny`, which an inner `allow` silences | Implementation, recorded |
 | AC13 | wasm32. `cargo check --workspace --exclude ocelli-native --target wasm32-unknown-unknown` and `bin/ocelli.sh wasm` and `bin/ocelli.sh wasm-decode` pass with the table in place | `gate native`, `gate wasm` | A forbid that breaks `#[wasm_bindgen]` expansion | Implementation |
 | AC14 | The scanner refuses `allow`, `expect` or `warn` of `unsafe_code`, inner or outer, in any tracked Rust file, including a trybuild file | `test_weakening_attribute_is_refused` and probe `unsafe.weakening-attribute` | Refusing the inner form only | guards |
-| AC15 | `lint_policy_check.py` requires both. Table at `deny` or absent is refused with a message naming `forbid`. The script removed from the `unsafe` gate is refused even with the table present | probes `lint-policy.unsafe-code-not-forbidden` and `lint-policy.unsafe-script-dropped-beside-the-lint`, and the existing `lint-policy.unsafe-gate-named-only-in-a-comment` updated. `lint_policy_check.py` has no unit test file, so its probes are its tests | Keeping "one of the two", which lets the script go once the lint exists | guards |
+| AC15 | `lint_policy_check.py` requires both. Table at `deny` or absent is refused with a message naming `forbid`. The script removed from the `unsafe` gate is refused even with the table present | probes `lint-policy.unsafe-code-not-forbidden` and `lint-policy.unsafe-script-dropped-beside-the-lint`, and the existing `lint-policy.unsafe-gate-named-only-in-a-comment` updated. | Keeping "one of the two", which lets the script go once the lint exists | guards |
 | AC16 | Guard registration. The `unsafe` guard's `refuses` text names the tokenizer, the weakening attribute and the five triggers. A level-1 probe per trigger, `unsafe.after-quote-char`, `unsafe.after-escaped-quote-char`, `unsafe.after-raw-backslash`, `unsafe.after-raw-quote`, `unsafe.after-comment-quote`, each with a control. `ci/guard-probe-budget.json` re-recorded, runbook regenerated, `python3 scripts/guard_census.py` reports the unwatched bucket empty | `gate guards` | A tokenizer fix with no probe per trigger | guards |
 | AC17 | `bin/ocelli.sh gate --floor` and `gate clippy` pass on the final tree | gates | A forbid that turns a clippy-only target red | Implementation |
 
@@ -132,7 +132,7 @@ Not applicable. No runtime resource.
 
 Rejected alternatives:
 
-- `#![forbid(unsafe_code)]` in each of the 21 lib and bin roots. It covers 21 of 143 roots, and it writes a line into crate roots that F-209, F-211, F-214, F-223, F-225, F-226, F-227, F-228 and F-229 also write, for a weaker result.
+- `#![forbid(unsafe_code)]` in each of the 21 lib and bin roots. It covers 21 of 143 roots, and it writes a line into crate roots that F-209, F-211, F-214, F-223, F-225, F-226, F-227, F-228 and F-229 also write, for a weaker result. F-232 does now write one line into every library root, the doctest attribute, but that line does what no root lint can, and the 21-of-143 reason against this alternative stands.
 - `deny` in the table, the HLD's literal text. An inner `allow` silences it, and the tree needs no allow today.
 - Keeping the regexes with a char literal pattern added. Pass 9 shows five triggers and the regex approach found three, so another pattern is another blind spot.
 
@@ -161,7 +161,7 @@ bin/ocelli.sh gate native wasm clippy
 python3 scripts/guard_census.py
 ```
 
-Final profile: `bin/ocelli.sh gate --sprint`. Evidence is invalidated by any change to the tokenizer, the table, `lint_policy_check.py`'s unsafe branch, or a vendored package.
+Final profile: `bin/ocelli.sh gate --sprint`. Evidence is invalidated by any change to the tokenizer, the table, `lint_policy_check.py`'s unsafe or doctest branch, a member library root's header, or a vendored package.
 
 ## Boundary and tier
 
@@ -178,6 +178,7 @@ Final profile: `bin/ocelli.sh gate --sprint`. Evidence is invalidated by any cha
 | Category | What it proves | Where |
 |----------|----------------|-------|
 | unit | AC1 to AC5, AC7, AC8, AC14, the tokenizer over planted snippets | `scripts/tests/test_unsafe_allowlist_check.py` |
+| unit | the doctest attribute's presence, position, the root read as rustc reads it and the printable header, after the pass 3 to pass 5 rulings | `scripts/tests/test_guard_readers.py`, class `EveryLibraryRootForbidsUnsafeDoctests` |
 | guard probe | AC14 to AC16 in the floor sandbox, AC15 included | `scripts/guards/catalogue.py` |
 | integration | AC9, AC13, AC17 through the real gates | `gate unsafe`, `gate native`, `gate wasm`, `gate clippy` |
 | recorded | AC6, AC10, AC11, AC12 in scratch copies | handoff |
