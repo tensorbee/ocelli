@@ -71,6 +71,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+- **F-217 fresh-clone build, fixed as a follow-up on 2026-11-07.** F-217's
+  Vite 8 to Vite 7 move made `npm run build` fail with ENOENT on a clone with
+  no `crates/ocelli-wasm/pkg`, so CI's frontend job would have failed on push.
+  The follow-up integrated from `work/f-217-fresh-build` marks the wasm URL
+  external for the worker build when the pkg is absent, decodes the URL path,
+  and adds `scripts/viewer_build_check.py` to `gate packages`. F-217 stays
+  done, and its follow-up AS_BUILT entry records the three open items for a
+  separate story: the built `dist` hard-codes the build machine's `/@fs` path,
+  the viewer stays `core not built` in Chromium even with the pkg, and dev mode
+  answers 403 because `server.fs.allow` is percent-encoded. No story is filed
+  for them yet.
 
 ## Pulled forward from S47
 

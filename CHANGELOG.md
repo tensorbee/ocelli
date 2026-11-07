@@ -709,3 +709,11 @@ Repository bootstrap. Nothing is published.
   mode, so a browser applied `"default"` and could serve a re-processed
   object from its HTTP cache by heuristic freshness without asking the
   server. A server with validators answers an unchanged object with 304.
+
+### Fixed
+
+- The example viewer builds again from a clean clone with no
+  `crates/ocelli-wasm/pkg`. Under Vite 7 `npm run build` failed with ENOENT on
+  `ocelli_wasm.js`. Without the pkg the worker now keeps a runtime import and
+  reports the core as not built, and with it the wasm is still bundled as its
+  own files. A checkout under a path with a space builds too.
