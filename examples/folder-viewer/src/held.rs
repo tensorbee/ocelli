@@ -1871,6 +1871,7 @@ mod tests {
             facts: Err(PreviewError::Window),
             full_range: Err(PreviewError::Window),
             value: Err(PreviewError::Window),
+            calibration: Err(PreviewError::Window),
             frames: 1,
             width: columns,
             height: rows,

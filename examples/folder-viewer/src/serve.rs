@@ -16,6 +16,9 @@ use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
     PreviewSource, Viewer, ViewerConfig, detach_grey, retire_bytes, with_decode_workspace,
 };
+use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
+use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json};
+use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
     decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
     render_held, reset_phases, validate_frame_request,
@@ -50,6 +53,8 @@ struct Request {
     file_id: Option<FileId>,
     /// `X-Ocelli-Points`, read only by `/value`.
     points: PointsHeader,
+    /// `X-Ocelli-Shape` as it arrived, read only by `/measure`.
+    shape: Option<String>,
     close: bool,
     /// Capacity charged to inflight for this body.
     body_charge: usize,
@@ -376,6 +381,16 @@ fn route(
         ("POST", "/file") => (file_route(viewer, request, charge), None),
         ("POST", "/value") => {
             let reply = value_route(viewer, &request, stream);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/measure") => {
+            let reply = measure_route(viewer, &request, stream);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/link") => {
+            let reply = link_route(&request);
             retire_request_body(charge, request.body);
             (reply, None)
         }
@@ -1327,6 +1342,75 @@ fn value_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -
     }
 }
 
+/// One measurement of a held file, named by id.
+///
+/// The body is the point list and nothing else, so this is the one id
+/// route whose body is not refused. The frame is read through the same
+/// held-frame path `/value` uses, and the window headers are not read.
+fn measure_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+    let Some(id) = request.file_id else {
+        return text_reply(400, Some("header"), "a measure request names a file id");
+    };
+    let Some(shape) = request.shape.as_deref().and_then(MeasureShape::from_token) else {
+        return text_reply(400, Some("header"), "a measure request names one shape");
+    };
+    let points = match parse_measure_points(&request.body) {
+        Some(points) if shape.accepts(points.len()) => points,
+        _ => return text_reply(400, Some("points"), "the point list is not usable"),
+    };
+    let frame = request.frame.frame;
+    let (result, source) = match viewer.preview_source(id, frame) {
+        PreviewSource::Gone => return gone(),
+        PreviewSource::Hit(held) => (measure_json(&held, frame, shape, &points), "held"),
+        PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
+            Ok(Some(held)) => (measure_json(&held, frame, shape, &points), "decoded"),
+            Ok(None) => return busy_reply(),
+            Err(error) => return error_reply(error),
+        },
+    };
+    match result {
+        Ok(json) => {
+            let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
+            reply.source = Some(source);
+            reply
+        }
+        Err(error) => error_reply(error),
+    }
+}
+
+/// `POST /link`: where linked viewports move and where their lines go.
+///
+/// The body carries every plane the answer needs, so this process holds
+/// nothing between requests and reads no file. A body it would not write is
+/// `400` with `X-Ocelli-Error: link`.
+fn link_route(request: &Request) -> Reply {
+    match link_json(&request.body) {
+        Ok(json) => bare(200, "application/json; charset=utf-8", json.into_bytes()),
+        Err(_) => text_reply(400, Some("link"), "the link request is not usable"),
+    }
+}
+
+/// ASCII `x,y` pairs separated by one space, each number a finite decimal,
+/// at most [`FREEFORM_POINT_CAP`] pairs. Anything else is `None`. The count
+/// each shape takes is checked by the caller.
+fn parse_measure_points(body: &[u8]) -> Option<Vec<ImagePoint>> {
+    if body.is_empty() || !body.is_ascii() {
+        return None;
+    }
+    let text = std::str::from_utf8(body).ok()?;
+    let mut points = Vec::new();
+    for pair in text.split(' ') {
+        if points.len() == FREEFORM_POINT_CAP {
+            return None;
+        }
+        let (x, y) = pair.split_once(',')?;
+        let x = x.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        let y = y.parse::<f64>().ok().filter(|value| value.is_finite())?;
+        points.push(ImagePoint { x, y });
+    }
+    Some(points)
+}
+
 /// `x,y` pairs separated by one space, each number a finite decimal, from
 /// one to [`MAX_POINTS`] pairs. Anything else is `None`.
 fn parse_points(header: &PointsHeader) -> Option<Vec<ImagePoint>> {
@@ -1349,7 +1433,7 @@ fn parse_points(header: &PointsHeader) -> Option<Vec<ImagePoint>> {
     Some(points)
 }
 
-/// Decode one frame of a held file for `/value`, and store it.
+/// Decode one frame of a held file for `/value` and `/measure`, and store it.
 ///
 /// The decode is the one `/preview` runs on a frame miss, with the same
 /// inflight charge and sample buffer, and no grey. The process server runs
@@ -1803,6 +1887,20 @@ fn read_request(
     };
     let parsed = parse_header(&header).map_err(ReadStop::Reply)?;
     let declared = match parsed.length {
+        Some(value) if parsed.path == "/link" && value > LINK_BODY_CAP => {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("link"),
+                "the link request is too large",
+            )));
+        }
+        Some(value) if parsed.path == "/measure" && value > MEASURE_BODY_CAP => {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("points"),
+                "the point list is not usable",
+            )));
+        }
         Some(value) if value > BODY_CAP => {
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -1864,6 +1962,7 @@ fn read_request(
         frame: parsed.frame,
         file_id: parsed.file_id,
         points: parsed.points,
+        shape: parsed.shape,
         close: parsed.close,
         body_charge: final_charge,
         body_counted: counted,
@@ -2099,6 +2198,7 @@ struct HeaderParts {
     frame: FrameRequest,
     file_id: Option<FileId>,
     points: PointsHeader,
+    shape: Option<String>,
     close: bool,
 }
 
@@ -2114,6 +2214,43 @@ enum PointsHeader {
 
 /// Most points one `/value` request may name.
 const MAX_POINTS: usize = 64;
+
+/// Longest `/measure` body, 256 KiB. A longer one is refused from its
+/// declared length, before any of it is read.
+const MEASURE_BODY_CAP: usize = 256 * 1024;
+
+/// Decimal digits of `value`.
+const fn digits(value: usize) -> usize {
+    let mut count = 1;
+    let mut rest = value / 10;
+    while rest > 0 {
+        count += 1;
+        rest /= 10;
+    }
+    count
+}
+
+/// One listed image at its longest: a space, a UID, a space and a token.
+const LINK_IMAGE_MAX: usize = 1 + UID_MAX_CHARS + 1 + TOKEN_MAX_CHARS;
+/// `source <uid> <plane>` and its newline.
+const LINK_SOURCE_LINE_MAX: usize = SOURCE_WORD.len() + 1 + UID_MAX_CHARS + 1 + TOKEN_MAX_CHARS + 1;
+/// `target <cell> <shown> <scroll>`, `FRAME_LIST_CAP` images and a newline.
+const LINK_TARGET_LINE_MAX: usize = TARGET_WORD.len()
+    + 1
+    + digits(CELLS - 1)
+    + 1
+    + digits(FRAME_LIST_CAP - 1)
+    + 1
+    + 1
+    + FRAME_LIST_CAP * LINK_IMAGE_MAX
+    + 1;
+/// Every shown cell but the active one is a target.
+const LINK_TARGETS: usize = CELLS - 1;
+/// Longest `/link` body. A longer one is refused from its declared length,
+/// before any of it is read. Its terms are the grammar in `link.rs`.
+const LINK_BODY_CAP: usize = LINK_SOURCE_LINE_MAX + LINK_TARGETS * LINK_TARGET_LINE_MAX;
+const _: () = assert!(LINK_BODY_CAP < BODY_CAP);
+const _: () = assert!(COUNT_FIELD_CHARS >= digits(FRAME_LIST_CAP - 1));
 
 fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut lines = header.split("\r\n");
@@ -2161,6 +2298,8 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_function = false;
     let mut seen_preset = false;
     let mut seen_file = false;
+    let mut seen_shape = false;
+    let mut shape = None;
     let mut frame = FrameRequest::default();
     let mut file_id = None;
     let mut points = PointsHeader::Absent;
@@ -2224,6 +2363,9 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
                 PointsHeader::Absent => PointsHeader::One(text.to_owned()),
                 PointsHeader::One(_) | PointsHeader::Repeated => PointsHeader::Repeated,
             };
+        } else if name.eq_ignore_ascii_case("x-ocelli-shape") {
+            once(&mut seen_shape)?;
+            shape = Some(text.to_owned());
         } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
             once(&mut seen_preset)?;
             frame.window_preset =
@@ -2237,6 +2379,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         frame,
         file_id,
         points,
+        shape,
         close,
     })
 }
@@ -2376,6 +2519,7 @@ mod tests {
                 frame: FrameRequest::default(),
                 file_id: None,
                 points: PointsHeader::Absent,
+                shape: None,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,

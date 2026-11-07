@@ -28,11 +28,12 @@ use ocelli_codec::{
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    DispatchPath, EncapsulatedFrameIndex, MetadataElement, MetadataSet, MetadataValue,
-    MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string, parse_part10,
+    DispatchPath, EncapsulatedFrameIndex, FrameGeometry, MetadataElement, MetadataSet,
+    MetadataValue, MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string,
+    parse_part10,
 };
 use ocelli_pixel::{
-    ByteOrder, ImageDimensions, LutChain, ModalityTransform, PhotometricInterpretation,
+    ByteOrder, ImageDimensions, ImagePlane, LutChain, ModalityTransform, PhotometricInterpretation,
     PresentationLutEvidence, PresentationLutShape, SampleLayout, StoredBits,
     StoredPixelDescription, StoredSampleTable, VoiFunction, VoiTransform,
 };
@@ -40,6 +41,7 @@ use ocelli_render::display_index;
 use ocelli_viewport::presentation::WindowPreset;
 use ocelli_viewport::view::f32_from_f64;
 
+use crate::measure::{CalibrationInputs, FactorInput, SpacingInput};
 use crate::value::{ValueFacts, value_facts};
 
 const ROWS: Tag = Tag(0x0028, 0x0010);
@@ -65,6 +67,8 @@ const PRESENTATION_SEQUENCE: Tag = Tag(0x2050, 0x0010);
 const PIXEL_DATA: Tag = Tag(0x7FE0, 0x0010);
 const PIXEL_SPACING: Tag = Tag(0x0028, 0x0030);
 const IMAGER_PIXEL_SPACING: Tag = Tag(0x0018, 0x1164);
+/// Estimated Radiographic Magnification Factor, PS3.3 C.8.7.5.
+const MAGNIFICATION_FACTOR: Tag = Tag(0x0018, 0x1114);
 const IMAGE_ORIENTATION: Tag = Tag(0x0020, 0x0037);
 const PIXEL_MEASURES_SEQUENCE: Tag = Tag(0x0028, 0x9110);
 const PLANE_ORIENTATION_SEQUENCE: Tag = Tag(0x0020, 0x9116);
@@ -79,6 +83,16 @@ const PATIENT_ID: Tag = Tag(0x0010, 0x0020);
 const STUDY_DATE: Tag = Tag(0x0008, 0x0020);
 const STUDY_DESCRIPTION: Tag = Tag(0x0008, 0x1030);
 const ACCESSION: Tag = Tag(0x0008, 0x0050);
+const FRAME_OF_REFERENCE: Tag = Tag(0x0020, 0x0052);
+
+/// The most images the page lists for one file, and the most planes
+/// `inspect_json` writes for it. The page's `FRAME_LIST_CAP` has the same
+/// value, and a page test pins the two.
+pub const FRAME_LIST_CAP: usize = 65536;
+
+/// The longest UID, in characters. PS3.5 Table 6.2-1: UI is "64 bytes
+/// maximum", and PS3.5 9.1 counts every digit, separator and padding.
+pub(crate) const UID_MAX_CHARS: usize = 64;
 const MAX_PIXELS: u32 = 8_192 * 8_192;
 const MAX_HEADER_ROWS: usize = 4096;
 const VALUE_CAP: usize = 1024;
@@ -168,6 +182,9 @@ impl PreviewError {
             Self::Window => "window",
             Self::Frame => "frame",
             Self::Point => "point",
+            Self::Calibration => "calibration",
+            Self::SelfIntersecting => "self-intersecting",
+            Self::Degenerate => "degenerate",
         }
     }
 }
@@ -202,6 +219,15 @@ pub enum PreviewError {
     /// A requested point is outside the image.
     #[error("the point is outside this image")]
     Point,
+    /// A present spacing attribute cannot be used, so nothing is measured.
+    #[error("the spacing in this file cannot be used for a measurement")]
+    Calibration,
+    /// A freeform outline crosses itself.
+    #[error("This outline crosses itself, so its area is not measured.")]
+    SelfIntersecting,
+    /// The shape has no length, no angle arm or no sample to measure.
+    #[error("the shape has nothing to measure")]
+    Degenerate,
 }
 
 /// Decode frame 0 with the file window.
@@ -463,6 +489,11 @@ pub(crate) struct HeldFrame {
     /// a refused frame does not carry the facts' size inline. The facts'
     /// heap bytes are charged in [`HeldFrame::charged_bytes`].
     pub(crate) value: Result<Box<ValueFacts>, PreviewError>,
+    /// The spacing attributes a measurement reads, as the file stores them,
+    /// or the refusal that blocks every measurement. Nothing is derived
+    /// here. `select_calibration` runs per request. The inputs own no heap,
+    /// so [`HeldFrame::charged_bytes`] counts them in the struct size.
+    pub(crate) calibration: Result<CalibrationInputs, PreviewError>,
     /// Number of Frames, or 1 when that attribute is absent.
     pub(crate) frames: u32,
     /// Columns.
@@ -652,6 +683,7 @@ fn held_from_samples(
         facts: prepared.facts,
         full_range: prepared.full_range,
         value: prepared.value,
+        calibration: prepared.calibration,
         frames: parts.frames,
         width: parts.width,
         height: parts.height,
@@ -724,6 +756,7 @@ struct Prepared {
     facts: Result<FrameFacts, PreviewError>,
     full_range: Result<(f32, f32), PreviewError>,
     value: Result<Box<ValueFacts>, PreviewError>,
+    calibration: Result<CalibrationInputs, PreviewError>,
 }
 
 fn prepare_held(
@@ -741,6 +774,7 @@ fn prepare_held(
                 facts: Err(error),
                 full_range: Err(error),
                 value: Err(error),
+                calibration: Err(error),
             };
         }
     };
@@ -752,16 +786,20 @@ fn prepare_held(
                 facts: Err(PreviewError::Attribute),
                 full_range: Err(PreviewError::Attribute),
                 value: Err(PreviewError::Attribute),
+                calibration: Err(PreviewError::Attribute),
             };
         }
     };
     let facts = frame_facts(&metadata, &multi, frame_index);
+    // Spacing is not stage 1, so a refused rescale below never refuses a length.
+    let calibration = calibration_inputs(&metadata, &multi, frame_index);
     if let Err(error) = modality_blocked(&multi, frame_index) {
         return Prepared {
             recipe: Err(error),
             facts,
             full_range: Err(error),
             value: Err(error),
+            calibration,
         };
     }
     let (slope, intercept) = match rescale(&multi, frame_index) {
@@ -772,6 +810,7 @@ fn prepare_held(
                 facts,
                 full_range: Err(error),
                 value: Err(error),
+                calibration,
             };
         }
     };
@@ -783,6 +822,7 @@ fn prepare_held(
                 facts,
                 full_range: Err(PreviewError::Window),
                 value: Err(PreviewError::Window),
+                calibration,
             };
         }
     };
@@ -817,6 +857,7 @@ fn prepare_held(
         facts,
         full_range,
         value,
+        calibration,
     }
 }
 
@@ -1758,6 +1799,68 @@ fn top_level_pair(metadata: &MetadataSet, tag: Tag) -> Option<(String, String)> 
     Some((clean_decimal(row)?, clean_decimal(column)?))
 }
 
+/// The spacing a measurement reads for one frame, PS3.3 C.7.6.2 and C.8.11.4.
+///
+/// Pixel Spacing resolves through the Pixel Measures Sequence with the top
+/// level as the fallback, as [`frame_facts`] reads it. Imager Pixel
+/// Spacing and the Estimated Radiographic Magnification Factor (PS3.3
+/// C.8.7.5) are top level. A present attribute that is not one usable value
+/// of its VR is `Unusable`, so a measurement refuses it rather than reading
+/// the next source. A zero-length factor is absent, as a zero-length
+/// rescale is.
+fn calibration_inputs(
+    metadata: &MetadataSet,
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Result<CalibrationInputs, PreviewError> {
+    if frame >= multi.frame_count() {
+        return Err(PreviewError::Frame);
+    }
+    let pixel_spacing = match spacing_pair(multi, frame, PIXEL_MEASURES_SEQUENCE, PIXEL_SPACING)? {
+        SpacingRead::Absent => SpacingInput::Absent,
+        SpacingRead::Unusable => SpacingInput::Unusable,
+        SpacingRead::Pair(row, column) => decimal_pair(&row, &column),
+    };
+    let imager_spacing = if metadata.get(IMAGER_PIXEL_SPACING).is_none() {
+        SpacingInput::Absent
+    } else {
+        match top_level_pair(metadata, IMAGER_PIXEL_SPACING) {
+            Some((row, column)) => decimal_pair(&row, &column),
+            None => SpacingInput::Unusable,
+        }
+    };
+    let magnification = match metadata.get(MAGNIFICATION_FACTOR) {
+        None => FactorInput::Absent,
+        Some(element) if matches!(element.value(), MetadataValue::Empty) => FactorInput::Absent,
+        Some(element) => {
+            let parts: Vec<&str> = element
+                .semantic_text()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect();
+            match (parts.as_slice(), parts.first()) {
+                ([_], Some(text)) => parse_decimal_string(text.trim())
+                    .map_or(FactorInput::Unusable, FactorInput::Value),
+                _ => FactorInput::Unusable,
+            }
+        }
+    };
+    Ok(CalibrationInputs {
+        pixel_spacing,
+        imager_spacing,
+        magnification,
+    })
+}
+
+/// A pair [`clean_decimal`] already accepted, parsed into the stored numbers.
+fn decimal_pair(row: &str, column: &str) -> SpacingInput {
+    match (parse_decimal_string(row), parse_decimal_string(column)) {
+        (Some(row), Some(column)) => SpacingInput::Pair { row, column },
+        _ => SpacingInput::Unusable,
+    }
+}
+
 fn token_list(
     multi: &MultiframeMetadata<'_>,
     frame: usize,
@@ -2345,8 +2448,97 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     push_field(&mut out, "edgeRight", &facts.edge_right, false);
     push_field(&mut out, "edgeTop", &facts.edge_top, false);
     push_field(&mut out, "edgeBottom", &facts.edge_bottom, false);
-    out.push('}');
+    push_field(
+        &mut out,
+        "frameOfReferenceUid",
+        &sendable_uid(optional_text(object, FRAME_OF_REFERENCE).ok().flatten()),
+        false,
+    );
+    out.push_str(",\"planes\":[");
+    for (index, token) in plane_tokens(object, frames).iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        match token {
+            Some(text) => json_string(&mut out, text),
+            None => out.push_str("null"),
+        }
+    }
+    out.push_str("]}");
     Ok(out)
+}
+
+/// The UID as the page may send it back, or `""`.
+///
+/// PS3.5 9.1: a UID is digits and `.` and at most [`UID_MAX_CHARS`]
+/// characters. Anything else is reported empty, so it links nothing rather
+/// than breaking the space-separated `/link` body.
+fn sendable_uid(text: Option<String>) -> String {
+    match text {
+        Some(text)
+            if text.len() <= UID_MAX_CHARS
+                && text
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b'.') =>
+        {
+            text
+        }
+        _ => String::new(),
+    }
+}
+
+/// One plane token per frame, up to [`FRAME_LIST_CAP`], or `None` where
+/// `FrameGeometry::derive` refused the frame.
+fn plane_tokens(object: &DefaultDicomObject, frames: u32) -> Vec<Option<String>> {
+    let count = usize::try_from(frames).map_or(FRAME_LIST_CAP, |count| count.min(FRAME_LIST_CAP));
+    let Ok(metadata) = project_metadata(object) else {
+        return vec![None; count];
+    };
+    let Ok(multi) = MultiframeMetadata::new(&metadata) else {
+        return vec![None; count];
+    };
+    (0..count)
+        .map(|frame| {
+            FrameGeometry::derive(&multi, frame)
+                .ok()
+                .map(|geometry| plane_token(&geometry.plane()))
+        })
+        .collect()
+}
+
+/// The thirteen numbers of a validated plane, joined by commas.
+///
+/// `Sx,Sy,Sz,Xx,Xy,Xz,Yx,Yy,Yz,rowSpacing,columnSpacing,rows,columns`. `S`
+/// is Image Position (Patient), `X` and `Y` the validated row and column
+/// cosines, and the spacings are in Pixel Spacing's order, row first, PS3.3
+/// 10.7.1.3. Each `f64` is written with `{:e}`, the shortest text that reads
+/// back to the same bits, which never exceeds 24 characters, and each `u32`
+/// with `{}`. The page stores the token and posts it back unread.
+pub fn plane_token(plane: &ImagePlane) -> String {
+    let position = plane.position_vector();
+    let row = plane.orientation.row();
+    let column = plane.orientation.column();
+    let spacing = plane.spacing();
+    let dimensions = plane.dimensions();
+    let numbers = [
+        position.x,
+        position.y,
+        position.z,
+        row.x,
+        row.y,
+        row.z,
+        column.x,
+        column.y,
+        column.z,
+        spacing.row_mm(),
+        spacing.column_mm(),
+    ];
+    let mut out = String::new();
+    for number in numbers {
+        out.push_str(&format!("{number:e},"));
+    }
+    out.push_str(&format!("{},{}", dimensions.rows(), dimensions.columns()));
+    out
 }
 
 /// File meta and data set rows for the headers table.

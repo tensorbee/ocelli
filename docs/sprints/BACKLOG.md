@@ -351,10 +351,10 @@ beside F-119.
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-206 | E38.16 | S45 | Folder viewer synthetic study, spacing, edge letters and preset window | Rust | 5w | F-201 | done |
 | F-207 | E38.17 | S45 | Folder viewer layout, gestures, marks and image controls | TS | 8w | F-206 | done |
-| F-208 | E38.18 | S46 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | F-207, F-199 | pending |
-| F-209 | E38.19 | S46 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | F-208, F-199 | pending |
+| F-208 | E38.18 | S46 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | F-207, F-199 | done |
+| F-209 | E38.19 | S46 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | F-208, F-199 | done |
 | F-210 | E38.20 | S46 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | F-207, F-191 | done |
-| F-211 | E38.21 | S46 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | F-210, F-195 | pending |
+| F-211 | E38.21 | S46 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | F-210, F-195 | done |
 | F-212 | E38.22 | S46 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | F-206 | pending |
 | F-213 | E38.23 | S46 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | F-200, F-207 | pending |
 | F-214 | E38.24 | S46 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | F-207 | pending |

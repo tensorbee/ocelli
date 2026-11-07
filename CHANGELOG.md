@@ -551,6 +551,30 @@ Repository bootstrap. Nothing is published.
   pointer, HU on a CT that states HU or states no unit and is not
   multi-energy, and Units on a PET. The local process computes it from the
   held frame, and `ocelli-dicom` gains `read_padding`.
+- The local folder viewer measures angle, Cobb angle, bidirectional, arrow,
+  probe and regions with area, mean, SD, minimum and maximum in modality
+  units, with editable handles and a measurement list. An outline that
+  crosses or touches itself is not measured. A projection image whose Pixel
+  Spacing equals its Imager Pixel Spacing is measured at the detector plane
+  unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
+  gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
+  `spacing_pair_agrees`, the one definition of an equal spacing pair.
+- The local folder viewer lays out 1 by 1 up to 3 by 3 viewports from a
+  picker on `G`, each with its own series, image, zoom, pan and window. A
+  series row dragged onto a viewport opens there, and the four-image view is
+  a tile mode of one viewport on `Shift G`. Bare digits no longer choose a
+  layout. A `viewer-browser` gate measures the displayed aspect and the
+  pointer readout in headless Chromium.
+- The local folder viewer links its viewports. A Link menu turns on Scroll,
+  Window and Zoom over every visible viewport, with the outlined one as the
+  source, and Reference lines draw where the source image's plane cuts each
+  other viewport. Scroll moves to the nearest image by Image Position
+  (Patient) when both series share a Frame of Reference UID and their planes
+  are within cornerstone3D 5.8.2's coplanar threshold. The local process
+  chooses the image and computes the line through the new
+  `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
+  and `reference_segment`, and `SyncScene` now uses the same UID rule. The
+  corner of an image that is not monochrome reads `Window not applicable`.
 
 ### Changed
 

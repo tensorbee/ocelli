@@ -6,9 +6,12 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ocelli_core::{Index, Pt};
+use ocelli_dicom::{FrameGeometry, MetadataSet, MultiframeMetadata, parse_part10};
 use ocelli_folder_viewer::{
-    FrameRequest, Preview, PreviewError, SLICES, Viewer, ViewerConfig, handle_connection,
-    headers_json, inspect_json, preview_first_frame, preview_frame, serve_on, slice,
+    FRAME_LIST_CAP, FrameRequest, Preview, PreviewError, SLICES, Viewer, ViewerConfig,
+    handle_connection, headers_json, inspect_json, plane_from_token, plane_token,
+    preview_first_frame, preview_frame, serve_on, slice,
 };
 use ocelli_pixel::VoiFunction;
 use ocelli_viewport::presentation::WindowPreset;
@@ -242,6 +245,76 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
             return Err(format!("the page computes a modality value: {arithmetic}"));
         }
     }
+    // F-211 AC17. The five new tools exist with their keys, every length,
+    // angle, area and statistic comes from `/measure` by file id, and a
+    // reply is kept only for the revision it was asked for.
+    for (tool, key) in [
+        ("Angle", "Q"),
+        ("Cobb", "J"),
+        ("Bidirectional", "B"),
+        ("Arrow", "U"),
+        ("Probe", "X"),
+    ] {
+        if !page.contains(&format!(">{tool}<"))
+            || !page.contains(&format!(
+                "data-key=\"{key}\"><svg class=\"i\"><use href=\"#i-"
+            ))
+        {
+            return Err(format!("the page has no {tool} tool on {key}"));
+        }
+    }
+    let measure_at = page
+        .find("fetch(\"/measure\"")
+        .ok_or_else(|| "the page does not ask for a measurement".to_owned())?;
+    let measure_call = page
+        .get(measure_at..)
+        .and_then(|rest| rest.find("});").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the measure call does not close".to_owned())?;
+    if !measure_call.contains("\"X-Ocelli-File\": id")
+        || !measure_call.contains("body: pointsAttr(points)")
+    {
+        return Err(format!(
+            "the measure call is not by id with the points: {measure_call}"
+        ));
+    }
+    for sentence in [
+        "\"tool-rect\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
+        "\"tool-ellipse\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
+        "\"tool-contour\": \"A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. It is not saved.\"",
+        "\"tool-length\": \"The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. It is not saved.\"",
+    ] {
+        if !page.contains(sentence) {
+            return Err(format!("the page lacks the sentence {sentence}"));
+        }
+    }
+    if page.contains("Math.hypot(dCol * facts.column") || page.contains("lengthText") {
+        return Err("the page keeps its own length formula".to_owned());
+    }
+    // The page's outline cap is the server's, so an outline over it gets the
+    // page's own sentence exactly when the route refuses it.
+    let cap = format!(
+        "const OUTLINE_CAP = {};",
+        ocelli_folder_viewer::FREEFORM_POINT_CAP
+    );
+    if !page.contains(&cap) {
+        return Err(format!("the page's outline cap is not {cap}"));
+    }
+    if !page.contains(&format!(
+        "This outline has more than {} points, so it is not measured.",
+        ocelli_folder_viewer::FREEFORM_POINT_CAP
+    )) {
+        return Err("the outline sentence does not name the server's cap".to_owned());
+    }
+    // The sentence is used for a freeform the route refuses with `points`
+    // for its length, not only declared.
+    if !page.contains(
+        "if (code === \"points\" && shape === \"contour\" && points.length > OUTLINE_CAP) return { result: null, error: OUTLINE_LONG };",
+    ) {
+        return Err("the outline sentence is not used for a long outline".to_owned());
+    }
+    if !page.contains("if (!live || live.revision !== revision) return;") {
+        return Err("a measure reply is applied without the revision check".to_owned());
+    }
     // PS3.3 10.7.1.3: the first Pixel Spacing value is the row spacing, the
     // vertical distance between rows, and the second is the column spacing.
     // The display stretches x by the column spacing and y by the row spacing.
@@ -258,6 +331,148 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
                 "the display aspect is not applied where it is used: {used}"
             ));
         }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_page_has_viewport_cells() -> Result<(), String> {
+    // F-208. The page text is read, not executed. The browser observations
+    // B1 to B7 of the design are a separate record.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    // AC1. A picker from 1 by 1 to 3 by 3, not a two-state toggle.
+    for needle in [
+        "id=\"layout\"",
+        "id=\"layout-picker\"",
+        "data-columns=\"3\"",
+        "data-rows=\"3\"",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the page has no layout picker: {needle}"));
+        }
+    }
+    // AC2. Every cell is cloned from one template.
+    if !page.contains("id=\"cell-template\"") || !page.contains("class=\"cell\"") {
+        return Err("the cells do not come from one template".to_owned());
+    }
+    // AC3. View state lives in one record per viewport. The script's top
+    // level starts at column 0, so a global is a line that starts with it.
+    for global in [
+        "let scale =",
+        "let panX =",
+        "let rotation =",
+        "let gridMode =",
+        "let overrideWindow =",
+        "let activePreset =",
+        "let activeIndex =",
+        "let viewIndex =",
+    ] {
+        if page.contains(&format!("\n{global}")) {
+            return Err(format!("the page keeps a global view state: {global}"));
+        }
+    }
+    if !page.contains("function blankViewport(") {
+        return Err("the page has no viewport record".to_owned());
+    }
+    // AC4. A thumbnail drags onto a cell under the page's own type.
+    for needle in [
+        "application/x-ocelli-series",
+        "draggable = true",
+        "\"dragover\"",
+        "\"drop\"",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("a series cannot be dragged onto a cell: {needle}"));
+        }
+    }
+    // AC5. The four-image view is kept as a tile mode with its sentences.
+    for needle in [
+        "id=\"tile-mode\"",
+        "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
+        "Drawing works in the single view.",
+        "Four images are not shown for a file larger than 32 MiB.",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the tile mode is not kept: {needle}"));
+        }
+    }
+    // AC7. An empty cell says what to do.
+    if !page.contains("Drag a series here.") {
+        return Err("an empty cell does not say what to do".to_owned());
+    }
+    // AC13. `G` opens the layout picker and `Shift G` toggles tile mode,
+    // through the two branch texts below and the two `data-key` attributes.
+    // Nothing here is about any other key, so F-213 may bind the digits.
+    for needle in [
+        "data-key=\"G\"",
+        "data-key=\"Shift G\"",
+        "} else if (event.shiftKey && event.key.toLowerCase() === \"g\") {\n    toggleTileMode();",
+        "} else if (event.key.toLowerCase() === \"g\") {\n    openLayoutPicker();",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the layout keys are not bound: {needle}"));
+        }
+    }
+    // In the text of `onKey`, including its `clicks` and `map` literals,
+    // `toggleTileMode(` and `openLayoutPicker(` each appear exactly once,
+    // and each other token in this list appears zero times. That is the
+    // whole check. A route that uses none of these tokens is not seen.
+    let key_at = page
+        .find("function onKey(event) {")
+        .ok_or_else(|| "the page has no key handler".to_owned())?;
+    let handler = page
+        .get(key_at..)
+        .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the key handler does not close".to_owned())?;
+    for (token, allowed) in [
+        ("toggleTileMode(", 1),
+        ("openLayoutPicker(", 1),
+        ("setTileMode(", 0),
+        ("setLayout(", 0),
+        ("tileButton", 0),
+        ("tile-mode", 0),
+        ("layout\"", 0),
+        ("layout'", 0),
+        ("layout`", 0),
+        ("#layout", 0),
+        ("layoutButton.click", 0),
+        ("layoutPicker.hidden = false", 0),
+        ("data-columns", 0),
+        ("dataset.columns", 0),
+    ] {
+        let found = handler.matches(token).count();
+        if found != allowed {
+            return Err(format!(
+                "onKey reaches the layout or the tile mode outside G and Shift G: {token} appears {found} times, {allowed} allowed"
+            ));
+        }
+    }
+    // In the whole page, `setLayout(`, `openLayoutPicker(` and
+    // `toggleTileMode` each appear exactly 3 times, which is their
+    // definition and their two uses today.
+    for (token, expected) in [
+        ("setLayout(", 3),
+        ("openLayoutPicker(", 3),
+        ("toggleTileMode", 3),
+    ] {
+        let found = page.matches(token).count();
+        if found != expected {
+            return Err(format!(
+                "{token} appears {found} times in the page, {expected} expected"
+            ));
+        }
+    }
+    // AC4. A cell accepts a drag only when it carries the series type, on
+    // both the dragover and the drop.
+    if !page.contains("return types.includes(SERIES_TYPE);")
+        || page.matches("if (!carriesSeries(event)) return;").count() != 2
+    {
+        return Err("a cell accepts a drag without the series type".to_owned());
     }
     Ok(())
 }
@@ -2645,6 +2860,872 @@ fn the_page_names_the_release_build() -> Result<(), String> {
     }
     if !page.contains("This is the slow debug build.") {
         return Err("the page does not name the debug build".to_owned());
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// F-209. Plane tokens and `POST /link`. Every expected number is worked by
+// hand from PS3.3 C.7.6.2.1.1, Equation C.7.6.2.1-1, with Pixel Spacing in
+// PS3.3 10.7.1.3's order, row spacing first, and from the cornerstone3D
+// 5.8.2 rules transcribed in `.claude/plans/F-209-design.md`. None is read
+// from a previous run of the route.
+
+/// A one-frame object with the plane attributes given as DS text.
+fn plane_object(
+    position: &str,
+    orientation: &str,
+    pixel: Option<&str>,
+    imager: Option<&str>,
+    frame_of_reference: Option<&str>,
+    rows: u16,
+    columns: u16,
+) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad("CT"))?);
+    if let Some(pair) = imager {
+        data.extend(short_le((0x0018, 0x1164), *b"DS", &text_pad(pair))?);
+    }
+    data.extend(short_le((0x0020, 0x000E), *b"UI", &ui(b"2.25.9"))?);
+    data.extend(short_le((0x0020, 0x0032), *b"DS", &text_pad(position))?);
+    data.extend(short_le((0x0020, 0x0037), *b"DS", &text_pad(orientation))?);
+    if let Some(uid) = frame_of_reference {
+        data.extend(short_le((0x0020, 0x0052), *b"UI", &ui(uid.as_bytes()))?);
+    }
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
+    if let Some(pair) = pixel {
+        data.extend(short_le((0x0028, 0x0030), *b"DS", &text_pad(pair))?);
+    }
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad("1"))?);
+    data.extend(short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?);
+    let samples = usize::from(rows) * usize::from(columns);
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &vec![0_u8; samples * 2])?);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
+    bytes.extend(data);
+    Ok(bytes)
+}
+
+/// The text between `"planes":` and the closing `]`, inclusive.
+fn planes_field(json: &str) -> Result<&str, String> {
+    let at = json
+        .find("\"planes\":")
+        .ok_or_else(|| "no planes field".to_owned())?;
+    let rest = json.get(at..).ok_or_else(|| "planes".to_owned())?;
+    let end = rest
+        .find(']')
+        .ok_or_else(|| "planes do not close".to_owned())?;
+    rest.get(..=end).ok_or_else(|| "planes".to_owned())
+}
+
+/// The first token in `"planes":["..."]`.
+fn first_token(json: &str) -> Result<String, String> {
+    let field = planes_field(json)?;
+    let token = field
+        .strip_prefix("\"planes\":[\"")
+        .and_then(|rest| rest.split('"').next())
+        .ok_or_else(|| format!("no token in {field}"))?;
+    Ok(token.to_owned())
+}
+
+#[test]
+fn inspect_reports_the_plane_token() -> Result<(), String> {
+    // AC8. Synthetic slice 3 is IPP `0\0\7.5`, IOP `1\0\0\0\1\0`, Pixel
+    // Spacing `0.7\0.5` (row 0.7, column 0.5, PS3.3 10.7.1.3), 96 rows and
+    // 128 columns. `{:e}` writes 0 as `0e0`, 7.5 as `7.5e0`, 1 as `1e0`,
+    // 0.7 as `7e-1` and 0.5 as `5e-1`.
+    let want = "\"planes\":[\"0e0,0e0,7.5e0,1e0,0e0,0e0,0e0,1e0,0e0,7e-1,5e-1,96,128\"]";
+    let file = slice(3).ok_or_else(|| "slice 3 was not built".to_owned())?;
+    let json = inspect_json(&file, 0).map_err(|_| "inspect refused slice 3".to_owned())?;
+    if !json.contains("\"frameOfReferenceUid\":\"2.25.44000\"") || !json.contains(want) {
+        return Err(format!("slice 3 reported {json}"));
+    }
+    // The same fields reach the page through `POST /file`.
+    let response = one_exchange(&http_post_to("/file", "", &file))?;
+    let (header, body) = split_http(&response)?;
+    let body = std::str::from_utf8(body).map_err(|_| "the reply is not text".to_owned())?;
+    if !header.contains("200") || body != json {
+        return Err(format!("POST /file did not carry the plane: {header}"));
+    }
+    // AC9. Imager Pixel Spacing alone is a detector-plane spacing, PS3.3
+    // C.8.11.4, so `FrameGeometry::derive` refuses it and there is no plane.
+    // The control, the same object with Pixel Spacing, has one.
+    let imager = plane_object(
+        "0\\0\\0",
+        "1\\0\\0\\0\\1\\0",
+        None,
+        Some("0.3\\0.2"),
+        None,
+        1,
+        1,
+    )?;
+    let imager_json =
+        inspect_json(&imager, 0).map_err(|_| "inspect refused imager spacing".to_owned())?;
+    if planes_field(&imager_json)? != "\"planes\":[null]" {
+        return Err(format!("imager spacing made a plane: {imager_json}"));
+    }
+    let pixel = plane_object(
+        "0\\0\\0",
+        "1\\0\\0\\0\\1\\0",
+        Some("0.3\\0.2"),
+        None,
+        None,
+        1,
+        1,
+    )?;
+    let pixel_json = inspect_json(&pixel, 0).map_err(|_| "inspect refused".to_owned())?;
+    if planes_field(&pixel_json)?
+        != "\"planes\":[\"0e0,0e0,0e0,1e0,0e0,0e0,0e0,1e0,0e0,3e-1,2e-1,1,1\"]"
+    {
+        return Err(format!("pixel spacing made no plane: {pixel_json}"));
+    }
+    // An absent UID and one the page could not send back are both "".
+    // PS3.5 9.1: a UID is digits and `.`, at most 64 characters.
+    if !pixel_json.contains("\"frameOfReferenceUid\":\"\"") {
+        return Err("an absent UID was not empty".to_owned());
+    }
+    for (uid, want) in [
+        ("1.2.840.99", "\"frameOfReferenceUid\":\"1.2.840.99\""),
+        ("1.2.x4", "\"frameOfReferenceUid\":\"\""),
+        (&"1".repeat(65), "\"frameOfReferenceUid\":\"\""),
+    ] {
+        let file = plane_object(
+            "0\\0\\0",
+            "1\\0\\0\\0\\1\\0",
+            Some("1\\1"),
+            None,
+            Some(uid),
+            1,
+            1,
+        )?;
+        let json = inspect_json(&file, 0).map_err(|_| "inspect refused a UID".to_owned())?;
+        if !json.contains(want) {
+            return Err(format!("UID {uid} reported {json}"));
+        }
+    }
+    // One entry per declared frame. This object has no plane attributes.
+    let two = tagged_frame(2, &[0, 0, 0, 0])?;
+    let two_json = inspect_json(&two, 0).map_err(|_| "inspect refused two frames".to_owned())?;
+    if planes_field(&two_json)? != "\"planes\":[null,null]" {
+        return Err(format!("two frames reported {two_json}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn the_frame_list_caps_agree() -> Result<(), String> {
+    // AC15. The page lists at most this many images per file and the
+    // process writes at most this many planes for it.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (_, body) = split_http(&response)?;
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    if !page.contains(&format!("\nconst FRAME_LIST_CAP = {FRAME_LIST_CAP};\n")) {
+        return Err("the page and the process disagree on FRAME_LIST_CAP".to_owned());
+    }
+    // The link body cap counts MAX_SIDE squared cells.
+    if !page.contains("\nconst MAX_SIDE = 3;\n") {
+        return Err("the page's MAX_SIDE is not the 3 the link cap counts".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_plane_field_is_at_most_24_characters() -> Result<(), String> {
+    // `{:e}` writes the shortest digits that read back to the same bits:
+    // at most 17 significant digits, so a sign, one digit, a point, 16
+    // digits and a three-digit negative exponent, 1 + 1 + 1 + 16 + 5 = 24.
+    let extremes = [
+        f64::MIN,
+        f64::MAX,
+        f64::MIN_POSITIVE,
+        -f64::MIN_POSITIVE,
+        -2.225_073_858_507_201_4e-308,
+        -1.234_567_890_123_456_7e-300,
+        5e-324,
+        -5e-324,
+        0.1 + 0.2,
+        -0.0,
+        f64::EPSILON,
+    ];
+    let mut longest = 0;
+    for value in extremes {
+        let text = format!("{value:e}");
+        let back: f64 = text
+            .parse()
+            .map_err(|_| format!("{text} did not read back"))?;
+        if back.to_bits() != value.to_bits() {
+            return Err(format!("{text} read back as another value"));
+        }
+        longest = longest.max(text.len());
+    }
+    if longest != 24 {
+        return Err(format!("the longest field was {longest} characters"));
+    }
+    // A field one character longer is not a token field.
+    let wide = format!(
+        "{},0e0,0e0,1e0,0e0,0e0,0e0,1e0,0e0,1e0,1e0,1,1",
+        "0".repeat(25)
+    );
+    if plane_from_token(&wide).is_some() {
+        return Err("a 25 character field was read".to_owned());
+    }
+    let narrow = format!(
+        "{},0e0,0e0,1e0,0e0,0e0,0e0,1e0,0e0,1e0,1e0,1,1",
+        "0".repeat(24)
+    );
+    if plane_from_token(&narrow).is_none() {
+        return Err("a 24 character field was refused".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_plane_token_round_trips() -> Result<(), String> {
+    // AC14. An oblique plane whose numbers need every digit. Row (0.6, 0.48,
+    // 0.64) and column (0.8, -0.36, -0.48) are unit and orthogonal:
+    // 0.36 + 0.2304 + 0.4096 = 1, 0.64 + 0.1296 + 0.2304 = 1 and
+    // 0.48 - 0.1728 - 0.3072 = 0. The four corners of a 2 by 3 image are
+    // compared, PS3.3 C.7.6.2.1.1 with i to 2 and j to 1.
+    let file = plane_object(
+        "-123.456789\\87.654321\\-0.000123",
+        "0.6\\0.48\\0.64\\0.8\\-0.36\\-0.48",
+        Some("0.488281\\0.3125"),
+        None,
+        Some("2.25.7"),
+        2,
+        3,
+    )?;
+    let json =
+        inspect_json(&file, 0).map_err(|_| "inspect refused the oblique plane".to_owned())?;
+    let token = first_token(&json)?;
+    let read = plane_from_token(&token).ok_or_else(|| format!("{token} was not read back"))?;
+    let parsed = parse_part10(&file).map_err(|_| "the object did not parse".to_owned())?;
+    let metadata = MetadataSet::from_object(parsed.object())
+        .map_err(|_| "the metadata did not project".to_owned())?;
+    let multi = MultiframeMetadata::new(&metadata).map_err(|_| "no multiframe view".to_owned())?;
+    let derived = FrameGeometry::derive(&multi, 0)
+        .map_err(|error| format!("derive refused: {error:?}"))?
+        .plane();
+    if plane_token(&derived) != token {
+        return Err("the token is not the derived plane's".to_owned());
+    }
+    for (column, row) in [(0.0, 0.0), (2.0, 0.0), (0.0, 1.0), (2.0, 1.0)] {
+        let corner = Pt::<Index>::new(column, row, 0.0);
+        let want = derived.index_to_world().apply(corner);
+        let got = read.index_to_world().apply(corner);
+        let gap = (want.x - got.x)
+            .abs()
+            .max((want.y - got.y).abs())
+            .max((want.z - got.z).abs());
+        // A NaN gap compares as nothing and is refused too.
+        if gap.partial_cmp(&1e-9).is_none_or(|order| order.is_gt()) {
+            return Err(format!("corner ({column}, {row}) moved {gap} mm"));
+        }
+    }
+    Ok(())
+}
+
+/// Synthetic slice `index`'s token, from `inspect_json`.
+fn synthetic_token(index: u32) -> Result<String, String> {
+    let file = slice(index).ok_or_else(|| format!("slice {index} was not built"))?;
+    first_token(&inspect_json(&file, 0).map_err(|_| "inspect refused".to_owned())?)
+}
+
+/// The coronal plane `C` of the design: IPP `0\20\30`, IOP `1\0\0\0\0\-1`,
+/// Pixel Spacing `2.5\0.5`, 13 rows and 128 columns, written by hand.
+const CORONAL: &str = "0e0,2e1,3e1,1e0,0e0,0e0,0e0,0e0,-1e0,2.5e0,5e-1,13,128";
+
+/// An axial plane of the synthetic geometry at height `z`, written by hand.
+fn axial_token(z: &str) -> String {
+    format!("0e0,0e0,{z},1e0,0e0,0e0,0e0,1e0,0e0,7e-1,5e-1,96,128")
+}
+
+fn link_viewers() -> Result<[(&'static str, SocketAddr); 2], String> {
+    let start = |viewer: Viewer| -> Result<SocketAddr, String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, viewer);
+        });
+        Ok(addr)
+    };
+    let config = || ViewerConfig {
+        cache_bytes: 8 * 1024 * 1024,
+    };
+    Ok([
+        ("direct", start(Viewer::new(config()))?),
+        ("server", start(Viewer::server(config()))?),
+    ])
+}
+
+fn post_link(addr: SocketAddr, body: &[u8]) -> Result<(String, String), String> {
+    let response = exchange(addr, &http_post_to("/link", "", body))?;
+    let (header, body) = split_http(&response)?;
+    Ok((
+        header.to_owned(),
+        String::from_utf8_lossy(body).into_owned(),
+    ))
+}
+
+fn expect_link(addr: SocketAddr, name: &str, body: &str, want: &str) -> Result<(), String> {
+    let (header, reply) = post_link(addr, body.as_bytes())?;
+    if !header.starts_with("HTTP/1.1 200 ") || reply != want {
+        return Err(format!("{name}: {header} {reply}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_draws_the_axial_level() -> Result<(), String> {
+    // AC10. Source synthetic slice 2, IPP z = 5, against `C` in cell 1.
+    // Corners TL (0,0,5), TR (127 * 0.5, 0, 5) = (63.5,0,5), BL (0, 95 *
+    // 0.7, 5) = (0,66.5,5). TL - BL normalised is (0,-1,0), whose dot with
+    // `C`'s normal (0,1,0) is -1, so the edges are TL to BL and TR to BR,
+    // cut by y = 20 at (0,20,5) and (63.5,20,5). In `C`'s index space
+    // (P - S) = (0,0,-25) and (63.5,0,-25): column 0 / 0.5 = 0 and
+    // 63.5 / 0.5 = 127, row 25 / 2.5 = 10. The page puts a pixel centre at
+    // index + 0.5, so (0.5,10.5) and (127.5,10.5). The normals have dot 0,
+    // so scroll is refused as not coplanar and the cell does not move.
+    let source = synthetic_token(2)?;
+    if source != axial_token("5e0") {
+        return Err(format!("slice 2 is {source}"));
+    }
+    let body = format!("source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {CORONAL}");
+    let want = r#"{"targets":[{"cell":1,"index":null,"line":[0.5,10.5,127.5,10.5],"reason":"not-coplanar"}]}"#;
+    for (name, addr) in link_viewers()? {
+        expect_link(addr, name, &body, want)?;
+        // An identical repeat is the same answer.
+        expect_link(addr, name, &body, want)?;
+        // With scroll off the line is drawn and no reason is given.
+        let off = format!("source 2.25.44000 {source}\ntarget 1 0 0 2.25.44000 {CORONAL}\n");
+        expect_link(
+            addr,
+            name,
+            &off,
+            r#"{"targets":[{"cell":1,"index":null,"line":[0.5,10.5,127.5,10.5],"reason":""}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_scrolls_to_the_nearest_position() -> Result<(), String> {
+    // A target stack at z = 0, 2.5 and 5 showing image 0. The source is at
+    // z = 5, distances 5, 2.5 and 0, so it moves to image 2. Both stacks
+    // are axial, dot 1, so the line is refused as parallel.
+    let source = axial_token("5e0");
+    let stack = [axial_token("0e0"), axial_token("2.5e0"), axial_token("5e0")];
+    let body = format!(
+        "source 2.25.44000 {source}\ntarget 4 0 1 2.25.44000 {} 2.25.44000 {} 2.25.44000 {}",
+        stack[0], stack[1], stack[2]
+    );
+    for (name, addr) in link_viewers()? {
+        expect_link(
+            addr,
+            name,
+            &body,
+            r#"{"targets":[{"cell":4,"index":2,"line":null,"reason":"parallel"}]}"#,
+        )?;
+        // Already on the nearest image: it does not move.
+        let still = body.replacen("target 4 0 1", "target 4 2 1", 1);
+        expect_link(
+            addr,
+            name,
+            &still,
+            r#"{"targets":[{"cell":4,"index":null,"line":null,"reason":"parallel"}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_refuses_another_frame() -> Result<(), String> {
+    // AC11. Different UIDs are different frames of reference, PS3.3
+    // C.7.4.1.1.1, and no registration is done. A missing source UID links
+    // nothing either.
+    let source = axial_token("5e0");
+    let want = r#"{"targets":[{"cell":1,"index":null,"line":null,"reason":"frame-of-reference"}]}"#;
+    for (name, addr) in link_viewers()? {
+        let other = format!("source 2.25.44000 {source}\ntarget 1 0 1 2.25.44001 {CORONAL}");
+        expect_link(addr, name, &other, want)?;
+        let missing = format!("source - {source}\ntarget 1 0 1 2.25.44000 {CORONAL}");
+        expect_link(addr, name, &missing, want)?;
+        // One listed image in another frame refuses the whole target.
+        let mixed = format!(
+            "source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {CORONAL} 2.25.44001 {CORONAL}"
+        );
+        expect_link(addr, name, &mixed, want)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_refuses_a_missing_plane() -> Result<(), String> {
+    // AC12. Without the gap the target at z = 0, 2.5 and 5 moves to image 2,
+    // as above. With the middle plane missing it moves nowhere, because
+    // skipping the gap would move it on a list it cannot place.
+    let source = axial_token("5e0");
+    let body = format!(
+        "source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {} 2.25.44000 - 2.25.44000 {}",
+        axial_token("0e0"),
+        axial_token("5e0")
+    );
+    let want = r#"{"targets":[{"cell":1,"index":null,"line":null,"reason":"no-plane"}]}"#;
+    for (name, addr) in link_viewers()? {
+        expect_link(addr, name, &body, want)?;
+        let sourceless = format!("source 2.25.44000 -\ntarget 1 0 1 2.25.44000 {CORONAL}");
+        expect_link(addr, name, &sourceless, want)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_answers_each_target() -> Result<(), String> {
+    // Two targets in one body: cell 2 another frame, cell 5 `C`.
+    let source = axial_token("5e0");
+    let body = format!(
+        "source 2.25.44000 {source}\ntarget 2 0 0 2.25.1 {CORONAL}\ntarget 5 0 0 2.25.44000 {CORONAL}"
+    );
+    let want = concat!(
+        r#"{"targets":[{"cell":2,"index":null,"line":null,"reason":"frame-of-reference"},"#,
+        r#"{"cell":5,"index":null,"line":[0.5,10.5,127.5,10.5],"reason":""}]}"#
+    );
+    for (name, addr) in link_viewers()? {
+        expect_link(addr, name, &body, want)?;
+        // A source with no target is an empty answer.
+        expect_link(
+            addr,
+            name,
+            &format!("source - {source}"),
+            r#"{"targets":[]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_refuses_a_malformed_body() -> Result<(), String> {
+    // AC13. The page sends only text this process wrote, so anything else
+    // is 400 `link` and links nothing.
+    let source = axial_token("5e0");
+    let good = format!("source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {CORONAL}");
+    let non_unit = "0e0,0e0,0e0,2e0,0e0,0e0,0e0,1e0,0e0,7e-1,5e-1,96,128";
+    let wide_field = format!(
+        "{},0e0,0e0,1e0,0e0,0e0,0e0,1e0,0e0,7e-1,5e-1,96,128",
+        "0".repeat(25)
+    );
+    let cases: Vec<(&str, String)> = vec![
+        ("empty", String::new()),
+        ("no source", format!("target 1 0 1 2.25.44000 {CORONAL}")),
+        (
+            "two sources",
+            format!("source - {source}\nsource - {source}"),
+        ),
+        (
+            "an unknown word",
+            format!("{good}\nmove 1 0 1 2.25.44000 {CORONAL}"),
+        ),
+        (
+            "a source field more",
+            format!("source 2.25.44000 {source} 1\ntarget 1 0 1 - -"),
+        ),
+        ("a source field less", "source 2.25.44000".to_owned()),
+        ("a double space", good.replacen("target 1", "target  1", 1)),
+        (
+            "a blank line",
+            format!("source - {source}\n\ntarget 1 0 1 - -"),
+        ),
+        ("two trailing newlines", format!("{good}\n\n")),
+        ("a carriage return", good.replace('\n', "\r\n")),
+        (
+            "a non-ASCII byte",
+            good.replacen("2.25.44000", "2.25.4400\u{00e9}", 1),
+        ),
+        (
+            "a UID with a letter",
+            good.replacen("2.25.44000", "2.25.4400a", 1),
+        ),
+        (
+            "a 65 character UID",
+            good.replacen("2.25.44000", &"1".repeat(65), 1),
+        ),
+        ("a non-unit cosine", good.replacen(CORONAL, non_unit, 1)),
+        (
+            "a 25 character field",
+            good.replacen(CORONAL, &wide_field, 1),
+        ),
+        ("twelve fields", good.replacen(",13,128", ",13", 1)),
+        ("fourteen fields", good.replacen(",13,128", ",13,128,1", 1)),
+        ("not a number", good.replacen("2.5e0", "x", 1)),
+        ("infinity", good.replacen("2e1", "inf", 1)),
+        ("zero rows", good.replacen(",13,128", ",0,128", 1)),
+        (
+            "a zero spacing on 13 rows",
+            good.replacen("2.5e0", "0e0", 1),
+        ),
+        (
+            "a uid without a plane",
+            format!("source - {source}\ntarget 1 0 1 2.25.44000"),
+        ),
+        ("no image", format!("source - {source}\ntarget 1 0 1")),
+        (
+            "shown out of range",
+            good.replacen("target 1 0 1", "target 1 1 1", 1),
+        ),
+        (
+            "a negative shown",
+            good.replacen("target 1 0 1", "target 1 -1 1", 1),
+        ),
+        ("cell 9", good.replacen("target 1 0 1", "target 9 0 1", 1)),
+        (
+            "a repeated cell",
+            format!("{good}\ntarget 1 0 1 2.25.44000 {CORONAL}"),
+        ),
+        ("scroll 2", good.replacen("target 1 0 1", "target 1 0 2", 1)),
+        (
+            "a file",
+            String::from_utf8_lossy(&slice(2).unwrap_or_default()).into_owned(),
+        ),
+    ];
+    for (name, addr) in link_viewers()? {
+        for (case, body) in &cases {
+            let (header, _) = post_link(addr, body.as_bytes())?;
+            if !header.starts_with("HTTP/1.1 400 ")
+                || header_line(&header, "X-Ocelli-Error") != Some("link")
+            {
+                return Err(format!("{name} {case}: {header}"));
+            }
+        }
+        // The control: the well-formed body, with one trailing newline.
+        let (header, _) = post_link(addr, format!("{good}\n").as_bytes())?;
+        if !header.starts_with("HTTP/1.1 200 ") {
+            return Err(format!("{name}: the good body was refused: {header}"));
+        }
+    }
+    Ok(())
+}
+
+/// One `f64` field at its longest, `{:e}`'s 24 characters, written with
+/// padding zeros so it still reads back to `digit` times ten to `exponent`.
+fn widest(digit: char, exponent: &str) -> String {
+    let fixed = 1 + 1 + 1 + exponent.len();
+    format!("{digit}.{}e{exponent}", "0".repeat(24 - fixed))
+}
+
+#[test]
+fn link_body_cap_admits_the_largest_body() -> Result<(), String> {
+    // AC13, the declared-length cap. The largest body the page can send:
+    // a 64 character UID on every line, PS3.5 Table 6.2-1, a token whose
+    // eleven `f64` fields are 24 characters and whose two `u32` fields are
+    // 10, eight targets, which is MAX_SIDE 3 squared less the source, each
+    // listing FRAME_LIST_CAP images and showing the last, and a newline after
+    // every line. It is accepted whole, and one byte more is refused from
+    // the declared length before any body is sent.
+    let uid = format!("2.25.{}", "1".repeat(59));
+    let zero = widest('0', "0");
+    let one = widest('1', "0");
+    let token = [
+        zero.clone(),
+        zero.clone(),
+        zero.clone(),
+        one.clone(),
+        zero.clone(),
+        zero.clone(),
+        zero.clone(),
+        one,
+        zero,
+        widest('7', "-1"),
+        widest('5', "-1"),
+        "4294967295".to_owned(),
+        "4294967295".to_owned(),
+    ]
+    .join(",");
+    if uid.len() != 64
+        || token
+            .split(',')
+            .any(|field| field.len() != 24 && field.len() != 10)
+    {
+        return Err("the largest fields are not their longest".to_owned());
+    }
+    let image = format!(" {uid} {token}");
+    let shown = FRAME_LIST_CAP - 1;
+    let mut body = format!("source {uid} {token}\n");
+    for cell in 1..=8 {
+        body.push_str(&format!("target {cell} {shown} 1"));
+        for _ in 0..FRAME_LIST_CAP {
+            body.push_str(&image);
+        }
+        body.push('\n');
+    }
+    for (name, addr) in link_viewers()? {
+        let mut request = format!(
+            "POST /link HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {len}\r\n\r\n",
+            len = body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(body.as_bytes());
+        let response = long_exchange(addr, &request)?;
+        let (header, reply) = split_http(&response)?;
+        // Every image is at the same position, so each target moves to the
+        // first, index 0, and the axial planes are parallel.
+        let reply = std::str::from_utf8(reply).map_err(|_| "the reply is not text".to_owned())?;
+        if !header.starts_with("HTTP/1.1 200 ")
+            || !reply
+                .starts_with(r#"{"targets":[{"cell":1,"index":0,"line":null,"reason":"parallel"}"#)
+        {
+            return Err(format!("{name}: the largest body was refused: {header}"));
+        }
+        let over = format!(
+            "POST /link HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {len}\r\n\r\n",
+            len = body.len() + 1
+        );
+        let response = exchange(addr, over.as_bytes())?;
+        let (header, reply) = split_http(&response)?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(header, "X-Ocelli-Error") != Some("link")
+            || reply != b"the link request is too large"
+        {
+            return Err(format!("{name}: one byte over was not refused: {header}"));
+        }
+    }
+    Ok(())
+}
+
+/// `exchange` with time for a body of a few hundred megabytes.
+fn long_exchange(addr: SocketAddr, request: &[u8]) -> Result<Vec<u8>, String> {
+    let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .write_all(request)
+        .map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|error| error.to_string())?;
+    Ok(response)
+}
+
+/// The text of `function <name>(` up to the first line that is `}`.
+fn function_body<'a>(page: &'a str, name: &str) -> Result<&'a str, String> {
+    let at = page
+        .find(&format!("\nfunction {name}("))
+        .ok_or_else(|| format!("the page has no {name}"))?;
+    page.get(at..)
+        .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| format!("{name} does not close"))
+}
+
+#[test]
+fn the_page_links_viewports() -> Result<(), String> {
+    // AC15. The page text is read, not executed. B1 to B3 are separate.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    for needle in [
+        "fetch(\"/link\"",
+        "id=\"link\"",
+        "id=\"link-menu\"",
+        "id=\"link-scroll\"",
+        "id=\"link-window\"",
+        "id=\"link-zoom\"",
+        "id=\"toggle-reference\"",
+        "class=\"ref-lines\"",
+        "Window not applicable",
+        "This image is not monochrome, so it has no window to set.",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the page does not link viewports: {needle}"));
+        }
+    }
+    // The line layer is a sibling of ink inside the stage, before it, so
+    // marks draw over the line and nothing that rebuilds ink erases it.
+    let template_at = page
+        .find("<template id=\"cell-template\">")
+        .ok_or_else(|| "no cell template".to_owned())?;
+    let template = page
+        .get(template_at..)
+        .and_then(|rest| rest.find("</template>").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the template does not close".to_owned())?;
+    let refs = template
+        .find("<svg class=\"ref-lines\"")
+        .ok_or_else(|| "the template has no line layer".to_owned())?;
+    let ink = template
+        .find("<svg class=\"ink\"")
+        .ok_or_else(|| "the template has no ink".to_owned())?;
+    let ink_close = template
+        .get(refs..)
+        .and_then(|rest| rest.find("</svg>"))
+        .map(|end| refs + end);
+    if refs > ink || ink_close.is_none_or(|end| end > ink) {
+        return Err("the line layer is not a sibling before ink".to_owned());
+    }
+    if function_body(page, "renderInk")?.contains("ref-lines")
+        || function_body(page, "renderInk")?.contains(".refs")
+    {
+        return Err("renderInk writes the line layer".to_owned());
+    }
+    // The page never reads a plane token: no `.planes[` is followed by a
+    // `.split(` on the same line, and no token is split anywhere.
+    for line in page.lines() {
+        if let Some(at) = line.find(".planes[")
+            && line.get(at..).is_some_and(|rest| rest.contains(".split("))
+        {
+            return Err(format!("the page splits a plane token: {line}"));
+        }
+    }
+    if page.contains("token.split(") || page.contains("planeToken(image).split(") {
+        return Err("the page splits a plane token".to_owned());
+    }
+    // No key is bound for the link, so F-213 keeps the digits.
+    if function_body(page, "onKey")?.contains("setLink(")
+        || function_body(page, "onKey")?.contains("setReference(")
+    {
+        return Err("onKey binds a link key".to_owned());
+    }
+    Ok(())
+}
+
+/// A tilted plane at height `z`: row (1,0,0), column (0,0.96,0.28), Pixel
+/// Spacing `1\1`, 13 rows and 128 columns. 0.96^2 + 0.28^2 = 1.
+fn tilted_token(z: &str) -> String {
+    format!("0e0,0e0,{z},1e0,0e0,0e0,0e0,9.6e-1,2.8e-1,1e0,1e0,13,128")
+}
+
+#[test]
+fn link_route_draws_the_line_on_the_moved_image() -> Result<(), String> {
+    // Plan row 297: the line is computed against the image the target will
+    // show. The tilted normal is (1,0,0) x (0,0.96,0.28) = (0,-0.28,0.96),
+    // dot 0.96 with the axial source's (0,0,1), which is above 0.9, so the
+    // stack at z = 0, 5 and 10 scrolls. The source is at z = 5, distances
+    // 5, 0 and 5, so it moves from image 0 to image 1.
+    // On image 1, S = (0,0,5), the plane is -0.28 y + 0.96 z = 4.8. The
+    // source corners at z = 5 meet it at y = 0. TL - BL is (0,-1,0) after
+    // normalising, dot 0.28 with the normal, so the edges are TL to BL and
+    // TR to BR, cut at (0,0,5) and (63.5,0,5). P - S is (0,0,0) and
+    // (63.5,0,0). The target's column spacing is 1 mm, so column 0 and
+    // 63.5 on row 0, which the page draws at (0.5,0.5) and (64,0.5).
+    // On the shown image 0 the plane is -0.28 y + 0.96 z = 0, cut at
+    // y = 4.8 / 0.28 = 17.142857..., row 17.142857 * 0.96 + 5 * 0.28 =
+    // 17.857142..., so a line left on image 0 would be at 18.357....
+    let source = axial_token("5e0");
+    let body = format!(
+        "source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {} 2.25.44000 {} 2.25.44000 {}",
+        tilted_token("0e0"),
+        tilted_token("5e0"),
+        tilted_token("1e1")
+    );
+    for (name, addr) in link_viewers()? {
+        expect_link(
+            addr,
+            name,
+            &body,
+            r#"{"targets":[{"cell":1,"index":1,"line":[0.5,0.5,64,0.5],"reason":""}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_names_the_scroll_refusal_first() -> Result<(), String> {
+    // `C` with one row at row spacing 0, PS3.3 10.7.1.3's single-row case.
+    // Scroll is refused as not coplanar, dot 0, and the line as degenerate.
+    // The scroll refusal is named.
+    let source = axial_token("5e0");
+    let flat = "0e0,2e1,3e1,1e0,0e0,0e0,0e0,0e0,-1e0,0e0,5e-1,1,128";
+    let body = format!("source 2.25.44000 {source}\ntarget 1 0 1 2.25.44000 {flat}");
+    for (name, addr) in link_viewers()? {
+        expect_link(
+            addr,
+            name,
+            &body,
+            r#"{"targets":[{"cell":1,"index":null,"line":null,"reason":"not-coplanar"}]}"#,
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn link_route_refuses_a_target_past_the_frame_list() -> Result<(), String> {
+    // A target lists at most FRAME_LIST_CAP images, as the page does. One
+    // more is refused whole, although it is far inside LINK_BODY_CAP.
+    let source = axial_token("5e0");
+    let at_cap = format!(
+        "source - {source}\ntarget 1 0 0{}",
+        " - -".repeat(FRAME_LIST_CAP)
+    );
+    let over = format!("{at_cap} - -");
+    for (name, addr) in link_viewers()? {
+        let (header, _) = post_link(addr, at_cap.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 200 ") {
+            return Err(format!(
+                "{name}: FRAME_LIST_CAP images were refused: {header}"
+            ));
+        }
+        let (header, _) = post_link(addr, over.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some("link")
+        {
+            return Err(format!("{name}: one image past the cap was read: {header}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn inspect_writes_at_most_the_frame_list_of_planes() -> Result<(), String> {
+    // An object declaring 65537 frames. The page lists 65536 of them, and
+    // `inspect_json` writes one plane entry for each of those and no more.
+    let two = tagged_frame(2, &[0, 0, 0, 0])?;
+    let declared: &[u8] = &[0x28, 0x00, 0x08, 0x00, b'I', b'S', 2, 0, b'2', b' '];
+    let wider: &[u8] = &[
+        0x28, 0x00, 0x08, 0x00, b'I', b'S', 6, 0, b'6', b'5', b'5', b'3', b'7', b' ',
+    ];
+    let at = two
+        .windows(declared.len())
+        .position(|window| window == declared)
+        .ok_or_else(|| "no Number of Frames element".to_owned())?;
+    let mut file = two.get(..at).ok_or_else(|| "prefix".to_owned())?.to_vec();
+    file.extend_from_slice(wider);
+    file.extend_from_slice(
+        two.get(at + declared.len()..)
+            .ok_or_else(|| "suffix".to_owned())?,
+    );
+    let json = inspect_json(&file, 0).map_err(|_| "inspect refused 65537 frames".to_owned())?;
+    if !json.contains("\"frames\":65537") {
+        return Err("the object does not declare 65537 frames".to_owned());
+    }
+    let planes = planes_field(&json)?;
+    let entries = planes.matches("null").count();
+    if entries != FRAME_LIST_CAP {
+        return Err(format!("{entries} plane entries for 65537 frames"));
     }
     Ok(())
 }

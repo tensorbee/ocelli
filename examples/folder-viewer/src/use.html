@@ -180,7 +180,7 @@
   <h1>Use the library</h1>
   <p class="lede">A guide to Ocelli as it exists in this repository today. Every name on this page is a real export, read from the source. Where a piece is not built yet, the page says so.</p>
   <div class="note">
-    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws one image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
+    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws each viewport's image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
   </div>
   <p>The window arithmetic lives once, in <code>LutChain</code>, and this page does not copy it. Where a formula matters, the page cites its DICOM section and points at the type that implements it.</p>
 
@@ -668,7 +668,7 @@ match StackGeometry::derive(&amp;multi)?.shear() {
 }</code></pre>
     <p>A <code>Pt&lt;World&gt;</code> and a <code>Pt&lt;Index&gt;</code> are different types, so a transform cannot be handed a point from the wrong space. <code>World</code> is the LPS patient system in millimetres.</p>
     <p>Stack shear is measured from the geometry, never read from Gantry/Detector Tilt <code>(0018,1120)</code>, which is Type 3 and nominal. Non uniform frame spacing, non parallel frames and coincident frames are refused rather than averaged, because rendering them as uniform distorts geometry in a way no measurement tool flags.</p>
-    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 C.7.6.1.1.5. On a projection radiograph they differ by the magnification factor, so one is never substituted for the other. <code>ocelli_geom::select_calibration</code> names the source it used.</p>
+    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated. <code>ocelli_geom::select_calibration</code> names the source it used, so a measurement never reports one as the other.</p>
 <pre><code>use ocelli_geom::{select_calibration, CalibrationRequest, SpacingMm};
 
 let calibration = select_calibration(CalibrationRequest {
@@ -681,6 +681,20 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p><code>ocelli_viewport::link</code> links two viewports from their planes. <code>same_frame_of_reference</code> is true only when both Frame of Reference UIDs are present and equal, so a missing UID links nothing. <code>closest_coplanar</code> answers the index in a target stack whose Image Position (Patient) is nearest the source's, keeping the lower index on a tie, and is <code>LinkError::NotCoplanar</code> when the absolute dot product of the source normal and the shown target normal is not above <code>COPLANAR_DOT</code>, 0.9. <code>reference_segment</code> answers where the source plane cuts the target, as two points in the target's index space with the first pixel centre at 0, and is <code>LinkError::Parallel</code> when the absolute dot product is above <code>1 - PLANE_EPSILON</code>. <code>closest_coplanar</code> is <code>LinkError::Degenerate</code> when no distance is finite, which includes an empty stack. <code>reference_segment</code> is <code>LinkError::Degenerate</code> for a point that is not finite and for a target with a zero spacing on its single row or column. The two constants are cornerstone3D 5.8.2's. <code>SyncScene</code> uses the same UID rule.</p>
+<pre><code>use ocelli_viewport::link::{
+    closest_coplanar, reference_segment, same_frame_of_reference, FrameOfReferenceUid, LinkError,
+};
+
+if same_frame_of_reference(Some(&amp;source_uid), Some(&amp;target_uid)) {
+    let next = closest_coplanar(&amp;source_plane, &amp;shown_plane, &amp;target_planes)?;
+    match reference_segment(&amp;source_plane, &amp;target_planes[next]) {
+        Ok((start, end)) =&gt; { /* column x and row y in the target's index space */ }
+        Err(LinkError::Parallel) =&gt; {}
+        Err(_) =&gt; {}
+    }
+}</code></pre>
+    <p>PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as the Imager Pixel Spacing, so an equal pair takes the imager path. The pair is equal when both halves agree within <code>ocelli_core::SPACING_EQUALITY_MM</code>, the same rule <code>ImagerAgrees</code> uses. With a magnification factor the source is <code>"imager-spacing"</code>. With none it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A factor that is present but not finite, or not strictly positive, is refused, as it is without Pixel Spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
   <section class="chapter" id="measure">
@@ -695,6 +709,7 @@ let mm = distance(a, b)?;
 
 let stats = roi_statistics(&amp;samples, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
     <p>The full set is <code>distance</code>, <code>length</code>, <code>polyline_length</code>, <code>height</code>, <code>angle_at</code>, <code>cobb</code>, <code>bidirectional</code>, <code>rectangle</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon_area</code>, <code>spline_point</code>, <code>hit_segment</code>, <code>project_onto_segment</code> and <code>project_onto_plane</code>. Statistics are <code>roi_statistics</code> and <code>histogram</code>. PET SUV is <code>suv_bw</code>, <code>suv_lbm</code> and <code>suv_bsa</code>. Refusals are <code>GeomError</code> and <code>SuvError</code>.</p>
+    <p>Which samples a region holds is <code>region_contains</code> and <code>region_bounds</code>, over a <code>RegionShape</code> of a rectangle, an axis-aligned ellipse or a polygon in index space. A sample belongs to a region when its pixel centre, the index point <code>(c, r)</code>, is inside the shape or on its boundary, and the polygon rule is the same even-odd and on-edge rule <code>ocelli-seg</code> paints a contour with. <code>polygon_crosses_itself</code> says whether a ring crosses or touches itself anywhere but at the shared vertex of two neighbouring edges.</p>
     <p><code>livewire_path</code>, <code>livewire_mask</code> and <code>redact_rect</code> live here too.</p>
   </section>
 
