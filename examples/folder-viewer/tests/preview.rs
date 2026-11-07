@@ -3778,7 +3778,7 @@ fn forget_drops_files_and_frames() -> Result<(), String> {
     // repeat. Each posted body is held at its length, which the census shows
     // after each post, and the two frames' charges are what the census rose
     // by when they were stored. Bytes is the sum of the four. Frame 1 is
-    // held so that a forget keeping any frame past 0 fails here.
+    // held so that a forget keeping frame 1 fails here.
     let addr = viewer_on(8 * 1024 * 1024)?;
     let two = tagged_frame(3, &[50, 0, 60, 0, 70, 0])?;
     let one = mono_frame(true)?;

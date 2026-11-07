@@ -182,7 +182,7 @@ The owner of release accounting is `Lru::remove_range`. The owner of the release
 | Series 7 holds nothing | `release_series(SeriesId(7))` | no event | unchanged |
 | Volume 2 holds bricks on levels 0 and 1, volume 3 holds bricks | `release_volume(VolumeId(2))` | every level of volume 2 removed | volume 3 untouched |
 | Folder A open, ids held | open folder B | page sends A's ids, `/forget` removes A's files and frames | B's posts proceed |
-| A decode for A's id in flight | `/forget` of that id | id doomed, the decode returns its reply, nothing inserted, id leaves `doomed` | `GET /held` never counts it again |
+| A decode for A's id in flight | `/forget` of that id | id doomed, nothing inserted, the request answers with its frame, or 410 Gone after a wait for grey room, id leaves `doomed` | `GET /held` never counts it again |
 | A late `410` for A's file after B is open | `ensureFile(fileA)` | refused, no post | A stays forgotten |
 | Page open | `pagehide` | beacons in chunks of at most 1,700 ids | a failed beacon leaves entries to age out |
 | `/forget` body with one malformed line | request | `400 forget` | nothing removed |

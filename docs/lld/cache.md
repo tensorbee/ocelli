@@ -259,10 +259,12 @@ for a doomed id and returns the frame to its own request. That request is
 answered with the frame, except on the decode workers when its render had
 to wait for grey room. Then nothing was stored, so the round after the wait
 finds the id gone and answers 410 Gone, as F-216 does for any file forgotten
-during that wait. Each decode's place in the count is a `Flight` that the
+during that wait, or 503 if the wait itself runs out. Each decode's place in the count is a `Flight` that the
 route keeps until after its store, on the direct path, the decode workers
 and `/value` and `/measure`, and the last one out for an id takes it out of
-both sets, so both are bounded by the decodes in flight.
+both sets. A flight lasts the whole request, including a wait for grey
+room, so both sets are bounded by the requests in flight, which F-216 caps
+at 32 connections.
 
 The page forgets. Every open, a folder or the synthetic study, sends the
 previous open's ids with `fetch` and replaces the set of files the page may
