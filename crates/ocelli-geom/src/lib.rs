@@ -25,6 +25,7 @@
 //! boundary, and the polygon rule is the F-085 rule of `ocelli-seg`.
 //! [`polygon_crosses_itself`] finds where a ring crosses or touches itself.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

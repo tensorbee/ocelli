@@ -612,3 +612,10 @@ Repository bootstrap. Nothing is published.
   or `TypeError` from a view over wasm memory still passes through.
 - `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
   the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.

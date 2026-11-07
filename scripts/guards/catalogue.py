@@ -274,6 +274,59 @@ def _unsafe_in_a_third_file(box: Sandbox) -> None:
     box.stage_all()
 
 
+def _tokenizer_snippet(label: str, source: str, line: int) -> Invoke:
+    """A level-1 run of the tokenizer over one planted Rust source.
+
+    The input is the trigger and nothing else, taken from F-229's review
+    findings rather than from the guard's code, so the probe asserts the rule
+    and not the implementation. It prints the guard's own refusal shape and
+    exits 1 when the planted line is reported. Exits 0 when the tokenizer
+    misses it, which is the inverted success. The same body is the control's
+    invoke with the plant removed, so a false positive on the healthy shape
+    fails the control instead of the probe.
+    """
+    body = (
+        "import sys\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import unsafe_allowlist_check as guard\n"
+        "source = " + repr(source) + "\n"
+        "try:\n"
+        "    lines, weakening = guard.scan(source)\n"
+        "except guard.LexError as error:\n"
+        "    print('probe/src/lib.rs:%d: %s' % (error.line, error.message))\n"
+        "    sys.exit(1)\n"
+        "if " + str(line) + " in lines:\n"
+        "    print('probe/src/lib.rs:" + str(line) +
+        ": `unsafe` outside the allow-list')\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n")
+    return python_snippet(label, body)
+
+
+def _weakening_snippet(label: str, source: str) -> Invoke:
+    """A level-1 run of the tokenizer over one weakening attribute.
+
+    Same shape as `_tokenizer_snippet`, asserting the attribute half of the
+    rule instead of the keyword half.
+    """
+    body = (
+        "import sys\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import unsafe_allowlist_check as guard\n"
+        "source = " + repr(source) + "\n"
+        "try:\n"
+        "    lines, weakening = guard.scan(source)\n"
+        "except guard.LexError as error:\n"
+        "    print('probe/src/lib.rs:%d: %s' % (error.line, error.message))\n"
+        "    sys.exit(1)\n"
+        "if 1 in weakening:\n"
+        "    print('probe/src/lib.rs:1: `unsafe_code` lowered by an allow, "
+        "expect or warn attribute')\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n")
+    return python_snippet(label, body)
+
+
 def _blocked_mention(box: Sandbox) -> None:
     name = _blocked_project(box)
     box.write(".claude/plans/F-000-probe.md",
@@ -3642,6 +3695,56 @@ def _lint_policy_uninherited(box: Sandbox) -> None:
                    "[lints]\nworkspace = true", "")
 
 
+def _doctest_forbid_behind_a_separator(box: Sandbox) -> None:
+    """The attribute text inside a `//` comment, behind U+2028. F-232.
+
+    rustc ends a `//` comment at LF only, so `// F-232.`, U+2028 and the
+    attribute text are one comment and the root forbids nothing, while
+    `str.splitlines` read two lines and accepted it, review pass 5's D1.
+    """
+    attribute = "#![doc(test(attr(forbid(unsafe_code))))]\n"
+    box.substitute(_a_crate_root(box), attribute,
+                   "// F-232.\u2028" + attribute)
+
+
+def _doctest_forbid_removed(box: Sandbox) -> None:
+    """One member library root without the doctest forbid. F-232.
+
+    The crate is read rather than named, the first under `crates/` with a
+    `src/lib.rs`, and only the attribute line is removed, so the table, the
+    script and every other root are as they were.
+    """
+    box.substitute(_a_crate_root(box),
+                   "#![doc(test(attr(forbid(unsafe_code))))]\n", "")
+
+
+def _unsafe_code_at_deny(box: Sandbox) -> None:
+    """The row the guard requires at forbid, written one level weaker.
+
+    `deny` is what HLD 27.1's table literally says. F-232 went one level
+    stronger because an inner `allow` silences a deny and cannot silence a
+    forbid, so this is exactly the weakening the forbid exists to prevent.
+    """
+    box.substitute("Cargo.toml", 'unsafe_code = "forbid"',
+                   'unsafe_code = "deny"')
+
+
+def _the_unsafe_arm_running_something_else(box: Sandbox) -> None:
+    """The `unsafe` arm running another gate's command, with no comment.
+
+    The table stays at forbid and the CI step is untouched, so the only
+    thing lost is the script in the arm. That is the half the lint cannot
+    replace: it does not reach the vendored packages or the trybuild files.
+    """
+    runner = box.read("bin/ocelli.sh")
+    raw = re.search(r"(?ms)^([ \t]*)unsafe\).*?;;", runner)
+    assert raw is not None, "the unsafe arm must exist for this probe"
+    replacement = next(
+        c for c in _ci_arm_commands(box, "prose") if c.startswith("python3 "))
+    box.substitute("bin/ocelli.sh", raw.group(0),
+                   f"{raw.group(1)}unsafe) {replacement} ;;")
+
+
 def _a_crate_root(box: Sandbox) -> str:
     """The first crate root under `crates/`, read rather than named.
 
@@ -4471,9 +4574,15 @@ def _clean_crate_root_outside_the_member(box: Sandbox) -> None:
     where it is, unread by cargo and still read by the rglob, which is the
     state that would make a guard refusing the SHAPE rather than the attribute
     look correct.
+
+    The moved root carries `#![doc(test(attr(forbid(unsafe_code))))]`, since
+    F-232 a part of a clean library root, so the state stays legitimate and
+    the probe still isolates the layout.
     """
     member, manifest, relative = _a_crate_root_the_manifest_moves(box)
-    box.write("probe-root/lib.rs", "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.write("probe-root/lib.rs",
+              "#![doc(test(attr(forbid(unsafe_code))))]\n"
+              "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.substitute(manifest, "[lints]",
                    f'[lib]\npath = "{relative}"\n\n[lints]')
 
@@ -7477,8 +7586,17 @@ GUARDS: tuple[Guard, ...] = (
         gate="unsafe",
         spec="HLD 27.2 R5, `docs/hld/24-agent-code-standards.md`",
         refuses="An `unsafe` keyword in any file other than the two the rule "
-                "names, so that auditing every unsafe line means reading two "
-                "files. Under a vendored package, which is a dependency that "
+                "names, found by a left-to-right Rust tokenizer that reports "
+                "it only as a keyword token, so the five shapes F-229's "
+                "reviews planted, a char literal holding a quote, the same "
+                "escaped, a raw string ending in a backslash, a raw string "
+                "holding a quote and a comment holding an unpaired quote, "
+                "are refused and never blanked, and a nested block comment "
+                "is one comment and not code. It refuses an unterminated "
+                "string, raw string or block comment naming the file and the "
+                "line the construct starts on, and an allow, expect or warn "
+                "of `unsafe_code`, inner or outer, in any tracked Rust file. "
+                "Under a vendored package, which is a dependency that "
                 "happens to be tracked, it instead refuses a count that has "
                 "moved from its record, a vendored package with no record at "
                 "all, and a record naming a package that is not in the tree.",
@@ -7519,14 +7637,125 @@ GUARDS: tuple[Guard, ...] = (
                   "`unsafe` outside the allow-list (HLD section 27.2 R5)",
                   note="The probe appends to a crate that is neither of the "
                        "two R5 names. It deliberately does NOT test "
-                       "`is_unsafe` or `unsafe` in a doc comment, which are "
-                       "facts about the current regex rather than about R5. "
+                       "`is_unsafe` or `unsafe` in a doc comment. The "
+                       "tokenizer's cases are covered by the unit tests and "
+                       "the `unsafe.after-*` probes. A doctest holding "
+                       "`unsafe` is refused by rustc through each member "
+                       "library root's "
+                       "`#![doc(test(attr(forbid(unsafe_code))))]`, which "
+                       "the lint policy check refuses the absence of and "
+                       "`lint-policy.doctest-forbid-removed` probes, and "
+                       "the scanner reads doc text as comment text. "
                        "The fragment is the refusal HEADER and not the bare "
                        "words `outside the allow-list`, which the guard's OK "
                        "line also contains: with an accept probe that would "
                        "have been a false green, and here it was kept from "
                        "mattering only by the exit-status check running "
                        "first."),
+            Probe("unsafe.after-quote-char", None,
+                  _tokenizer_snippet(
+                      "tokenizer, quote char literal",
+                      "pub const QUOTE: char = '\"';\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, quote char literal, clean",
+                      "pub const QUOTE: char = '\"';\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 1 of F-229's pass 8. A char literal holding "
+                       "a double quote, and the STRING regex opened a false "
+                       "match there and closed it at the next literal, "
+                       "blanking the block. The rejected fix was another "
+                       "pattern while keeping the three regexes.",
+                  ),
+            Probe("unsafe.after-escaped-quote-char", None,
+                  _tokenizer_snippet(
+                      "tokenizer, escaped quote char literal",
+                      "pub const ESCAPED: char = '\\\"';\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, escaped quote char literal, clean",
+                      "pub const ESCAPED: char = '\\\"';\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 2, the escaped spelling of trigger 1. The "
+                       "backslash sits before the quote the regex matched, so "
+                       "it changed nothing about what was blanked."),
+            Probe("unsafe.after-raw-backslash", None,
+                  _tokenizer_snippet(
+                      "tokenizer, raw string ending in a backslash",
+                      "pub const RAW: &str = r\"a\\\";\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, raw string ending in a backslash, clean",
+                      "pub const RAW: &str = r\"a\\\";\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 3. `r\"a\\\"` is a COMPLETE raw string "
+                       "holding a backslash. Treating the backslash as an "
+                       "escape inside a raw string runs past the closing "
+                       "quote, which is the wrong implementation the plan "
+                       "names for this row."),
+            Probe("unsafe.after-raw-quote", None,
+                  _tokenizer_snippet(
+                      "tokenizer, raw string holding a quote",
+                      "pub const RAW: &str = r#\"a \" b\"#;\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, raw string holding a quote, clean",
+                      "pub const RAW: &str = r#\"a \" b\"#;\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 4. The hash count is part of the delimiter, "
+                       "and `br##\"x \"# y\"##` is the byte form with two. A "
+                       "rule with a fixed hash count mis-closes both, which "
+                       "is the wrong implementation the plan names."),
+            Probe("unsafe.after-comment-quote", None,
+                  _tokenizer_snippet(
+                      "tokenizer, line comment holding a quote",
+                      "// say \"\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, line comment holding a quote, clean",
+                      "// say \"\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 5. The regexes stripped strings BEFORE line "
+                       "comments, so an unpaired quote in `//` or `///` text "
+                       "opened a false string into the code below it. The "
+                       "wrong implementation is any order that strips strings "
+                       "first, which a tokenizer has no order to get wrong."),
+            Probe("unsafe.weakening-attribute", None,
+                  _weakening_snippet(
+                      "tokenizer, allow of unsafe_code",
+                      "#![allow(unsafe_code)]\npub fn clean() {}\n"),
+                  "lowered by an allow, expect or warn attribute",
+                  level=1,
+                  control=_weakening_snippet(
+                      "tokenizer, allow of dead_code",
+                      "#![allow(dead_code)]\npub fn clean() {}\n"),
+                  note="F-232's second refusal. The workspace table is "
+                       "forbid, so rustc refuses an allow, an expect or a "
+                       "warn of `unsafe_code` as well. This half keeps the "
+                       "trybuild files honest, which no lint table reaches. "
+                       "The vendored packages are audited by their recorded "
+                       "counts, and an allow inside one lowers nothing "
+                       "because no lint table reaches them."),
         ),
     ),
 
@@ -11586,19 +11815,70 @@ GUARDS: tuple[Guard, ...] = (
         spec="HLD 27.1, the denied lint table",
         refuses="A lint in HLD 27.1's table weakened below the level the "
                 "specification sets, a crate that stops inheriting the "
-                "workspace lint table, and any `.rs` file in a crate putting "
+                "workspace lint table, any `.rs` file in a crate putting "
                 "one of those lints back to sleep with an inner allow, by "
-                "name or through a group that contains it.",
+                "name or through a group that contains it, and, since "
+                "F-232, an `unsafe_code` row below 'forbid' in "
+                "[workspace.lints.rust], an `unsafe` gate that no longer "
+                "runs scripts/unsafe_allowlist_check.py beside it, and a "
+                "member library root without "
+                "`#![doc(test(attr(forbid(unsafe_code))))]`, which is what "
+                "refuses `unsafe` in a doctest.",
         claims=("*",),
         probes=(
             Probe("lint-policy.weakened", _lint_policy_weakened,
                   script("python3", "scripts/lint_policy_check.py"),
                   "is 'allow' and HLD 27.1 requires",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.unsafe-code-not-forbidden",
+                  _unsafe_code_at_deny,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "must be 'forbid'",
+                  needs="cargo", profile="deep",
+                  note="F-232 requires both mechanisms. `deny` is HLD 27.1's "
+                       "literal level and it is refused: an inner `allow` "
+                       "silences a deny and cannot silence a forbid, which "
+                       "is why the table went one level stronger."),
+            Probe("lint-policy.unsafe-script-dropped-beside-the-lint",
+                  _the_unsafe_arm_running_something_else,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "must stay in the `unsafe` gate",
+                  needs="cargo", profile="deep",
+                  note="F-232's other half. The table is present at forbid "
+                       "and the CI step is untouched, so the only loss is "
+                       "the script in the arm. The lint does not reach the "
+                       "vendored packages or the trybuild files, which the "
+                       "script audits, so the arm going quiet leaves half of "
+                       "R5 enforced by nothing."),
             Probe("lint-policy.uninherited", _lint_policy_uninherited,
                   script("python3", "scripts/lint_policy_check.py"),
                   "does not inherit the workspace lint table",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.doctest-forbid-removed",
+                  _doctest_forbid_removed,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and does not carry",
+                  needs="cargo", profile="deep",
+                  note="F-232. The [workspace.lints.rust] table does not "
+                       "reach a doctest, so each member library root "
+                       "carries `#![doc(test(attr(forbid(unsafe_code))))]`, "
+                       "which rustdoc injects into every doctest of the "
+                       "crate. One root loses the line and nothing else "
+                       "moves. The workspace has no doctests today, so the "
+                       "floor checks the attribute is present, and it acts "
+                       "on the first doctest anyone writes."),
+            Probe("lint-policy.doctest-forbid-behind-a-separator",
+                  _doctest_forbid_behind_a_separator,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "holds a character other than printable ASCII and tab",
+                  needs="cargo", profile="deep",
+                  note="F-232, review pass 5. The root is split at LF "
+                       "only, as rustc ends a `//` comment, and a head "
+                       "line holding anything but printable ASCII and tab "
+                       "is refused naming the line, so CR, NEL, U+2028 and "
+                       "the other separators Python splits at cannot hide "
+                       "the attribute text inside a comment. The unit tests "
+                       "carry one case per separator."),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
@@ -11964,7 +12244,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
@@ -11975,8 +12255,10 @@ GUARDS: tuple[Guard, ...] = (
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
-                       "`produce` already follows one path module, so the "
-                       "planted module is the second.",
+                       "The tree follows two `#[path]` modules, `produce` "
+                       "and `held.rs` (F-210), so the planted module is the "
+                       "third. The count is the one measured on the F-232 "
+                       "tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -12010,7 +12292,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
@@ -12018,8 +12300,10 @@ GUARDS: tuple[Guard, ...] = (
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
-                       "read. `produce` already follows one path module, so "
-                       "the planted module is the second.",
+                       "read. The tree follows two `#[path]` modules, "
+                       "`produce` and `held.rs` (F-210), so the planted "
+                       "module is the third. The count is the one measured "
+                       "on the F-232 tree.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
@@ -12095,6 +12379,16 @@ GUARDS: tuple[Guard, ...] = (
                        "`#[path]`: it names a file clippy compiles and this "
                        "pass did not read, which is exactly the state the "
                        "group-allow measurement above was taken in.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unreadable-library-root",
+                  _crate_root_the_guard_cannot_open,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and could not be read",
+                  note="F-232. The same missing `[lib] path` as "
+                       "`lint-policy.unreadable-crate-root`, read by the "
+                       "doctest attribute check. A library root it cannot "
+                       "open is an unknown, and an unknown is not a forbid, "
+                       "so it is refused rather than skipped.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cap-lints-allow",
                   _cap_lints_allow,
@@ -12383,7 +12677,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.unsafe-gate-named-only-in-a-comment",
                   _the_unsafe_gate_named_only_in_a_comment,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "neither mechanism is present",
+                  "must stay in the `unsafe` gate",
                   note="**One line of regex producing a positive assertion of "
                        "a false thing.** The declared substitution for HLD "
                        "27.1's `unsafe_code` deny is that the `unsafe` gate "
@@ -12407,7 +12701,10 @@ GUARDS: tuple[Guard, ...] = (
                        "comment-stripped and span-aware by construction, and "
                        "this guard is its third caller now. That is the "
                        "propagation failure again, the answer present in the "
-                       "repository and not reaching the caller.",
+                       "repository and not reaching the caller. F-232 made "
+                       "both mechanisms required, so the same plant now "
+                       "refuses with the script-dropped message rather than "
+                       "with neither-mechanism-is-present.",
                   needs="cargo", profile="deep"),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "

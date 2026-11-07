@@ -15,6 +15,7 @@
 //! still no `wgpu` dependency, because this crate never sees a texture, only
 //! its size.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

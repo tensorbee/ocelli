@@ -54,6 +54,8 @@
 //! constants in source rather than in a configuration file, precisely so that
 //! changing one is a diff a reviewer sees.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 pub mod attribution;
 pub mod candidate;
 pub mod frame;
