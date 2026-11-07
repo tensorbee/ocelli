@@ -333,6 +333,148 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
 }
 
 #[test]
+fn the_page_has_viewport_cells() -> Result<(), String> {
+    // F-208. The page text is read, not executed. The browser observations
+    // B1 to B7 of the design are a separate record.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    // AC1. A picker from 1 by 1 to 3 by 3, not a two-state toggle.
+    for needle in [
+        "id=\"layout\"",
+        "id=\"layout-picker\"",
+        "data-columns=\"3\"",
+        "data-rows=\"3\"",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the page has no layout picker: {needle}"));
+        }
+    }
+    // AC2. Every cell is cloned from one template.
+    if !page.contains("id=\"cell-template\"") || !page.contains("class=\"cell\"") {
+        return Err("the cells do not come from one template".to_owned());
+    }
+    // AC3. View state lives in one record per viewport. The script's top
+    // level starts at column 0, so a global is a line that starts with it.
+    for global in [
+        "let scale =",
+        "let panX =",
+        "let rotation =",
+        "let gridMode =",
+        "let overrideWindow =",
+        "let activePreset =",
+        "let activeIndex =",
+        "let viewIndex =",
+    ] {
+        if page.contains(&format!("\n{global}")) {
+            return Err(format!("the page keeps a global view state: {global}"));
+        }
+    }
+    if !page.contains("function blankViewport(") {
+        return Err("the page has no viewport record".to_owned());
+    }
+    // AC4. A thumbnail drags onto a cell under the page's own type.
+    for needle in [
+        "application/x-ocelli-series",
+        "draggable = true",
+        "\"dragover\"",
+        "\"drop\"",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("a series cannot be dragged onto a cell: {needle}"));
+        }
+    }
+    // AC5. The four-image view is kept as a tile mode with its sentences.
+    for needle in [
+        "id=\"tile-mode\"",
+        "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
+        "Drawing works in the single view.",
+        "Four images are not shown for a file larger than 32 MiB.",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the tile mode is not kept: {needle}"));
+        }
+    }
+    // AC7. An empty cell says what to do.
+    if !page.contains("Drag a series here.") {
+        return Err("an empty cell does not say what to do".to_owned());
+    }
+    // AC13. `G` opens the layout picker and `Shift G` toggles tile mode,
+    // through the two branch texts below and the two `data-key` attributes.
+    // Nothing here is about any other key, so F-213 may bind the digits.
+    for needle in [
+        "data-key=\"G\"",
+        "data-key=\"Shift G\"",
+        "} else if (event.shiftKey && event.key.toLowerCase() === \"g\") {\n    toggleTileMode();",
+        "} else if (event.key.toLowerCase() === \"g\") {\n    openLayoutPicker();",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!("the layout keys are not bound: {needle}"));
+        }
+    }
+    // In the text of `onKey`, including its `clicks` and `map` literals,
+    // `toggleTileMode(` and `openLayoutPicker(` each appear exactly once,
+    // and each other token in this list appears zero times. That is the
+    // whole check. A route that uses none of these tokens is not seen.
+    let key_at = page
+        .find("function onKey(event) {")
+        .ok_or_else(|| "the page has no key handler".to_owned())?;
+    let handler = page
+        .get(key_at..)
+        .and_then(|rest| rest.find("\n}\n").and_then(|end| rest.get(..end)))
+        .ok_or_else(|| "the key handler does not close".to_owned())?;
+    for (token, allowed) in [
+        ("toggleTileMode(", 1),
+        ("openLayoutPicker(", 1),
+        ("setTileMode(", 0),
+        ("setLayout(", 0),
+        ("tileButton", 0),
+        ("tile-mode", 0),
+        ("layout\"", 0),
+        ("layout'", 0),
+        ("layout`", 0),
+        ("#layout", 0),
+        ("layoutButton.click", 0),
+        ("layoutPicker.hidden = false", 0),
+        ("data-columns", 0),
+        ("dataset.columns", 0),
+    ] {
+        let found = handler.matches(token).count();
+        if found != allowed {
+            return Err(format!(
+                "onKey reaches the layout or the tile mode outside G and Shift G: {token} appears {found} times, {allowed} allowed"
+            ));
+        }
+    }
+    // In the whole page, `setLayout(`, `openLayoutPicker(` and
+    // `toggleTileMode` each appear exactly 3 times, which is their
+    // definition and their two uses today.
+    for (token, expected) in [
+        ("setLayout(", 3),
+        ("openLayoutPicker(", 3),
+        ("toggleTileMode", 3),
+    ] {
+        let found = page.matches(token).count();
+        if found != expected {
+            return Err(format!(
+                "{token} appears {found} times in the page, {expected} expected"
+            ));
+        }
+    }
+    // AC4. A cell accepts a drag only when it carries the series type, on
+    // both the dragover and the drop.
+    if !page.contains("return types.includes(SERIES_TYPE);")
+        || page.matches("if (!carriesSeries(event)) return;").count() != 2
+    {
+        return Err("a cell accepts a drag without the series type".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
 fn every_page_carries_a_well_formed_icon() -> Result<(), String> {
     for path in ["/", "/more", "/use"] {
         let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");

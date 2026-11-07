@@ -442,8 +442,10 @@ const config = tseslint.config(
     //
     // The second set is the page's own. `examples/folder-viewer/src/page.html`
     // loads one classic script, so its top-level `let`, `const` and function
-    // declarations are reachable by name from a Playwright callback. The three
-    // the driver assigns are writable and the rest are read only.
+    // declarations are reachable by name from a Playwright callback. The one
+    // the driver assigns is writable and the rest are read only. F-208 moved
+    // the window and the image index into one record per viewport, which the
+    // driver reaches through `activeViewport`.
     files: ["tools/bench/src/viewer_work.mjs"],
     languageOptions: {
       globals: {
@@ -455,16 +457,37 @@ const config = tseslint.config(
         MutationObserver: "readonly",
         KeyboardEvent: "readonly",
         CanvasRenderingContext2D: "readonly",
-        overrideWindow: "writable",
-        activePreset: "writable",
         cacheBytes: "writable",
         cache: "readonly",
-        viewIndex: "readonly",
+        activeViewport: "readonly",
         showIndex: "readonly",
         currentImage: "readonly",
         postPreview: "readonly",
         requestGrey: "readonly",
         drawGrey: "readonly",
+      },
+    },
+  },
+  {
+    // F-208's browser checks of the folder viewer, the displayed aspect and
+    // the pointer readout. They run under node and hand Playwright callbacks
+    // that read the page's DOM and call four of the page's own top-level
+    // functions by name. The readout check wraps `paintSelection` to inject
+    // a throw and replaces `requestGrey` to make the main preview fail.
+    files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        document: "readonly",
+        imageToClient: "readonly",
+        activeViewport: "readonly",
+        paintSelection: "readonly",
+        dropCache: "readonly",
+        Event: "readonly",
+        window: "readonly",
       },
     },
   },

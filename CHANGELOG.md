@@ -559,6 +559,12 @@ Repository bootstrap. Nothing is published.
   unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
   gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
   `spacing_pair_agrees`, the one definition of an equal spacing pair.
+- The local folder viewer lays out 1 by 1 up to 3 by 3 viewports from a
+  picker on `G`, each with its own series, image, zoom, pan and window. A
+  series row dragged onto a viewport opens there, and the four-image view is
+  a tile mode of one viewport on `Shift G`. Bare digits no longer choose a
+  layout. A `viewer-browser` gate measures the displayed aspect and the
+  pointer readout in headless Chromium.
 
 ### Changed
 

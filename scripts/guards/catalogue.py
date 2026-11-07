@@ -731,6 +731,30 @@ def _decode_frame_accepts_absent_binary(box: Sandbox) -> None:
     )
 
 
+def _aspect_check_accepts_any_ratio(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/aspect.mjs",
+        "    if (!(Math.abs(ratio - expected) <= tolerance)) {",
+        "    if (false) {",
+    )
+
+
+def _aspect_check_accepts_no_canvas(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/aspect.mjs",
+        "  if (!Array.isArray(readings) || readings.length === 0) {",
+        "  if (false) {",
+    )
+
+
+def _readout_check_accepts_a_survivor(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/readout.mjs",
+        "    if (!seen.after.readHidden || !seen.after.crossHidden || !seen.after.magHidden) {",
+        "    if (false) {",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -13261,6 +13285,117 @@ GUARDS: tuple[Guard, ...] = (
             r"/preview carried a body \$ times while the file was held",
         ),
         covered_by=("tools/bench/tests/viewer_work_test.mjs",),
+    ),
+    Guard(
+        id="viewer-browser.aspect",
+        file="examples/folder-viewer/tests/browser/aspect.mjs",
+        gate="viewer-browser",
+        spec="F-208 design AC14, PS3.3 10.7.1.3 Pixel Spacing is row spacing "
+             "then column spacing",
+        refuses="A folder viewer canvas whose displayed width over height on "
+                "the synthetic study, 128 columns by 96 rows at Pixel Spacing "
+                "0.7 by 0.5, is not 64 to 67.2 within 0.001, and a run that "
+                "measured no canvas.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `aspectProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives it.",
+        probes=(
+            Probe(
+                "viewer-browser.aspect-swapped",
+                _aspect_check_accepts_any_ratio,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { aspectProblems } from "
+                    "'./examples/folder-viewer/tests/browser/aspect.mjs';\n"
+                    "const problems = aspectProblems([{ name: 'swapped', "
+                    "width: 89.6, height: 48 }]);\n"
+                    "if (problems.some((line) => line.includes('not 0.952381'))) "
+                    "process.exit(0);\n"
+                    "console.error('aspect check accepted a swapped aspect'); "
+                    "process.exit(1);",
+                ),
+                "aspect check accepted a swapped aspect",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.aspect-no-canvas",
+                _aspect_check_accepts_no_canvas,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { aspectProblems } from "
+                    "'./examples/folder-viewer/tests/browser/aspect.mjs';\n"
+                    "const problems = aspectProblems([]);\n"
+                    "if (problems.includes('no canvas was measured')) "
+                    "process.exit(0);\n"
+                    "console.error('aspect check accepted a run with no "
+                    "canvas'); process.exit(1);",
+                ),
+                "aspect check accepted a run with no canvas",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the ratio check with the swapped spacing "
+              "reading and the empty-run check with no reading. The measurement itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so the browser half is watched by the `viewer-browser` gate "
+              "and its CI job rather than by this harness.",
+    ),
+    Guard(
+        id="viewer-browser.readout",
+        file="examples/folder-viewer/tests/browser/readout.mjs",
+        gate="viewer-browser",
+        spec="F-208 design, the cross, its readout and the magnifier are "
+             "positioned from the cell under the pointer, and the lead's "
+             "pass 4 ruling that they are cleared whenever that view "
+             "geometry can change",
+        refuses="A layout change, a window resize, a zoom with `=` or a tile "
+                "toggle, made with the pointer still, that leaves the readout, "
+                "the cross or the magnifier showing, a pointer move after it "
+                "that does not show them again, a pan or zoom drag that hides "
+                "them on most moves, a still-pointer ArrowRight or Play that "
+                "leaves the magnifier on the previous image, a tile emptied "
+                "under the pointer that leaves the magnifier on its old "
+                "image, a throw inside a drag's layout after which a zoom "
+                "no longer clears, a pointer over a faulted cell or between "
+                "tiles that shows the cross, the readout or the magnifier, "
+                "and a run that observed no change.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `readoutProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its survival branch.",
+        probes=(
+            Probe(
+                "viewer-browser.readout-survives",
+                _readout_check_accepts_a_survivor,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { readoutProblems } from "
+                    "'./examples/folder-viewer/tests/browser/readout.mjs';\n"
+                    "const shown = { read: 'C 1  R 1  40 HU', readHidden: "
+                    "false, crossHidden: false, magHidden: false };\n"
+                    "const problems = readoutProblems([{ name: 'kept', "
+                    "before: shown, after: shown, moved: shown, shown: "
+                    "['readout', 'magnifier'], again: ['readout', "
+                    "'magnifier'] }]);\n"
+                    "if (problems.some((line) => line.includes('survived the "
+                    "change'))) process.exit(0);\n"
+                    "console.error('readout check accepted a readout that "
+                    "survived'); process.exit(1);",
+                ),
+                "readout check accepted a readout that survived",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the survival branch with a readout that "
+              "stayed. The observation itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so it is watched by the `viewer-browser` gate and its CI job. "
+              "The no-change, no-repaint, drag, image-step, empty-tile, "
+              "thrown-layout, faulted-cell and tile-gap branches have no "
+              "probe.",
     ),
     Guard(
         id="bench.cold-start",
