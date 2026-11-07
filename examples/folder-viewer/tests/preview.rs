@@ -6078,25 +6078,18 @@ fn a_compressed_per_frame_multiframe_is_inspected_by_id_after_every_frame_is_hel
     let id = header_line(header, "X-Ocelli-File")
         .ok_or_else(|| "the file id was missing".to_owned())?
         .to_owned();
-    // Charged at its real length. Each frame's reply ends with the same
-    // `planes` list, which is kept once, so the pool holds both reply heads,
-    // one tail and the two `String` slots of the head list.
-    let mut replies = 0_usize;
-    let mut tail = 0_usize;
-    for frame in 0..2 {
-        let json =
-            inspect_json(&file, frame).map_err(|_| "inspect refused the RLE file".to_owned())?;
-        let at = json
-            .rfind(",\"planes\":[")
-            .ok_or_else(|| "a reply has no planes".to_owned())?;
-        replies += at + std::mem::size_of::<String>();
-        tail = json.len() - at;
-    }
-    let replies = replies + tail;
+    // The pool keeps the frame-independent parts once and each frame's
+    // fields beside them, so it holds something, and less than the two
+    // whole replies. Its exact charge is pinned by the unit test
+    // `kept_replies_are_charged_at_their_heap_bytes`.
+    let whole: usize = (0..2)
+        .map(|frame| inspect_json(&file, frame).map(|json| json.len()))
+        .sum::<Result<usize, _>>()
+        .map_err(|_| "inspect refused the RLE file".to_owned())?;
     let kept = json_number(&held_census(addr)?, "kept")?;
-    if kept != replies {
+    if kept == 0 || kept >= whole {
         return Err(format!(
-            "the pool holds {kept} bytes, the two replies are {replies}"
+            "the pool holds {kept} bytes for two replies of {whole}"
         ));
     }
     for frame in 0..2 {
@@ -6150,6 +6143,109 @@ fn a_file_whose_windows_do_not_change_by_frame_keeps_nothing() -> Result<(), Str
     let kept = json_number(&held_census(addr)?, "kept")?;
     if kept != 0 {
         return Err(format!("files without per-frame windows kept {kept} bytes"));
+    }
+    Ok(())
+}
+
+/// Review pass 3, D2. Three 1 by 1 frames storing 50, slope 1 and intercept
+/// 0 in the shared group. Frame 0's per-frame item has no Frame VOI LUT, so
+/// it falls back to the top-level `40\-600`, `400\1500`, `TOPA\TOPB`.
+/// Frames 1 and 2 carry 300 and 1500 explained `F1ONLY` per frame.
+fn late_per_frame() -> Result<Vec<u8>, String> {
+    let rescale = item(&concat_bytes(&[
+        &short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?,
+        &short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
+    ]))?;
+    let shared = item(&long_le((0x0028, 0x9145), *b"SQ", &rescale)?)?;
+    let own = item(&long_le(
+        (0x0028, 0x9132),
+        *b"SQ",
+        &item(&concat_bytes(&[
+            &short_le((0x0028, 0x1050), *b"DS", &text_pad("300"))?,
+            &short_le((0x0028, 0x1051), *b"DS", &text_pad("1500"))?,
+            &short_le((0x0028, 0x1055), *b"LO", &text_pad("F1ONLY"))?,
+        ]))?,
+    )?)?;
+    let per_frame = concat_bytes(&[&item(&[])?, &own, &own]);
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2.1"),
+    )?);
+    data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad("CT"))?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0008), *b"IS", &text_pad("3"))?);
+    for (tag, value) in [
+        ((0x0028, 0x0010), 1_u16),
+        ((0x0028, 0x0011), 1),
+        ((0x0028, 0x0100), 16),
+        ((0x0028, 0x0101), 16),
+        ((0x0028, 0x0102), 15),
+        ((0x0028, 0x0103), 0),
+    ] {
+        data.extend(short_le(tag, *b"US", &value.to_le_bytes())?);
+    }
+    data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("40\\-600"))?);
+    data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad("400\\1500"))?);
+    data.extend(short_le((0x0028, 0x1055), *b"LO", &text_pad("TOPA\\TOPB"))?);
+    data.extend(long_le((0x5200, 0x9229), *b"SQ", &shared)?);
+    data.extend(long_le((0x5200, 0x9230), *b"SQ", &per_frame)?);
+    data.extend(long_le(
+        (0x7FE0, 0x0010),
+        *b"OW",
+        &concat_bytes(&[
+            &50_u16.to_le_bytes(),
+            &50_u16.to_le_bytes(),
+            &50_u16.to_le_bytes(),
+        ]),
+    )?);
+    part10(data)
+}
+
+#[test]
+fn later_frames_with_their_own_windows_are_per_frame() -> Result<(), String> {
+    // Review pass 3, D2. The decision reads every frame, not frame 0's. The
+    // scan of frame 0 says per frame, so the page asks frame 1 for its list,
+    // and the process keeps the replies. Frame 0 lists the top-level pair,
+    // frame 1 its own. Frame 1 at its first window, PS3.3 C.11.2.1.2.1
+    // LINEAR centre 300 width 1500: c' = 299.5, w' = 1499,
+    // ((50 - 299.5) / 1499 + 0.5) * 255 = 85.06, grey 85.
+    let file = late_per_frame()?;
+    let first = inspect_json(&file, 0).map_err(|_| "inspect frame 0".to_owned())?;
+    if field(&first, "windowsPerFrame")? != "true" {
+        return Err(format!("frame 0 did not say per frame: {first}"));
+    }
+    if !field(&first, "windows")?.contains("\"TOPB\"") {
+        return Err(format!("frame 0 lost the top-level list: {first}"));
+    }
+    let second = inspect_json(&file, 1).map_err(|_| "inspect frame 1".to_owned())?;
+    if field(&second, "windows")?
+        != "[{\"center\":300,\"width\":1500,\"explanation\":\"F1ONLY\",\"label\":\"F1ONLY\"}]"
+    {
+        return Err(format!("frame 1 did not list its own window: {second}"));
+    }
+    let drawn = preview_frame(
+        &file,
+        FrameRequest {
+            frame: 1,
+            ..FrameRequest::default()
+        },
+    )
+    .map_err(|error| format!("frame 1 refused as {}", error.code()))?;
+    if only_byte(&drawn)? != 85 {
+        return Err(format!("frame 1 drew {:?}", drawn.grey));
+    }
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    if !header.contains("200") || json_number(&held_census(addr)?, "kept")? == 0 {
+        return Err("the replies of a late per-frame file were not kept".to_owned());
     }
     Ok(())
 }

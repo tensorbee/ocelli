@@ -13979,8 +13979,11 @@ GUARDS: tuple[Guard, ...] = (
                 "window, a frame change on a fully held multiframe that "
                 "posts the file again, a Four images tile that is not drawn "
                 "at the chosen file window once its frame's list is known or "
-                "whose label does not name that window, and a run in which a "
-                "step was not observed.",
+                "whose label does not name that window, a later frame of a "
+                "file whose frame 0 takes the top-level window that is named "
+                "with frame 0's label or shows a fault, a multiframe step "
+                "whose process never holds every frame without the posted "
+                "bytes, and a run in which a step was not observed.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "

@@ -36,6 +36,12 @@
 // the posted bytes, so the frame's list must come from `/inspect` by id
 // with no `POST /file`.
 //
+// Review pass 3, D2. A three-frame enhanced CT whose frame 0 has no Frame
+// VOI LUT, so it takes the top-level `40\-600`, `400\1500`, `TOPA\TOPB`,
+// while frames 1 and 2 carry 300 and 1500 explained `F1ONLY`. Key 5 on frame
+// 0 is TOPB, grey 236 and 94. ArrowDown must name F1ONLY at grey 83 and 0,
+// never TOPB beside frame 1's own window and never a fault.
+//
 // Review pass 2, D2. In Four images every tile follows the single view's
 // rule. A four-frame enhanced CT stores `40\-600` and `400\1500` in every
 // frame, explained `Ak\Bk` for frame k. Key 5 then Shift G must draw all
@@ -76,23 +82,27 @@ export const EXPECTED = [
  * after key 5 and after one ArrowDown, the faults sampled between them, and
  * the `POST /file` requests made after the first image was drawn.
  */
-export function multiframeProblems(seen) {
+/** The two multiframe files: frame 0's first and chosen names, frame 1's. */
+export const MULTIFRAME = { name: "per-frame multiframe", first: "F0A", chosen: "F0B", next: "F1ONLY", frames: 2 };
+export const LATE = { name: "late per-frame multiframe", first: "TOPA", chosen: "TOPB", next: "F1ONLY", frames: 3 };
+
+export function multiframeProblems(seen, want = MULTIFRAME) {
   const problems = [];
   if (!seen || !seen.before || !seen.after) {
-    problems.push("the multiframe case was not observed");
+    problems.push(`the ${want.name} case was not observed`);
     return problems;
   }
-  if (!seen.before.line.endsWith("  F0B") || seen.before.soft !== 236 || seen.before.lung !== 94) {
-    problems.push(`key 5 on frame 0 showed ${JSON.stringify(seen.before.line)}, grey ${seen.before.soft} and ${seen.before.lung}, wanted F0B with 236 and 94`);
+  if (!seen.before.line.endsWith("  " + want.chosen) || seen.before.soft !== 236 || seen.before.lung !== 94) {
+    problems.push(`${want.name}: key 5 on frame 0 showed ${JSON.stringify(seen.before.line)}, grey ${seen.before.soft} and ${seen.before.lung}, wanted ${want.chosen} with 236 and 94`);
   }
-  if (!seen.after.line.endsWith("  F1ONLY") || seen.after.soft !== 83 || seen.after.lung !== 0) {
-    problems.push(`frame 1 showed ${JSON.stringify(seen.after.line)}, grey ${seen.after.soft} and ${seen.after.lung}, wanted F1ONLY with 83 and 0`);
+  if (!seen.after.line.endsWith("  " + want.next) || seen.after.soft !== 83 || seen.after.lung !== 0) {
+    problems.push(`${want.name}: frame 1 showed ${JSON.stringify(seen.after.line)}, grey ${seen.after.soft} and ${seen.after.lung}, wanted ${want.next} with 83 and 0`);
   }
   if (seen.faults.length) {
-    problems.push(`frame 1 showed the fault ${JSON.stringify(seen.faults[0])} before its own window list arrived`);
+    problems.push(`${want.name}: frame 1 showed the fault ${JSON.stringify(seen.faults[0])} before its own window list arrived`);
   }
   if (seen.posts !== 0) {
-    problems.push(`one ArrowDown on a fully held multiframe posted the file ${seen.posts} times`);
+    problems.push(`${want.name}: one ArrowDown on a fully held multiframe posted the file ${seen.posts} times`);
   }
   return problems;
 }
@@ -219,7 +229,11 @@ function item(content) {
 }
 
 /** Two 32 by 32 frames with a Frame VOI LUT item each, no patient attributes. */
-function enhanced(frames) {
+/**
+ * One enhanced CT of 32 by 32 frames. A `null` frame has an empty per-frame
+ * item, so it falls back to `top`, the top-level window when one is given.
+ */
+function enhanced(frames, top) {
   const sopClass = "1.2.840.10008.5.1.4.1.1.2.1";
   const sop = "2.25.213030";
   const meta = Buffer.concat([
@@ -235,11 +249,16 @@ function enhanced(frames) {
     shortEl(0x0028, 0x1052, "DS", text("-1024")),
     shortEl(0x0028, 0x1053, "DS", text("1")),
   ]))));
-  const perFrame = Buffer.concat(frames.map((win) => item(longEl(0x0028, 0x9132, "SQ", item(Buffer.concat([
+  const perFrame = Buffer.concat(frames.map((win) => (win == null ? item(Buffer.alloc(0)) : item(longEl(0x0028, 0x9132, "SQ", item(Buffer.concat([
     shortEl(0x0028, 0x1050, "DS", text(win.centers)),
     shortEl(0x0028, 0x1051, "DS", text(win.widths)),
     shortEl(0x0028, 0x1055, "LO", text(win.explanation)),
-  ]))))));
+  ])))))));
+  const topWindow = top ? [
+    shortEl(0x0028, 0x1050, "DS", text(top.centers)),
+    shortEl(0x0028, 0x1051, "DS", text(top.widths)),
+    shortEl(0x0028, 0x1055, "LO", text(top.explanation)),
+  ] : [];
   return Buffer.concat([
     Buffer.alloc(128),
     Buffer.from("DICM"),
@@ -260,6 +279,7 @@ function enhanced(frames) {
     shortEl(0x0028, 0x0101, "US", u16(16)),
     shortEl(0x0028, 0x0102, "US", u16(15)),
     shortEl(0x0028, 0x0103, "US", u16(0)),
+    ...topWindow,
     longEl(0x5200, 0x9229, "SQ", shared),
     longEl(0x5200, 0x9230, "SQ", perFrame),
     longEl(0x7fe0, 0x0010, "OW", Buffer.concat(frames.map(() => one))),
@@ -304,7 +324,25 @@ function writeMultiframe(folder) {
   ]));
 }
 
-export async function observeMultiframe(url, chromium, folder) {
+function writeLate(folder) {
+  const own = { centers: "300", widths: "1500", explanation: "F1ONLY" };
+  writeFileSync(join(folder, "late.dcm"), enhanced([null, own, own], { centers: "40\\-600", widths: "400\\1500", explanation: "TOPA\\TOPB" }));
+}
+
+/** Poll `GET /held` until the process holds every frame and no posted bytes. */
+async function waitFullyHeld(page, url, frames) {
+  const deadline = Date.now() + 8000;
+  for (;;) {
+    const held = await (await page.request.get(url + "held")).json();
+    if (held.files === 0 && held.frames === frames) return;
+    if (Date.now() > deadline) {
+      throw new Error(`the process never held all ${frames} frames without the posted bytes: ${JSON.stringify(held)}`);
+    }
+    await page.waitForTimeout(100);
+  }
+}
+
+export async function observeMultiframe(url, chromium, folder, want = MULTIFRAME) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -316,15 +354,13 @@ export async function observeMultiframe(url, chromium, folder) {
     await page.goto(url);
     await page.locator("#folder").setInputFiles(folder);
     await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("1 series."));
-    await settle(page, { word: "F0A" });
+    await settle(page, { word: want.first });
     drawn = true;
     await page.keyboard.press("5");
-    await settle(page, { word: "F0B" });
-    // The prefetch holds frame 1 too, and the process then drops the bytes.
-    await page.waitForFunction(async () => {
-      const held = await (await window.fetch("/held")).json();
-      return held.files === 0 && held.frames === 2;
-    }, null, { timeout: 8000, polling: 100 });
+    await settle(page, { word: want.chosen });
+    // The prefetch holds every frame, and the process then drops the bytes.
+    // A run that never reaches that state fails here rather than passing.
+    await waitFullyHeld(page, url, want.frames);
     const first = await sample(page);
     const before = { line: first.corner.split("\n")[0], soft: first.soft, lung: first.lung };
     await page.evaluate(() => {
@@ -338,7 +374,7 @@ export async function observeMultiframe(url, chromium, folder) {
       window.__faultTimer = window.setInterval(watch, 5);
     });
     await page.keyboard.press("ArrowDown");
-    await settle(page, { word: "F1ONLY" });
+    await settle(page, { word: want.next });
     await page.waitForTimeout(400);
     const faults = await page.evaluate(() => {
       window.clearInterval(window.__faultTimer);
@@ -471,22 +507,35 @@ async function main() {
   const folder = mkdtempSync(join(tmpdir(), "ocelli-f213-"));
   const multi = mkdtempSync(join(tmpdir(), "ocelli-f213-multi-"));
   const tiled = mkdtempSync(join(tmpdir(), "ocelli-f213-tiles-"));
-  const server = await startViewer(binary);
+  const late = mkdtempSync(join(tmpdir(), "ocelli-f213-late-"));
+  // Each observation has its own viewer process, so `GET /held` counts that
+  // observation's file alone.
+  const alone = async (observe) => {
+    const server = await startViewer(binary);
+    try {
+      return await observe(server.url);
+    } finally {
+      await stopByPid(server.pid);
+    }
+  };
   let seen;
   let frames;
   let tiles;
+  let lateFrames;
   try {
     writeFolder(folder);
     writeMultiframe(multi);
     writeTiles(tiled);
-    seen = await observeWindows(server.url, chromium, folder);
-    frames = await observeMultiframe(server.url, chromium, multi);
-    tiles = await observeTiles(server.url, chromium, tiled);
+    writeLate(late);
+    seen = await alone((url) => observeWindows(url, chromium, folder));
+    frames = await alone((url) => observeMultiframe(url, chromium, multi));
+    tiles = await alone((url) => observeTiles(url, chromium, tiled));
+    lateFrames = await alone((url) => observeMultiframe(url, chromium, late, LATE));
   } finally {
-    await stopByPid(server.pid);
     rmSync(folder, { recursive: true, force: true });
     rmSync(multi, { recursive: true, force: true });
     rmSync(tiled, { recursive: true, force: true });
+    rmSync(late, { recursive: true, force: true });
   }
   for (const step of seen.steps) {
     console.log(`${step.name}: ${JSON.stringify(step.corner.split("\n")[0])}, grey ${step.soft} and ${step.lung}`);
@@ -497,7 +546,12 @@ async function main() {
     : `region window, no library build: ${JSON.stringify(seen.region.sentence)}`);
   console.log(`multiframe: key 5 ${JSON.stringify(frames.before.line)} grey ${frames.before.soft} and ${frames.before.lung}, ArrowDown ${JSON.stringify(frames.after.line)} grey ${frames.after.soft} and ${frames.after.lung}, ${frames.faults.length} faults seen, ${frames.posts} file posts`);
   console.log(`tiles: ${tiles.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
-  const problems = windowProblems(seen).concat(multiframeProblems(frames), tileProblems(tiles));
+  console.log(`late: key 5 ${JSON.stringify(lateFrames.before.line)} grey ${lateFrames.before.soft} and ${lateFrames.before.lung}, ArrowDown ${JSON.stringify(lateFrames.after.line)} grey ${lateFrames.after.soft} and ${lateFrames.after.lung}, ${lateFrames.faults.length} faults seen, ${lateFrames.posts} file posts`);
+  const problems = windowProblems(seen).concat(
+    multiframeProblems(frames),
+    tileProblems(tiles),
+    multiframeProblems(lateFrames, LATE),
+  );
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
