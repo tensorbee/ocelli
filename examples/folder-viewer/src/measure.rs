@@ -138,12 +138,15 @@ pub(crate) struct CalibrationInputs {
 }
 
 /// The spacing a request uses and how it is labelled.
+///
+/// The preview reply carries `source` and `mm` for the scale bar, so the
+/// bar and a length read the same choice.
 #[derive(Debug, Clone, Copy)]
-struct Spacing {
+pub(crate) struct Spacing {
     /// `pixel-spacing`, `imager-spacing`, `detector` or `uncalibrated`.
-    source: &'static str,
+    pub(crate) source: &'static str,
     /// Millimetres per row and per column, absent when uncalibrated.
-    mm: Option<SpacingMm>,
+    pub(crate) mm: Option<SpacingMm>,
     /// The length unit, `mm`, `mm at the detector` or `px`.
     length_unit: &'static str,
     /// The area unit.
@@ -166,7 +169,7 @@ struct Spacing {
 /// order and only as far as the source that is chosen. A present Pixel
 /// Spacing that differs from the imager pair decides alone, and a later
 /// Imager Pixel Spacing or factor that cannot be used is never read.
-fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
+pub(crate) fn choose_spacing(inputs: &CalibrationInputs) -> Result<Spacing, PreviewError> {
     let pair = |input: SpacingInput| match input {
         SpacingInput::Absent => Ok(None),
         SpacingInput::Unusable => Err(PreviewError::Calibration),

@@ -9,9 +9,10 @@ use std::time::Duration;
 use ocelli_core::{Index, Pt};
 use ocelli_dicom::{FrameGeometry, MetadataSet, MultiframeMetadata, parse_part10};
 use ocelli_folder_viewer::{
-    FRAME_LIST_CAP, FrameRequest, Preview, PreviewError, SLICES, Viewer, ViewerConfig,
-    handle_connection, headers_json, inspect_json, plane_from_token, plane_token,
-    preview_first_frame, preview_frame, serve_on, slice,
+    FRAME_LIST_CAP, FrameRequest, ImagePoint, MeasureShape, Preview, PreviewError, SLICES, Viewer,
+    ViewerConfig, age_text, dicom_date_text, dicom_time_text, exposure_mas, handle_connection,
+    headers_json, inspect_json, measure_frame, patient_orientation_letters, person_name_text,
+    plane_from_token, plane_token, preview_first_frame, preview_frame, serve_on, slice,
 };
 use ocelli_pixel::VoiFunction;
 use ocelli_viewport::presentation::WindowPreset;
@@ -331,6 +332,59 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
                 "the display aspect is not applied where it is used: {used}"
             ));
         }
+    }
+    // F-212 AC11. The corner text is formatted by the local process, so the
+    // page keeps no name or date formatter of its own.
+    for formatter in ["function personName", "function dicomDate"] {
+        if page.contains(formatter) {
+            return Err(format!("the page still formats corner text: {formatter}"));
+        }
+    }
+    for field in [
+        "info.patientNameText",
+        "info.birthDate",
+        "info.sex",
+        "info.age",
+        "info.institution",
+        "info.studyDateText",
+        "info.studyTime",
+        "info.sliceLocation",
+        "info.sliceThickness",
+        "info.kvp",
+        "info.exposureMas",
+        "info.repetitionTime",
+        "info.echoTime",
+    ] {
+        if !page.contains(field) {
+            return Err(format!("the corners do not read {field}"));
+        }
+    }
+    // The bar reads the calibration headers the preview reply writes.
+    for read in [
+        "response.headers.get(\"X-Ocelli-Calibration-Source\")",
+        "headerNumber(response, \"X-Ocelli-Calibration-Column\")",
+    ] {
+        if !page.contains(read) {
+            return Err(format!("the page does not read {read}"));
+        }
+    }
+    // cornerstone3D 5.8.2 `ScaleOverlayTool`: the length list, the bounds
+    // of 0.2 and 0.6 of the view width, and the detector words F-211's
+    // length uses.
+    for used in [
+        "const SCALE_SIZES = [16000, 8000, 4000, 2000, 1000, 500, 250, 100, 50, 25, 10, 5, 2];",
+        "SCALE_SIZES.find((mm) => mm < viewMm * 0.6 && mm > viewMm * 0.2)",
+        "if (facts.calibrationSource === \"detector\") label += \" at the detector\";",
+        "const perMm = show ? vp.scale * vp.aspectX / column : 0;",
+    ] {
+        if !page.contains(used) {
+            return Err(format!("the scale bar lacks {used}"));
+        }
+    }
+    if !page.contains(
+        "\"toggle-letters\": \"The patient direction at each edge, read from Image Orientation (Patient), or from Patient Orientation on an image without Image Orientation (Patient). The letters are hidden while the picture is turned or flipped.\"",
+    ) {
+        return Err("the letters sentence does not name Patient Orientation".to_owned());
     }
     Ok(())
 }
@@ -3726,6 +3780,715 @@ fn inspect_writes_at_most_the_frame_list_of_planes() -> Result<(), String> {
     let entries = planes.matches("null").count();
     if entries != FRAME_LIST_CAP {
         return Err(format!("{entries} plane entries for 65537 frames"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// F-212. Corner text, edge letters from Patient Orientation, and the scale
+// bar's calibration. Every expected value below is read from the PS3.5 6.2
+// Table 6.2-1 row or the PS3.3 section named beside it, or worked by hand in
+// the comment, never from a run of `corners.rs`.
+
+#[test]
+fn person_name_text_follows_ps3_5_pn() -> Result<(), String> {
+    // PS3.5 6.2 PN. Five `^` components in the order family, given, middle,
+    // prefix, suffix. Groups separated by `=` are alphabetic, ideographic,
+    // phonetic. The plan's display is `family, prefix given middle, suffix`
+    // with empty parts and their separators dropped.
+    for (stored, want) in [
+        ("Doe^John^Quincy^Dr^Jr", "Doe, Dr John Quincy, Jr"),
+        ("Doe^John", "Doe, John"),
+        ("^John", "John"),
+        // The alphabetic group exists, so the ideographic one is not used.
+        ("Yamada^Tarou=山田^太郎=やまだ^たろう", "Yamada, Tarou"),
+        // The alphabetic group is empty, so the ideographic one is used.
+        ("=山田^太郎", "山田, 太郎"),
+        // VM 2. Only the first value is a name.
+        ("A\\B", "A"),
+        ("", ""),
+    ] {
+        let got = person_name_text(stored);
+        if got != want {
+            return Err(format!("{stored:?} gave {got:?}, want {want:?}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn dicom_date_text_follows_ps3_5_da() -> Result<(), String> {
+    // PS3.5 6.2 DA, YYYYMMDD on the Gregorian calendar. 2000 and 1600 are
+    // divisible by 400, so they are leap years and 29 February exists. 2020
+    // is divisible by 4 and not by 100, so it is one too. 1900 and 2100 are
+    // divisible by 100 and not by 400, so they are not, and their 29
+    // February names no day. Month 13 and day 32 name no day. `1970.01.02`
+    // is the retired ACR-NEMA form and `197001` is not eight digits. Each of
+    // those stays as stored.
+    for (stored, want) in [
+        ("19700102", "1970-01-02"),
+        ("20000229", "2000-02-29"),
+        ("16000229", "1600-02-29"),
+        ("20200229", "2020-02-29"),
+        ("19000229", "19000229"),
+        ("21000229", "21000229"),
+        ("19701302", "19701302"),
+        ("19700132", "19700132"),
+        ("1970.01.02", "1970.01.02"),
+        ("197001", "197001"),
+        ("", ""),
+    ] {
+        let got = dicom_date_text(stored);
+        if got != want {
+            return Err(format!("{stored:?} gave {got:?}, want {want:?}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn dicom_time_text_follows_ps3_5_tm() -> Result<(), String> {
+    // PS3.5 6.2 TM, HHMMSS.FFFFFF with HH 00 to 23, MM 00 to 59, SS 00 to
+    // 60 and a fraction of 1 to 6 digits. A component may be left out only
+    // with every component to its right. The fraction is dropped, never
+    // rounded, and no component is invented. `2400` is outside the hour
+    // range, `143` is not a whole component, `14:30:12` is the retired
+    // ACR-NEMA form, `146012` has minute 60, and `143012.` has a separator
+    // with no fraction digit. Each of those stays as stored.
+    for (stored, want) in [
+        ("143012", "14:30:12"),
+        ("143012.123456", "14:30:12"),
+        ("1430", "14:30"),
+        ("14", "14"),
+        ("235959.999999", "23:59:59"),
+        ("235960", "23:59:60"),
+        ("2400", "2400"),
+        ("143", "143"),
+        ("14:30:12", "14:30:12"),
+        ("146012", "146012"),
+        ("143012.", "143012."),
+        ("143012.1234567", "143012.1234567"),
+        ("", ""),
+    ] {
+        let got = dicom_time_text(stored);
+        if got != want {
+            return Err(format!("{stored:?} gave {got:?}, want {want:?}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn patient_age_follows_ps3_5_as() -> Result<(), String> {
+    // PS3.5 6.2 AS, nnnD, nnnW, nnnM or nnnY, 4 bytes fixed. The number is
+    // shown without its leading zeros and the unit as a word, singular for
+    // 1. `45Y` is three bytes and `045y` has a lower-case unit, so neither
+    // is AS. Neither falls through to the age computed from the two dates,
+    // which here would be 54 years.
+    for (stored, want, source) in [
+        ("045Y", "45 years", "PatientAge"),
+        ("001Y", "1 year", "PatientAge"),
+        ("018M", "18 months", "PatientAge"),
+        ("003W", "3 weeks", "PatientAge"),
+        ("012D", "12 days", "PatientAge"),
+        ("000D", "0 days", "PatientAge"),
+        ("45Y", "", ""),
+        ("045y", "", ""),
+    ] {
+        let (text, from) = age_text(Some(stored), Some("19700102"), Some("20240305"));
+        if text != want || from != source {
+            return Err(format!(
+                "{stored:?} gave {text:?} from {from:?}, want {want:?} from {source:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn computed_age_is_the_age_at_the_study() -> Result<(), String> {
+    // Whole years are `sy - by`, less one while `(sm, sd) < (bm, bd)`.
+    // 1970-01-02 to 2024-03-05: 54, and (3, 5) is not before (1, 2).
+    // 1970-03-06 to 2024-03-05: 54 less one, (3, 5) is before (3, 6).
+    // 1970-03-05 to 2024-03-05: the birthday itself, 54.
+    // 2000-02-29 to 2001-02-28: 1 less one is 0 years. Months are
+    // 1 * 12 + (2 - 2) = 12, less one because day 28 is before day 29: 11.
+    // 2000-02-29 to 2001-03-01: (3, 1) is not before (2, 29), so 1 year.
+    // 2024-01-15 to 2024-03-05: 0 years, 2 months less one for day 5: 1.
+    // 2024-01-05 to 2024-03-05: day 5 is not before day 5, so 2 months.
+    // 2024-03-01 to 2024-03-15: 0 years, 0 months, 14 Gregorian days.
+    // 2024-02-20 to 2024-03-05: 0 months, and 2024 is a leap year, so
+    // 9 days to 29 February and 5 more, 14 days. 2020 is a leap year as
+    // well, so 2020-02-20 to 2020-03-05 is also 14 days. 2023 is not, so
+    // 2023-02-20 to 2023-03-05 is 8 days to 28 February and 5 more, 13.
+    // A study before the birth, or no study date, is empty.
+    for (birth, study, want, source) in [
+        (Some("19700102"), Some("20240305"), "54 years", "computed"),
+        (Some("19700306"), Some("20240305"), "53 years", "computed"),
+        (Some("19700305"), Some("20240305"), "54 years", "computed"),
+        (Some("20000229"), Some("20010228"), "11 months", "computed"),
+        (Some("20000229"), Some("20010301"), "1 year", "computed"),
+        (Some("20240115"), Some("20240305"), "1 month", "computed"),
+        (Some("20240105"), Some("20240305"), "2 months", "computed"),
+        (Some("20240301"), Some("20240315"), "14 days", "computed"),
+        (Some("20240220"), Some("20240305"), "14 days", "computed"),
+        (Some("20200220"), Some("20200305"), "14 days", "computed"),
+        (Some("20230220"), Some("20230305"), "13 days", "computed"),
+        (Some("20240305"), Some("20240301"), "", ""),
+        (Some("19700102"), None, "", ""),
+        (Some("19000229"), Some("20240305"), "", ""),
+    ] {
+        let (text, from) = age_text(None, birth, study);
+        if text != want || from != source {
+            return Err(format!(
+                "{birth:?} to {study:?} gave {text:?} from {from:?}, want {want:?} from {source:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn exposure_mas_prefers_exposure_then_micro() -> Result<(), String> {
+    // PS3.3 C.8.2.1 and C.8.7.8. Exposure (0018,1152) is IS in mAs.
+    // Exposure in µAs (0018,1153) is IS in µAs, so mAs is the value over
+    // 1000, written exactly: 200000 is 200, 500 is 0.5, 1234567 is
+    // 1234.567, 2147483647 is 2147483.647 and -500 is -0.5. PS3.5 6.2 IS
+    // ranges from -2^31 to 2^31 - 1, so 2147483648 is not an IS and the
+    // next source is read.
+    for (exposure, micro, want, source) in [
+        (Some("200"), None, Some("200"), "Exposure"),
+        (Some("200"), Some("500"), Some("200"), "Exposure"),
+        (None, Some("200000"), Some("200"), "ExposureInuAs"),
+        (None, Some("500"), Some("0.5"), "ExposureInuAs"),
+        (None, Some("1234567"), Some("1234.567"), "ExposureInuAs"),
+        (
+            None,
+            Some("2147483647"),
+            Some("2147483.647"),
+            "ExposureInuAs",
+        ),
+        (None, Some("-500"), Some("-0.5"), "ExposureInuAs"),
+        (
+            Some("2147483648"),
+            Some("500"),
+            Some("0.5"),
+            "ExposureInuAs",
+        ),
+        (Some("2147483647"), None, Some("2147483647"), "Exposure"),
+        (Some("2.5"), None, None, ""),
+        (None, None, None, ""),
+    ] {
+        let (text, from) = exposure_mas(exposure, micro);
+        if text.as_deref() != want || from != source {
+            return Err(format!(
+                "{exposure:?} and {micro:?} gave {text:?} from {from:?}, want {want:?} from {source:?}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn patient_orientation_follows_ps3_3_c_7_6_1_1_1() -> Result<(), String> {
+    // PS3.3 C.7.6.1.1.1. The first value is the direction of the positive
+    // row axis, left to right, so it names the right edge, and the left edge
+    // is its opposite. The second is the positive column axis, top to
+    // bottom, so it names the bottom edge, and the top is its opposite.
+    // Opposites are A and P, R and L, H and F.
+    for (values, want) in [
+        (&["L", "F"][..], ["R", "L", "H", "F"]),
+        (&["A", "F"][..], ["P", "A", "H", "F"]),
+        (&["A", "FR"][..], ["P", "A", "HL", "FR"]),
+    ] {
+        let got =
+            patient_orientation_letters(values).ok_or_else(|| format!("{values:?} was refused"))?;
+        if got != want.map(str::to_owned) {
+            return Err(format!("{values:?} gave {got:?}, want {want:?}"));
+        }
+    }
+    // A letter with its opposite, a letter outside A P R L H F, one value,
+    // three values, four letters, and the quadruped terms are refused.
+    // `LAHL` has four letters of the set and no opposite pair, so only the
+    // length refuses it.
+    for values in [
+        &["LR", "F"][..],
+        &["F", "PA"][..],
+        &["X", "F"][..],
+        &["A"][..],
+        &["L", "F", "A"][..],
+        &["ABCD", "F"][..],
+        &["LAHL", "F"][..],
+        &["RT", "V"][..],
+    ] {
+        if let Some(got) = patient_orientation_letters(values) {
+            return Err(format!("{values:?} gave {got:?}, want refused"));
+        }
+    }
+    Ok(())
+}
+
+/// One element a `corner_object` adds: tag, VR and the padded value.
+type Planted = ((u16, u16), [u8; 2], Vec<u8>);
+
+fn planted_text(tag: (u16, u16), vr: [u8; 2], text: &str) -> Planted {
+    (tag, vr, text_pad(text))
+}
+
+/// A one-pixel CT image with the planted elements, in ascending tag order.
+fn corner_object(planted: &[Planted]) -> Result<Vec<u8>, String> {
+    let mut elements = vec![
+        (
+            (0x0008, 0x0016),
+            short_le((0x0008, 0x0016), *b"UI", &ui(b"1.2.840.10008.5.1.4.1.1.2"))?,
+        ),
+        (
+            (0x0008, 0x0060),
+            short_le((0x0008, 0x0060), *b"CS", &text_pad("CT"))?,
+        ),
+        (
+            (0x0028, 0x0002),
+            short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0004),
+            short_le((0x0028, 0x0004), *b"CS", &text_pad("MONOCHROME2"))?,
+        ),
+        (
+            (0x0028, 0x0010),
+            short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0011),
+            short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0100),
+            short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0101),
+            short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0102),
+            short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0103),
+            short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x1050),
+            short_le((0x0028, 0x1050), *b"DS", &text_pad("100"))?,
+        ),
+        (
+            (0x0028, 0x1051),
+            short_le((0x0028, 0x1051), *b"DS", &text_pad("200"))?,
+        ),
+        (
+            (0x0028, 0x1052),
+            short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?,
+        ),
+        (
+            (0x0028, 0x1053),
+            short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
+        ),
+        (
+            (0x7FE0, 0x0010),
+            long_le((0x7FE0, 0x0010), *b"OW", &50_u16.to_le_bytes())?,
+        ),
+    ];
+    for (tag, vr, value) in planted {
+        let encoded = if vr == b"SQ" {
+            long_le(*tag, *vr, value)?
+        } else {
+            short_le(*tag, *vr, value)?
+        };
+        elements.push((*tag, encoded));
+    }
+    elements.sort_by_key(|(tag, _)| *tag);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
+    for (_, encoded) in elements {
+        bytes.extend(encoded);
+    }
+    Ok(bytes)
+}
+
+const PATIENT_ORIENTATION: (u16, u16) = (0x0020, 0x0020);
+const IMAGE_ORIENTATION: (u16, u16) = (0x0020, 0x0037);
+const ANATOMICAL_ORIENTATION_TYPE: (u16, u16) = (0x0010, 0x2210);
+
+fn edges_of(file: &[u8]) -> Result<[String; 5], String> {
+    let preview = preview_frame(file, FrameRequest::default())
+        .map_err(|error| format!("the frame was refused with {}", error.code()))?;
+    let facts = preview.facts;
+    Ok([
+        facts.edge_left,
+        facts.edge_right,
+        facts.edge_top,
+        facts.edge_bottom,
+        facts.edge_source.to_owned(),
+    ])
+}
+
+#[test]
+fn patient_orientation_is_used_only_without_image_orientation() -> Result<(), String> {
+    // PS3.3 C.7.6.1.1.1. Patient Orientation `L\F`: rows run to the
+    // patient's left, so the right edge is L and the left edge R. Columns
+    // run to the feet, so the bottom edge is F and the top H.
+    let po = planted_text(PATIENT_ORIENTATION, *b"CS", "L\\F");
+    let projection = corner_object(std::slice::from_ref(&po))?;
+    let want = ["R", "L", "H", "F", "PatientOrientation"].map(str::to_owned);
+    if edges_of(&projection)? != want {
+        return Err(format!("L\\F gave {:?}", edges_of(&projection)?));
+    }
+    let response = one_exchange(&http_post(&projection))?;
+    let (header, _) = split_http(&response)?;
+    if header_line(header, "X-Ocelli-Edge-Left") != Some("R")
+        || header_line(header, "X-Ocelli-Edge-Source") != Some("PatientOrientation")
+    {
+        return Err(format!("the reply did not carry the letters: {header}"));
+    }
+    // With the axial cosines 1\0\0\0\1\0, F-206 decides: row +x is the
+    // patient's left, column +y is posterior, so left R, right L, top A,
+    // bottom P, and Patient Orientation is not read.
+    let axial = corner_object(&[
+        po.clone(),
+        planted_text(IMAGE_ORIENTATION, *b"DS", "1\\0\\0\\0\\1\\0"),
+    ])?;
+    let want = ["R", "L", "A", "P", "ImageOrientationPatient"].map(str::to_owned);
+    if edges_of(&axial)? != want {
+        return Err(format!("the axial cosines gave {:?}", edges_of(&axial)?));
+    }
+    // A present Image Orientation (Patient) that cannot be used, a non-unit
+    // row cosine or a value that is not text, is not rescued by Patient
+    // Orientation.
+    let empty = [""; 5].map(str::to_owned);
+    for (name, orientation) in [
+        (
+            "non-unit",
+            planted_text(IMAGE_ORIENTATION, *b"DS", "2\\0\\0\\0\\1\\0"),
+        ),
+        (
+            "binary",
+            (IMAGE_ORIENTATION, *b"US", 1_u16.to_le_bytes().to_vec()),
+        ),
+    ] {
+        let file = corner_object(&[po.clone(), orientation])?;
+        if edges_of(&file)? != empty {
+            return Err(format!("a {name} orientation gave {:?}", edges_of(&file)?));
+        }
+    }
+    // A zero-length Image Orientation (Patient) is the same as an absent one.
+    let zero = corner_object(&[po.clone(), (IMAGE_ORIENTATION, *b"DS", Vec::new())])?;
+    let want = ["R", "L", "H", "F", "PatientOrientation"].map(str::to_owned);
+    if edges_of(&zero)? != want {
+        return Err(format!(
+            "a zero-length orientation gave {:?}",
+            edges_of(&zero)?
+        ));
+    }
+    // A refused Patient Orientation gives no letters, and the frame draws.
+    let refused = corner_object(&[planted_text(PATIENT_ORIENTATION, *b"CS", "LR\\F")])?;
+    if edges_of(&refused)? != empty {
+        return Err(format!("LR\\F gave {:?}", edges_of(&refused)?));
+    }
+    // PS3.3 C.7.6.1.1.1. In a QUADRUPED object `R` is rostral, so the human
+    // letters would be wrong. Neither attribute gives letters there.
+    let quadruped = planted_text(ANATOMICAL_ORIENTATION_TYPE, *b"CS", "QUADRUPED");
+    for (name, orientation) in [
+        (
+            "Patient Orientation",
+            planted_text(PATIENT_ORIENTATION, *b"CS", "R\\PL"),
+        ),
+        (
+            "Image Orientation (Patient)",
+            planted_text(IMAGE_ORIENTATION, *b"DS", "1\\0\\0\\0\\1\\0"),
+        ),
+    ] {
+        let file = corner_object(&[quadruped.clone(), orientation])?;
+        if edges_of(&file)? != empty {
+            return Err(format!("a quadruped {name} gave {:?}", edges_of(&file)?));
+        }
+    }
+    let biped = corner_object(&[
+        planted_text(ANATOMICAL_ORIENTATION_TYPE, *b"CS", "BIPED"),
+        planted_text(PATIENT_ORIENTATION, *b"CS", "R\\PL"),
+    ])?;
+    // `R\PL`: right edge R, left L, bottom PL, top AR.
+    let want = ["L", "R", "AR", "PL", "PatientOrientation"].map(str::to_owned);
+    if edges_of(&biped)? != want {
+        return Err(format!("a biped R\\PL gave {:?}", edges_of(&biped)?));
+    }
+    Ok(())
+}
+
+fn every_corner_attribute() -> Vec<Planted> {
+    vec![
+        planted_text((0x0008, 0x0020), *b"DA", "20240305"),
+        planted_text((0x0008, 0x0030), *b"TM", "143012.5"),
+        planted_text((0x0008, 0x0080), *b"LO", "Example Institution"),
+        planted_text((0x0010, 0x0010), *b"PN", "Doe^Jane"),
+        planted_text((0x0010, 0x0030), *b"DA", "19700102"),
+        planted_text((0x0010, 0x0040), *b"CS", "F"),
+        planted_text((0x0018, 0x0050), *b"DS", "5.0"),
+        planted_text((0x0018, 0x0060), *b"DS", "120"),
+        planted_text((0x0018, 0x0080), *b"DS", "500"),
+        planted_text((0x0018, 0x0081), *b"DS", "15"),
+        planted_text((0x0018, 0x1153), *b"IS", "200000"),
+        planted_text((0x0020, 0x1041), *b"DS", "-12.50"),
+    ]
+}
+
+#[test]
+fn inspect_json_reports_the_corner_fields() -> Result<(), String> {
+    // Birth 1970-01-02, study 2024-03-05, no Patient's Age: 54 years, since
+    // (3, 5) is not before (1, 2). Study Time 143012.5 drops its fraction.
+    // Exposure is absent, so 200000 µAs over 1000 is 200 mAs. Each DS token
+    // is a JSON number already and is kept as stored, `-12.50` included.
+    let file = corner_object(&every_corner_attribute())?;
+    let json = inspect_json(&file, 0).map_err(|_| "inspect refused the CT".to_owned())?;
+    let fields = [
+        "\"patientName\":\"Doe^Jane\"",
+        "\"studyDate\":\"20240305\"",
+        "\"edgeSource\":\"\"",
+        "\"patientNameText\":\"Doe, Jane\"",
+        "\"birthDate\":\"1970-01-02\"",
+        "\"sex\":\"F\"",
+        "\"age\":\"54 years\"",
+        "\"ageSource\":\"computed\"",
+        "\"studyDateText\":\"2024-03-05\"",
+        "\"studyTime\":\"14:30:12\"",
+        "\"institution\":\"Example Institution\"",
+        "\"sliceLocation\":-12.50",
+        "\"sliceThickness\":5.0",
+        "\"kvp\":120",
+        "\"repetitionTime\":500",
+        "\"echoTime\":15",
+        "\"exposureMas\":200",
+        "\"exposureSource\":\"ExposureInuAs\"",
+    ];
+    let planes_at = json
+        .find("\"planes\":")
+        .ok_or_else(|| "inspect has no planes".to_owned())?;
+    for needle in fields {
+        match json.find(needle) {
+            Some(at) if at < planes_at => {}
+            Some(_) => return Err(format!("{needle} is after the planes tail")),
+            None => return Err(format!("inspect lacks {needle}: {json}")),
+        }
+    }
+    // The HTTP scan returns the same object.
+    let response = one_exchange(&http_post_to("/inspect", "", &file))?;
+    let (_, body) = split_http(&response)?;
+    if body != json.as_bytes() {
+        return Err("the /inspect reply differs from inspect_json".to_owned());
+    }
+    // A stored Patient's Age 045Y wins over the dates, Exposure 200 wins
+    // over the µAs value, a multi-valued DS and one that is not a number are
+    // null, and a sex outside M, F and O is empty.
+    let mut planted = every_corner_attribute();
+    planted.push(planted_text((0x0010, 0x1010), *b"AS", "045Y"));
+    planted.push(planted_text((0x0018, 0x1152), *b"IS", "200"));
+    planted.retain(|(tag, _, _)| {
+        *tag != (0x0020, 0x1041) && *tag != (0x0010, 0x0040) && *tag != (0x0018, 0x0050)
+    });
+    planted.push(planted_text((0x0020, 0x1041), *b"DS", "1\\2"));
+    planted.push(planted_text((0x0018, 0x0050), *b"DS", "five"));
+    planted.push(planted_text((0x0010, 0x0040), *b"CS", "X"));
+    let stored = corner_object(&planted)?;
+    let json = inspect_json(&stored, 0).map_err(|_| "inspect refused the CT".to_owned())?;
+    for needle in [
+        "\"age\":\"45 years\"",
+        "\"ageSource\":\"PatientAge\"",
+        "\"exposureMas\":200",
+        "\"exposureSource\":\"Exposure\"",
+        "\"sliceLocation\":null",
+        "\"sliceThickness\":null",
+        "\"sex\":\"\"",
+    ] {
+        if !json.contains(needle) {
+            return Err(format!("inspect lacks {needle}: {json}"));
+        }
+    }
+    // The phantom writes none of the corner attributes. It has Image
+    // Orientation (Patient), so its letters come from there.
+    let phantom = slice(0).ok_or_else(|| "slice 0 was not built".to_owned())?;
+    let json =
+        inspect_json(&phantom, 0).map_err(|_| "inspect refused the synthetic slice".to_owned())?;
+    for needle in [
+        "\"patientNameText\":\"\"",
+        "\"birthDate\":\"\"",
+        "\"sex\":\"\"",
+        "\"age\":\"\"",
+        "\"ageSource\":\"\"",
+        "\"studyDateText\":\"\"",
+        "\"studyTime\":\"\"",
+        "\"institution\":\"\"",
+        "\"sliceLocation\":null",
+        "\"sliceThickness\":null",
+        "\"kvp\":null",
+        "\"repetitionTime\":null",
+        "\"echoTime\":null",
+        "\"exposureMas\":null",
+        "\"exposureSource\":\"\"",
+        "\"edgeSource\":\"ImageOrientationPatient\"",
+    ] {
+        if !json.contains(needle) {
+            return Err(format!("the phantom inspect lacks {needle}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn a_corner_attribute_that_is_not_text_does_not_refuse_the_scan() -> Result<(), String> {
+    // Lead amendment 3. Each new attribute is planted as a binary US value
+    // and then as an empty sequence. The scan still lists the file, the
+    // frame still draws, and each corner field is empty or null. Study Date
+    // and Patient's Birth Date stay valid in the age row, so an age shown
+    // there would be a computed one replacing the unusable Patient's Age.
+    let new_tags = [
+        (0x0008, 0x0030),
+        (0x0008, 0x0080),
+        (0x0010, 0x0040),
+        (0x0010, 0x1010),
+        (0x0010, 0x2210),
+        (0x0018, 0x0050),
+        (0x0018, 0x0060),
+        (0x0018, 0x0080),
+        (0x0018, 0x0081),
+        (0x0018, 0x1152),
+        (0x0018, 0x1153),
+        (0x0020, 0x0020),
+        (0x0020, 0x1041),
+    ];
+    for (vr, value) in [(*b"US", 7_u16.to_le_bytes().to_vec()), (*b"SQ", Vec::new())] {
+        let mut planted: Vec<Planted> = new_tags
+            .iter()
+            .map(|tag| (*tag, vr, value.clone()))
+            .collect();
+        planted.push(planted_text((0x0008, 0x0020), *b"DA", "20240305"));
+        planted.push(planted_text((0x0010, 0x0030), *b"DA", "19700102"));
+        let file = corner_object(&planted)?;
+        let vr_name = String::from_utf8_lossy(&vr).into_owned();
+        let json = inspect_json(&file, 0)
+            .map_err(|_| format!("a {vr_name} corner attribute refused the scan"))?;
+        for needle in [
+            "\"sex\":\"\"",
+            "\"age\":\"\"",
+            "\"ageSource\":\"\"",
+            "\"studyTime\":\"\"",
+            "\"institution\":\"\"",
+            "\"sliceLocation\":null",
+            "\"sliceThickness\":null",
+            "\"kvp\":null",
+            "\"repetitionTime\":null",
+            "\"echoTime\":null",
+            "\"exposureMas\":null",
+            "\"exposureSource\":\"\"",
+            "\"edgeLeft\":\"\"",
+            "\"edgeSource\":\"\"",
+        ] {
+            if !json.contains(needle) {
+                return Err(format!("a {vr_name} value left {needle} out: {json}"));
+            }
+        }
+        if edges_of(&file)? != [""; 5].map(str::to_owned) {
+            return Err(format!("a {vr_name} Patient Orientation gave letters"));
+        }
+    }
+    // A Patient's Name and Patient's Birth Date that are not text show
+    // nothing, rather than their numbers as a name or a date.
+    let file = corner_object(&[
+        ((0x0010, 0x0010), *b"US", 7_u16.to_le_bytes().to_vec()),
+        ((0x0010, 0x0030), *b"US", 7_u16.to_le_bytes().to_vec()),
+    ])?;
+    let json = inspect_json(&file, 0).map_err(|_| "a binary name refused the scan".to_owned())?;
+    if !json.contains("\"patientNameText\":\"\"") || !json.contains("\"birthDate\":\"\"") {
+        return Err(format!("a binary name or birth date was shown: {json}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
+    // Lead amendment 1. The preview reply carries F-211's choice and
+    // `/measure` reports the same one. Each row moves one input and both
+    // move together. PS3.3 C.8.11.4 and C.8.7.5: Imager Pixel Spacing 0.2
+    // alone is at the detector. With a magnification factor 2 it is
+    // 0.2 / 2 = 0.1 mm at the patient. A Pixel Spacing 0.5 decides alone,
+    // no spacing is uncalibrated, and a Pixel Spacing of 0\0.5 refuses.
+    let imager = planted_text((0x0018, 0x1164), *b"DS", "0.2\\0.2");
+    let factor = planted_text((0x0018, 0x1114), *b"DS", "2");
+    let segment = [ImagePoint { x: 0.0, y: 0.0 }, ImagePoint { x: 1.0, y: 0.0 }];
+    for (name, planted, source, mm) in [
+        (
+            "detector",
+            vec![imager.clone()],
+            "detector",
+            Some((0.2, 0.2)),
+        ),
+        (
+            "factor",
+            vec![imager.clone(), factor.clone()],
+            "imager-spacing",
+            Some((0.1, 0.1)),
+        ),
+        (
+            "pixel",
+            vec![planted_text((0x0028, 0x0030), *b"DS", "0.5\\0.5")],
+            "pixel-spacing",
+            Some((0.5, 0.5)),
+        ),
+        ("none", Vec::new(), "uncalibrated", None),
+        (
+            "refused",
+            vec![planted_text((0x0028, 0x0030), *b"DS", "0\\0.5")],
+            "",
+            None,
+        ),
+    ] {
+        let file = corner_object(&planted)?;
+        let preview = preview_frame(&file, FrameRequest::default())
+            .map_err(|error| format!("{name}: the frame was refused with {}", error.code()))?;
+        if preview.calibration_source != source || preview.calibration_mm != mm {
+            return Err(format!(
+                "{name}: the preview carried {:?} {:?}",
+                preview.calibration_source, preview.calibration_mm
+            ));
+        }
+        let measured = measure_frame(&file, 0, MeasureShape::Length, &segment);
+        match (measured, mm) {
+            (Ok(json), Some((row, column))) => {
+                let want = format!(
+                    "\"calibration\":{{\"source\":\"{source}\",\"row_mm\":{row},\"column_mm\":{column}}}"
+                );
+                if !json.contains(&want) {
+                    return Err(format!("{name}: /measure reported {json}"));
+                }
+            }
+            (Ok(json), None) => {
+                if !json.contains(&format!("\"calibration\":{{\"source\":\"{source}\"}}")) {
+                    return Err(format!("{name}: /measure reported {json}"));
+                }
+            }
+            (Err(PreviewError::Calibration), None) if source.is_empty() => {}
+            (other, _) => return Err(format!("{name}: /measure gave {other:?}")),
+        }
+    }
+    // The reply headers, source and value.
+    let file = corner_object(&[imager])?;
+    let response = one_exchange(&http_post(&file))?;
+    let (header, _) = split_http(&response)?;
+    if header_line(header, "X-Ocelli-Calibration-Source") != Some("detector")
+        || header_line(header, "X-Ocelli-Calibration-Row") != Some("0.2")
+        || header_line(header, "X-Ocelli-Calibration-Column") != Some("0.2")
+    {
+        return Err(format!("the reply did not carry the calibration: {header}"));
     }
     Ok(())
 }
