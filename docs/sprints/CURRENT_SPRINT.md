@@ -35,6 +35,8 @@
 | F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
+| F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
+| F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -68,6 +70,10 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+
+## Pulled forward from S47
+
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 waits, because it depends on F-231, which is not integrated. Their backlog rows keep sprint S47 until they integrate.
 
 ## Questions for the operator
 
@@ -184,6 +190,53 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   says.
   **Answered by the operator on 2026-11-06:** fixed in S46. A new story builds
   every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim. F-233 implements it.
+- **A colour series in the folder viewer shows a fault, not an image.** Every
+  frame that is not `MONOCHROME1` or `MONOCHROME2` stops at
+  `PreviewError::NotMonochrome` in `examples/folder-viewer/src/preview.rs`,
+  and the page shows "this preview shows monochrome frames only". The library
+  already has the colour stage, F-030's `ColorTransform` in `ocelli-pixel`.
+  **Decided by the operator on 2026-11-07:** the folder viewer previews RGB,
+  YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR frames with
+  Planar Configuration through that stage and the decoder's reported output
+  space, so the colour arithmetic exists once in the library. F-239
+  implements it, scheduled first in the folder viewer chain, ahead of F-212.
+  F-212 now depends on it.
+  **F-239's design questions answered by the operator on 2026-11-07:** each
+  decoder reports its own output length, F-239 also decodes multi-component
+  JPEG 2000 and HTJ2K with their component transforms, window and invert act
+  on each colour channel as cornerstone3D 5.8.2 does, a region on a colour
+  frame reports R, G and B statistics, colour above 8 bits and palette entries
+  above 255 are scaled by one `ocelli-pixel` rule, and a file with an ICC
+  profile is drawn with a sentence that the profile was not applied. F-240
+  applies matrix and tone-curve ICC profiles after F-239, filed the same day.
+  **Answered by the operator later on 2026-11-07:** the vendored JPEG 2000
+  crates are patched with recorded provenance, HTJ2K first, the ICC subset is
+  built with no dependency, a profile outside it is drawn and named, neither
+  story may grow the wasm build or slow the viewer, and cornerstone3D 5.8.2 is
+  the floor that both stories must meet or beat on a measured axis. Both plans
+  are approved, with deviations D-29, D-30 and D-31. F-239 is 12w in a codec
+  part and a viewer part, and F-240 is 5w.
+- **No decoder handles DICOM video.** After F-239 a `YBR_PARTIAL_420` frame is
+  refused by name, and the sixteen MPEG-2, H.264 and HEVC transfer syntaxes of
+  PS3.6 are not in the codec registry's known list. cornerstone3D 5.8.2 plays
+  video only through a server's `/rendered` resource in an HTML `<video>`
+  element, and fails on a local file.
+  **Decided by the operator on 2026-11-07:** file a video story now, at least
+  what cornerstone3D does for video in the folder viewer and the library and
+  better on a measured axis. F-241 is filed for S47 at 12w, E4.11, with a draft
+  plan. Its nine questions, among them the decode route, the patent position
+  and MPEG-2, are open for the operator, each with the lead's recommendation.
+  **Answered by the operator later on 2026-11-07:** H.264 and HEVC decode
+  through WebCodecs in a worker on both targets, with the stream demuxed in
+  Rust and the colour converted once in `ocelli-pixel`, and no shipped artefact
+  may contain a software H.264 or HEVC decoder, now a section of
+  `docs/SOURCE-POLICY.md`. The stream's own colour description wins over
+  PS3.3's matrix when present. The `VideoFrame` held in the worker for one
+  copy is deviation D-32. F-241 is approved at 12w in a library part and a
+  viewer part. MPEG-2 is decoded in Rust by F-242, filed for S48 at 7w, E4.12,
+  with a draft plan whose six questions are open for the operator, the
+  patent position among them, because the pool's list still names patents
+  active in Malaysia.
 
 ## What is carried in
 
