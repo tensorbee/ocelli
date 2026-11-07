@@ -10961,6 +10961,15 @@ GUARDS: tuple[Guard, ...] = (
         ),
         covered_by=("scripts/tests/test_corpus_check.py "
                     "(run by the `corpus-tests` gate)",),
+        limit="The count moved from 43 to 46 with F-229's three decode-digest "
+              "refusals for a known syntax that has no decoder: a `.111` row "
+              "routed to a decoder, a `.111` row carrying a decode digest, and "
+              "an available row routed to the unavailable refusal. Each is "
+              "covered by `UnavailableDecodeDigests` in "
+              "`scripts/tests/test_corpus_check.py` rather than by a sandbox "
+              "probe, because the function imports "
+              "the DICOM tooling and the corpus, neither of which a probe "
+              "sandbox carries.",
     ),
     Guard(
         id="corpus-tests",
@@ -11030,7 +11039,12 @@ GUARDS: tuple[Guard, ...] = (
               "of this script inside a sandbox dies at import before reaching "
               "any refusal of its own. That is the same reason every other "
               "refusal in this file is `covered_by` its unit test rather than "
-              "probed, and the count moving from 5 to 6 is this selector.",
+              "probed, and the count moving from 5 to 6 is this selector. "
+              "The seventh to ninth are F-229's JPEG XL encoder refusals, an "
+              "encode or a recompression that returns no bytes and a "
+              "recompression that does not restore the `.50` fragment. Each "
+              "is covered by `JpegXlEncoderRefusals` with a stubbed "
+              "imagecodecs entry point, for the same import reason.",
     ),
 
     # -- the cross-target proof and the packages ---------------------------

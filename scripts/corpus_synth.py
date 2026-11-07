@@ -32,9 +32,10 @@ digest silently and `--tool-versions` is the only thing that will say so.
 A moved digest is not a hole in the manifest. It is the manifest telling you
 the thing the tolerance policy was measured against moved.
 
-**A tool used to build a case is not a tool used to check it.** DCMTK, OpenJPH
-and OpenJPEG produce codestreams here. Whether Ocelli decodes them correctly is
-decided by the oracle against cornerstone3D, per HLD section 11.
+**A tool used to build a case is not a tool used to check it.** DCMTK, OpenJPH,
+OpenJPEG and imagecodecs with libjxl produce codestreams here. Whether Ocelli
+decodes them correctly is decided by the oracle against cornerstone3D, per HLD
+section 11.
 
 Usage:
   .venv/bin/python scripts/corpus_synth.py           # write to corpus/data
@@ -159,12 +160,47 @@ JPEG_QUALITY = 90      # IJG quality factor for the two lossy JPEG cases
 J2K_COMPRESSION_RATIO = 20.0
 HTJ2K_QSTEP = 0.001
 
+# PS3.5 A.4.12. `.111` is a known syntax the registry leaves unavailable.
+# jxl-jbr 0.2.1 src/reconstruct.rs:457 panics on a malformed DHT, so the
+# row is not in the lossy set and it is not read back as pixels. `.112`
+# is the general JPEG XL syntax and is lossy.
+JPEGXL_LOSSLESS = "1.2.840.10008.1.2.4.110"
+JPEGXL_RECOMPRESSION = "1.2.840.10008.1.2.4.111"
+JPEGXL_GENERAL = "1.2.840.10008.1.2.4.112"
+JPEGXL_DISTANCE = 1.0
+JPEGXL_EFFORT = 7
+
+
+def register_jpegxl_transfer_syntaxes() -> None:
+    """Teach pydicom 3.0.2 the three JPEG XL transfer syntaxes.
+
+    Its UID dictionary has no PS3.5 A.4.12 rows, so `save_as` refuses the
+    UID as not a transfer syntax. The names are Table 8.2.15-1. A later
+    pydicom that already knows them is left unchanged.
+    """
+    from pydicom._uid_dict import UID_dictionary
+    rows = {
+        JPEGXL_LOSSLESS: (
+            "JPEG XL Lossless", "Transfer Syntax", "", "", "JPEGXLLossless"),
+        JPEGXL_RECOMPRESSION: (
+            "JPEG XL JPEG Recompression", "Transfer Syntax", "", "",
+            "JPEGXLJPEGRecompression"),
+        JPEGXL_GENERAL: (
+            "JPEG XL", "Transfer Syntax", "", "", "JPEGXL"),
+    }
+    for uid, row in rows.items():
+        UID_dictionary.setdefault(uid, row)
+
+
+register_jpegxl_transfer_syntaxes()
+
 LOSSY_TRANSFER_SYNTAXES = frozenset({
     "1.2.840.10008.1.2.4.50",     # JPEG Baseline, DCT
     "1.2.840.10008.1.2.4.51",     # JPEG Extended, DCT
     "1.2.840.10008.1.2.4.81",     # JPEG-LS Near-Lossless
     "1.2.840.10008.1.2.4.91",     # JPEG 2000, irreversible 9/7
     "1.2.840.10008.1.2.4.203",    # HTJ2K, irreversible 9/7
+    JPEGXL_GENERAL,               # JPEG XL, lossy
 })
 
 # The four syntaxes whose pixel data is native rather than encapsulated. Every
@@ -191,6 +227,10 @@ EXTERNAL_ENCODERS = {
     "OpenJPH, ojph_compress": (
         ("1.2.840.10008.1.2.4.201", "1.2.840.10008.1.2.4.202",
          "1.2.840.10008.1.2.4.203"), rb"OpenJPH Ver [0-9.]+"),
+    # libjxl writes no version stamp into these codestreams. The pattern is
+    # None for the same reason pyjpegls is None.
+    "imagecodecs, libjxl": (
+        (JPEGXL_LOSSLESS, JPEGXL_RECOMPRESSION, JPEGXL_GENERAL), None),
 }
 
 # The one compressed syntax no external encoder touches. pydicom implements RLE
@@ -231,11 +271,17 @@ SYNTAX_CASES = {
     "htj2k_lossless.dcm": "1.2.840.10008.1.2.4.201",
     "htj2k_lossless_rpcl.dcm": "1.2.840.10008.1.2.4.202",
     "htj2k_lossy.dcm": "1.2.840.10008.1.2.4.203",
+    # PS3.5 A.4.12, F-229. Five files, three UIDs.
+    "jpegxl_lossless.dcm": JPEGXL_LOSSLESS,
+    "jpegxl_lossless_rgb8.dcm": JPEGXL_LOSSLESS,
+    "jpegxl_recompression_rgb8.dcm": JPEGXL_RECOMPRESSION,
+    "jpegxl_lossy.dcm": JPEGXL_GENERAL,
+    "jpegxl_xyb_rgb8.dcm": JPEGXL_GENERAL,
 }
 
 # The uncompressed case each compressed one must decode back to. Three bit
 # depths are needed because JPEG Baseline is 8-bit only and JPEG Extended is
-# 12-bit only, so a single base cannot serve all sixteen.
+# 12-bit only, so a single base cannot serve every syntax.
 REFERENCE_MONO16 = "explicit_vr_le.dcm"
 REFERENCE_MONO12 = "reference_mono12.dcm"
 REFERENCE_RGB8 = "reference_rgb8.dcm"
@@ -244,6 +290,10 @@ SYNTAX_REFERENCE = {name: REFERENCE_MONO16 for name in SYNTAX_CASES}
 SYNTAX_REFERENCE["jpeg_extended_12.dcm"] = REFERENCE_MONO12
 SYNTAX_REFERENCE["jpeg_baseline_rgb8.dcm"] = REFERENCE_RGB8
 SYNTAX_REFERENCE["jpegls_lossless_rgb8.dcm"] = REFERENCE_RGB8
+SYNTAX_REFERENCE["jpegxl_lossy.dcm"] = REFERENCE_MONO12
+SYNTAX_REFERENCE["jpegxl_lossless_rgb8.dcm"] = REFERENCE_RGB8
+SYNTAX_REFERENCE["jpegxl_recompression_rgb8.dcm"] = REFERENCE_RGB8
+SYNTAX_REFERENCE["jpegxl_xyb_rgb8.dcm"] = REFERENCE_RGB8
 
 # What every generated row records. These files are the output of a script in
 # this repository, so they carry this repository's own terms (see LICENSE). The
@@ -879,6 +929,129 @@ def encode_with_ojph(base: Path, label: str, syntax: str, target: Path,
     ds.save_as(str(target), enforce_file_format=True)
 
 
+def jpegxl_encode_frame(pixels: np.ndarray, *, lossless: bool, bits: int,
+                        photometric: str | None) -> bytes:
+    """One JPEG XL codestream through imagecodecs and libjxl.
+
+    `usecontainer` is false. imagecodecs 2026.10.10 still writes an ISO
+    BMFF container for a 16-bit lossless frame and for `jpegxl_encode_jpeg`.
+    The other encodes are bare codestreams starting FF 0A. The lossy-method
+    classifier accepts both framings.
+    """
+    import imagecodecs
+    options: dict[str, object] = {
+        "lossless": lossless,
+        "bitspersample": bits,
+        "effort": JPEGXL_EFFORT,
+        "usecontainer": False,
+    }
+    if photometric is not None:
+        options["photometric"] = photometric
+    if not lossless:
+        options["distance"] = JPEGXL_DISTANCE
+    encoded = imagecodecs.jpegxl_encode(np.ascontiguousarray(pixels), **options)
+    if not isinstance(encoded, (bytes, bytearray)):
+        raise RuntimeError("jpegxl_encode did not return bytes")
+    return bytes(encoded)
+
+
+def write_jpegxl(ds: Dataset, label: str, syntax: str, codestream: bytes,
+                 target: Path, lossy_method: str | None) -> None:
+    """Encapsulate one codestream. PS3.5 A.4: one fragment, OB, undefined length."""
+    ds.file_meta.TransferSyntaxUID = UID(syntax)
+    ds.PixelData = encapsulate([codestream])
+    ds["PixelData"].VR = "OB"
+    ds["PixelData"].is_undefined_length = True
+    normalise(ds, label)
+    if lossy_method is not None:
+        # PS3.3 C.7.6.1.1.5.1 Defined Term for JPEG XL lossy compression,
+        # ISO/IEC 18181-1, added by Supplement 232.
+        mark_lossy(ds, lossy_method)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ds.save_as(str(target), enforce_file_format=True)
+
+
+def encode_jpegxl_cases(directory: Path) -> None:
+    """The five JPEG XL rows. PS3.5 A.4.12.
+
+    The pixel sources are the uncompressed syntax bases already in
+    `directory`. `--case jpegxl` therefore leaves every other syntax file
+    untouched. A full `generate()` writes those bases first and then calls
+    this.
+
+    `.111` takes its header from the RGB reference and its fragment from
+    `jpegxl_encode_jpeg` of the `.50` JPEG. It is not a copy of the DCMTK
+    dataset. That file carries DerivationDescription, and this producer
+    must not. `.111` is also absent from `LOSSY_TRANSFER_SYNTAXES`, so the
+    Lossy Image Compression attributes stay absent. The imagecodecs
+    round trip below only checks that the fixture is a real recompression.
+    Ocelli refuses the row as unavailable.
+
+    imagecodecs accepts photometric RGB and GRAY. Its XYB colour-space
+    value produced the same bytes as RGB on these ramps, so the XYB row is
+    an RGB codestream whose DICOM Photometric Interpretation is XYB.
+    """
+    import imagecodecs
+    from pydicom.encaps import generate_frames
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    def load(name: str) -> FileDataset:
+        return pydicom.dcmread(str(directory / name))
+
+    mono16 = load(REFERENCE_MONO16)
+    write_jpegxl(
+        mono16, "jpegxl_lossless.dcm", JPEGXL_LOSSLESS,
+        jpegxl_encode_frame(mono16.pixel_array, lossless=True, bits=16,
+                            photometric="GRAY"),
+        directory / "jpegxl_lossless.dcm", None)
+
+    rgb = load(REFERENCE_RGB8)
+    write_jpegxl(
+        rgb, "jpegxl_lossless_rgb8.dcm", JPEGXL_LOSSLESS,
+        jpegxl_encode_frame(rgb.pixel_array, lossless=True, bits=8,
+                            photometric="RGB"),
+        directory / "jpegxl_lossless_rgb8.dcm", None)
+
+    mono12 = load(REFERENCE_MONO12)
+    write_jpegxl(
+        mono12, "jpegxl_lossy.dcm", JPEGXL_GENERAL,
+        jpegxl_encode_frame(mono12.pixel_array, lossless=False, bits=12,
+                            photometric="GRAY"),
+        directory / "jpegxl_lossy.dcm", "ISO_18181_1")
+
+    xyb = load(REFERENCE_RGB8)
+    # Read the samples before the tag changes. pydicom refuses to decode a
+    # frame whose Photometric Interpretation it does not know, and XYB is
+    # one of those.
+    xyb_pixels = xyb.pixel_array
+    xyb.PhotometricInterpretation = "XYB"
+    write_jpegxl(
+        xyb, "jpegxl_xyb_rgb8.dcm", JPEGXL_GENERAL,
+        jpegxl_encode_frame(xyb_pixels, lossless=False, bits=8,
+                            photometric="RGB"),
+        directory / "jpegxl_xyb_rgb8.dcm", "ISO_18181_1")
+
+    baseline = load("jpeg_baseline_rgb8.dcm")
+    fragment = bytes(next(generate_frames(baseline.PixelData, number_of_frames=1)))
+    recompressed = imagecodecs.jpegxl_encode_jpeg(fragment)
+    if not isinstance(recompressed, (bytes, bytearray)):
+        raise RuntimeError("jpegxl_encode_jpeg did not return bytes")
+    restored = imagecodecs.jpegxl_decode_jpeg(bytes(recompressed))
+    if bytes(restored) != fragment:
+        raise RuntimeError("JPEG XL recompression did not restore the JPEG fragment")
+    header = load(REFERENCE_RGB8)
+    header.PhotometricInterpretation = "YBR_FULL_422"
+    for name in ("LossyImageCompression", "LossyImageCompressionRatio",
+                 "LossyImageCompressionMethod"):
+        if name in header:
+            del header[name]
+    write_jpegxl(
+        header, "jpegxl_recompression_rgb8.dcm", JPEGXL_RECOMPRESSION,
+        bytes(recompressed), directory / "jpegxl_recompression_rgb8.dcm", None)
+
+
 # The toolchain corpus/manifest.tsv was generated with, and the only record of
 # it. Every entry can move a digest, and the ones that leave no version in the
 # file cannot be recovered from the corpus at all, which is why they are here.
@@ -891,6 +1064,8 @@ BUILT_WITH = {
     "pyjpegls": "1.5.1",
     "DCMTK": "3.7.0",
     "OpenJPH": "0.31.0",
+    "imagecodecs": "2026.10.10",
+    "libjxl (the library inside imagecodecs)": "0.12.0",
 }
 
 
@@ -926,11 +1101,19 @@ def openjph_version() -> str:
 def tool_versions() -> dict[str, str]:
     """What is actually installed, asked of each tool rather than assumed."""
     found: dict[str, str] = {}
-    for package in ("pydicom", "numpy", "pylibjpeg-openjpeg", "pyjpegls"):
+    for package in ("pydicom", "numpy", "pylibjpeg-openjpeg", "pyjpegls",
+                    "imagecodecs"):
         try:
             found[package] = metadata.version(package)
         except metadata.PackageNotFoundError:
             found[package] = "absent"
+    try:
+        import imagecodecs
+        reported = imagecodecs.jpegxl_version().split()
+        found["libjxl (the library inside imagecodecs)"] = (
+            reported[-1] if reported else "unknown")
+    except (ImportError, AttributeError, IndexError):
+        found["libjxl (the library inside imagecodecs)"] = "absent"
     try:
         # The binding's own version and the OpenJPEG it wraps are different
         # numbers, and it is the library's that lands in the COM marker.
@@ -1067,6 +1250,7 @@ def generate_syntax_layer(out: Path) -> None:
                      directory / "htj2k_lossy.dcm",
                      ["-reversible", "false", "-qstep", str(HTJ2K_QSTEP),
                       "-prog_order", "RPCL"])
+    encode_jpegxl_cases(directory)
 
 
 def case_callables(out: Path) -> dict[str, Callable[[], None]]:
@@ -1075,9 +1259,11 @@ def case_callables(out: Path) -> dict[str, Callable[[], None]]:
     One list, read by both `generate()` and `--case`, so a case cannot exist in
     the full run and be missing from the selector.
 
-    `syntax` is one entry rather than sixteen because its cases share three
-    bases that are written by the same function. `jpegls_rgb8` is separate and
-    ordered after it, because it re-reads the RGB reference that entry writes.
+    `syntax` is one entry rather than one per syntax because its cases share
+    three bases that are written by the same function. `jpegls_rgb8` is
+    separate and ordered after it, because it re-reads the RGB reference that
+    entry writes. `jpegxl` re-reads those bases too, and it is its own entry
+    so one story can add the five JPEG XL files without re-encoding the rest.
     """
     return {
         "ct_signed_12in16_right":
@@ -1103,6 +1289,7 @@ def case_callables(out: Path) -> dict[str, Callable[[], None]]:
                                        16),
         "syntax": lambda: generate_syntax_layer(out),
         "jpegls_rgb8": lambda: case_jpegls_rgb8(out),
+        "jpegxl": lambda: encode_jpegxl_cases(out / "syntax"),
     }
 
 

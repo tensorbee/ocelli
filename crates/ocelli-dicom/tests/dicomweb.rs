@@ -450,7 +450,7 @@ fn wado_uri_parses_one_part10_object_without_a_multipart_wrapper() {
 #[test]
 fn selected_codec_catalogue_matches_corpus_and_f016_dispatch() {
     let selected: BTreeSet<_> = KNOWN_TRANSFER_SYNTAXES.iter().copied().collect();
-    assert_eq!(selected.len(), 16);
+    assert_eq!(selected.len(), 19);
     assert_eq!(selected, corpus_transfer_syntaxes());
 
     for uid in KNOWN_TRANSFER_SYNTAXES {

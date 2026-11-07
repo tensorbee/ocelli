@@ -24,7 +24,8 @@ use dicom_object::{DefaultDicomObject, StandardDataDictionary};
 use ocelli_codec::{
     DecodePhotometricInterpretation, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation,
     RawDecoder, Registry, register_htj2k_decoders, register_jpeg_decoders,
-    register_jpeg2000_decoders, register_jpegls_decoders, register_native_and_rle_decoders,
+    register_jpeg2000_decoders, register_jpegls_decoders, register_jpegxl_decoders,
+    register_native_and_rle_decoders,
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
@@ -1168,6 +1169,9 @@ fn photometric_name(photometric: PhotometricInterpretation) -> &'static str {
         PhotometricInterpretation::YbrPartial422 => "YBR_PARTIAL_422",
         PhotometricInterpretation::YbrIct => "YBR_ICT",
         PhotometricInterpretation::YbrRct => "YBR_RCT",
+        // XYB is three samples, so this preview refuses it as not-monochrome
+        // before decode. The arm exists so the match stays exhaustive.
+        PhotometricInterpretation::Xyb => "XYB",
     }
 }
 
@@ -1439,6 +1443,7 @@ fn codecs() -> Result<Registry, PreviewError> {
     register_jpeg2000_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     register_jpegls_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     register_htj2k_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
+    register_jpegxl_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     Ok(registry)
 }
 

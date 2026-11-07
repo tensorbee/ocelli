@@ -59,6 +59,25 @@ class IndexAudit(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("crates/example/src/lib.rs:1", output)
 
+    def test_string_continuation_does_not_blank_following_code(self):
+        # A Rust string continuation is a backslash before a newline inside a
+        # string literal. While the STRING pattern could not cross it, the
+        # match at the literal's opening quote failed and the regex re-paired
+        # from that literal's closing quote to the next literal's opening
+        # quote, so the `unsafe` between the two was blanked as string and
+        # the guard returned 0. The trailing literal is what makes the
+        # re-pairing possible, and this test was red on that pattern.
+        self.write(
+            "crates/example/src/lib.rs",
+            'pub const FIRST: &str = "one \\\n'
+            'two";\n'
+            "pub unsafe fn planted() {}\n"
+            'pub const LAST: &str = "three";\n')
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/example/src/lib.rs:3", output)
+
     def test_unstaged_unsafe_is_not_attributed_to_the_index(self):
         self.write("crates/example/src/lib.rs", "pub unsafe fn local() {}\n")
         self.assertEqual(self.run_guard()[0], 0)

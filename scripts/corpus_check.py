@@ -46,9 +46,9 @@ HEADER = "\t".join(COLUMNS)
 # names the two open Appendix A gates, A1 for HTJ2K and A2 for JPEG-LS, but it
 # carries no list of syntaxes, so this list is not a transcription of it.
 #
-# Sixteen of them. Condition 4 of F-009 is therefore sixteen rows at minimum
-# rather than a gesture at the common ones, and neither open gate has anything
-# to be answered against until its syntaxes have cases.
+# Nineteen of them. Condition 4 of F-009 required sixteen rows at minimum.
+# F-229 added the three JPEG XL UIDs from PS3.5 A.4.12. Neither open gate has
+# anything to be answered against until its syntaxes have cases.
 REGISTRY_TRANSFER_SYNTAXES = (
     "1.2.840.10008.1.2",          # Implicit VR Little Endian
     "1.2.840.10008.1.2.1",        # Explicit VR Little Endian
@@ -66,7 +66,19 @@ REGISTRY_TRANSFER_SYNTAXES = (
     "1.2.840.10008.1.2.4.201",    # HTJ2K Lossless Only
     "1.2.840.10008.1.2.4.202",    # HTJ2K Lossless Only, RPCL
     "1.2.840.10008.1.2.4.203",    # HTJ2K
+    "1.2.840.10008.1.2.4.110",    # JPEG XL Lossless
+    "1.2.840.10008.1.2.4.111",    # JPEG XL JPEG Recompression
+    "1.2.840.10008.1.2.4.112",    # JPEG XL
 )
+
+# Known syntaxes with no frame decoder. A corpus row is still required.
+# `.111` stays unregistered because jxl-jbr 0.2.1 src/reconstruct.rs:457
+# panics with `is_last not found` on a malformed DHT. The refusal text is
+# CodecError::KnownUnavailable.
+UNAVAILABLE_REGISTRY_SYNTAXES = (
+    "1.2.840.10008.1.2.4.111",
+)
+UNAVAILABLE_REFUSAL = "known DICOM transfer syntax has no registered decoder"
 
 # The `category` column is a comma-separated token list. Two facts are read out
 # of it, and both are properties the manifest can be asked about with no corpus
@@ -89,7 +101,7 @@ CONTRADICTORY_TOKENS = (("colour", "chroma-untested"),)
 MONOCHROME_PHOTOMETRIC = {"MONOCHROME1", "MONOCHROME2"}
 COLOUR_PHOTOMETRIC = {
     "PALETTE COLOR", "RGB", "YBR_FULL", "YBR_FULL_422",
-    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT",
+    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT", "XYB",
 }
 
 
@@ -469,6 +481,7 @@ def verify_decode_digests(rows: list[dict[str, str]]) -> int:
         recorded[path] = (file_sha, decode_sha)
 
     manifest = {row["path"]: row["sha256"] for row in rows}
+    manifest_syntax = {row["path"]: row["transfer_syntax"] for row in rows}
     routes = _route_module()
     import pydicom
     base = corpus_dir()
@@ -488,6 +501,23 @@ def verify_decode_digests(rows: list[dict[str, str]]) -> int:
             problems.append(
                 f"{relative} file digest does not match the manifest, so "
                 f"its decode digest is not checked")
+            continue
+        syntax = manifest_syntax.get(relative, "")
+        if syntax in UNAVAILABLE_REGISTRY_SYNTAXES:
+            # The row is present so the catalogue stays complete. Decode is
+            # the unavailable refusal, not a pixel digest.
+            if routes.READ_BACK.get(name) != "unavailable":
+                problems.append(
+                    f"{relative} must expect the unavailable refusal")
+                continue
+            if relative in recorded:
+                problems.append(
+                    f"{relative} is unavailable and has a decode digest")
+            continue
+        if routes.READ_BACK.get(name) == "unavailable":
+            problems.append(
+                f"{relative} expects the unavailable refusal and its syntax "
+                f"is not in UNAVAILABLE_REGISTRY_SYNTAXES")
             continue
         row = recorded.get(relative)
         if row is None:

@@ -465,6 +465,7 @@ fn photometric_of(metadata: &MetadataSet) -> Result<PhotometricInterpretation, F
         "YBR_PARTIAL_422" => Ok(PhotometricInterpretation::YbrPartial422),
         "YBR_ICT" => Ok(PhotometricInterpretation::YbrIct),
         "YBR_RCT" => Ok(PhotometricInterpretation::YbrRct),
+        "XYB" => Ok(PhotometricInterpretation::Xyb),
         _ => Err(FrameOpenError::Photometric),
     }
 }
@@ -480,7 +481,8 @@ fn colour_of(photometric: PhotometricInterpretation) -> ColourSelection {
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => ColourSelection::Colour {
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => ColourSelection::Colour {
             codec_already_rgb: false,
         },
     }
@@ -691,7 +693,8 @@ fn padding_of(
             | PhotometricInterpretation::YbrFull422
             | PhotometricInterpretation::YbrPartial422
             | PhotometricInterpretation::YbrIct
-            | PhotometricInterpretation::YbrRct => value <= limit,
+            | PhotometricInterpretation::YbrRct
+            | PhotometricInterpretation::Xyb => value <= limit,
         };
         if !ordered {
             return Err(FrameOpenError::PaddingOrder);

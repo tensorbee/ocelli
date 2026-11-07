@@ -23,14 +23,14 @@ row here in the same hand.
 | [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection, measurement, ultrasound direction and rectangular redaction | F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195, F-211 |
 | [calibration.md](calibration.md) | Spacing provenance, SUVlbm, SUVbsa, length ratio and contour volume | F-195, F-211 |
 | [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025, F-211 |
-| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191, F-210 |
+| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191, F-210, F-229 |
 | [series-open.md](series-open.md) | Display groups, projected order, temporal slots, cine timing, and the example-viewer series panel | F-192 |
 | [overlays.md](overlays.md) | Overlay planes, display shutters, and the example-viewer overlay panel | F-193 |
-| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046, F-216 |
+| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046, F-216, F-229 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021, F-101, F-198, F-230 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |
-| [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, native normalization, RLE, JPEG and JPEG 2000 decode | F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217 |
-| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013, F-217 |
+| [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, native normalization, RLE, JPEG and JPEG 2000 decode | F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217, F-229 |
+| [corpus.md](corpus.md) | Golden corpus layout, generation and verification | F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013, F-217, F-229 |
 | [build-targets.md](build-targets.md) | The wasm pipeline, the size budget, the cross-target proof and the isolation invariant | F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198 |
 | [gpu-ownership.md](gpu-ownership.md) | One device, one queue, one owner. The section 31 contract | F-004, F-005, F-008, F-037, F-038, F-039, F-041, F-042, F-X001, F-101, F-110 |
 | [render-graph.md](render-graph.md) | `crates/ocelli-render` graph and frame scheduler: passes, dirt, one submit per frame, stored-sample upload, brick upload, progressive sync of ready bricks, the composite volume ray, the opacity table, the gradient shade, the patient clip planes, the thick-slab pipelines, the composite labelmap, contour and surface overlay, the labelmap edge-projection blend, contour intersection, the per-viewport representation, and a fusion view inside the existing tick | F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067, F-054, F-056, F-194 |
@@ -45,7 +45,7 @@ row here in the same hand.
 | [migration.md](migration.md) | The element seam, the listener rename, a neighbour that stays, kind flags in stack then MPR then volume order, a caller count of differing bytes, and the concepts that stay | F-108, F-106, F-107, F-109 |
 | [playbook.md](playbook.md) | The migration order stack, then MPR, then volume, and the null for a skip | F-116 |
 | [release-policy.md](release-policy.md) | The stable claim, the deprecation window, and the refusal to publish | F-117, F-217, F-220 |
-| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026, F-X021 |
+| [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-012, F-013, F-015, F-X012, F-X003, F-103, F-X021 |
 | [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216 |
 | [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner, the census and executable skill examples | F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-219, F-218, F-220 |
