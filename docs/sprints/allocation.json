@@ -3134,6 +3134,31 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-241",
+      "eid": "E4.11",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name",
+      "layer": "All",
+      "weeks": 12,
+      "depends_eids": [
+        "E38.24",
+        "E38.32",
+        "E5.9",
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-214",
+        "F-223",
+        "F-231",
+        "F-239"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: file a video story now. Ocelli refuses YBR_PARTIAL_420 by name after F-239, and no decoder handles the video transfer syntaxes. cornerstone3D 5.8.2 is the floor and Ocelli must be better on a stated measured axis. The decode route, the patent position and MPEG-2 are open questions for the operator. E4.11 rather than E4.9, which F-145's recorded defect declares.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",

@@ -212,6 +212,16 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   the floor that both stories must meet or beat on a measured axis. Both plans
   are approved, with deviations D-29, D-30 and D-31. F-239 is 12w in a codec
   part and a viewer part, and F-240 is 5w.
+- **No decoder handles DICOM video.** After F-239 a `YBR_PARTIAL_420` frame is
+  refused by name, and the sixteen MPEG-2, H.264 and HEVC transfer syntaxes of
+  PS3.6 are not in the codec registry's known list. cornerstone3D 5.8.2 plays
+  video only through a server's `/rendered` resource in an HTML `<video>`
+  element, and fails on a local file.
+  **Decided by the operator on 2026-11-07:** file a video story now, at least
+  what cornerstone3D does for video in the folder viewer and the library and
+  better on a measured axis. F-241 is filed for S47 at 12w, E4.11, with a draft
+  plan. Its nine questions, among them the decode route, the patent position
+  and MPEG-2, are open for the operator, each with the lead's recommendation.
 
 ## What is carried in
 
