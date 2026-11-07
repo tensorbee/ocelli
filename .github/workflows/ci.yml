@@ -359,6 +359,26 @@ jobs:
       # because it is the one with wasm-pack.
       - run: bin/ocelli.sh gate panic
 
+  viewer-browser:
+    name: Viewer browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # F-208 AC14. The folder viewer's displayed aspect is measured in
+      # headless Chromium through the benchmark harness's pinned Playwright,
+      # so that install is the one made here. The gate builds the viewer in
+      # release and starts it with OCELLI_PORT=0.
+      - run: npm ci
+        working-directory: tools/bench
+      - run: npx playwright install --with-deps chromium
+        working-directory: tools/bench
+      - run: bin/ocelli.sh gate viewer-browser
+
 # The `guards-deep` JOB used to sit here, gated to push-to-main and
 # workflow_dispatch. The S03 review's ninth pass moved its one step into the
 # `guards` job above, where the toolchain it needs is already installed, and

@@ -253,5 +253,6 @@ fn the_generated_file_names_the_ring_event_the_producer_emits() {
     let text = generated();
     assert!(text.contains("export const RING_EVENT_KIND = {"));
     assert!(text.contains("presented: 6,"));
+    assert!(text.contains("released: 7,"));
     assert!(text.contains("export const EVENT_STRIDE = 48;"));
 }

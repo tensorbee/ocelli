@@ -242,3 +242,14 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 4. Answered: the plan's choice, the research file stays untracked and the brief stays the quoted source. Moving its section 2 into `docs/` is not part of this story.
 
 No question is left open.
+
+## Lead amendments before implementation, against F-209's tree
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-209-xai` at 3c206f67. Where these differ from the text above, these win. F-214 starts after F-213 lands and re-checks every path and line named here.
+
+1. **Cine timing is per object.** PS3.3 C.7.6.5.1.1 defines Frame Time as the interval between frames of one multi-frame image. The file's interval applies only while stepping through frames of that same file. Stepping between files of a series uses the page's default interval, and a test with two files of different Frame Time shows each plays at its own.
+2. **`cine_timing` reads the timing alone,** through `read_timing`, so a bad Preferred Playback Sequencing value never hides a good Frame Time. A fixture with Frame Time 40 and an invalid playback value plays at 40.
+3. **AC9 uses single-object fixtures.** New Frame Time Vector fixtures on one multi-frame object, because the existing vector fixtures group two single-frame objects and `assemble_display`'s length check is per group.
+4. **AC7's unusable value needs two or more frames.** Frame Time 0 on a single-frame object is legal per the C.7.6.5.1.1 note and reports `none`.
+5. **Middle-button window drags go through F-213's window state,** clearing the preset and the file window index the same way the left-button window drag does, keyed on the drag mode rather than the button.
+6. **Names.** The series loader is `loadSeries`. README steps, and the AC12 file, are measured from the tree. AC12 uses a monochrome multi-frame XA or NM file, because ultrasound cine is usually colour.
