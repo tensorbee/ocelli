@@ -4057,3 +4057,89 @@ fn forget_by_page_drops_only_that_pages_files() -> Result<(), String> {
     }
     Ok(())
 }
+
+/// The text from `start` up to the first line that is `});` or `}`.
+fn block_from<'a>(page: &'a str, start: &str) -> Result<&'a str, String> {
+    let at = page
+        .find(start)
+        .ok_or_else(|| format!("the page has no {start}"))?;
+    page.get(at..)
+        .and_then(|rest| {
+            let end = [rest.find("\n});\n"), rest.find("\n}\n")]
+                .into_iter()
+                .flatten()
+                .min()?;
+            rest.get(..end)
+        })
+        .ok_or_else(|| format!("{start} does not close"))
+}
+
+#[test]
+fn the_page_keys_pixels_by_file_and_probes_for_changes() -> Result<(), String> {
+    // F-224 AC16, and the page invariant that no pixel cache key is derived
+    // from a file name, size or time. The page text is read, not executed.
+    // changed.mjs drives the same rules in Chromium.
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("the page response was not 200".to_owned());
+    }
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    // The change handler copies the list before the reset, because the reset
+    // empties it, and opens the copy.
+    let change = block_from(page, "folderInput.addEventListener(\"change\", () => {")?;
+    let copy = change
+        .find("const files = Array.from(folderInput.files")
+        .ok_or_else(|| "the change handler does not copy the files".to_owned())?;
+    let reset = change
+        .find("folderInput.value = \"\";")
+        .ok_or_else(|| "the change handler does not reset the input".to_owned())?;
+    let open = change
+        .find("readFolder(files);")
+        .ok_or_else(|| "the change handler does not open the copy".to_owned())?;
+    if !(copy < reset && reset < open) {
+        return Err("the change handler resets the input before it copies the files".to_owned());
+    }
+    // A series selection in the active viewport probes, and so do focus and
+    // a return to a visible page.
+    if !function_body(page, "loadSeries")?.contains("if (vp.cell === activeCell) probeActive();") {
+        return Err("a series selection does not probe".to_owned());
+    }
+    if !page.contains("window.addEventListener(\"focus\", probeActive);") {
+        return Err("a window focus does not probe".to_owned());
+    }
+    let visible = block_from(
+        page,
+        "document.addEventListener(\"visibilitychange\", () => {",
+    )?;
+    if !visible.contains("if (document.visibilityState === \"visible\") probeActive();") {
+        return Err("a return to a visible page does not probe".to_owned());
+    }
+    // One byte a file, never the whole file.
+    let probe = block_from(page, "async function probeFiles(")?;
+    if !probe.contains("await file.slice(0, 1).arrayBuffer();")
+        || probe.contains("await file.arrayBuffer()")
+    {
+        return Err("the probe does not read one byte a file".to_owned());
+    }
+    // The grey cache key starts with the picked file's serial.
+    let key = function_body(page, "cacheKey")?;
+    if !key.contains("return fileSerial(image.file) + ") || key.contains("fileIdentity(") {
+        return Err("the grey cache is not keyed by the picked file".to_owned());
+    }
+    // A changed file is refused before any held id is used.
+    let ensure = block_from(page, "async function ensureFile(")?;
+    let refused = ensure
+        .find("if (changedFiles.has(file)) throw changedError();")
+        .ok_or_else(|| "ensureFile does not refuse a changed file".to_owned())?;
+    let held = ensure
+        .find("if (filePosts.has(file))")
+        .ok_or_else(|| "ensureFile no longer reads its held id".to_owned())?;
+    if refused > held {
+        return Err("ensureFile serves a held id before it refuses a changed file".to_owned());
+    }
+    if !page.contains("\"This file changed or was removed on disk after the folder was opened. Open the folder again to see it.\"") {
+        return Err("the page does not carry the changed-file sentence".to_owned());
+    }
+    Ok(())
+}

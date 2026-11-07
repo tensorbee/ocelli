@@ -922,6 +922,13 @@ const GONE = "the viewer process at this address is not answering. Run " + RELEA
 const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run " + RELEASE_COMMAND + " again.";
 const DEBUG_STATUS = "This is the slow debug build. Run " + RELEASE_COMMAND + ".";
 const FILE_GONE = "the file is no longer held by this process";
+// Shown in place of the image of a file whose read failed after the folder
+// was opened. A browser refuses to read a picked file again once its
+// modification time moves, so the page cannot show the new bytes until the
+// folder is chosen again.
+const FILE_CHANGED = "This file changed or was removed on disk after the folder was opened. Open the folder again to see it.";
+// Reads the change probe keeps in flight.
+const PROBE_WIDTH = 4;
 // Most ids one /forget names. The process refuses a longer list.
 const FORGET_LINES = 65536;
 // This page load's token, 32 lowercase hex digits, sent with every /file
@@ -989,6 +996,14 @@ const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
 const filePosts = new WeakMap();
+// Every pixel cache key starts with the picked `File`'s serial, never its
+// name, size or time, so a file chosen again is never served an old grey.
+const fileSerials = new WeakMap();
+let nextFileSerial = 0;
+// Files whose one-byte read failed after the folder was opened.
+const changedFiles = new WeakSet();
+const probe = { busy: false, again: false };
+let changedNote = "";
 // The ids the process gave the current open's files, and those files. Both
 // are replaced on every open, after the previous open's ids are forgotten.
 let openIds = new Set();
@@ -996,6 +1011,8 @@ let openFiles = new WeakSet();
 const posting = new Map();
 const canvasBuffers = new WeakMap();
 const thumbBitmaps = new Map();
+// The file each series' thumbnail was drawn from.
+const thumbFiles = new Map();
 let cacheGeneration = 0;
 let cacheBytes = 0;
 let debugBuild = false;
@@ -1116,8 +1133,12 @@ for (const color of INKS) {
 }
 
 folderInput.addEventListener("change", () => {
-  const files = folderInput.files;
-  if (!files || !files.length) return;
+  // Copied first, because the reset empties the list. The reset lets the
+  // same folder be chosen again, which Chromium otherwise reports as no
+  // change.
+  const files = Array.from(folderInput.files || []);
+  folderInput.value = "";
+  if (!files.length) return;
   sourceMode = "folder";
   markSource();
   readFolder(files);
@@ -1128,6 +1149,12 @@ document.getElementById("source-synthetic").addEventListener("click", openSynthe
 window.addEventListener("pagehide", () => {
   openIds = new Set();
   try { navigator.sendBeacon("/forget", "page " + PAGE_TOKEN); } catch {}
+});
+// A file can change on disk while the page is in the background, so coming
+// back to the page checks the active series.
+window.addEventListener("focus", probeActive);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") probeActive();
 });
 document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
 for (const button of document.querySelectorAll("[data-open]")) {
@@ -1419,6 +1446,7 @@ function keepId(ids, id) {
 }
 
 async function ensureFile(file) {
+  if (changedFiles.has(file)) throw changedError();
   if (filePosts.has(file)) return filePosts.get(file);
   // A file of an open the page has left is not posted again, so a late 410
   // for it cannot put back what the forget removed.
@@ -1626,6 +1654,8 @@ async function readFolder(fileList) {
   positions.clear();
   selected = null;
   thumbBitmaps.clear();
+  thumbFiles.clear();
+  changedNote = "";
   thumbGeneration += 1;
   resetViewports();
   const files = Array.from(fileList);
@@ -1872,6 +1902,7 @@ async function loadThumbs() {
       const grey = await fetchGrey(image, PLAIN_VIEW);
       if (generation !== thumbGeneration || signal.aborted) return;
       thumbBitmaps.set(series.key, paintThumbBitmap(grey));
+      thumbFiles.set(series.key, image.file);
       const buttons = seriesEl.querySelectorAll("button");
       for (const button of buttons) {
         if (button.dataset.key !== series.key) continue;
@@ -1917,6 +1948,7 @@ function loadSeries(vp, key) {
   clearLine(vp);
   const remembered = positions.get(key);
   showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
+  if (vp.cell === activeCell) probeActive();
   // A new series in any shown cell needs its line, and a new source moves
   // the others. One coalesced request covers both.
   if (cellShown(vp)) scheduleLink();
@@ -1933,9 +1965,22 @@ function seriesOf(vp) {
   return seriesByKey.get(vp.seriesKey) || null;
 }
 
+// Where a file sits in the folder, for marks. Pixel caches use
+// `fileSerial`.
 function fileIdentity(file) {
   const path = file.webkitRelativePath || file.name;
   return path + "\0" + file.size + "\0" + file.lastModified;
+}
+
+// A number for this `File` object, given on first use and never reused.
+function fileSerial(file) {
+  let serial = fileSerials.get(file);
+  if (serial === undefined) {
+    nextFileSerial += 1;
+    serial = nextFileSerial;
+    fileSerials.set(file, serial);
+  }
+  return serial;
 }
 
 function noteKey(image) {
@@ -2122,7 +2167,7 @@ function cacheKey(image, view) {
   const win = view.overrideWindow
     ? view.overrideWindow.center + "/" + view.overrideWindow.width + "/" + view.overrideWindow.fn
     : (view.activePreset || "file");
-  return fileIdentity(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
+  return fileSerial(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
 }
 
 function dropCache() {
@@ -2137,6 +2182,134 @@ function dropCache() {
     vp.prefetchAbort.abort();
     vp.tileAbort.abort();
   }
+}
+
+// The picked files a series lists, each once.
+function seriesFiles(series) {
+  const files = [];
+  const seen = new Set();
+  for (const image of series.images) {
+    if (seen.has(image.file)) continue;
+    seen.add(image.file);
+    files.push(image.file);
+  }
+  return files;
+}
+
+// Reads one byte of each file of the active series, PROBE_WIDTH at a time.
+// The browser refuses to read a picked file whose modification time moved
+// after it was picked, and that refusal is the only change the page can see.
+// A rewrite that keeps the modification time reads without error and is not
+// found.
+function probeActive() {
+  const series = seriesOf(activeViewport());
+  if (!series) return;
+  probeFiles(seriesFiles(series), currentGeneration);
+}
+
+// One probe at a time. A probe asked for while one runs runs once more
+// after it, for the series active then. A result for an open the page has
+// left is dropped.
+async function probeFiles(files, generation) {
+  if (probe.busy) {
+    probe.again = true;
+    return;
+  }
+  probe.busy = true;
+  let cursor = 0;
+  async function worker() {
+    while (generation === currentGeneration && cursor < files.length) {
+      const file = files[cursor];
+      cursor += 1;
+      if (changedFiles.has(file) || !openFiles.has(file)) continue;
+      try {
+        await file.slice(0, 1).arrayBuffer();
+      } catch {
+        if (generation === currentGeneration) markChanged(file);
+      }
+    }
+  }
+  try {
+    const workers = [];
+    for (let at = 0; at < PROBE_WIDTH; at += 1) workers.push(worker());
+    await Promise.all(workers);
+  } finally {
+    probe.busy = false;
+  }
+  if (generation === currentGeneration) noteChanged();
+  if (probe.again) {
+    probe.again = false;
+    probeActive();
+  }
+}
+
+// A file found changed is forgotten by the process, loses its greys and
+// its thumbnail, and every shown viewport on it is drawn again, which shows
+// FILE_CHANGED because `ensureFile` refuses the file from now on.
+function markChanged(file) {
+  if (changedFiles.has(file)) return;
+  changedFiles.add(file);
+  const id = filePosts.get(file);
+  filePosts.delete(file);
+  if (id) {
+    openIds.delete(id);
+    forgetIds([id]);
+  }
+  dropFileGrey(file);
+  for (const [key, drawn] of thumbFiles) {
+    if (drawn !== file) continue;
+    thumbFiles.delete(key);
+    thumbBitmaps.delete(key);
+    const series = seriesByKey.get(key);
+    for (const button of seriesEl.querySelectorAll("button")) {
+      if (button.dataset.key !== key || !series) continue;
+      const node = button.querySelector("canvas");
+      if (node) paintThumb(node, series);
+    }
+  }
+  for (const vp of shownViewports()) {
+    if (!showsFile(vp, file)) continue;
+    vp.loadToken += 1;
+    showIndex(vp, vp.viewIndex);
+  }
+  noteChanged();
+}
+
+// The single image, or the four tiles, a viewport shows.
+function showsFile(vp, file) {
+  const series = seriesOf(vp);
+  if (!series) return false;
+  const last = Math.min(series.images.length, vp.viewIndex + (vp.tileMode ? 4 : 1));
+  for (let index = vp.viewIndex; index < last; index += 1) {
+    if (series.images[index].file === file) return true;
+  }
+  return false;
+}
+
+function dropFileGrey(file) {
+  const prefix = fileSerial(file) + "\0";
+  for (const key of Array.from(cache.keys())) {
+    if (!key.startsWith(prefix)) continue;
+    cacheBytes -= greyBytes(cache.get(key));
+    cache.delete(key);
+  }
+  for (const key of Array.from(inflight.keys())) {
+    if (key.startsWith(prefix)) inflight.delete(key);
+  }
+}
+
+// The status line ends with the count of the active series' changed files.
+function noteChanged() {
+  const series = seriesOf(activeViewport());
+  const count = series ? seriesFiles(series).filter((file) => changedFiles.has(file)).length : 0;
+  const next = count
+    ? count + (count === 1 ? " file" : " files") + " of this series changed on disk after the folder was opened."
+    : "";
+  if (next === changedNote) return;
+  let text = status.textContent;
+  if (changedNote) text = text.replace(" " + changedNote, "");
+  changedNote = next;
+  status.textContent = next ? text + " " + next : text;
 }
 
 function greyBytes(grey) {
@@ -2190,6 +2363,12 @@ function abortError() {
   return error;
 }
 
+function changedError() {
+  const error = new Error(FILE_CHANGED);
+  error.name = "FileChanged";
+  return error;
+}
+
 function sleepAbortable(ms, signal) {
   return new Promise((resolve, reject) => {
     if (signal && signal.aborted) {
@@ -2238,6 +2417,7 @@ async function requestGrey(image, options) {
       response = await postPreview(image, headers, signal);
     } catch (error) {
       if ((error && error.name === "AbortError") || (signal && signal.aborted)) throw error;
+      if (error && error.name === "FileChanged") throw error;
       if (await processAnswers()) throw new Error(UNREADABLE);
       processGone();
       throw new Error(GONE);
@@ -2260,6 +2440,9 @@ async function requestGrey(image, options) {
     if (!width || !height || bytes.length !== width * height) {
       throw new Error("the preview response did not match the frame");
     }
+    // A reply that was on its way when the file was found changed carries
+    // the old bytes, so no cache keeps it and no viewport paints it.
+    if (changedFiles.has(image.file)) throw changedError();
     return {
       width,
       height,
