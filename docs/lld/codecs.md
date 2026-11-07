@@ -1,14 +1,14 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217, F-229
+**Last updated:** 2026-11-07
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
 Little Endian, native Explicit VR Big Endian, RLE Lossless, JPEG Baseline
 `.50`, JPEG Extended `.51`, JPEG Lossless `.57`, JPEG Lossless SV1 `.70`,
-JPEG 2000 `.90` and `.91`, JPEG-LS `.80` and `.81`, and HTJ2K `.201`, `.202`
-and `.203`.
+JPEG 2000 `.90` and `.91`, JPEG-LS `.80` and `.81`, HTJ2K `.201`, `.202`
+and `.203`, and JPEG XL `.110` and `.112`, with `.111` known and unavailable.
 The crate builds for native and `wasm32-unknown-unknown` from the same Rust
 implementation.
 
@@ -28,10 +28,10 @@ decoders as `Arc<dyn Decoder>` so one adapter can serve every syntax it owns.
 
 The public `Decoder::decode` contract reflects D-21. Registry lookup and
 dispatch add no allocation of their own. Raw plus RLE implementations remain
-allocation-free per call. Concrete JPEG and JPEG 2000 adapters may allocate
-bounded dependency-owned decoded storage and may copy encoded input when a
-safe packet API requires owned bytes. Every adapter retains caller-owned
-output and must not modify it before complete success.
+allocation-free per call. Concrete JPEG, JPEG 2000, JPEG-LS, HTJ2K and JPEG XL
+adapters may allocate bounded dependency-owned decoded storage and may copy
+encoded input when a safe packet API requires owned bytes. Every adapter
+retains caller-owned output and must not modify it before complete success.
 
 Registration is setup work. It may allocate the hash tables and clone `Arc`
 handles. Capability lookup and one-frame dispatch borrow existing state and do
@@ -299,10 +299,151 @@ invisible one. `scripts/unsafe_allowlist_check.py` refuses a vendored package
 whose count moves, one with no record, and a record for a package not in the
 tree. The per-file audit is in `docs/SOURCE-POLICY.md`.
 
+## JPEG XL
+
+PS3.5 A.4.12 gives three syntaxes. `.110` is JPEG XL Lossless, `.111` is JPEG
+XL JPEG Recompression, and `.112` is JPEG XL, the general form. The adapters
+live in `crates/ocelli-codec/src/jpegxl.rs` under deviation **D-28**:
+`jxl-oxide` 0.12.6 renders and `jxl-render` 0.12.4 carries the grids, both
+with default features off, because dicom-rs reaches this family through its
+inventory registry, which section 21 says does not work on WebAssembly.
+
+### `.111` is known and unavailable
+
+`register_jpegxl_decoders` claims only `.110` and `.112`, and preflights all
+three UIDs before either adapter is registered. `.111` stays
+`KnownUnavailable`, the same shape as Deflated Explicit VR Little Endian. The
+reason is a measured defect: `jxl-jbr` 0.2.1 `src/reconstruct.rs:457` is an
+unconditional `expect("is_last not found")` in the DHT branch of JPEG
+reconstruction, filed upstream as jxl-oxide issue 512, and under the release
+profile's `panic = "abort"` that panic ends the process. No Ocelli path calls
+`reconstruct_jpeg` or any other `jxl-jbr` entry point, so the reconstruction
+route through `JpegDecoder::baseline()`, which section 10.19's note would
+make byte-identical to the `.50` source, is not built. A `.111` frame is
+refused by the registry, before any byte reaches `jxl-oxide`. A released
+dependency that fixes the defect turns the syntax on in its own story.
+
+### The pre-check runs before `jxl-oxide` parses anything
+
+`crates/ocelli-codec/src/jpegxl_icc.rs` strips a container to its codestream
+and refuses a header that would make the dependency allocate against its own
+declaration. The measured reason is that `jxl-oxide` 0.12.6 `aux_box.rs:72`
+inflates a `brob` box into an unbounded `Vec` outside the `AllocTracker`, and
+`jxl-jbr` 0.2.1 `lib.rs:59` does the same for `jbrd`: a 1,129 byte container
+with a compressed `brob` box measured a peak resident set of 1,095,647,232
+bytes on 2026-11-06 and then decoded. So `prepare` collects the `jxlc` payload
+or the `jxlp` payloads in index order and hands `jxl-oxide` that codestream
+alone. No other box is copied or parsed. A container with no codestream, two
+`jxlc` boxes, a `jxlc` beside `jxlp` boxes, `jxlp` boxes out of order, or
+`jxlp` boxes without the last flag is refused before decode.
+
+The header is read by the dependency's own `ImageHeader::parse`, the same
+parse `try_init` runs, so there is no hand-written walk to desynchronise from
+the parser it protects. A header that declares an embedded ICC profile or any
+extra channel refuses with `UnsupportedPixelFormat`, and a header that cannot
+be read to those fields refuses fail-closed. On the crafted streams above, a
+probe that parsed the header and stopped at the ICC flag peaked at
+2,260,992 bytes of resident set against 270,811,136 for the unguarded parse.
+
+### Exact stored values, and the float quantiser
+
+`jxl-oxide`'s `ImageStream::write_to_buffer` is not used for integer output.
+A 12-bit stored value would be rescaled into the full `u16` range: measured
+on 2026-11-05, a ramp sample of 13 renders as 208, because 13 times 65,535
+over 4,095 is 208.05. Integer grids (`I16`, `I32`) are instead read sample by
+sample, range-checked against Bits Stored, and written as the stored value.
+Lossless `.110` and `.112` frames therefore reproduce the synthetic source's
+stored values exactly.
+
+A float grid, which a VarDCT or XYB frame renders to, is quantised by
+`quantise_lossy_sample`: `q = floor(v * (2^BitsStored - 1) + 0.5)`, clamped
+to `[0, 2^BitsStored - 1]`, computed in `f64` from the `f32`. Half rounds
+away from zero on a non-negative operand. A non-finite sample refuses with
+`DecoderFailure` before anything is written. This is the decoder's own output
+contract, because neither PS3.5 nor ISO/IEC 18181-1 assigns DICOM stored
+values to a float render.
+
+The output layout is `Interleaved` in every mode. A three-sample frame
+reports `Rgb`, because `jxl-oxide` renders XYB into the declared encoding and
+the colour stage applies no second conversion. One sample reports
+`Preserved`.
+
+### What is refused, and where
+
+| Condition | Where | Error |
+|-----------|-------|-------|
+| Pixel Data VR other than OB | descriptor | `UnsupportedPixelFormat` |
+| Pixel Representation 1 | descriptor | `UnsupportedPixelFormat` |
+| Bits Allocated other than 8 or 16 | descriptor | `UnsupportedPixelFormat` |
+| Orientation other than 1 | codestream header | `UnsupportedPixelFormat` |
+| A float sample bit depth | codestream header | `UnsupportedPixelFormat` |
+| Any extra channel (alpha, black, spot) | codestream header | `UnsupportedPixelFormat` |
+| A colour encoding given as an ICC profile | codestream header | `UnsupportedPixelFormat` |
+| An enum colour space other than RGB or grey | codestream header | `UnsupportedPixelFormat` |
+| A PQ or HLG transfer function | codestream header | `UnsupportedPixelFormat` |
+| `bits_per_sample` differing from Bits Stored | codestream header | `FrameMismatch` |
+| Width or height differing from Columns or Rows | codestream header | `FrameMismatch` |
+| Colour channels differing from Samples per Pixel | codestream header | `FrameMismatch` |
+| More than one keyframe | after load | `FrameMismatch` |
+| A VarDCT frame, or `xyb_encoded`, under `.110` | after load | `FrameMismatch` |
+| A sample outside the stored range | after render | `UnsupportedPixelFormat` |
+| Bytes after the codestream, except one `0x00` pad on an odd length | after load | `TrailingData` |
+
+Bits Allocated 24 never reaches the adapter: `FrameDesc::new` accepts only 1,
+8, 16 and 32. A declared 65,535 by 65,535 frame under a 64 by 96 descriptor
+is refused by the header checks before any grid is allocated.
+
+### Lossy modular under `.110` is not detected
+
+`.110` refuses a VarDCT frame encoding and an image header with
+`xyb_encoded` set, which is what libjxl writes for its lossy routes. A lossy
+modular frame, quantised squeeze with `xyb_encoded` false, is a modular
+encoding the header check cannot see, and `.110` does not detect it. The
+tracked `jpegxl_modular_xyb.jxl` fixture is the detected shape. Closing the
+modular gap would need the frame's own quantisation evidence and is a
+follow-up decision, not a silent acceptance.
+
+### Signed samples refuse
+
+PS3.5 8.2.15 says the JPEG XL bit stream is capable of encoding signed
+values, and PS3.5 does not say how a signed sample lands in the DICOM
+container. Pixel Representation 1 is refused with `UnsupportedPixelFormat`
+rather than decoded through a guessed offset or a two's-complement
+reinterpretation, which is the quietly wrong pixel. A follow-up story is
+filed when a reference signed file exists.
+
+### The allocation bound, and what sits outside it
+
+Each decode builds its image with `AllocTracker::with_limit(n)` where `n` is
+`ALLOC_LIMIT_NUMERATOR` times `FrameDesc::output_len()`. The numerator is the
+measured worst tracked peak over the fixtures, doubled: the suite fails up to
+a numerator of 12 and passes from 13, and the binding case is the 64 by 96
+lossy 12-bit `jpegxl_lossy_12.jxl`, measured on 2026-11-05. A decode that
+exceeds the doubled limit returns `DecoderFailure` and writes nothing.
+
+Two bounds sit outside the tracker by measurement and are recorded on the
+constants: the extracted codestream copy of a container, at most the input
+length, and the extra channel vector the header parser grows for a header
+that declares them, constant bounded by the format's own limits. Extra
+channels refuse in the pre-check, so the vector is never filled.
+
+### The forward wasm cost, which no shipped module pays today
+
+A wasm32 `cdylib` that reads a JPEG XL image and renders frame 0 through
+`jxl-oxide` 0.12.6, built with the workspace release profile and no
+wasm-opt, measured 940,335 bytes on 2026-11-05, against 75 bytes for an empty
+`cdylib` at the same profile. That is what a decode worker pays when a later
+story links `ocelli-codec` into a wasm module. Neither `ocelli-wasm` nor
+`ocelli-native` reaches `ocelli-codec`, so both shipped size budgets are
+unchanged by this family. If that link happens, `alloc-stdlib` enters the
+closure and ships no licence file, so F-220's generator would need a pinned
+text in `ci/notices/sources.toml`. The other sixteen closure crates carry
+licence files or allow-listed declarations.
+
 ## Known does not mean available
 
-`KNOWN_TRANSFER_SYNTAXES` is the explicit sixteen-UID catalogue shared with the
-corpus surface. A new `Registry` begins with every one of those UIDs in
+`KNOWN_TRANSFER_SYNTAXES` is the explicit nineteen-UID catalogue shared with
+the corpus surface. A new `Registry` begins with every one of those UIDs in
 `KnownUnavailable`. No native or compressed syntax is inferred to work merely
 because its UID is common or because `ocelli-dicom` can parse its data set.
 
@@ -346,7 +487,11 @@ and RLE Lossless. Deflated Explicit VR Little Endian is intentionally absent.
 Its compressed stream wraps the data set rather than one frame and remains an
 `ocelli-dicom` ingest responsibility. It therefore remains
 `KnownUnavailable` in the frame registry even when all F-025 adapters are
-registered.
+registered. `register_jpegxl_decoders` preflights all three JPEG XL UIDs the
+same way and registers only `.110` and `.112`, leaving `.111` known and
+unregistered. `crates/ocelli-codec/tests/registry.rs` asserts the partition:
+nineteen known, seventeen available, Deflated and JPEG XL JPEG Recompression
+the two unavailable.
 
 ## Frame description and output ownership
 
@@ -514,8 +659,13 @@ touch the GPU, so rendering tiers A, B, and C do not select different registry
 behavior. `ocelli-codec` imports neither `wgpu` nor `wasm-bindgen`, and it uses
 no unsafe code.
 
-JPEG 2000, JPEG-LS and HTJ2K are registered. The sections above are their
-contracts. A known UID with no adapter remains `KnownUnavailable`.
+JPEG 2000, JPEG-LS, HTJ2K and JPEG XL are registered, the last with `.111`
+left known and unavailable. The sections above are their contracts. A known
+UID with no adapter remains `KnownUnavailable`. The folder viewer's
+`codecs()` in `examples/folder-viewer/src/preview.rs` registers all six
+families, and its preview draws monochrome frames only: a three-sample frame
+is refused `NotMonochrome` before decode, and a decoder that reports `Rgb`
+output is refused the same way.
 
 ## Evidence and measurement boundary
 

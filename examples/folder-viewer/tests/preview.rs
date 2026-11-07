@@ -532,6 +532,52 @@ fn a_post_without_a_length_is_refused() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn a_jpegxl_lossless_frame_draws() -> Result<(), String> {
+    // PS3.5 A.4.12: one codestream in one fragment of an OB Pixel Data whose
+    // File Meta names JPEG XL Lossless. The codestream is the tracked 12-bit
+    // lossless fixture beside the adapter's own tests, 87 bytes, so the
+    // fragment carries the one trailing NULL pad of an odd item value. Its
+    // stored values are measured from the fixture's reference ramp
+    // jpegxl_reference_mono12_u16le.raw: 64 by 96 samples, minimum 0 first and
+    // maximum 4095 last. No window is declared, so the full-range rule of
+    // PS3.3 C.11.2.1.3.2 maps the minimum to grey 0 and the maximum to 255.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_12.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "MONOCHROME2",
+        12,
+    )?;
+    let preview = preview_first_frame(&file)
+        .map_err(|error| format!("the JPEG XL lossless frame was refused: {error}"))?;
+    assert_eq!(preview.width, 96);
+    assert_eq!(preview.height, 64);
+    assert_eq!(preview.grey.len(), 64 * 96);
+    assert_eq!(preview.grey.first().copied(), Some(0));
+    assert_eq!(preview.grey.last().copied(), Some(255));
+    Ok(())
+}
+
+#[test]
+fn a_jpegxl_colour_frame_refuses_not_monochrome() -> Result<(), String> {
+    // The colour fixture is three samples of eight bits. Samples per Pixel 3
+    // is refused before any decode, the same refusal every colour frame gets,
+    // because this preview draws monochrome frames only.
+    let file = jpegxl_frame(
+        "jpegxl_lossless_rgb8.jxl",
+        "1.2.840.10008.1.2.4.110",
+        3,
+        "RGB",
+        8,
+    )?;
+    match preview_first_frame(&file) {
+        Err(PreviewError::NotMonochrome) => Ok(()),
+        Ok(_) => Err("a JPEG XL colour frame was drawn".to_owned()),
+        Err(error) => Err(format!("a JPEG XL colour frame was refused as {error}")),
+    }
+}
+
 fn only_byte(preview: &Preview) -> Result<u8, String> {
     if preview.grey.len() != 1 {
         return Err("the frame is not one pixel".to_owned());
@@ -754,6 +800,79 @@ fn part10(data: Vec<u8>) -> Result<Vec<u8>, String> {
     bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
     bytes.extend(data);
     Ok(bytes)
+}
+
+fn part10_as(data: Vec<u8>, transfer_syntax: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta(transfer_syntax)?);
+    bytes.extend(data);
+    Ok(bytes)
+}
+
+/// One encapsulated frame around a tracked JPEG XL fixture.
+///
+/// The wrapper has the measured shape of the corpus JPEG XL rows: Pixel Data
+/// OB of undefined length, a Basic Offset Table item carrying its one offset,
+/// one Fragment Item holding the codestream padded to even length, and the
+/// Sequence Delimitation Item.
+fn jpegxl_frame(
+    fixture: &str,
+    uid: &str,
+    samples: u16,
+    photometric: &str,
+    bits_stored: u16,
+) -> Result<Vec<u8>, String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/ocelli-codec/tests/fixtures")
+        .join(fixture);
+    let codestream =
+        std::fs::read(&path).map_err(|_| format!("{} is not readable", path.display()))?;
+    let bits_allocated: u16 = if bits_stored > 8 { 16 } else { 8 };
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &samples.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(photometric))?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &64_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &96_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0100),
+        *b"US",
+        &bits_allocated.to_le_bytes(),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0101),
+        *b"US",
+        &bits_stored.to_le_bytes(),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0102),
+        *b"US",
+        &(bits_stored - 1).to_le_bytes(),
+    )?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    let mut fragment = codestream;
+    if fragment.len() % 2 == 1 {
+        fragment.push(0);
+    }
+    let mut pixels = item(&0_u32.to_le_bytes())?;
+    pixels.extend_from_slice(&item(&fragment)?);
+    pixels.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+    pixels.extend_from_slice(&0xE0DD_u16.to_le_bytes());
+    pixels.extend_from_slice(&0_u32.to_le_bytes());
+    let mut element = Vec::new();
+    element.extend_from_slice(&0x7FE0_u16.to_le_bytes());
+    element.extend_from_slice(&0x0010_u16.to_le_bytes());
+    element.extend_from_slice(b"OB");
+    element.extend_from_slice(&[0, 0]);
+    element.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    element.extend_from_slice(&pixels);
+    data.extend(element);
+    part10_as(data, uid)
 }
 
 fn mono_unusable_window() -> Result<Vec<u8>, String> {

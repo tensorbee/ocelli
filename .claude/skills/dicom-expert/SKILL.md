@@ -98,24 +98,40 @@ dataset.
 |-----|------|--------|
 | `1.2.840.10008.1.2` | Implicit VR Little Endian | native |
 | `1.2.840.10008.1.2.1` | Explicit VR Little Endian | native |
-| `1.2.840.10008.1.2.1.99` | Deflated Explicit VR LE | deflate |
+| `1.2.840.10008.1.2.1.99` | Deflated Explicit VR LE | no frame decoder, `ocelli-dicom` (D-18) |
 | `1.2.840.10008.1.2.2` | Explicit VR Big Endian (retired) | native, byte-swapped |
 | `1.2.840.10008.1.2.5` | RLE Lossless | rle |
 | `1.2.840.10008.1.2.4.50` | JPEG Baseline, process 1, 8-bit | jpeg |
 | `1.2.840.10008.1.2.4.51` | JPEG Extended, process 2 and 4, 12-bit | jpeg |
 | `1.2.840.10008.1.2.4.57` | JPEG Lossless, process 14 | jpeg |
 | `1.2.840.10008.1.2.4.70` | JPEG Lossless, process 14 SV1 | jpeg |
-| `1.2.840.10008.1.2.4.80` | JPEG-LS Lossless | **open gate A2** |
-| `1.2.840.10008.1.2.4.81` | JPEG-LS Near-Lossless | **open gate A2** |
-| `1.2.840.10008.1.2.4.90` | JPEG 2000 Lossless Only | openjp2 |
-| `1.2.840.10008.1.2.4.91` | JPEG 2000 | openjp2 |
-| `1.2.840.10008.1.2.4.201` | HTJ2K Lossless Only | **open gate A1** |
-| `1.2.840.10008.1.2.4.202` | HTJ2K Lossless Only, RPCL | **open gate A1** |
-| `1.2.840.10008.1.2.4.203` | HTJ2K | **open gate A1** |
+| `1.2.840.10008.1.2.4.80` | JPEG-LS Lossless | ritk-codecs (D-20) |
+| `1.2.840.10008.1.2.4.81` | JPEG-LS Near-Lossless | ritk-codecs (D-20) |
+| `1.2.840.10008.1.2.4.90` | JPEG 2000 Lossless Only | ritk-codecs |
+| `1.2.840.10008.1.2.4.91` | JPEG 2000 | ritk-codecs |
+| `1.2.840.10008.1.2.4.201` | HTJ2K Lossless Only | openjph-core (D-22) |
+| `1.2.840.10008.1.2.4.202` | HTJ2K Lossless Only, RPCL | openjph-core (D-22) |
+| `1.2.840.10008.1.2.4.203` | HTJ2K | openjph-core (D-22) |
+| `1.2.840.10008.1.2.4.110` | JPEG XL Lossless | jxl-oxide (D-28) |
+| `1.2.840.10008.1.2.4.111` | JPEG XL JPEG Recompression | unavailable, jxl-jbr defect (issue 512) |
+| `1.2.840.10008.1.2.4.112` | JPEG XL | jxl-oxide (D-28) |
 
-The two open gates are HLD Appendix A, A1 and A2. A1 asks whether HTJ2K decodes
-bit-exact through openjp2 under wasm32. A2 asks what the JPEG-LS answer is at
-all. Both are architecture decisions, not dependency lines.
+The catalogue is the nineteen UIDs in `KNOWN_TRANSFER_SYNTAXES`, of which
+seventeen have a registered decoder. The two without are the rows above that
+name a reason. Gates A1 and A2 of HLD Appendix A are resolved and their
+records are in `docs/spikes/`.
+
+### JPEG XL pixel values
+
+PS3.5 8.2.15: the codestream's own bit depth is the stored precision, the
+three syntaxes allow 1 to 24 bits stored, and Photometric Interpretation is
+`MONOCHROME1`, `MONOCHROME2`, `XYB`, `YBR_RCT`, `RGB` or, for `.111`,
+`YBR_FULL_422`. **TRAP: do not rescale a sub-16-bit sample to the container.**
+`jxl-oxide`'s `write_to_buffer::<u16>` maps a 12-bit stored 13 to 208, because
+13 times 65,535 over 4,095 is 208.05. Read integer grids sample by sample as
+stored values instead. **TRAP: `XYB` has no conversion matrix in PS3.3
+C.7.6.3.1.2**, so only the codec's own conversion is legitimate and it is
+reported by a decoder that answers `Rgb`, never applied twice.
 
 ### Encapsulated pixel data
 
@@ -190,6 +206,7 @@ one-line bug that produces a completely plausible image of the wrong thing.
 | `YBR_PARTIAL_422` | Video-range YCbCr |
 | `YBR_ICT` | Irreversible colour transform, JPEG 2000 lossy |
 | `YBR_RCT` | Reversible colour transform, JPEG 2000 lossless |
+| `XYB` | The JPEG XL LMS-based colour model, PS3.3 C.7.6.3.1.2. Three samples. Codec-owned: no matrix exists here |
 
 **TRAP: `MONOCHROME1` is not rare.** Plain radiography and some mammography
 use it. Treating it as `MONOCHROME2` produces a photographic negative, which

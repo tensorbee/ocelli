@@ -3,7 +3,7 @@
     "What the pinned cornerstone3D cannot render, and what it said when it could not.",
     "Every corpus row is attempted. A row that fails is checked against this file: an entry has to match the row's transfer syntax, the boundary it failed at, the row's own path, and a fragment of the error the reference produced. A failure no entry describes fails the run, and a row an entry claims that then succeeds fails the run too.",
     "This file is committed because it is a fact about cornerstone3D 5.8.2, not about this machine.",
-    "It does not answer Appendix A gates A1 or A2. Those ask about Ocelli's own wasm codec build, which does not exist yet. What it records is that the reference decodes, presents and reads back all three HTJ2K rows and both JPEG-LS rows, so those five have reference frames to be measured against when there is something to measure.",
+    "It does not answer Appendix A gates A1 or A2. Those ask about Ocelli's own wasm codec build, which does not exist yet. What it records is that the reference decodes, presents and reads back all three HTJ2K rows and all three JPEG-LS rows, so those six have reference frames to be measured against when there is something to measure.",
     "Regenerate the candidate list with `node tools/oracle/run.mjs --report-unsupported`, then write the `why` by hand. The reason a row cannot be rendered is not something the harness can know.",
     "`errorContains` matches the message the harness reports, not the browser console. The console evidence behind each diagnosis is quoted in `why`, and a full run writes the console to `out/console.log`."
   ],
