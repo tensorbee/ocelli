@@ -12507,7 +12507,7 @@ GUARDS: tuple[Guard, ...] = (
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
                        "The tree follows two `#[path]` modules, `produce` "
-                       "and `held.rs` (F-210), so the planted module is the "
+                       "and `held.rs`, so the planted module is the "
                        "third. The count is the one measured on the F-232 "
                        "tree.",
                   needs="cargo", profile="deep"),
@@ -12552,7 +12552,7 @@ GUARDS: tuple[Guard, ...] = (
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
                        "read. The tree follows two `#[path]` modules, "
-                       "`produce` and `held.rs` (F-210), so the planted "
+                       "`produce` and `held.rs`, so the planted "
                        "module is the third. The count is the one measured "
                        "on the F-232 tree.",
                   needs="cargo", profile="deep"),
