@@ -20,6 +20,10 @@
 //! plane and the length includes `z`. A missed rectangle sets `applied`
 //! false. [`distance`] stays the F-070 function. The HLD names the crate
 //! and does not give them. Camera transforms stay in `ocelli-viewport`.
+//! F-211 adds [`region_contains`] and [`region_bounds`]. A sample belongs
+//! to a region when its centre, the index point, is inside or on the
+//! boundary, and the polygon rule is the F-085 rule of `ocelli-seg`.
+//! [`polygon_crosses_itself`] finds where a ring crosses or touches itself.
 
 #![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
@@ -30,6 +34,7 @@ mod calibration;
 mod livewire;
 mod measure;
 mod redact;
+mod region;
 mod stats;
 
 pub use calibration::{
@@ -43,6 +48,9 @@ pub use measure::{
     project_onto_plane, project_onto_segment, rectangle, spline_point,
 };
 pub use redact::{Direction, Redaction, redact_rect, ultrasound_direction};
+pub use region::{
+    IndexBounds, RegionShape, polygon_crosses_itself, region_bounds, region_contains,
+};
 pub use stats::{
     Histogram, RoiStats, SuvActivity, SuvError, SuvInputs, histogram, roi_statistics, suv_bsa,
     suv_bw, suv_lbm,

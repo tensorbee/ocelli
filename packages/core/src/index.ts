@@ -355,6 +355,7 @@ export type {
   CacheBudgetChangedPayload,
   CacheKeyPayload,
   CachePressurePayload,
+  CacheReleasedPayload,
   CornerstoneEventRow,
   EventDelivery,
   FramePresentedPayload,

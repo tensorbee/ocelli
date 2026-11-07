@@ -94,6 +94,48 @@ libraries those dependencies bundle. It does not cover tools that are
 downloaded or installed on a developer or CI host and never redistributed.
 Playwright browsers, ffmpeg, git, bash and CI images are in that second group.
 
+## Patents, and the video decoders a shipped artefact may contain
+
+Everything above is about copyright: what may be read, and what may be
+depended on. This section is about patents, which that test does not touch. A
+permissive licence on a decoder's source says nothing about the patents its
+codec is covered by.
+
+**No shipped artefact contains a software H.264 or HEVC decoder.** A shipped
+artefact is anything a release publishes or a user installs: the wasm modules,
+the native binaries and the npm packages. H.264 and HEVC streams are decoded
+through the browser's decoder, WebCodecs `VideoDecoder`, or the platform's,
+and a build where neither can decode a stream refuses it by name. This holds
+for a dependency, a vendored crate, a bundled package and code written here
+alike, and it holds for a fallback used only when the browser has no decoder.
+Host tools that are never redistributed, ffmpeg among them, are outside it as
+they are outside "What a dependency is".
+
+**MPEG-2 video is decoded in Rust, by the operator's decision of
+2026-11-07.** F-242 writes that decoder from ITU-T H.262 and adds no
+dependency. What the decision relies on, as read by the lead on 2026-11-07
+and **marked for verification**: the MPEG-2 patent pool's published list
+dated 1 January 2026, administered by Via LA, formerly MPEG LA, states that
+the last United States patent expired on 13 February 2018 and that patents
+remain active only in Malaysia. A third-party tracker of that list names two
+Malaysian patents, MY 163465-A and MY 177139-A, "Synchronization arrangement
+for a compressed video signal", with possible expiry on 15 September 2032 and
+8 September 2035. The lead has not checked those two against the pool's list
+attachment or the Malaysian register. A pool list also says nothing about
+patents held outside the pool. F-242's plan carries the full assessment.
+
+**The operator decided on 2026-11-07 to proceed knowing those two Malaysian
+patents.** The MPEG-2 decoder ships in the wasm module and the native
+binaries, which are published worldwide, Malaysia included, and the risk is
+recorded here rather than resolved. This is not legal advice.
+
+Any other codec covered by a patent pool, video or audio, enters a shipped
+artefact only with a written assessment in its story's plan and the
+operator's recorded decision, recorded in this section.
+
+**The operator may take counsel on any of this, and none of it is legal
+advice.** It records an engineering decision and what it was based on.
+
 ## Extensions to the table
 
 A source assessed after this policy was written gets a row here, in the same
@@ -128,6 +170,19 @@ form as the table above, with the date it was decided.
 | jxl-oxide 0.12.6 and its twelve jxl-* subcrates | MIT OR Apache-2.0 in each package's registry metadata, packaged licence files in every one | yes | yes | 2026-11-05 |
 | brotli-decompressor 5.0.3 | BSD-3-Clause/MIT in registry metadata (the legacy `/` separator), packaged licence file | yes | yes | 2026-11-05 |
 | alloc-no-stdlib 2.0.4 and alloc-stdlib 0.2.4 | BSD-3-Clause in registry metadata, alloc-stdlib ships no licence file | yes | yes, not shippable | 2026-11-05 |
+| libmpeg2 | GPL-2.0 | **NO** | no | 2026-11-07 |
+| FFmpeg MPEG-2 decoder source | LGPL-2.1-or-later | **NO** | no, ffmpeg runs only as a host tool | 2026-11-07 |
+
+**libmpeg2 and FFmpeg's MPEG-2 decoder source are read-blocked from
+2026-11-07**, by the operator's answer to F-242's question 4, for the reason
+dwv is: translating a decoder's source into Rust is a translation. They are
+not to be read or depended on by a person or an agent on this project. ffmpeg
+itself stays allowed as a host tool that is run, as "What a dependency is"
+says, and its source is not opened. Until F-242 lands,
+`scripts/source_provenance_check.py` does not enforce these two rows, and this
+paragraph is the rule. F-242 adds libmpeg2 to the checker's mention,
+dependency and URL rules, and ffmpeg's source to its dependency and URL rules
+only, because naming ffmpeg as a host tool is allowed.
 
 ### Shipped binary notice sources
 

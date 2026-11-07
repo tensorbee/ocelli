@@ -379,3 +379,14 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 ### Lead rulings after review pass 8
 
 Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-8.md`. The sentence naming which builds compile the closure for wasm32 is deleted, because no build passes `+simd128` to the closure's crates and step 2 of `bin/ocelli.sh native` also compiles it. The scanner's remaining blind spots, after a `'"'` character literal, a raw string holding a quote and a line comment with an unpaired quote, predate this story and change no audit count, so they leave F-229 and go to their own story with a real lexer, recorded for the operator.
+
+### Lead amendments for the viewer and documentation half
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against the sprint head after F-209. Where these differ from the text above, these win.
+
+- **The numbers are the ones after the operator's `.111` answer,** measured from `crates/ocelli-codec/tests/registry.rs` at implementation, not from this plan: the known transfer syntaxes, the available ones, the unavailable ones with their reasons, the families and the registered names. Every document sentence uses the measured numbers. AC2, AC7, AC8 and AC15's `.111` decoding text is superseded by that answer.
+- **The folder viewer registers JPEG XL.** `codecs()` in `examples/folder-viewer/src/preview.rs` calls `register_jpegxl_decoders`. A viewer test shows a monochrome `.110` frame draws and a colour one refuses with `NotMonochrome`, red before the registration.
+- **README** gains one sentence in its local series viewer section naming what the viewer opens, because README has no such list today. `use.html` section 8 and `more.html` say the same measured facts.
+- **The four LLDs** the plan names, `codecs.md`, `corpus.md`, `pixel-pipeline.md` and `frame-open.md`, and the dicom-expert skill with its regenerated adapters, are brought current. The stale counts pass 10 found in `docs/lld/oracle.md` and the `$notes` of `tools/oracle/unsupported.json` are corrected to measured values.
+- **The serialisation clause** after F-215 and F-225 is withdrawn. The remaining edits share no region with them.
+- **AC20's wasm budget half** is measured by `bin/ocelli.sh wasm` and `bin/ocelli.sh wasm-decode` with no budget file edited, and the result is recorded.

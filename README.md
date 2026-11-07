@@ -175,14 +175,24 @@ DICOM files on this machine, use the local series page below.
 
 ## Start the local series viewer
 
-`examples/folder-viewer` lists series from a folder you choose and shows one
-image at a time. It listens on this machine only.
+`examples/folder-viewer` lists series from a folder you choose and shows them
+in up to nine viewports, from 1 by 1 to 3 by 3. Each viewport has its own
+series, image, zoom, pan and window, and Link can make the others follow the
+outlined one's scroll, window and zoom. The preview registers all six decoder
+families of `ocelli-codec`. It opens the monochrome frames of eighteen of the
+nineteen known transfer syntaxes: the seventeen with a registered decoder and
+Deflated Explicit VR Little Endian, whose whole data set `parse_part10`
+inflates before the raw decoder reads it. JPEG XL JPEG Recompression is the
+only one refused for every frame, and a colour frame is refused as not
+monochrome. It listens on this machine only.
 
 ```bash
 cargo run --release -p ocelli-folder-viewer
 ```
 
 The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
+
+Opening another folder or the synthetic study tells the process to forget the folder the page left. The page sends that folder's file ids to `POST /forget`, and the process drops each posted file and every decoded frame of it, so `GET /held` then counts only the folder now open. A reply for the folder left that arrives late does not post its file again. A decode already running for a forgotten file stores nothing. Its request is still answered, with 410 Gone when its render had to wait for grey room, or 503 if that wait runs out. Each page load sends a random token with every file it posts, and leaving the page sends one short beacon naming that token, so the process forgets every file that page posted and no other page's. A list of ids would not do, because Chromium allows only 64 KiB of beacons in flight at once. A forget that fails is not retried, and the cache budget, which `OCELLI_CACHE_MIB` sets, still bounds what the process holds.
 
 The process prints one line, the page URL, and nothing else. It has the form
 `http://127.0.0.1:12345/`. The port is chosen at startup unless
@@ -201,27 +211,55 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
 2. The left column has one row per Series Instance UID. A row shows the series
    number, the modality, the description and the image count. A file with no
    Series Instance UID keeps its own row.
-3. Select a row. The viewport shows the first image and keeps it. The arrow
-   keys move one image. A wheel without Ctrl moves one image after about 40
-   pixels of travel. The scrubber reads `n / total`. Coming back to a series
-   restores the image you left.
-4. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
+3. Select a row. The outlined viewport shows the first image and keeps it.
+   The arrow keys move one image in the outlined viewport. A wheel without
+   Ctrl moves one image in the viewport under the pointer after about 40
+   pixels of travel, and makes that viewport the outlined one, as a press in
+   it does. The scrubber reads `n / total` for the outlined viewport. Coming
+   back to a series restores the image you left. With one viewport there is
+   no outline.
+4. Drag a series row onto a viewport to open it there, or click or
+   double-click a row to open it in the outlined viewport. A click on the
+   series already open there starts its window and fit again, and a drop of
+   that series keeps its view. Opening a folder
+   puts the series with the most images in the first viewport and the next
+   series in list order into each other viewport. A viewport with no series
+   reads "Drag a series here." Link opens three switches, Scroll, Window and
+   Zoom, which are off at load and act on every visible viewport as one set,
+   with the outlined viewport as the source. Scroll moves each other viewport
+   to its image nearest the source image's position, when both series share a
+   Frame of Reference UID and the cosine of the angle between their planes
+   is above 0.9, which is under about 26 degrees. Window copies the source's
+   window when a W/L drag ends, on a preset and on Reset. A preset is not sent to a viewport whose image is not
+   CT, and no window is sent to one whose image is not monochrome. Zoom
+   copies the source's zoom over each viewport's own fit, and pan is not
+   copied. A click on a series row is a new load and copies nothing.
+   Reference lines, on at load, draw a yellow line in each other viewport
+   where the source image's plane cuts it, when both share a Frame of
+   Reference UID and the planes are not parallel. The local process chooses
+   the image and computes the line, through `ocelli_viewport::link`.
+5. Space plays and pauses. Playback loops. The FPS control runs from 1 to 30
    and starts at 10.
-5. The toolbar is a row of icons. Point at one to see its name, its key and
+6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
-   W/L), the drawing tools (Length, Rectangle, Ellipse, Freeform, Text), the
+   W/L), the drawing tools (Length, Angle `Q`, Cobb `J`, Bidirectional `B`,
+   Rectangle, Ellipse, Freeform, Arrow `U`, Probe `X`, Text), the
    view (Invert, Rotate 90, Flip horizontal, Flip vertical), the display
    (Pointer cross, Magnifier, Corners, Orientation letters), the layout
-   (1 by 1, 2 by 2), and Key image, Headers, Fit, Reset and Full screen.
+   (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
+   which shows four neighbouring images in the outlined viewport, Link and
+   Reference lines, which have no key), and Key
+   image, Headers, Fit, Reset and Full screen. The view, window, Fit, Reset,
+   Key image and Headers act on the outlined viewport.
    Scroll starts active. The right column holds the window presets, the marks
    and the mouse and key lists. The icons at either end of the top bar, or
    the `[` and `]` keys, hide and show the two side columns.
-6. The left button uses the active tool. The right button pans. Control with
+7. The left button uses the active tool. The right button pans. Control with
    the left button also pans. The middle button zooms from the place you
    pressed. A pinch, or Ctrl with the wheel, zooms at the pointer. A sideways
    swipe does not change the image. Zoom keeps the image aspect ratio. The
    viewport clips an image that is larger than the pane.
-7. Headers shows the data set as stored. The corners show the current image's
+8. Headers shows the data set as stored. The corners show the current image's
    labels, with a person name in family, given order and a date as
    year-month-day. Edge letters show the patient direction and hide
    while the picture is flipped or rotated. The pointer cross shows the
@@ -229,15 +267,47 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
-   for a file the process could not hold.
-8. Freeform draws a freehand outline and keeps it at three or more points.
-   Rectangle and ellipse draw a region and do not fill it. Text places a note.
-   Click, type, and press Enter to keep it. Escape drops the draft. Leaving
-   the field keeps the note. Size and colour can be changed after the note
-   exists. Length shows millimetres when the file gives Pixel Spacing,
-   millimetres at the detector when it gives only Imager Pixel Spacing, and
-   pixels when it gives no spacing. Click a mark to select it. While a drawing
-   tool is active, drag moves that mark. Press Delete, Backspace or Remove to
+   for a file the process could not hold. The cross, its readout and the
+   magnifier hide when the picture moves under a still pointer, after a
+   zoom, a fit, a turn or flip, Four images, a layout change, a side
+   panel, full screen or a window resize, and come back with the next
+   pointer move. In Four images only the magnifier comes back, because the
+   cross is drawn in the single view only. During a pan or zoom drag they
+   stay with the pointer. When the image under a still pointer changes, by
+   a key, the wheel or Play, the magnifier shows the new image, or hides.
+9. Every number on a mark comes from the local process, and the page prints
+   its text. Probe asks `POST /value`, and every other mark asks `POST
+   /measure`. Length, Angle, Cobb and Bidirectional are in millimetres from
+   Pixel Spacing, or from Imager Pixel Spacing divided by the Estimated
+   Radiographic Magnification Factor, in millimetres at the detector from
+   Imager Pixel Spacing alone, and in pixels when the file gives no spacing.
+   PS3.3 10.7.1.1 says a Pixel Spacing that has not been corrected for
+   magnification has the same values as the Imager Pixel Spacing, so a Pixel
+   Spacing equal to it takes the imager path: it is divided by the factor when
+   the file has one and is millimetres at the detector when it has none. On
+   that path, and on Imager Pixel Spacing alone, a factor that is present but
+   cannot be used is not measured. Beside a Pixel Spacing that differs from
+   the Imager Pixel Spacing, the factor is not read and the Pixel Spacing
+   decides. An angle without spacing says square pixels are assumed. A Pixel
+   Spacing that is present but not usable is not measured. Angle is a drag
+   along the first arm to the vertex and a click at the end of the second arm.
+   Cobb is two drags, one per line, and reports the acute angle between them.
+   Bidirectional is a drag along the long axis, with a short axis placed
+   across its middle at half its length, and reports both lengths as drawn.
+   Rectangle, Ellipse and Freeform report the area of the drawn shape and the
+   mean, SD, minimum and maximum of the modality values whose pixel centres
+   are inside it. Padding pixels are left out. A freeform that crosses or
+   touches itself is not measured, and neither is one of more than 4000
+   points. Freeform keeps an outline of three or more points. Probe is a click
+   and reports the modality value of that pixel. Arrow is a drag from the tail
+   to the head with an optional note. Text places a note. Click, type, and
+   press Enter to keep it. Escape drops the draft. Leaving the field keeps the
+   note. Size and colour can be changed after the note exists. The marks list
+   shows each mark with its numbers, `measuring` while the reply is on its
+   way, or the reason it was not measured. Click a mark to select it. A
+   selected mark shows a handle on each of its points. Drag a handle to move
+   that point, and the mark is measured again on release. While a drawing tool
+   is active, drag moves the whole mark. Press Delete, Backspace or Remove to
    remove it. Marks last until you reload the page. They are drawings on that
    image. They are not written back into the file.
 
@@ -247,7 +317,10 @@ does not draw. Use explains the JavaScript, React and Rust calls.
 
 A file that is not a Part 10 DICOM object is skipped and counted. A colour
 frame, a Modality LUT Sequence, or a VOI LUT Sequence without both a window
-center and a window width stays on a fixed error sentence.
+center and a window width stays on a fixed error sentence. The corner of an
+image that is not monochrome reads `Window not applicable`, and its window
+presets are off. A series of more than 65536 images is not linked: it does
+not scroll with the others and has no reference line.
 
 The page HTML is compiled into the binary. After a change under
 `examples/folder-viewer`, build again and start that new process.

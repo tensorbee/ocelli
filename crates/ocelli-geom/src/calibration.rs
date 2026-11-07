@@ -4,7 +4,12 @@
 //! `.claude/plans/F-195-design.md`. This module does not read DICOM tags
 //! and does not call the modality LUT.
 //!
-//! Pixel spacing is the patient spacing of PS3.3 C.7.6.2, row then column.
+//! Pixel spacing is the patient spacing of PS3.3 C.7.6.2, row then column,
+//! except where PS3.3 10.7.1.1 says otherwise: an uncalibrated Pixel
+//! Spacing has the same values as Imager Pixel Spacing, so an equal pair is
+//! detector-plane spacing and takes the imager path. A
+//! [`CalibrationSource::Detector`] result is detector-plane spacing, not a
+//! patient spacing.
 //! Imager pixel spacing is PS3.3 C.8.11.4, in millimetres at the detector,
 //! and it is not already corrected for magnification. PS3.3 C.8.7.5 defines
 //! the estimated radiographic magnification factor as source image receptor
@@ -26,6 +31,12 @@ pub enum CalibrationSource {
     PixelSpacing,
     /// Imager Pixel Spacing divided by the magnification factor.
     ImagerSpacing,
+    /// Imager Pixel Spacing at the detector plane, not corrected for
+    /// magnification, and not a patient spacing. Chosen only when Pixel
+    /// Spacing equals Imager Pixel Spacing (PS3.3 10.7.1.1) and no
+    /// magnification factor is present. A present factor that cannot be used
+    /// refuses instead.
+    Detector,
     /// Ultrasound physical deltas supplied as a row and column pair.
     Ultrasound,
     /// A caller-entered pair.
@@ -39,6 +50,7 @@ impl CalibrationSource {
         match self {
             Self::PixelSpacing => "pixel-spacing",
             Self::ImagerSpacing => "imager-spacing",
+            Self::Detector => "detector",
             Self::Ultrasound => "ultrasound",
             Self::Manual => "manual",
         }
@@ -72,12 +84,18 @@ pub struct CalibrationRequest {
     pub manual: Option<SpacingMm>,
 }
 
-/// The selected source and the patient spacing in millimetres.
+/// The selected source and its spacing in millimetres.
+///
+/// The spacing is a patient spacing unless the source is
+/// [`CalibrationSource::Detector`], which is detector-plane spacing, not
+/// corrected for magnification.
 #[derive(Debug, Clone, Copy)]
 pub struct Calibration {
     /// Which source won.
     pub source: CalibrationSource,
-    /// Patient spacing after applying the magnification factor, when that source is the imager.
+    /// The spacing of [`Self::source`]. After applying the magnification
+    /// factor when the source is the imager, and raw at the detector plane
+    /// when the source is [`CalibrationSource::Detector`].
     pub spacing: SpacingMm,
 }
 
@@ -86,14 +104,35 @@ pub struct Calibration {
 /// The order is pixel spacing, imager spacing with the magnification
 /// factor, ultrasound deltas, then manual.
 ///
+/// One exception, PS3.3 10.7.1.1: a Pixel Spacing equal to the Imager
+/// Pixel Spacing has not been calibrated for geometric magnification, so
+/// the imager path decides once Pixel Spacing passes its own check. A
+/// factor gives
+/// [`CalibrationSource::ImagerSpacing`], the imager spacing divided by the
+/// factor. No factor gives [`CalibrationSource::Detector`], the raw imager
+/// spacing at the detector plane. A present factor that cannot be used
+/// refuses with the codes below, as it does without Pixel Spacing. A Pixel
+/// Spacing that differs in either half decides on its own, and the later
+/// sources are not read.
+///
 /// # Errors
 ///
 /// [`SuvError::Frame`] when a present number is not finite, including a
 /// non-finite half of the imager pair.
 /// [`SuvError::Unavailable`] when every source is absent, or a present
 /// magnitude is not strictly positive, or the imager pair is incomplete.
+/// On the equal branch both Pixel Spacing and the imager pair are checked,
+/// in that order.
 pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, SuvError> {
     if let Some(spacing) = request.pixel_spacing {
+        if let Some(imager) = request.imager_spacing
+            && same_pair(spacing, imager)
+        {
+            // Pixel Spacing is the earlier present source, so its own check
+            // runs first and an invalid one is refused, not replaced.
+            accept(CalibrationSource::PixelSpacing, spacing, None)?;
+            return detector_plane(imager, request.estimated_radiographic_magnification_factor);
+        }
         return accept(CalibrationSource::PixelSpacing, spacing, None);
     }
     if request.imager_spacing.is_some()
@@ -128,6 +167,25 @@ pub fn select_calibration(request: CalibrationRequest) -> Result<Calibration, Su
         return accept(CalibrationSource::Manual, spacing, None);
     }
     Err(SuvError::Unavailable)
+}
+
+/// Both halves agree under [`ocelli_core::spacing_pair_agrees`], the one
+/// definition `ocelli-dicom`'s `ImagerAgrees` also uses. This is not a
+/// validity check. On the equal branch [`accept`] checks Pixel Spacing and
+/// then the imager pair.
+fn same_pair(left: SpacingMm, right: SpacingMm) -> bool {
+    ocelli_core::spacing_pair_agrees(left.row, left.column, right.row, right.column)
+}
+
+/// The imager path of an equal pair, PS3.3 10.7.1.1 and C.8.7.5.
+///
+/// [`accept`] refuses a present factor that is not finite or not strictly
+/// positive, the same refusal the imager path gives without Pixel Spacing.
+fn detector_plane(imager: SpacingMm, factor: Option<f64>) -> Result<Calibration, SuvError> {
+    match factor {
+        Some(factor) => accept(CalibrationSource::ImagerSpacing, imager, Some(factor)),
+        None => accept(CalibrationSource::Detector, imager, None),
+    }
 }
 
 /// `select_calibration` also rejects a non-finite imager half before calling

@@ -394,6 +394,19 @@ impl Budgeted for Brick {
     }
 }
 
+/// What one [`BrickCache::release_volume`] released.
+///
+/// A volume release has no ring kind, because no volume or brick event
+/// exists today. The summary is the caller's observation instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReleaseSummary {
+    /// The bricks that left, over every level of the volume.
+    pub entries: usize,
+    /// Their host buffer lengths, summed. `pressure().used` drops by
+    /// exactly this.
+    pub bytes: usize,
+}
+
 /// Resident bricks for one GPU budget.
 ///
 /// The bytes are still a host buffer. F-043's upload takes the brick by
@@ -425,6 +438,28 @@ impl BrickCache {
     /// Remove one brick without calling it an eviction.
     pub fn remove(&mut self, key: &BrickKey) -> Option<Brick> {
         self.bricks.remove(key)
+    }
+
+    /// Release every brick of every level of `volume`.
+    ///
+    /// Explicit release, not an eviction, over one range removal. A repeat
+    /// call finds nothing held and returns zeros.
+    pub fn release_volume(&mut self, volume: VolumeId) -> ReleaseSummary {
+        let released = self.bricks.remove_range(
+            BrickKey {
+                volume,
+                level: 0,
+                brick: [0, 0, 0],
+            }..=BrickKey {
+                volume,
+                level: u32::MAX,
+                brick: [u32::MAX; 3],
+            },
+        );
+        ReleaseSummary {
+            entries: released.len(),
+            bytes: released.iter().map(|(_, brick)| brick.bytes()).sum(),
+        }
     }
 
     /// The GPU tier's pressure. A reading is not a use.

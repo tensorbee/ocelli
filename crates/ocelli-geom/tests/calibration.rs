@@ -80,6 +80,159 @@ fn pixel_spacing_wins_over_a_present_imager_pair() {
 }
 
 #[test]
+fn equal_pixel_and_imager_spacing_is_the_detector_plane() {
+    // F-211, the operator answer after review pass 1. PS3.3 10.7.1.1: when
+    // Pixel Spacing is present and the image has not been calibrated for
+    // geometric magnification, its values are the same as Imager Pixel
+    // Spacing. So an equal pair is detector-plane spacing and the imager
+    // path decides. With a usable factor 2 the patient spacing is
+    // 0.2 / 2 = 0.1 (C.8.7.5). With no factor, the raw 0.2 is reported as
+    // the detector plane and is not corrected. A present factor that cannot
+    // be used refuses, as it does on the imager path without Pixel Spacing
+    // (the lead ruling after F-211 review pass 1).
+    let equal = Some(pair(0.2, 0.2));
+    let corrected = select_calibration(CalibrationRequest {
+        pixel_spacing: equal,
+        imager_spacing: equal,
+        estimated_radiographic_magnification_factor: Some(2.0),
+        ..empty()
+    });
+    assert!(corrected.is_ok());
+    let Ok(corrected) = corrected else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(corrected.source, CalibrationSource::ImagerSpacing);
+    assert_eq!(bits(corrected.spacing.row), bits(0.1));
+    assert_eq!(bits(corrected.spacing.column), bits(0.1));
+    // No factor leaves the detector plane, uncorrected.
+    let detector = select_calibration(CalibrationRequest {
+        pixel_spacing: equal,
+        imager_spacing: equal,
+        ..empty()
+    });
+    assert!(detector.is_ok());
+    let Ok(detector) = detector else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(detector.source, CalibrationSource::Detector);
+    assert_eq!(detector.source.name(), "detector");
+    assert_eq!(bits(detector.spacing.row), bits(0.2));
+    assert_eq!(bits(detector.spacing.column), bits(0.2));
+    // A present factor that cannot be used refuses with the F-195 codes: a
+    // non-finite factor is `Frame`, and one that is not strictly positive is
+    // `Unavailable`. The same factors refuse without Pixel Spacing.
+    for (factor, want) in [
+        (f64::NAN, SuvError::Frame),
+        (0.0, SuvError::Unavailable),
+        (-2.0, SuvError::Unavailable),
+    ] {
+        for pixel_spacing in [equal, None] {
+            let refused = select_calibration(CalibrationRequest {
+                pixel_spacing,
+                imager_spacing: equal,
+                estimated_radiographic_magnification_factor: Some(factor),
+                ..empty()
+            });
+            assert!(
+                matches!(refused, Err(error) if error == want),
+                "factor {factor}, pixel spacing {pixel_spacing:?}: {refused:?}"
+            );
+        }
+    }
+    // A pair that differs in one half is a corrected Pixel Spacing and
+    // decides on its own, whatever the factor.
+    let differs = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.2, 0.18)),
+        imager_spacing: equal,
+        estimated_radiographic_magnification_factor: Some(f64::NAN),
+        ..empty()
+    });
+    assert!(differs.is_ok());
+    let Ok(differs) = differs else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(differs.source, CalibrationSource::PixelSpacing);
+    assert_eq!(bits(differs.spacing.column), bits(0.18));
+    // F-211 review pass 2, D1. A pair that differs only in the row half is
+    // corrected too: 0.18\0.2 beside 0.2\0.2 is Pixel Spacing 0.18 and 0.2.
+    let row_differs = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.18, 0.2)),
+        imager_spacing: equal,
+        ..empty()
+    });
+    assert!(row_differs.is_ok());
+    let Ok(row_differs) = row_differs else {
+        unreachable!("asserted immediately above")
+    };
+    assert_eq!(row_differs.source, CalibrationSource::PixelSpacing);
+    assert_eq!(bits(row_differs.spacing.row), bits(0.18));
+    assert_eq!(bits(row_differs.spacing.column), bits(0.2));
+}
+
+#[test]
+fn an_invalid_pixel_spacing_is_refused_beside_an_agreeing_imager_pair() {
+    // F-211 review pass 3, D1. A present Pixel Spacing that is not strictly
+    // positive is refused `Unavailable` and does not fall through (F-195).
+    // An Imager Pixel Spacing within the 1e-9 mm tolerance of it does not
+    // change that: 0\0 beside 5e-10\5e-10, with or without a factor, and
+    // -5e-10\-5e-10 beside 5e-10\5e-10, each differ by 5e-10 or 1e-9 mm and
+    // agree, and each is still refused.
+    //
+    // F-211 review pass 4, S1. The order is Pixel Spacing first, then the
+    // imager path, and both halves of each pair are checked:
+    // - 0\0 with a NaN factor is Pixel Spacing's `Unavailable`, not the
+    //   factor's `Frame`, because Pixel Spacing is checked first.
+    // - 0\0.2 beside 5e-10\0.2, and 0.2\0 beside 0.2\5e-10, agree within
+    //   the tolerance and have one invalid half, which refuses.
+    // - A valid 5e-10\5e-10 beside an agreeing imager pair of 0\0 takes the
+    //   imager path, whose pair is not strictly positive, so it refuses and
+    //   does not fall back to Pixel Spacing.
+    let near = pair(5.0e-10, 5.0e-10);
+    for (pixel, imager, factor) in [
+        (pair(0.0, 0.0), near, None),
+        (pair(0.0, 0.0), near, Some(2.0)),
+        (pair(-5.0e-10, -5.0e-10), near, None),
+        (pair(0.0, 0.0), near, Some(f64::NAN)),
+        (pair(0.0, 0.2), pair(5.0e-10, 0.2), None),
+        (pair(0.2, 0.0), pair(0.2, 5.0e-10), None),
+        (near, pair(0.0, 0.0), None),
+    ] {
+        let refused = select_calibration(CalibrationRequest {
+            pixel_spacing: Some(pixel),
+            imager_spacing: Some(imager),
+            estimated_radiographic_magnification_factor: factor,
+            ..empty()
+        });
+        assert!(
+            matches!(refused, Err(SuvError::Unavailable)),
+            "{pixel:?} beside {imager:?} with factor {factor:?}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn an_equal_pair_is_equal_within_the_one_spacing_tolerance() {
+    // F-211 review pass 2, S1. One definition of an equal pair,
+    // `ocelli_core::spacing_pair_agrees`, the one `ocelli-dicom`'s
+    // `ImagerAgrees` uses. 0.1430000001 and 0.143 are both legal DS text and
+    // differ by about 1e-10 mm, inside the 1e-9 mm tolerance, so the pair is
+    // equal under PS3.3 10.7.1.1 and with no factor it is the detector plane.
+    // A difference of 1e-6 mm is outside it and Pixel Spacing decides.
+    let near = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.143_000_000_1, 0.143_000_000_1)),
+        imager_spacing: Some(pair(0.143, 0.143)),
+        ..empty()
+    });
+    assert!(matches!(near, Ok(found) if found.source == CalibrationSource::Detector));
+    let apart = select_calibration(CalibrationRequest {
+        pixel_spacing: Some(pair(0.143_001, 0.143)),
+        imager_spacing: Some(pair(0.143, 0.143)),
+        ..empty()
+    });
+    assert!(matches!(apart, Ok(found) if found.source == CalibrationSource::PixelSpacing));
+}
+
+#[test]
 fn imager_spacing_divided_by_the_magnification_factor_is_one_tenth() {
     // PS3.3 C.8.11.4 and C.8.7.5. 0.2 / 2 = 0.1. 0.4 / 2 = 0.2.
     let selected = select_calibration(CalibrationRequest {

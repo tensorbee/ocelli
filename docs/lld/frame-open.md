@@ -1,7 +1,7 @@
 # Frame open
 
-**F-IDs that contributed:** F-191, F-210
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-191, F-210, F-229
+**Last updated:** 2026-11-07
 
 `open_frame` reads one Part 10 object and returns the inputs `LutChain`
 already accepts. It does not map samples. The example helper maps the
@@ -97,7 +97,12 @@ use that function.
 
 `PALETTE COLOR` is `ColourSelection::Palette`. RGB and the YBR family are
 `ColourSelection::Colour` with `codec_already_rgb` false until
-`with_codec_rgb(true)`.
+`with_codec_rgb(true)`. `XYB` maps the same way, through
+`PhotometricInterpretation::Xyb`, and `ColorTransform::resolve` then refuses
+it with `CodecOwnedColorTransform` unless the decoder answered `Rgb`, which
+is the one legitimate route because PS3.3 C.7.6.3.1.2 gives XYB no matrix.
+An unrecognised Photometric Interpretation string is still
+`FrameOpenError::Photometric`.
 
 Lossy Image Compression `00` is lossless and `01` is lossy. Any other present
 code is `LossyCode`. Burned In Annotation is `YES` or `NO`. Empty and absent

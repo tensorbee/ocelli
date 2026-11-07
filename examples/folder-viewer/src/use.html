@@ -180,7 +180,7 @@
   <h1>Use the library</h1>
   <p class="lede">A guide to Ocelli as it exists in this repository today. Every name on this page is a real export, read from the source. Where a piece is not built yet, the page says so.</p>
   <div class="note">
-    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws one image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
+    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws each viewport's image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
   </div>
   <p>The window arithmetic lives once, in <code>LutChain</code>, and this page does not copy it. Where a formula matters, the page cites its DICOM section and points at the type that implements it.</p>
 
@@ -363,7 +363,7 @@ function onFrame() {
   requestAnimationFrame(onFrame);
 }
 requestAnimationFrame(onFrame);</code></pre>
-    <p>The ring carries six kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed and presented. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code> and <code>frame.presented</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
+    <p>The ring carries seven kinds today, in <code>RING_EVENT_KIND</code>: evicted, displaced, refused, pressure, budget changed, presented and released. <code>decodeNamedEvent</code> names them <code>cache.evicted</code>, <code>cache.displaced</code>, <code>cache.refused</code>, <code>cache.pressure</code>, <code>cache.budgetChanged</code>, <code>frame.presented</code> and <code>cache.released</code>. <code>OCELLI_EVENTS</code> lists the rest of the catalogue, including pointer, key, touch, tool and annotation names that the shell raises itself. <code>CORNERSTONE_EVENT_MAP</code> maps the cornerstone3D 5.8.2 event names onto these, and <code>UNMAPPED_EVENTS</code> names the ones with no counterpart.</p>
 
     <h3 id="js-state"><span class="num">5.4</span>Reading state</h3>
     <p><code>copy_state()</code> returns a copied 96 byte block. <code>readViewportState</code> reads it into plain numbers and returns <code>null</code> for any other length.</p>
@@ -544,11 +544,11 @@ match DicomwebSource.consume(response)? {
 
   <section class="chapter" id="rust-decode">
     <h2><span class="num">8</span>Rust, decode</h2>
-    <p><code>ocelli_codec::Registry::new()</code> knows the sixteen UIDs in <code>KNOWN_TRANSFER_SYNTAXES</code> and has no decoder until you register one. Five functions register the five families.</p>
+    <p><code>ocelli_codec::Registry::new()</code> knows the nineteen UIDs in <code>KNOWN_TRANSFER_SYNTAXES</code> and has no decoder until you register one. Six functions register the six families.</p>
 <pre><code>use ocelli_codec::{
     register_htj2k_decoders, register_jpeg2000_decoders, register_jpeg_decoders,
-    register_jpegls_decoders, register_native_and_rle_decoders, Capability, Registry,
-    RegistryError,
+    register_jpegls_decoders, register_jpegxl_decoders, register_native_and_rle_decoders,
+    Capability, Registry, RegistryError,
 };
 
 fn registry() -&gt; Result&lt;Registry, RegistryError&gt; {
@@ -558,6 +558,7 @@ fn registry() -&gt; Result&lt;Registry, RegistryError&gt; {
     register_jpeg2000_decoders(&amp;mut registry)?;
     register_jpegls_decoders(&amp;mut registry)?;
     register_htj2k_decoders(&amp;mut registry)?;
+    register_jpegxl_decoders(&amp;mut registry)?;
     Ok(registry)
 }
 
@@ -579,9 +580,12 @@ registry.decode(transfer_syntax_uid, encoded, &amp;desc, &amp;mut out)?;</code><
         <tr><td><code>1.2.840.10008.1.2.4.80</code>, <code>.81</code></td><td>JPEG-LS Lossless, Near Lossless</td><td>JPEG-LS</td></tr>
         <tr><td><code>1.2.840.10008.1.2.4.90</code>, <code>.91</code></td><td>JPEG 2000 Lossless, JPEG 2000</td><td>JPEG 2000</td></tr>
         <tr><td><code>1.2.840.10008.1.2.4.201</code>, <code>.202</code>, <code>.203</code></td><td>HTJ2K Lossless, Lossless RPCL, HTJ2K</td><td>HTJ2K</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.110</code></td><td>JPEG XL Lossless</td><td>JPEG XL</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.111</code></td><td>JPEG XL JPEG Recompression</td><td>None, unavailable</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.112</code></td><td>JPEG XL</td><td>JPEG XL</td></tr>
       </tbody>
     </table></div>
-    <p>Fifteen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. <code>crates/ocelli-codec/tests/registry.rs</code> asserts both halves.</p>
+    <p>Seventeen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. JPEG XL JPEG Recompression has no decoder either: <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. <code>crates/ocelli-codec/tests/registry.rs</code> asserts the nineteen, the seventeen and which two are unavailable.</p>
   </section>
 
   <section class="chapter" id="lut">
@@ -668,7 +672,7 @@ match StackGeometry::derive(&amp;multi)?.shear() {
 }</code></pre>
     <p>A <code>Pt&lt;World&gt;</code> and a <code>Pt&lt;Index&gt;</code> are different types, so a transform cannot be handed a point from the wrong space. <code>World</code> is the LPS patient system in millimetres.</p>
     <p>Stack shear is measured from the geometry, never read from Gantry/Detector Tilt <code>(0018,1120)</code>, which is Type 3 and nominal. Non uniform frame spacing, non parallel frames and coincident frames are refused rather than averaged, because rendering them as uniform distorts geometry in a way no measurement tool flags.</p>
-    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 C.7.6.1.1.5. On a projection radiograph they differ by the magnification factor, so one is never substituted for the other. <code>ocelli_geom::select_calibration</code> names the source it used.</p>
+    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated. <code>ocelli_geom::select_calibration</code> names the source it used, so a measurement never reports one as the other.</p>
 <pre><code>use ocelli_geom::{select_calibration, CalibrationRequest, SpacingMm};
 
 let calibration = select_calibration(CalibrationRequest {
@@ -681,6 +685,20 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p><code>ocelli_viewport::link</code> links two viewports from their planes. <code>same_frame_of_reference</code> is true only when both Frame of Reference UIDs are present and equal, so a missing UID links nothing. <code>closest_coplanar</code> answers the index in a target stack whose Image Position (Patient) is nearest the source's, keeping the lower index on a tie, and is <code>LinkError::NotCoplanar</code> when the absolute dot product of the source normal and the shown target normal is not above <code>COPLANAR_DOT</code>, 0.9. <code>reference_segment</code> answers where the source plane cuts the target, as two points in the target's index space with the first pixel centre at 0, and is <code>LinkError::Parallel</code> when the absolute dot product is above <code>1 - PLANE_EPSILON</code>. <code>closest_coplanar</code> is <code>LinkError::Degenerate</code> when no distance is finite, which includes an empty stack. <code>reference_segment</code> is <code>LinkError::Degenerate</code> for a point that is not finite and for a target with a zero spacing on its single row or column. The two constants are cornerstone3D 5.8.2's. <code>SyncScene</code> uses the same UID rule.</p>
+<pre><code>use ocelli_viewport::link::{
+    closest_coplanar, reference_segment, same_frame_of_reference, FrameOfReferenceUid, LinkError,
+};
+
+if same_frame_of_reference(Some(&amp;source_uid), Some(&amp;target_uid)) {
+    let next = closest_coplanar(&amp;source_plane, &amp;shown_plane, &amp;target_planes)?;
+    match reference_segment(&amp;source_plane, &amp;target_planes[next]) {
+        Ok((start, end)) =&gt; { /* column x and row y in the target's index space */ }
+        Err(LinkError::Parallel) =&gt; {}
+        Err(_) =&gt; {}
+    }
+}</code></pre>
+    <p>PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as the Imager Pixel Spacing, so an equal pair takes the imager path. The pair is equal when both halves agree within <code>ocelli_core::SPACING_EQUALITY_MM</code>, the same rule <code>ImagerAgrees</code> uses. With a magnification factor the source is <code>"imager-spacing"</code>. With none it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A factor that is present but not finite, or not strictly positive, is refused, as it is without Pixel Spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
   <section class="chapter" id="measure">
@@ -695,6 +713,7 @@ let mm = distance(a, b)?;
 
 let stats = roi_statistics(&amp;samples, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
     <p>The full set is <code>distance</code>, <code>length</code>, <code>polyline_length</code>, <code>height</code>, <code>angle_at</code>, <code>cobb</code>, <code>bidirectional</code>, <code>rectangle</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon_area</code>, <code>spline_point</code>, <code>hit_segment</code>, <code>project_onto_segment</code> and <code>project_onto_plane</code>. Statistics are <code>roi_statistics</code> and <code>histogram</code>. PET SUV is <code>suv_bw</code>, <code>suv_lbm</code> and <code>suv_bsa</code>. Refusals are <code>GeomError</code> and <code>SuvError</code>.</p>
+    <p>Which samples a region holds is <code>region_contains</code> and <code>region_bounds</code>, over a <code>RegionShape</code> of a rectangle, an axis-aligned ellipse or a polygon in index space. A sample belongs to a region when its pixel centre, the index point <code>(c, r)</code>, is inside the shape or on its boundary, and the polygon rule is the same even-odd and on-edge rule <code>ocelli-seg</code> paints a contour with. <code>polygon_crosses_itself</code> says whether a ring crosses or touches itself anywhere but at the shared vertex of two neighbouring edges.</p>
     <p><code>livewire_path</code>, <code>livewire_mask</code> and <code>redact_rect</code> live here too.</p>
   </section>
 
@@ -712,6 +731,20 @@ let mut cache: Lru&lt;u64, Frame&gt; = Lru::new(CacheTier::Decoded, 64 * 1024 * 
 let Admission { evicted, displaced, refused } = cache.insert(7, Frame(bytes));
 let band = cache.pressure().band();     // Low, Elevated or Critical</code></pre>
     <p>An eviction, a replacement and a refusal are three different outcomes, and <code>Admission</code> is the only thing that tells them apart, so it is <code>#[must_use]</code>. The bands sit at one half and nine tenths of the budget. The value types in the library are <code>DecodedFrame</code> and <code>Brick</code> in <code>ocelli-cache</code> and <code>Volume</code> in <code>ocelli-volume</code>.</p>
+    <p>Leaving a series releases all of its frames in one call, and leaving a volume releases every brick of every level. Neither is an eviction. <code>release_series</code> returns one <code>Released</code> event for the series, which the ring carries as <code>cache.released</code>, and nothing when the series held nothing. <code>release_volume</code> returns a <code>ReleaseSummary</code>, because volumes and bricks have no ring event.</p>
+<pre><code>use ocelli_cache::{BrickCache, CacheEvent, ImageCache, SeriesId, VolumeId};
+use ocelli_volume::{VolumeCache, VolumeKey};
+
+let events = images.release_series(SeriesId(5));       // images: ImageCache
+for event in events.events() {
+    if let CacheEvent::Released { series, frames, bytes } = event {
+        // one event for the whole series, `bytes` left the budget
+    }
+}
+let gone = bricks.release_volume(VolumeId(2));          // bricks: BrickCache
+let _ = (gone.entries, gone.bytes);                     // every level of volume 2
+let _ = volumes.remove(&amp;VolumeKey { series: SeriesId(5) }); // volumes: VolumeCache</code></pre>
+    <p>The cache has no study. A study is released by whoever owns it calling <code>release_series</code> for each of its series, <code>VolumeCache::remove</code> for each of its volumes and <code>release_volume</code> for each of its bricked volumes. This folder viewer releases by file instead: opening another folder or the synthetic study sends the left folder's ids to <code>POST /forget</code>, which drops each file and every frame of it from the local process.</p>
     <p><code>ocelli_volume::group_volumes</code> splits decoded frames by frame of reference and orientation together, so a localiser mixed with axials is two candidates. <code>Volume::assemble</code> then refuses a candidate that is not one volume.</p>
 <pre><code>use ocelli_volume::{group_volumes, FrameOfReferenceUid, Volume};
 

@@ -110,7 +110,11 @@ rendering.
   must not be depended on either, and
   `scripts/source_provenance_check.py` enforces all three.
 - **No `unsafe`** outside `ocelli-wasm/src/ring.rs` and
-  `ocelli-core/src/cast.rs`.
+  `ocelli-core/src/cast.rs`. rustc forbids it through `[workspace.lints.rust]`,
+  every library root forbids it in doctests, and
+  `scripts/unsafe_allowlist_check.py` audits what rustc does not reach. The
+  first story that writes one of the two files follows the sequence in that
+  script's docstring.
 - **wgpu is pinned exactly.** Treat GPU code that compiles first try with
   suspicion. Agents confidently emit APIs that have not existed for two years.
 - **Never re-type file content from tool output.** Tool output truncates and

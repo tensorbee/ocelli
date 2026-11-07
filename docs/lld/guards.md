@@ -1,7 +1,7 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219, F-220
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219, F-220, F-232
+**Last updated:** 2026-11-07
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.

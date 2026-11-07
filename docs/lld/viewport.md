@@ -1,7 +1,7 @@
 # Viewport
 
-**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055, F-X004
-**Last updated:** 2026-11-01
+**F-IDs that contributed:** F-045, F-046, F-047, F-048, F-049, F-050, F-052, F-053, F-101, F-X003, F-X022, F-054, F-055, F-X004, F-209
+**Last updated:** 2026-11-07
 
 `View` in `crates/ocelli-viewport` is the stack camera. It does not draw.
 `RenderGraph::set_view` uploads the CSS matrix `View::camera_matrix` returns
@@ -88,7 +88,7 @@ Presented. Its payload is generation, drawn width, drawn height and flags.
 The drawn extent is the reduced grid during interaction and the full device
 on settle. A full ring drops the new event. `copy_pending` writes a 16-byte header whose
 first word is the pending count, then the events in order, and advances.
-Cache kinds 1 to 5 are not produced here.
+Cache kinds 1 to 5 and 7 are not produced here.
 
 ## What the GPU stores
 
@@ -259,8 +259,9 @@ F-X004 does not present a slab.
 
 `SyncScene` keeps one patient point across viewports that share a
 `FrameOfReferenceUID`. The UID is the existing `FrameOfReferenceUid` string.
-Comparison is that string. A trailing space is a different UID. The scene
-does not parse it and does not trim it.
+Comparison is `link::same_frame_of_reference`, described below, so the rule
+lives in one function. A trailing space is a different UID. The scene does
+not parse it and does not trim it.
 
 `register` stores one slot, or replaces the slot with the same `u16`. It
 does not move a peer. `set_point` looks up the source. A missing source or
@@ -276,6 +277,61 @@ empty list is a successful no-op. The anchor stays the world point of index
 0. The normal and the spacing stay. The geometry is the volume function, so
 tier A, tier B and tier C store the same index. This crate creates no
 device.
+
+## Linked viewports
+
+`link` holds the geometry of linked scroll and reference lines over a list of
+planes that need not be uniformly spaced, which `SyncScene`'s `HeldPlane`
+cannot describe. F-209 added it. It is `no_std` with `alloc`, holds no state
+and creates no device.
+
+- `same_frame_of_reference(Option<&FrameOfReferenceUid>,
+  Option<&FrameOfReferenceUid>)` is true only when both are `Some` and equal
+  as strings. PS3.3 C.7.4.1.1.1 says the UID uniquely identifies a Frame of
+  Reference for a Series, that several series in a study may share one, and
+  that all images in a series that share the same UID are spatially related.
+  The sentence on spatial relation is scoped to a series. Linking two series
+  rests on the UID identifying one Frame of Reference, as cornerstone3D
+  5.8.2's `getFrameOfReferenceUID()` equality does. A missing UID links
+  nothing, not even to another missing one. `FrameOfReferenceUid` is
+  re-exported here so a caller needs no dependency on `ocelli-volume`.
+- `closest_coplanar(source, shown, stack)` is the index into `stack` whose
+  Image Position (Patient) is nearest the source's, by Euclidean distance in
+  millimetres, with a strict `<` so a tie keeps the lower index. It is
+  `LinkError::NotCoplanar` when `abs(dot)` of the source normal and the shown
+  target normal is not above `COPLANAR_DOT`, 0.9, and `LinkError::Degenerate`
+  when no distance is finite, which includes an empty stack.
+- `reference_segment(source, target)` is where the source plane cuts the
+  target, as two `Pt<Index>` in the target's index space, column `x` and row
+  `y`, with the first pixel centre at 0. The source corners are the centres
+  of its four corner pixels through `index_to_world`. When the source's
+  top-bottom edge is perpendicular to the target normal within
+  `PLANE_EPSILON`, 1e-3, the top and bottom edges are cut, otherwise the left
+  and right. It is `LinkError::Parallel` when `abs(dot)` of the normals is
+  above `1 - PLANE_EPSILON`, and `LinkError::Degenerate` for a non-finite
+  point or for a target with a zero spacing, which PS3.3 10.7.1.3 allows only
+  on a single row or column and where `index_to_world` puts a unit extension.
+
+`COPLANAR_DOT` is cornerstone3D 5.8.2's `areViewportsCoplanar` threshold and
+`PLANE_EPSILON` its `EPSILON`, used by `isParallel` and `isPerpendicular` in
+`ReferenceLinesTool`. The intersection is that tool's `linePlaneIntersection`
+with `showFullDimension: false` over the whole source image. Registration
+across frames of reference is not done.
+
+The normal is `ImagePlane::slice_normal`, `X cross Y`. PS3.3 C.7.6.2.1.1
+spans the image plane with the row cosine `X` and the column cosine `Y` and
+requires them orthogonal and of unit length, so that cross product is a unit
+normal of the plane. The section does not name a normal, and no rule here
+reads its sign, because every comparison takes the absolute value of a dot
+product. The index is `index_to_world().inverse()`, the pattern
+`placement::frame_shift` uses. The arithmetic is `f64` CPU arithmetic, so
+tiers A, B and C give the same answer.
+
+The folder viewer's `POST /link` is the one caller of the geometry functions
+today, and `SyncScene` also calls `same_frame_of_reference`. It sends each plane
+as a token of thirteen numbers written by the local process and rebuilds it
+through the `ocelli-pixel` constructors, and the page draws the returned line
+in image pixel units, one half pixel from index space.
 
 ## What this file does not own
 

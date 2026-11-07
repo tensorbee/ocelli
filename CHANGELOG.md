@@ -551,6 +551,56 @@ Repository bootstrap. Nothing is published.
   pointer, HU on a CT that states HU or states no unit and is not
   multi-energy, and Units on a PET. The local process computes it from the
   held frame, and `ocelli-dicom` gains `read_padding`.
+- The local folder viewer measures angle, Cobb angle, bidirectional, arrow,
+  probe and regions with area, mean, SD, minimum and maximum in modality
+  units, with editable handles and a measurement list. An outline that
+  crosses or touches itself is not measured. A projection image whose Pixel
+  Spacing equals its Imager Pixel Spacing is measured at the detector plane
+  unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
+  gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
+  `spacing_pair_agrees`, the one definition of an equal spacing pair.
+- The local folder viewer lays out 1 by 1 up to 3 by 3 viewports from a
+  picker on `G`, each with its own series, image, zoom, pan and window. A
+  series row dragged onto a viewport opens there, and the four-image view is
+  a tile mode of one viewport on `Shift G`. Bare digits no longer choose a
+  layout. A `viewer-browser` gate measures the displayed aspect and the
+  pointer readout in headless Chromium.
+- The local folder viewer links its viewports. A Link menu turns on Scroll,
+  Window and Zoom over every visible viewport, with the outlined one as the
+  source, and Reference lines draw where the source image's plane cuts each
+  other viewport. Scroll moves to the nearest image by Image Position
+  (Patient) when both series share a Frame of Reference UID and their planes
+  are within cornerstone3D 5.8.2's coplanar threshold. The local process
+  chooses the image and computes the line through the new
+  `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
+  and `reference_segment`, and `SyncScene` now uses the same UID rule. The
+  corner of an image that is not monochrome reads `Window not applicable`.
+- Release by series and by volume. `ImageCache::release_series` releases
+  every frame of one series and returns one `Released` event, which the ring
+  carries as the new kind 7, `cache.released`, with the series, the frame
+  count and the bytes. `BrickCache::release_volume` releases every brick of
+  every level of one volume and returns a `ReleaseSummary`. Both go through
+  the new `Lru::remove_range`, an explicit release that is not an eviction.
+  `@ocelli/core` decodes `cache.released` and lists it in `UNMAPPED_EVENTS`,
+  because cornerstone3D 5.8.2 reports a removed image per image. The cache
+  has no study, so a study is released by its owner's series and volumes.
+  The local folder viewer now forgets the folder it left. Opening another
+  folder or the synthetic study sends that folder's ids to the new
+  `POST /forget`, and leaving the page sends one short beacon naming a
+  per-load page token, so `GET /held` counts only what is open. A late reply
+  for the folder left does not post its file again, and a decode already
+  running for a forgotten file stores nothing.
+- JPEG XL decoding. `register_jpegxl_decoders` registers a sixth decoder
+  family in `ocelli-codec` for JPEG XL Lossless, `1.2.840.10008.1.2.4.110`,
+  and JPEG XL, `.112`, through `jxl-oxide` with default features off.
+  Lossless frames decode to their exact stored values and lossy frames are
+  quantised to Bits Stored. JPEG XL JPEG Recompression, `.111`, is known and
+  unavailable until an upstream panic, jxl-oxide issue 512, is fixed. A
+  signed, ICC, HDR, oriented or extra-channel frame is refused as
+  unavailable, and a frame of more than one keyframe is refused as a
+  mismatch, rather than drawn. `XYB` is a recognised
+  Photometric Interpretation whose colour conversion the codec owns. The
+  local folder viewer opens monochrome `.110` and `.112` frames.
 
 ### Changed
 
@@ -562,3 +612,10 @@ Repository bootstrap. Nothing is published.
   or `TypeError` from a view over wasm memory still passes through.
 - `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
   the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.
