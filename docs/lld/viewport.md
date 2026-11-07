@@ -88,7 +88,7 @@ Presented. Its payload is generation, drawn width, drawn height and flags.
 The drawn extent is the reduced grid during interaction and the full device
 on settle. A full ring drops the new event. `copy_pending` writes a 16-byte header whose
 first word is the pending count, then the events in order, and advances.
-Cache kinds 1 to 5 are not produced here.
+Cache kinds 1 to 5 and 7 are not produced here.
 
 ## What the GPU stores
 

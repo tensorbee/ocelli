@@ -182,7 +182,7 @@ The owner of release accounting is `Lru::remove_range`. The owner of the release
 | Series 7 holds nothing | `release_series(SeriesId(7))` | no event | unchanged |
 | Volume 2 holds bricks on levels 0 and 1, volume 3 holds bricks | `release_volume(VolumeId(2))` | every level of volume 2 removed | volume 3 untouched |
 | Folder A open, ids held | open folder B | page sends A's ids, `/forget` removes A's files and frames | B's posts proceed |
-| A decode for A's id in flight | `/forget` of that id | id doomed, the decode returns its reply, nothing inserted, id leaves `doomed` | `GET /held` never counts it again |
+| A decode for A's id in flight | `/forget` of that id | id doomed, nothing inserted, the request answers with its frame, or 410 Gone after a wait for grey room, id leaves `doomed` | `GET /held` never counts it again |
 | A late `410` for A's file after B is open | `ensureFile(fileA)` | refused, no post | A stays forgotten |
 | Page open | `pagehide` | beacons in chunks of at most 1,700 ids | a failed beacon leaves entries to age out |
 | `/forget` body with one malformed line | request | `400 forget` | nothing removed |
@@ -317,3 +317,27 @@ None. Section 17.3 lists no kinds, so kind 7 fills an unspecified slot. Section 
 - Q3, one event per series. Answered: lead decision under the operator's delegation of 2026-11-05. Decision 3.
 - Q4, the forget route, its race and its timing. Answered: lead decision under the operator's delegation of 2026-11-05. Decisions 5 to 8.
 - Q5, order. Answered: lead decision under the operator's delegation of 2026-11-05. After F-208, before F-224, recorded under Dependencies.
+
+### Lead amendment after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-226-working-pass-2.md`. AC3's fixture holds the state table's first three rows plus a frame at each end of the series range, so the range ends are tested. Its expected frames and bytes follow from that fixture and are hand-computed in the test, and they are not the state table's figures.
+
+### Lead amendments for the folder viewer half, against F-209's tree
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against the sprint head after F-209. Where these differ from the text above, these win. Line numbers are re-measured at implementation.
+
+- **There is no `restore_file`.** `preview_source` hands out shared posted bytes. The in-flight count is taken where `preview_source` hands out the shared bytes, and only `store_frame_with` checks the doomed set. Decision 6, Approach step 4 and the state table row for an in-flight decode are restated on that basis.
+- **The forget goes through the existing removal path.** It removes through `forget_frame` and `reclaim_held`, so `frame_order`, `files`, `frames` and the free buffer lists stay consistent. A test forgets a file with frames held and then shows a later store and eviction behave as if the file had never been held.
+- **One forget path.** The production forget replaces the test-only `forget_file`, and its tests move to the production route.
+- **New refusals are claimed.** Any refusal the `/forget` route adds is registered with `scripts/guards/catalogue.py` and the census stays at zero unwatched.
+- **The new browser check is wired** into `bin/ocelli.sh viewer-browser` and its `--list` description, beside `aspect.mjs`, `readout.mjs` and `link.mjs`.
+- **Pass 4's carried note** on `RingEvent::kind`'s doc is fixed if it is still untrue.
+
+### Lead ruling after the viewer half's AC15 measurement
+
+Made by the sprint lead on 2026-11-07. The implementer measured in Chromium that the 64 KiB keepalive limit is on all keepalive bytes in flight from the page, not on each beacon, so decision 7's two beacons of 1,700 ids can never both arrive, and a 3,400-file folder left 1,700 files held.
+
+- **Leaving the page forgets by page, in one short beacon.** Each page load makes a random page token and sends it with every `/file` post. The server records the token beside each held file. On `pagehide` the page sends one beacon naming its token, and the server forgets every file posted under it, through the same removal path as `/forget`. Another page's files are untouched. Opening another folder still forgets by id, through an ordinary request with no keepalive limit.
+- **AC15 is restated.** A 3,400-file synthetic folder sends exactly one beacon on `pagehide`, under 1 KiB, after which `GET /held` counts none of that page's files, while a second page's held files are unchanged. Sending one beacon per id goes red, and so does forgetting by token without matching the token.
+- **The token is not trusted for more than its own files.** A malformed token is refused with `400 forget`. An unknown token forgets nothing and answers four zeros.
+- **Content type.** `/forget` replies with the same JSON content type as the other JSON routes.

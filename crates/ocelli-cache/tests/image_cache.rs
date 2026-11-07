@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 
 use ocelli_cache::{
     Budgeted, CacheEvent, DecodedFrame, FrameKey, ImageCache, KIND_DISPLACED, KIND_EVICTED,
-    KIND_REFUSED, RingEvent, SeriesId,
+    KIND_REFUSED, KIND_RELEASED, RingEvent, SeriesId,
 };
 use ocelli_pixel::{
     ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient,
@@ -274,6 +274,7 @@ fn kind_numbers_are_pinned_to_the_wire_values() {
     assert_eq!(KIND_EVICTED, 1);
     assert_eq!(KIND_DISPLACED, 2);
     assert_eq!(KIND_REFUSED, 3);
+    assert_eq!(KIND_RELEASED, 7);
     assert_eq!(
         CacheEvent::Evicted {
             key: key(1, 1, 0),
@@ -300,6 +301,16 @@ fn kind_numbers_are_pinned_to_the_wire_values() {
         .encode(0)
         .kind,
         3
+    );
+    assert_eq!(
+        CacheEvent::Released {
+            series: SeriesId(1),
+            frames: 1,
+            bytes: 1
+        }
+        .encode(0)
+        .kind,
+        7
     );
 }
 
@@ -373,6 +384,91 @@ fn one_insert_can_displace_and_evict_with_displaced_first() -> Result<(), ocelli
     Ok(())
 }
 
+#[test]
+fn release_series_releases_one_series() -> Result<(), ocelli_pixel::PixelError> {
+    // The state table's first three rows plus a frame at each end of the
+    // series range, so the range ends are tested. Series 5 holds five
+    // frames of 32 bytes at (5, 0, 0), (5, 1, 0), (5, 2, 0), (5, 3, 0) and
+    // (5, u32::MAX, u32::MAX), the outer two being the range's own end
+    // keys, and series 6 holds one, so 6 * 32 = 192 fills a 192-byte
+    // budget. The expected frames and bytes are this fixture's,
+    // hand-computed, and not the state table's figures: the release takes
+    // series 5's 5 * 32 = 160 and leaves series 6's 32.
+    let mut cache = ImageCache::new(192);
+    assert!(
+        cache
+            .insert(key(5, 0, 0), make_frame(1, 1, 8, vec![0_u8; 32])?)
+            .is_empty()
+    );
+    for instance in 1_u32..=3 {
+        assert!(
+            cache
+                .insert(key(5, instance, 0), make_frame(1, 1, 8, vec![0_u8; 32])?)
+                .is_empty()
+        );
+    }
+    assert!(
+        cache
+            .insert(
+                key(5, u32::MAX, u32::MAX),
+                make_frame(1, 1, 8, vec![0_u8; 32])?
+            )
+            .is_empty()
+    );
+    assert!(
+        cache
+            .insert(key(6, 0, 0), make_frame(1, 1, 8, vec![0_u8; 32])?)
+            .is_empty()
+    );
+    assert_eq!(cache.pressure().used, 192);
+
+    let events = cache.release_series(SeriesId(5));
+    assert_eq!(
+        events.events(),
+        [CacheEvent::Released {
+            series: SeriesId(5),
+            frames: 5,
+            bytes: 160,
+        }]
+    );
+    assert_eq!(cache.pressure().used, 32);
+    // Series 6's first key is exactly the key an end bound of
+    // (series + 1, 0, 0) inclusive would take, so this is the contains
+    // that rejects it. The extreme keys are the ones an end bound of
+    // (series, 3, 0) or (series, u32::MAX, 0), or a start bound of
+    // (series, 1, 0), would leave behind.
+    assert!(cache.contains(&key(6, 0, 0)));
+    assert!(!cache.contains(&key(5, 0, 0)));
+    assert!(!cache.contains(&key(5, 1, 0)));
+    assert!(!cache.contains(&key(5, 2, 0)));
+    assert!(!cache.contains(&key(5, 3, 0)));
+    assert!(!cache.contains(&key(5, u32::MAX, u32::MAX)));
+
+    // A repeat finds nothing held and emits nothing.
+    let events = cache.release_series(SeriesId(5));
+    assert!(events.is_empty());
+    assert_eq!(cache.pressure().used, 32);
+
+    // A series that holds nothing emits nothing.
+    let events = cache.release_series(SeriesId(7));
+    assert!(events.is_empty());
+    assert_eq!(cache.pressure().used, 32);
+
+    // Series 6's frame is the only survivor and leaves by nothing but a
+    // later eviction. 32 + 161 = 193 is one over the budget, so the next
+    // insert evicts it. A range that bled into series 6 would have
+    // released it here already and evicted nothing.
+    let events = cache.insert(key(7, 1, 0), make_frame(1, 1, 8, vec![0_u8; 161])?);
+    assert_eq!(
+        events.events(),
+        [CacheEvent::Evicted {
+            key: key(6, 0, 0),
+            bytes: 32,
+        }]
+    );
+    Ok(())
+}
+
 proptest! {
     /// The events of every insert account for what the cache stopped holding.
     /// A shadow map is updated from the events alone, never from the cache,
@@ -406,6 +502,11 @@ proptest! {
                         prop_assert_eq!(gone, frame_key);
                         prop_assert_eq!(gone_bytes, bytes);
                         refused = true;
+                    }
+                    CacheEvent::Released { .. } => {
+                        // `release_series` is the only producer and is not
+                        // on the insert path this property drives.
+                        return Err(TestCaseError::fail("a Released event left an insert"));
                     }
                 }
             }

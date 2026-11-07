@@ -97,6 +97,7 @@ export const RING_EVENT_KIND = {
   pressure: 4,
   budget_changed: 5,
   presented: 6,
+  released: 7,
 } as const;
 
 export const FLAG_INVERT = 1;

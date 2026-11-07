@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226
+**Last updated:** 2026-11-07
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -22,7 +22,7 @@ crate links no `wgpu`, and is `#![cfg_attr(not(test), no_std)]` over `alloc`.
 | `Pressure` | One tier's reading: the tier, the bytes used and the budget |
 | `DecodedFrame` | F-032. The decoded tier's value type. Its `bytes` is the sample buffer length |
 | `ImageCache` | F-032. An `Lru<FrameKey, DecodedFrame>` fixed to the decoded tier, returning events |
-| `CacheEvent` | F-032. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused` |
+| `CacheEvent` | F-032 and F-226. One variant per `Admission` field: `Evicted`, `Displaced`, `Refused`, plus `Released` from a series release |
 | `RingEvent` | F-032. Section 17.3's 48-byte event envelope, `#[repr(C)]` and `Pod` |
 | `HandoffMeta` | F-035. Frame identity plus the sample length a section 24 transfer must match. `#[repr(C)]`, little-endian, no samples |
 | `HandoffError` | F-035. `Length` when the buffer length is not `HandoffMeta.bytes` |
@@ -50,11 +50,11 @@ nothing to notice. Reading it once makes `used` the sum of the live entries'
 admitted bytes, which `tests/invariants.rs` asserts after every operation of a
 random sequence.
 
-Three unit tests hold that down with a value that reports a different size after
-admission, one for each place bytes are given back: `remove`, an eviction, and
-the replacement of a live key. They exist because every other value in the suite
-is immutable, so no number of random cases can tell a cache that kept the
-admitted number from one that re-reads it.
+Four unit tests hold that down with a value that reports a different size after
+admission, one for each place bytes are given back: `remove`, an eviction, the
+replacement of a live key, and `remove_range`. They exist because every other
+value in the suite is immutable, so no number of random cases can tell a cache
+that kept the admitted number from one that re-reads it.
 
 ## What `insert` returns, and why it is not section 20's vector
 
@@ -237,6 +237,57 @@ a file post can wait as long, because each of up to four waiting previews
 keeps its request body slot. Measured with four waiting, a file post waited
 58.99 seconds.
 
+The folder viewer forgets a folder the page has left. `POST /forget` takes
+held ids, one `<generation>.<serial>` per line, LF separated, at most 65,536
+lines and 4 MiB. Every line is parsed with `FileId::parse` before anything is
+removed, so one line that is not an id forgets nothing and answers `400` with
+`X-Ocelli-Error: forget`, and an `X-Ocelli-File` header answers `400 header`.
+For each id `Viewer::forget` removes `HeldKey::File(id)` with `Lru::remove`
+and every `HeldKey::Frame(id, n)` with one `Lru::remove_range`, which is
+contiguous because `HeldKey` orders by id before frame. Each frame leaves
+through `forget_frame` and `reclaim_held`, the bookkeeping eviction uses, so
+the frame order, the counts and the free list are as if the id had never been
+held. The reply counts `files`, `frames`, the admitted `bytes` and `unknown`,
+the ids that held nothing, which include another generation's ids and a
+repeat. This is the only forget path. The test-only `forget_file` it replaced
+is gone.
+
+A forget wins against a decode already in flight. `preview_source` counts
+each decode it hands posted bytes to in `in_flight`, and a forget of an id
+with a non-zero count adds it to `doomed`. `store_frame_with` stores nothing
+for a doomed id and returns the frame to its own request. That request is
+answered with the frame, except on the decode workers when its render had
+to wait for grey room. Then nothing was stored, so the round after the wait
+finds the id gone and answers 410 Gone, as F-216 does for any file forgotten
+during that wait, or 503 if the wait itself runs out. Each decode's place in the count is a `Flight` that the
+route keeps until after its store, on the direct path, the decode workers
+and `/value` and `/measure`, and the last one out for an id takes it out of
+both sets. A flight lasts from the lookup that hands out the posted bytes until
+after the store, and on the decode workers through the grey wait that
+follows it, so both sets are bounded by the requests in flight, which F-216 caps
+at 32 connections.
+
+The page forgets. Every open, a folder or the synthetic study, sends the
+previous open's ids with `fetch` and replaces the set of files the page may
+post, so `ensureFile` refuses a file of an open the page has left and a late
+`410` for it does not post it again. An id that arrives after another open
+began is forgotten at once.
+
+Leaving the page forgets by page rather than by id. Each page load makes a
+random token of 32 lowercase hex digits and sends it as `X-Ocelli-Page` with
+every `/file` post, and `CacheState` records it beside the id. On `pagehide`
+the page sends one beacon whose body is `page <token>`, and
+`Viewer::forget_page` forgets every id recorded under that token through the
+same `forget_ids` as `/forget` by id, so a doomed decode and the counts are
+kept one way and another page's files are untouched. A malformed token is
+`400 forget` and an unknown one forgets nothing. A list of ids would not do:
+Chromium allows 64 KiB of beacons in flight at once, over all of them rather
+than each, and measured two beacons of 1,700 ids, 35,699 bytes each, returned
+true and then false. Eviction does not touch the token record, so
+`sweep_pages` drops the ids that hold nothing once the record passes 4,096
+and twice the entries held. A forget that fails is not retried, and the
+budget still bounds what the process holds.
+
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.
 No other crate names it.
@@ -245,19 +296,24 @@ No other crate names it.
 
 `ImageCache::insert` converts the `Admission` into `CacheEvents`, displaced
 first because `Lru` releases the previous value before eviction begins, then
-the evictions in least recently used order. **The three variants are never
-collapsed.**
+the evictions in least recently used order. `release_series` adds `Released`.
+**The four variants are never collapsed.**
 
 `CacheEvent::encode` writes the event into section 17.3's `RingEvent`: kind
-1, 2 and 3 for evicted, displaced and refused, `viewport` as `u32::MAX`
-because an eviction belongs to no viewport and zero is a valid viewport id,
-and a payload of series, instance, frame and bytes, little-endian, with the
-last eight bytes reserved and zero. The numbers are the wire contract until
-F-103 decides whether event kinds get a registry, so a test pins each one.
+1, 2 and 3 for evicted, displaced and refused and kind 7 for a released
+series, `viewport` as `u32::MAX` because an eviction belongs to no viewport
+and zero is a valid viewport id, and a payload that is little-endian with
+the last eight bytes reserved and zero. Kinds 1, 2 and 3 carry the series
+as `u64`, the instance and the frame as `u32` and the bytes as `u64`. Kind
+7 carries the series as `u64`, `frames` as `u32`, a zero `u32` where the
+frame sits, and the bytes as `u64`, so every kind `encode` writes keeps
+`bytes` at offset 16. The numbers are the wire contract until F-103 decides whether event
+kinds get a registry, so a test pins each one.
 
 **This crate still does not own a ring and still does not reach JavaScript.**
 F-101's `EventRing` lives in `ocelli-viewport` and reuses this `RingEvent`
-layout. Kind 6 is Presented. Kinds 1 to 5 are unchanged. This story stops at
+layout. Kind 6 is Presented. Kinds 1 to 5 are unchanged and kind 7 is a
+release. This story stops at
 the tested encoding, which the
 S12 design round decided for F-032 and F-034 together, and `CacheEvents`
 wraps a `Vec` that allocates on the insert path as `Lru::insert` does. One
@@ -366,9 +422,11 @@ HLD section 20's first bullet forbids allocation in the render loop, and its own
 not a render-loop call.** Insertion happens on the decode and upload paths, and
 the render loop's cache interaction is `get`.
 
-**`insert` and `set_budget` are the methods on `Lru` that allocate.** A shrink
-allocates when it pushes an eviction. A grow and a repeated budget push
-nothing. The other methods do not build a `Vec`.
+**`insert`, `set_budget` and `remove_range` are the methods on `Lru` that
+allocate.** A shrink allocates when it pushes an eviction. A grow and a
+repeated budget push nothing. `remove_range` builds the key collection and
+the pairs it returns, which is why it is a release call and not a
+render-loop call. The remaining methods do not build a `Vec`.
 
 **`insert` can allocate**, and the doc comment on it says so, because the
 sentence a later story needs is the one that stops it calling this per frame.
