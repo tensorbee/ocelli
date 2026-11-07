@@ -237,6 +237,43 @@ a file post can wait as long, because each of up to four waiting previews
 keeps its request body slot. Measured with four waiting, a file post waited
 58.99 seconds.
 
+The folder viewer forgets a folder the page has left. `POST /forget` takes
+held ids, one `<generation>.<serial>` per line, LF separated, at most 65,536
+lines and 4 MiB. Every line is parsed with `FileId::parse` before anything is
+removed, so one line that is not an id forgets nothing and answers `400` with
+`X-Ocelli-Error: forget`, and an `X-Ocelli-File` header answers `400 header`.
+For each id `Viewer::forget` removes `HeldKey::File(id)` with `Lru::remove`
+and every `HeldKey::Frame(id, n)` with one `Lru::remove_range`, which is
+contiguous because `HeldKey` orders by id before frame. Each frame leaves
+through `forget_frame` and `reclaim_held`, the bookkeeping eviction uses, so
+the frame order, the counts and the free list are as if the id had never been
+held. The reply counts `files`, `frames`, the admitted `bytes` and `unknown`,
+the ids that held nothing, which include another generation's ids and a
+repeat. This is the only forget path. The test-only `forget_file` it replaced
+is gone.
+
+A forget wins against a decode already in flight. `preview_source` counts
+each decode it hands posted bytes to in `in_flight`, and a forget of an id
+with a non-zero count adds it to `doomed`. `store_frame_with` stores nothing
+for a doomed id and returns the frame to its own request, which is still
+served. Each decode's place in the count is a `Flight` that the route keeps
+until after its store, on the direct path, the decode workers and `/value`
+and `/measure`, and the last one out for an id takes it out of both sets, so
+both are bounded by the decodes in flight.
+
+The page forgets. Every open, a folder or the synthetic study, sends the
+previous open's ids with `fetch` and replaces the set of files the page may
+post, so `ensureFile` refuses a file of an open the page has left and a late
+`410` for it does not post it again. An id that arrives after another open
+began is forgotten at once. On `pagehide` the page sends the open's ids with
+`navigator.sendBeacon` in chunks of at most 1,700. Chromium refuses a beacon
+while 64 KiB of earlier keepalive bytes are in flight, which is a limit over
+all beacons at once rather than over each. Measured, two beacons of 1,700
+ids and 35,699 bytes each, sent together, returned true and then false, and
+in the 3,400-file browser check only the first beacon's 1,700 ids were
+forgotten. A forget that fails is not retried, and the budget still bounds
+what the process holds.
+
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.
 No other crate names it.

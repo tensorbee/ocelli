@@ -293,7 +293,9 @@ pub const KIND_RELEASED: u32 = 7;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct RingEvent {
-    /// Which event this is. One of this crate's `KIND_` constants.
+    /// Which event this is. A cache event carries one of this crate's
+    /// `KIND_` constants. Kind 6, a presented frame, is
+    /// `ocelli_viewport::boundary::KIND_PRESENTED`.
     pub kind: u32,
     /// The viewport the event belongs to, or `u32::MAX` for a cache event.
     pub viewport: u32,

@@ -390,7 +390,7 @@ const parsed = parseSnapshot(session.snapshot());</code></pre>
   <section class="feature" id="worker">
     <h2>Worker decode and the wasm path</h2>
     <span class="status part">Partial. Fetch, hand-off and the worker pool are built. Decoding those bytes in the worker is not.</span>
-    <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts each file once while the local process holds it, and posts it again after eviction or a restart. It is still not the wasm path.</p>
+    <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts each file once while the local process holds it, and posts it again after eviction or a restart. Opening another folder, or leaving the page, tells that process to forget the previous folder's files and frames through <code>POST /forget</code>. It is still not the wasm path.</p>
     <p class="where">Lives in <code>@ocelli/core</code>: <code>postWadoInstance</code> in <code>instance-bytes.ts</code>, <code>holdSessionBytes</code> in <code>bulk.ts</code>, and <code>openDecodePool</code> in <code>pool.ts</code>.</p>
 <pre><code>import {
   DEFAULT_DECODE_WORKERS, MAX_DECODE_WORKERS, holdSessionBytes, openDecodePool, postWadoInstance,
@@ -411,7 +411,7 @@ ticket = holdSessionBytes(wasm, new Uint8Array(message.bytes), ticket);
 // Several decode workers, each its own wasm instance. No SharedArrayBuffer.
 const pool = openDecodePool(owner, DEFAULT_DECODE_WORKERS, (index) =&gt; new Worker(url));
 pool?.close();</code></pre>
-    <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, and a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>. Not built: decoding that envelope in the worker, its frame cache and a render of that frame. The example worker publishes one stored sample to prove the path.</p>
+    <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, and a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>. Not built: decoding that envelope in the worker, its frame cache and a render of that frame. The example worker publishes one stored sample to prove the path. <code>cache.released</code> reports a series released by the Rust <code>ImageCache::release_series</code>, and no shipped session produces it yet. The worker's own frame cache, and the <code>releaseSeries</code> and <code>releaseStudy</code> calls over it, arrive with F-231.</p>
   </section>
 
   <section class="feature" id="documents">
