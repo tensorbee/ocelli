@@ -271,7 +271,10 @@ which rustdoc injects into each doctest of the crate, measured in
 `carries_doctest_forbid`. This check requires all three: a table below
 `forbid` is refused naming `forbid`, the script dropped from the `unsafe`
 gate is refused even with the table present, and a member library root
-without the exact attribute line in its header is refused.
+whose first line after the leading `//!`, `//` and blank lines is not the
+exact attribute is refused. The workspace has no doctests today, so the
+floor checks the attribute is present, and it acts on the first doctest
+anyone writes.
 
 Usage: python3 scripts/lint_policy_check.py
 """
@@ -1468,7 +1471,7 @@ def library_roots(packages: list[dict]) -> dict[Path, Path]:
 
 
 def carries_doctest_forbid(source: str) -> bool:
-    """Does this crate root carry `DOCTEST_FORBID` in its header, exactly.
+    """Does this crate root carry `DOCTEST_FORBID` at the head, exactly.
 
     F-232. The `[workspace.lints.rust]` table does not reach a doctest,
     MEASURED under the pinned 1.97.1 toolchain: on a scratch crate whose
@@ -1481,22 +1484,20 @@ def carries_doctest_forbid(source: str) -> bool:
     supplied it. An inner `allow`, `warn` or `expect` of `unsafe_code` in
     the doctest, or in a module's own `doc(test(attr(...)))`, is error E0453.
 
-    The header is the run of blank lines, line comments and one-line inner
-    attributes before the first other line. The attribute is read there and
-    only as the whole line, so a weaker level, another spelling, a block
-    comment or a string holding the text are all refused. A header this
-    reader cannot follow, such as a multi-line inner attribute above the
-    line, is refused too: move the attribute above it.
+    The attribute is accepted in one place only: as the first line after
+    the crate's leading `//!`, `//` and blank lines, written exactly. Those
+    three line kinds open no string and no block comment, so the line that
+    follows them is Rust source and not literal text. Any other first line
+    is a refusal, whatever comes after it, because a reader that skipped an
+    inner attribute above the line accepted the text inside a string or a
+    block comment that attribute line opened, review pass 4's D1. A weaker
+    level, another spelling, an indented copy or one with a trailing comment
+    is refused as well. Every member root carries it in that place.
     """
     for line in source.splitlines():
-        if line == DOCTEST_FORBID:
-            return True
-        stripped = line.strip()
-        if not stripped or stripped.startswith("//"):
+        if not line.strip() or line.startswith("//"):
             continue
-        if line.startswith("#![") and line.rstrip().endswith("]"):
-            continue
-        return False
+        return line == DOCTEST_FORBID
     return False
 
 
@@ -1970,8 +1971,8 @@ def main() -> int:
         if not carries_doctest_forbid(root_source):
             problems.append(
                 f"{_relative(library)} is a member library root and does not "
-                f"carry `{DOCTEST_FORBID}` as a whole line in its header, "
-                f"above the first item. The [workspace.lints.rust] table "
+                f"carry `{DOCTEST_FORBID}` as the first line after its "
+                f"leading `//!`, `//` and blank lines. The [workspace.lints.rust] table "
                 f"does not reach a doctest, MEASURED under the pinned 1.97.1 "
                 f"toolchain, so without it a doctest holding `unsafe` "
                 f"compiles and runs under `cargo test`. rustdoc injects this "

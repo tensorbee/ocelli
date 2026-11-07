@@ -306,6 +306,22 @@ class Tokenizer(StagedIndex):
             self.assertEqual(code, 1)
             self.assertIn("unsafe_code` lowered", output)
 
+    def test_line_count_survives_trivia_inside_an_attribute_opener(self):
+        # N1, review passes 2 to 4. The newline between `#` and `[` is
+        # counted once the `[` is found, so a finding after the attribute
+        # names its own line. Without that the planted block is reported
+        # one line early.
+        self.write(
+            "crates/example/src/lib.rs",
+            "#\n"                                   # line 1
+            "[allow(dead_code)]\n"                  # line 2
+            "pub fn planted() { unsafe { 0 }; }\n") # line 3, refused
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/example/src/lib.rs:3:", output)
+        self.assertNotIn("crates/example/src/lib.rs:2:", output)
+
     def test_doc_text_is_comment_text(self):
         # Lead ruling after review pass 3. A doctest is refused by rustc,
         # through `#![doc(test(attr(forbid(unsafe_code))))]` at each member

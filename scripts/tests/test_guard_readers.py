@@ -1453,8 +1453,8 @@ class EveryLibraryRootForbidsUnsafeDoctests(unittest.TestCase):
                        f"pub mod a;\n",
                        f"//! A crate.\n\n{self.ATTRIBUTE}\n\n"
                        f"#![cfg_attr(not(test), no_std)]\n\npub mod a;\n",
-                       f"//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n"
-                       f"// F-232.\n{self.ATTRIBUTE}\nuse a::b;\n",
+                       f"//! A crate.\n// F-232.\n\n{self.ATTRIBUTE}\n"
+                       f"use a::b;\n",
                        f"{self.ATTRIBUTE}\n"):
             with self.subTest(source):
                 self.assertTrue(
@@ -1478,11 +1478,22 @@ class EveryLibraryRootForbidsUnsafeDoctests(unittest.TestCase):
                     f"//! A crate.\n\n{line}\n\npub mod a;\n"))
 
     def test_the_attribute_is_read_only_in_the_crate_header(self) -> None:
-        """Below the first item it is not an inner attribute of the crate, and
-        inside a block comment or a string it is no attribute at all."""
+        """Only as the first line after the leading `//!`, `//` and blank
+        lines. Below the first item it is not an inner attribute of the
+        crate, and inside a block comment or a string it is no attribute at
+        all. The last two shapes are review pass 4's D1: a header attribute
+        line that opens a string or a block comment, with the exact text on
+        the next line inside it. Both compile and neither forbids anything.
+        """
         for source in (f"pub mod a;\n{self.ATTRIBUTE}\n",
                        f"/*\n{self.ATTRIBUTE}\n*/\npub mod a;\n",
-                       f'const S: &str = r"\n{self.ATTRIBUTE}\n";\n'):
+                       f'const S: &str = r"\n{self.ATTRIBUTE}\n";\n',
+                       f"//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n"
+                       f"{self.ATTRIBUTE}\npub mod a;\n",
+                       f'//! A crate.\n\n#![doc = "]\n{self.ATTRIBUTE}\n"]\n'
+                       f"pub mod a;\n",
+                       f"//! A crate.\n\n#![allow(dead_code)] /* ]\n"
+                       f"{self.ATTRIBUTE}\n*/\npub mod a;\n"):
             with self.subTest(source):
                 self.assertFalse(
                     lint_policy_check.carries_doctest_forbid(source))

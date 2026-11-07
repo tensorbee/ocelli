@@ -1118,7 +1118,8 @@ reach doctests, which rustdoc compiles without the table. Doctests are
 enforced by rustc through a third piece: every member library root
 carries `#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects
 into each doctest of that crate, and this check refuses a member library
-root, found from `cargo metadata`, without that exact line in its header.
+root, found from `cargo metadata`, that does not carry that exact line as
+the first line after its leading `//!`, `//` and blank lines.
 F-232 measured the attribute under the pinned 1.97.1 toolchain against
 every doctest shape the third review found the scanner missing, the
 `rust2015` to `rust2024` fence tags, `no_run`, indented, block-quoted and
@@ -1128,10 +1129,11 @@ a comment, `#[unsafe(export_name)]`, `cfg_attr` doc, escaped doc strings,
 with error E0453 for an inner `allow`, `warn` or `expect` of
 `unsafe_code` in the doctest. An `ignore` doctest is not compiled at all,
 and a `compile_fail` one passes because the forbid makes it fail to
-compile, so neither produces a binary. `cargo test --workspace`, which
-the floor runs, compiles the doctests, and
-`lint-policy.doctest-forbid-removed` removes the attribute from one root
-and goes red. `scripts/unsafe_allowlist_check.py` stays in the `unsafe`
+compile, so neither produces a binary. The workspace has no doctests
+today, so what the floor checks is that the attribute is present, and
+`lint-policy.doctest-forbid-removed` removes it from one root and goes
+red. It acts on the first doctest anyone writes, which
+`cargo test --workspace` in the floor then compiles under it. `scripts/unsafe_allowlist_check.py` stays in the `unsafe`
 gate beside the table because the lint does not reach the vendored
 packages or the trybuild files, which the script audits, and because the
 script was one string regex away from the blindness F-229 measured. The

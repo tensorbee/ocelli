@@ -11804,8 +11804,9 @@ GUARDS: tuple[Guard, ...] = (
                        "carries `#![doc(test(attr(forbid(unsafe_code))))]`, "
                        "which rustdoc injects into every doctest of the "
                        "crate. One root loses the line and nothing else "
-                       "moves. `cargo test --workspace`, which the floor "
-                       "runs, compiles the doctests under it."),
+                       "moves. The workspace has no doctests today, so the "
+                       "floor checks the attribute is present, and it acts "
+                       "on the first doctest anyone writes."),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
