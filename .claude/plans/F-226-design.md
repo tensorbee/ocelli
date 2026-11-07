@@ -326,7 +326,7 @@ Made by the sprint lead on 2026-11-06 under the operator's delegation of the qua
 
 Made by the sprint lead on 2026-11-07 from read-only groundwork against the sprint head after F-209. Where these differ from the text above, these win. Line numbers are re-measured at implementation.
 
-- **There is no `restore_file`.** `preview_source` hands out shared posted bytes and the file stays in the cache until `store_frame_with` removes it once every frame is decoded. The in-flight count is taken where `preview_source` hands out the shared bytes, and only `store_frame_with` checks the doomed set. Decision 6, Approach step 4 and the state table row for an in-flight decode are restated on that basis.
+- **There is no `restore_file`.** `preview_source` hands out shared posted bytes. The in-flight count is taken where `preview_source` hands out the shared bytes, and only `store_frame_with` checks the doomed set. Decision 6, Approach step 4 and the state table row for an in-flight decode are restated on that basis.
 - **The forget goes through the existing removal path.** It removes through `forget_frame` and `reclaim_held`, so `frame_order`, `files`, `frames` and the free buffer lists stay consistent. A test forgets a file with frames held and then shows a later store and eviction behave as if the file had never been held.
 - **One forget path.** The production forget replaces the test-only `forget_file`, and its tests move to the production route.
 - **New refusals are claimed.** Any refusal the `/forget` route adds is registered with `scripts/guards/catalogue.py` and the census stays at zero unwatched.

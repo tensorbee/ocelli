@@ -166,16 +166,13 @@ pub(crate) enum Lookup {
     Miss(Arc<PostedBytes>),
 }
 
-/// A preview's view of one id. The posted bytes stay in the cache during a
-/// decode unless the id is forgotten, so a second preview or `/headers`
-/// still finds them.
+/// A preview's view of one id.
 pub(crate) enum PreviewSource {
     /// The id is unknown, or the bytes and this frame are both gone.
     Gone,
     /// The decoded frame.
     Hit(Arc<CachedFrame>),
-    /// Posted bytes. The cache keeps its own `Arc` until the frame is stored
-    /// or the id is forgotten.
+    /// Posted bytes, shared with the cache.
     Shared(SharedBytes),
 }
 
