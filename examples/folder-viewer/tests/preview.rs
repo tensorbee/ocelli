@@ -438,7 +438,7 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     {
         return Err("the region window does not use windowRegion from the library".to_owned());
     }
-    if !page.contains("\"The region window needs the library build. Run npm run build in the repository, then start the viewer again.\"") {
+    if !page.contains("\"The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.\"") {
         return Err("the page lacks the library sentence".to_owned());
     }
     // The region and the per-frame windows are asked for by file id with
@@ -5894,6 +5894,48 @@ fn inspect_by_id_matches_the_posted_body() -> Result<(), String> {
         || header_line(gone_header, "X-Ocelli-Error") != Some("file-gone")
     {
         return Err(format!("an unknown id answered {gone_header}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_empty_first_window_slot_opens_at_the_first_usable_pair() -> Result<(), String> {
+    // Lead ruling on amendment 6. Centres `\40` and widths `\400`: slot 0 is
+    // empty, slot 1 is 40 and 400. With no index the file opens drawn at the
+    // first slot holding both values, PS3.3 C.11.2.1.2.1 LINEAR:
+    // c' = 39.5, w' = 399, y = ((50 - 39.5) / 399 + 0.5) * 255 = 134.21,
+    // grey 134, reported as index 1. Choosing the empty slot is refused at
+    // its own index.
+    let hole = window_file(&WindowSpec {
+        modality: Some("CT"),
+        centers: Some("\\40"),
+        widths: Some("\\400"),
+        ..WindowSpec::default()
+    })?;
+    let opened = preview_frame(&hole, FrameRequest::default())
+        .map_err(|error| format!("the file opened as {}", error.code()))?;
+    if only_byte(&opened)? != 134
+        || opened.window_center.to_bits() != 40.0_f32.to_bits()
+        || opened.window_index != Some(1)
+        || opened.window_count != 2
+    {
+        return Err(format!(
+            "opened grey {:?} centre {} index {:?}",
+            opened.grey, opened.window_center, opened.window_index
+        ));
+    }
+    refused_as(
+        preview_frame(&hole, indexed(0)),
+        PreviewError::Window,
+        "the empty slot",
+    )?;
+    let response = one_exchange(&http_post_to("/preview", "", &hole))?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200")
+        || header_line(header, "X-Ocelli-Window-Index") != Some("1")
+        || body != [134]
+    {
+        return Err(format!("the route opened {header}"));
     }
     Ok(())
 }

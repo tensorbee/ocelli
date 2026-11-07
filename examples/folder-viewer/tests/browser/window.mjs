@@ -40,7 +40,7 @@ import { fileURLToPath } from "node:url";
 import { ensureViewerBinary, longEl, shortEl, startViewer } from "../../../../tools/bench/src/viewer_work.mjs";
 import { loadPlaywright, stopByPid } from "./aspect.mjs";
 
-export const LIBRARY_MISSING = "The region window needs the library build. Run npm run build in the repository, then start the viewer again.";
+export const LIBRARY_MISSING = "The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.";
 
 /** What each step must show: the corner word, and the grey at HU 40 and HU -800. */
 export const EXPECTED = [

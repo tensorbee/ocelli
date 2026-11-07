@@ -266,9 +266,11 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    row that cannot be chosen, because this preview does not apply one, and
    while a file has one its other rows cannot be chosen either. A multiframe
    whose windows change per frame lists the shown frame's own, asked for by
-   file id. A slice keeps its window, and a file window past the next
-   image's list shows that image's first. A series change and Reset return
-   to the first file window. The bottom right corner names the window shown:
+   file id. A file opens at its first window that has both a centre and a
+   width, and a slot missing either is listed as a row that cannot be
+   chosen. A slice keeps its window, and a file window past the next
+   image's list shows that image's first usable one. A series change and
+   Reset return to the first usable file window. The bottom right corner names the window shown:
    the preset, the file window's name, `region` or `manual`. A window row
    or a region window that the local process refuses leaves the image and
    the window as they were and puts the reason in the sentence line. Region
@@ -278,7 +280,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    the function already shown. The local process finds the two values
    through `POST /region`, and `windowRegion` from `@ocelli/core` makes the
    window. The process serves the built `packages/core/dist` under `/lib/`,
-   so run `npm run build` before starting the viewer, or the region window
+   so run `npm run build -w @ocelli/core` before starting the viewer, or the region window
    reads unavailable and says so. Its centre is the middle of that span.
    cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean and
    keeps a width of at least 10, so the two can give different windows.

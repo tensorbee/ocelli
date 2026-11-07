@@ -529,7 +529,7 @@ const LIBRARY_FILES: &[&str] = &[
 ];
 
 /// The repository root this crate was built in. `/lib/` reads under it at
-/// request time, so the crate builds and its tests run without `npm run build`.
+/// request time, so the crate builds and its tests run without the library build.
 fn library_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -559,7 +559,7 @@ fn library_reply(root: &std::path::Path, path: &str) -> Reply {
         Err(_) => text_reply(
             404,
             Some("library"),
-            "the library build is not on disk. Run npm run build in the repository",
+            "the library build is not on disk. Run npm run build -w @ocelli/core in the repository",
         ),
     }
 }

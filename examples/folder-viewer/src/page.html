@@ -819,7 +819,7 @@
   <section>
     <h2>WINDOW</h2>
     <div id="window-list"></div>
-    <p class="note-text" id="window-note">Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first window in the file.</p>
+    <p class="note-text" id="window-note">Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.</p>
   </section>
   <section>
     <h2>MARKS</h2>
@@ -931,7 +931,7 @@ const SENTENCE = {
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
-  reset: "Put the image back to the first window in the file and the fitted view.",
+  reset: "Put the image back to the first usable window in the file and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
   invert: "Reverse the grey. The pixels in the file are not changed.",
   rotate: "The displayed picture turns. The pixels are not changed and the marks turn with them.",
@@ -961,8 +961,8 @@ const SENTENCE = {
 const PRESET_ROW = "A preset from the library, in Hounsfield units. The local process offers the presets on CT only.";
 const FILE_ROW = "A window stored in the file, named by its Window Center & Width Explanation, or by its place in the file when it has none.";
 const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
-const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first window in the file.";
-const LIBRARY_MISSING = "The region window needs the library build. Run npm run build in the repository, then start the viewer again.";
+const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.";
+const LIBRARY_MISSING = "The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.";
 const ONE_VALUE = "This region holds one value, so it gives no window.";
 const RELEASE_COMMAND = "cargo run --release -p ocelli-folder-viewer";
 const GONE = "the viewer process at this address is not answering. Run " + RELEASE_COMMAND + " again and open the address it prints";
@@ -2880,11 +2880,16 @@ function windowInfo(image) {
 }
 
 // The file window index a request for this image sends. An index at or past
-// this image's own list is its first window, so moving to an image with a
-// shorter list shows that image's first window and no fault.
+// this image's own list, or on a slot with no centre or width, is this
+// image's first usable window, the one the local process opens with, so a
+// shorter list or an empty slot shows that window and no fault.
 function effectiveIndex(image, view) {
+  const windows = windowInfo(image).windows;
+  const usable = (win) => Boolean(win) && win.center != null && win.width != null;
   const index = view.windowIndex || 0;
-  return index < windowInfo(image).windows.length ? index : 0;
+  if (usable(windows[index])) return index;
+  const first = windows.findIndex(usable);
+  return first < 0 ? 0 : first;
 }
 
 function presetOffered(image, token) {

@@ -1280,14 +1280,23 @@ fn select_window(
             if let Some(choice) = request.window_function {
                 function = choice;
             }
-            let index = request.window_index.unwrap_or(0);
-            let selected = usize::try_from(index).map_err(|_| PreviewError::Window)?;
+            // With no index the default is the first slot holding both a
+            // centre and a width, so a file whose first value is empty still
+            // opens drawn. An explicit index is taken as sent.
+            let usable = |at: usize| {
+                matches!(
+                    (centers.get(at), widths.get(at)),
+                    (Some(Some(_)), Some(Some(_)))
+                )
+            };
+            let selected = match request.window_index {
+                Some(index) => usize::try_from(index).map_err(|_| PreviewError::Window)?,
+                None => (0..centers.len()).find(|at| usable(*at)).unwrap_or(0),
+            };
+            let index = u32::try_from(selected).map_err(|_| PreviewError::Window)?;
             // An empty slot has no number to draw. It is refused here rather
             // than skipped, so the pairs after it keep their positions.
-            if !matches!(
-                (centers.get(selected), widths.get(selected)),
-                (Some(Some(_)), Some(Some(_)))
-            ) {
+            if !usable(selected) {
                 return Err(PreviewError::Window);
             }
             // An empty slot that is not the selected one is never read by
