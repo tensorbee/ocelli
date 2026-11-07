@@ -230,11 +230,12 @@ impl ColorTransform {
     ///
     /// [`PixelError::ColorTransformNotApplicable`] for a monochrome frame,
     /// whose route is stage 3. [`PixelError::CodecOwnedColorTransform`] for
-    /// `YBR_ICT` or `YBR_RCT` that a decoder did not convert, because PS3.3
-    /// permits those only with JPEG 2000 and the codestream's own multiple
-    /// component transform is what inverts them. RCT is an integer lifting
-    /// transform and not a matrix at all, so applying the full-range matrix to
-    /// it would produce a plausible image in the wrong colours.
+    /// `YBR_ICT`, `YBR_RCT` or `XYB` that a decoder did not convert. PS3.3
+    /// permits the first two only with JPEG 2000, and the codestream's own
+    /// multiple component transform is what inverts them. RCT is an integer
+    /// lifting transform and not a matrix at all, so applying the full-range
+    /// matrix to it would produce a plausible image in the wrong colours.
+    /// PS3.3 C.7.6.3.1.2 gives no matrix for `XYB`, so the same refusal applies.
     /// [`PixelError::MissingPaletteLut`] and
     /// [`PixelError::UnexpectedPaletteLut`] when the supplied palette and the
     /// resolved space disagree.
@@ -251,7 +252,9 @@ impl ColorTransform {
                 PhotometricInterpretation::Monochrome1 | PhotometricInterpretation::Monochrome2 => {
                     return Err(PixelError::ColorTransformNotApplicable);
                 }
-                PhotometricInterpretation::YbrIct | PhotometricInterpretation::YbrRct => {
+                PhotometricInterpretation::YbrIct
+                | PhotometricInterpretation::YbrRct
+                | PhotometricInterpretation::Xyb => {
                     return Err(PixelError::CodecOwnedColorTransform);
                 }
                 PhotometricInterpretation::PaletteColor => ColorSpace::Palette,

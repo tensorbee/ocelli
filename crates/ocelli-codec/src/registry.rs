@@ -14,9 +14,9 @@ use std::{
 
 /// Transfer Syntax UIDs covered by the repository's codec surface.
 ///
-/// These sixteen UIDs are defined by DICOM PS3.6 Annex A and enumerated by the
-/// corpus manifest. Membership means the syntax is known. It does not mean a
-/// decoder is registered or that this build can decode it.
+/// These nineteen UIDs are the PS3.5 Annex A membership this catalogue carries,
+/// together with the corpus manifest. Membership means the syntax is known. It
+/// does not mean a decoder is registered or that this build can decode it.
 pub const KNOWN_TRANSFER_SYNTAXES: &[&str] = &[
     "1.2.840.10008.1.2",
     "1.2.840.10008.1.2.1",
@@ -34,6 +34,9 @@ pub const KNOWN_TRANSFER_SYNTAXES: &[&str] = &[
     "1.2.840.10008.1.2.4.201",
     "1.2.840.10008.1.2.4.202",
     "1.2.840.10008.1.2.4.203",
+    "1.2.840.10008.1.2.4.110",
+    "1.2.840.10008.1.2.4.111",
+    "1.2.840.10008.1.2.4.112",
 ];
 
 /// Whether a transfer syntax is usable by this registry.
@@ -381,7 +384,7 @@ pub trait Decoder: Send + Sync {
     ///
     /// Registry lookup and dispatch add no allocation of their own. Raw plus
     /// RLE implementations remain allocation-free per call. Under deviation
-    /// D-21, concrete JPEG and JPEG 2000 adapters may allocate bounded
+    /// D-21, concrete JPEG, JPEG 2000 and JPEG XL adapters may allocate bounded
     /// dependency-owned decoded storage and may copy encoded input when a safe
     /// packet API requires owned bytes.
     ///

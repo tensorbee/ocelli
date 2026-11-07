@@ -4,8 +4,8 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216, F-229
+**Last updated:** 2026-11-07
 
 Living current-state document. It describes what the code does today.
 
@@ -389,7 +389,7 @@ stage. `PixelRepresentation` already has this shape for the same reason.
 | `YBR_FULL` | inverse full-range matrix |
 | `YBR_FULL_422` | chroma replicated across the pair, then the full-range matrix |
 | `YBR_PARTIAL_422` | chroma replicated, then the partial-range matrix |
-| `YBR_ICT`, `YBR_RCT` | refused, `CodecOwnedColorTransform` |
+| `YBR_ICT`, `YBR_RCT`, `XYB` | refused, `CodecOwnedColorTransform` |
 | `MONOCHROME1`, `MONOCHROME2` | refused, `ColorTransformNotApplicable` |
 
 PS3.3 permits `YBR_ICT` and `YBR_RCT` only with JPEG 2000, where the
@@ -399,6 +399,17 @@ this stage still in that space. RCT is an integer lifting transform and not a
 matrix at all, so applying the full-range matrix to it would produce a plausible
 image in the wrong colours. Under a decoder reporting `Rgb` the question does
 not arise, because the resolution has already replaced the space.
+
+**`XYB` is a recognised colour space that this crate owns no transform for.**
+PS3.3 C.7.6.3.1.2 defines it as the LMS-based model JPEG XL uses and gives no
+matrix to or from it, so `ColorTransform::resolve` refuses it with
+`CodecOwnedColorTransform` exactly as it refuses `YBR_ICT` and `YBR_RCT`.
+F-229 added the variant, which expects three samples like the other colour
+spaces. The one legitimate route is the codec's own conversion, reported
+through a decoder that answers `Rgb`: the JPEG XL adapter does that for every
+three-sample frame, because `jxl-oxide` renders XYB into the declared
+encoding before the adapter sees a grid. A decoder that answered `Preserved`
+for an `XYB` frame would be refused here rather than passed through as RGB.
 
 The 4:2:2 upsample **replicates** rather than interpolating. PS3.3 names no
 filter, so interpolation would invent values the standard does not define.

@@ -1434,5 +1434,165 @@ class WhichMembersInheritTheTable(unittest.TestCase):
         self.assertNotEqual(error, "")
 
 
+class EveryLibraryRootForbidsUnsafeDoctests(unittest.TestCase):
+    """`#![doc(test(attr(forbid(unsafe_code))))]` at each library root. F-232.
+
+    MEASURED under the pinned 1.97.1 toolchain on a scratch crate carrying the
+    package table `unsafe_code = "forbid"`: with no attribute every doctest
+    holding `unsafe` ran ok under `cargo test --doc`, so the table does not
+    reach a doctest. With the attribute every compiled one failed with
+    "usage of an `unsafe` block" or, for an inner `allow`, `warn` or
+    `expect` of `unsafe_code`, error E0453. rustdoc injects the attribute
+    into each doctest, so the root is the one place it can be written.
+    """
+
+    ATTRIBUTE = "#![doc(test(attr(forbid(unsafe_code))))]"
+
+    def test_the_attribute_after_the_crate_docs_is_found(self) -> None:
+        for source in (f"//! A crate.\n//!\n//! More.\n\n{self.ATTRIBUTE}\n\n"
+                       f"pub mod a;\n",
+                       f"//! A crate.\n\n{self.ATTRIBUTE}\n\n"
+                       f"#![cfg_attr(not(test), no_std)]\n\npub mod a;\n",
+                       f"//! A crate.\n// F-232.\n\n{self.ATTRIBUTE}\n"
+                       f"use a::b;\n",
+                       f"{self.ATTRIBUTE}\n"):
+            with self.subTest(source):
+                self.assertTrue(
+                    lint_policy_check.carries_doctest_forbid(source))
+
+    def test_a_root_without_it_is_refused(self) -> None:
+        self.assertFalse(lint_policy_check.carries_doctest_forbid(
+            "//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n\npub mod a;\n"))
+
+    def test_only_the_exact_attribute_counts(self) -> None:
+        """A weaker level does not refuse a doctest, and a different spelling
+        is not what this check was asked to read, so both are refused."""
+        for line in ("#![doc(test(attr(deny(unsafe_code))))]",
+                     "#![doc(test(attr(warn(unsafe_code))))]",
+                     "#![doc(test(attr(forbid( unsafe_code ))))]",
+                     "#![doc(test(attr(forbid(unsafe_code))))] // x",
+                     "    #![doc(test(attr(forbid(unsafe_code))))]",
+                     "#![doc(test(no_crate_inject))]"):
+            with self.subTest(line):
+                self.assertFalse(lint_policy_check.carries_doctest_forbid(
+                    f"//! A crate.\n\n{line}\n\npub mod a;\n"))
+
+    def test_the_attribute_is_read_only_in_the_crate_header(self) -> None:
+        """Only as the first line after the leading `//!`, `//` and blank
+        lines. Below the first item it is not an inner attribute of the
+        crate, and inside a block comment or a string it is no attribute at
+        all. The last two shapes are review pass 4's D1: a header attribute
+        line that opens a string or a block comment, with the exact text on
+        the next line inside it. Both compile and neither forbids anything.
+        """
+        for source in (f"pub mod a;\n{self.ATTRIBUTE}\n",
+                       f"/*\n{self.ATTRIBUTE}\n*/\npub mod a;\n",
+                       f'const S: &str = r"\n{self.ATTRIBUTE}\n";\n',
+                       f"//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n"
+                       f"{self.ATTRIBUTE}\npub mod a;\n",
+                       f'//! A crate.\n\n#![doc = "]\n{self.ATTRIBUTE}\n"]\n'
+                       f"pub mod a;\n",
+                       f"//! A crate.\n\n#![allow(dead_code)] /* ]\n"
+                       f"{self.ATTRIBUTE}\n*/\npub mod a;\n"):
+            with self.subTest(source):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+
+    # rustc ends a `//` comment at LF only. Each of these ends a line for
+    # Python's `splitlines`, so `// x`, the separator and the attribute
+    # text is one comment to rustc and forbids nothing. Review pass 5's D1.
+    SEPARATORS = ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85",
+                  " ", " ")
+
+    def test_a_separator_rustc_does_not_end_a_comment_at_is_refused(
+            self) -> None:
+        for separator in self.SEPARATORS:
+            source = (f"//! A crate.\n// x{separator}{self.ATTRIBUTE}\n"
+                      f"pub mod a;\n")
+            with self.subTest(hex(ord(separator))):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+                self.assertEqual(
+                    lint_policy_check.unprintable_head_line(source), 2)
+
+    def test_crlf_line_endings_are_accepted(self) -> None:
+        self.assertTrue(lint_policy_check.carries_doctest_forbid(
+            f"//! A crate.\r\n\r\n{self.ATTRIBUTE}\r\npub mod a;\r\n"))
+
+    def test_any_unprintable_character_above_it_is_refused(self) -> None:
+        """Fail closed, by the ruling after pass 5: a character outside
+        printable ASCII and tab on a head line refuses the root even where
+        it hides nothing, so no separator has to be named to be caught."""
+        for head in ("//! caf\u00e9.", "// x\x00", "//!\u00a0"):
+            source = f"{head}\n\n{self.ATTRIBUTE}\npub mod a;\n"
+            with self.subTest(head):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+                self.assertEqual(
+                    lint_policy_check.unprintable_head_line(source), 1)
+
+    def test_only_the_lines_down_to_the_attribute_must_be_ascii(
+            self) -> None:
+        """Below the attribute line the source is Rust and may hold any
+        character, so the printable rule stops at the attribute line."""
+        source = (f"//! A crate.\n\n{self.ATTRIBUTE}\n"
+                  f'pub const S: &str = "\u00e9\u2028";\n')
+        self.assertIsNone(lint_policy_check.unprintable_head_line(source))
+        self.assertTrue(lint_policy_check.carries_doctest_forbid(source))
+
+    def test_a_bare_cr_in_a_root_file_is_refused_naming_the_line(
+            self) -> None:
+        """Through the read as well as the split. A text-mode read turns a
+        bare CR into LF before any split sees it, so the file is written
+        as bytes and handed to the function `main` calls per root."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "lib.rs"
+            root.write_bytes(
+                f"//! A crate.\n\n// x\r{self.ATTRIBUTE}\npub mod a;\n"
+                .encode("utf-8"))
+            problems = lint_policy_check.library_root_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("line 3", problems[0])
+        self.assertIn("printable ASCII", problems[0])
+
+    def test_a_clean_root_file_has_no_problem(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "lib.rs"
+            root.write_bytes(
+                f"//! A crate.\r\n\r\n{self.ATTRIBUTE}\r\npub mod a;\r\n"
+                .encode("utf-8"))
+            self.assertEqual(lint_policy_check.library_root_problems(root),
+                             [])
+
+    def test_library_roots_are_the_library_targets_only(self) -> None:
+        """A doctest is compiled from a library target and from nothing else,
+        so a bin, test, bench or example root owes no attribute."""
+        packages = [
+            {"manifest_path": "/w/crates/a/Cargo.toml",
+             "targets": [
+                 {"kind": ["lib"], "src_path": "/w/crates/a/src/lib.rs"},
+                 {"kind": ["bin"], "src_path": "/w/crates/a/src/main.rs"},
+                 {"kind": ["test"], "src_path": "/w/crates/a/tests/t.rs"},
+                 {"kind": ["example"], "src_path": "/w/crates/a/ex/e.rs"},
+                 {"kind": ["bench"], "src_path": "/w/crates/a/b/b.rs"}]},
+            {"manifest_path": "/w/crates/b/Cargo.toml",
+             "targets": [{"kind": ["cdylib", "rlib"],
+                          "src_path": "/w/crates/b/src/lib.rs"}]},
+            {"manifest_path": "/w/crates/c/Cargo.toml",
+             "targets": [{"kind": ["proc-macro"],
+                          "src_path": "/w/crates/c/src/lib.rs"}]},
+            {"manifest_path": "/w/crates/d/Cargo.toml",
+             "targets": [{"kind": ["bin"],
+                          "src_path": "/w/crates/d/src/main.rs"}]},
+        ]
+        self.assertEqual(
+            lint_policy_check.library_roots(packages),
+            {Path("/w/crates/a"): Path("/w/crates/a/src/lib.rs").resolve(),
+             Path("/w/crates/b"): Path("/w/crates/b/src/lib.rs").resolve(),
+             Path("/w/crates/c"): Path("/w/crates/c/src/lib.rs").resolve()})
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

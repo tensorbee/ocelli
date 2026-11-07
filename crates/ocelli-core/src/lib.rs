@@ -14,6 +14,7 @@
 //! F-211 adds [`spacing`], the one rule for whether two in-plane spacing
 //! pairs are the same, which `ocelli-dicom` and `ocelli-geom` share.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 pub mod error;

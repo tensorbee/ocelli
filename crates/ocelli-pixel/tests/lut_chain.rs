@@ -329,6 +329,7 @@ fn colour_photometric_interpretations_refuse_the_presentation_stage() {
         PhotometricInterpretation::YbrPartial422,
         PhotometricInterpretation::YbrIct,
         PhotometricInterpretation::YbrRct,
+        PhotometricInterpretation::Xyb,
     ] {
         assert_eq!(
             chain(

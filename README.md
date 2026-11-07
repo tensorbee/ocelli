@@ -178,7 +178,13 @@ DICOM files on this machine, use the local series page below.
 `examples/folder-viewer` lists series from a folder you choose and shows them
 in up to nine viewports, from 1 by 1 to 3 by 3. Each viewport has its own
 series, image, zoom, pan and window, and Link can make the others follow the
-outlined one's scroll, window and zoom. It listens on this machine only.
+outlined one's scroll, window and zoom. The preview registers all six decoder
+families of `ocelli-codec`. It opens the monochrome frames of eighteen of the
+nineteen known transfer syntaxes: the seventeen with a registered decoder and
+Deflated Explicit VR Little Endian, whose whole data set `parse_part10`
+inflates before the raw decoder reads it. JPEG XL JPEG Recompression is the
+only one refused for every frame, and a colour frame is refused as not
+monochrome. It listens on this machine only.
 
 ```bash
 cargo run --release -p ocelli-folder-viewer
@@ -257,10 +263,20 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. The corners show the current image's
    labels, with a person name in family, given order and a date as
-   year-month-day. Edge letters show the patient direction and hide
-   while the picture is flipped or rotated. The pointer cross shows the
-   column, the row and the modality value of the pixel under it with its
-   unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
+   year-month-day. They also show the birth date, sex, age, study time,
+   institution, slice location and thickness, kVp, mAs, TR and TE when the
+   file has them. With no Patient's Age, the age is worked out from the birth
+   date at the study date.
+   Edge letters show the patient direction from Image Orientation (Patient),
+   or from Patient Orientation on an image without it, such as a projection
+   radiograph, and hide while the picture is flipped or rotated. An image
+   whose Anatomical Orientation Type is `QUADRUPED` shows no letters. A scale
+   bar shows above the window line when the file gives a spacing a length can
+   use, from that same spacing, and says `at the detector` when that spacing
+   is at the detector: Imager Pixel Spacing with no magnification factor,
+   alone or with a Pixel Spacing equal to it. It hides with the corners and in Four images. The pointer
+   cross shows the column, the row and the modality value of the pixel under
+   it with its unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
    for a file the process could not hold. The cross, its readout and the

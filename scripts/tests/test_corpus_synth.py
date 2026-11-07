@@ -37,10 +37,12 @@ import re
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -82,6 +84,11 @@ READ_BACK = {
     "htj2k_lossless.dcm": "pylibjpeg",
     "htj2k_lossless_rpcl.dcm": "pylibjpeg",
     "htj2k_lossy.dcm": "pylibjpeg",
+    "jpegxl_lossless.dcm": "jpegxl",
+    "jpegxl_lossless_rgb8.dcm": "jpegxl",
+    "jpegxl_recompression_rgb8.dcm": "unavailable",
+    "jpegxl_lossy.dcm": "jpegxl",
+    "jpegxl_xyb_rgb8.dcm": "jpegxl",
 }
 
 # imagecodecs.__version__ and the string jpeg8_version() reports.
@@ -89,6 +96,10 @@ DECODED_WITH = {
     "imagecodecs": "2026.10.10",
     "jpeg8_version": "libjpeg_turbo 3.2.0/8.0",
 }
+
+
+class UnavailableSyntax(AssertionError):
+    """The registry knows this syntax and refuses to decode it."""
 
 
 def read_back(ds: "pydicom.Dataset", name: str):
@@ -109,6 +120,12 @@ def read_back(ds: "pydicom.Dataset", name: str):
         return imagecodecs.jpeg8_decode(fragment)
     if route == "jpeg8-rgb":
         return imagecodecs.jpeg8_decode(fragment, outcolorspace="RGB")
+    if route == "jpegxl":
+        return imagecodecs.jpegxl_decode(fragment)
+    if route == "unavailable":
+        raise UnavailableSyntax(
+            f"{corpus_check.UNAVAILABLE_REFUSAL} "
+            f"(jxl-jbr 0.2.1 src/reconstruct.rs:457)")
     raise AssertionError(f"unknown read-back route {route}")
 
 
@@ -358,6 +375,13 @@ class SigmoidFixture(unittest.TestCase):
 # of the same shape, so this bound is 1.5 times the worst measured.
 # Re-measured with imagecodecs jpeg8_decode and outcolorspace RGB: 4 of 255,
 # ratio 0.015686. The bound is unchanged.
+# libjxl 0.12.0 at distance 1.0 and effort 7 on reference_rgb8. TRANSFORM_MAX
+# times 255 is 1.275 levels. The same encoder's smallest positive distance
+# on this ramp is already 7 levels, so the generic fraction cannot hold.
+# This ceiling is that encode's measured maximum absolute error. It is not
+# a change to TRANSFORM_MAX.
+JPEGXL_XYB_MAX_ABS = 21
+
 YBR_EIGHT_BIT_MAX = 0.03
 # The three transform cases at their configured settings: JPEG extended at
 # quality 90 gives 0.00049, JPEG 2000 at ratio 20 gives 0.00003, HTJ2K at
@@ -625,9 +649,34 @@ class Conformance(unittest.TestCase):
         self.assertEqual(expected, 2)
         self.assertEqual(struct.unpack("<L", data[:4])[0], expected)
 
+    def test_jpegxl_codestreams_are_jpeg_xl(self) -> None:
+        """ISO/IEC 18181-2. A bare codestream starts FF 0A.
+
+        An ISO BMFF container has the box type JXL at byte 4. imagecodecs
+        2026.10.10 writes that container for the 16-bit lossless encode and
+        for jpegxl_encode_jpeg even when usecontainer is false. The other
+        three rows are bare codestreams.
+        """
+        boxed = {"jpegxl_lossless.dcm", "jpegxl_recompression_rgb8.dcm"}
+        for name, uid in corpus_synth.SYNTAX_CASES.items():
+            if uid not in (corpus_synth.JPEGXL_LOSSLESS,
+                           corpus_synth.JPEGXL_RECOMPRESSION,
+                           corpus_synth.JPEGXL_GENERAL):
+                continue
+            with self.subTest(case=name):
+                data = self.frame(self.case(name))
+                if name in boxed:
+                    self.assertEqual(data[4:8], b"JXL ")
+                else:
+                    self.assertEqual(data[:2], b"\xff\x0a")
+
     def test_lossless_syntaxes_round_trip_exactly(self) -> None:
         for name, uid in corpus_synth.SYNTAX_CASES.items():
             if uid in corpus_synth.LOSSY_TRANSFER_SYNTAXES:
+                continue
+            # `.111` is the unavailable refusal. A pixel compare would
+            # claim a decode the registry does not perform.
+            if uid == corpus_synth.JPEGXL_RECOMPRESSION:
                 continue
             with self.subTest(case=name):
                 ds = self.case(name)
@@ -636,6 +685,27 @@ class Conformance(unittest.TestCase):
                 self.assertTrue(
                     np.array_equal(read_back(ds, name), reference.pixel_array),
                     f"{name} declares a lossless syntax and did not round-trip")
+
+    def test_jpegxl_recompression_is_unavailable(self) -> None:
+        """`.111` is known and the read-back route refuses it.
+
+        jxl-jbr 0.2.1 src/reconstruct.rs:457 panics on a malformed DHT, so
+        the corpus row expects the unavailable refusal rather than pixels.
+        """
+        name = "jpegxl_recompression_rgb8.dcm"
+        self.assertEqual(READ_BACK[name], "unavailable")
+        self.assertIn(
+            corpus_synth.JPEGXL_RECOMPRESSION,
+            corpus_check.UNAVAILABLE_REGISTRY_SYNTAXES)
+        self.assertEqual(
+            self.case(name).file_meta.TransferSyntaxUID,
+            corpus_synth.JPEGXL_RECOMPRESSION)
+        with self.assertRaises(UnavailableSyntax) as caught:
+            read_back(self.case(name), name)
+        message = str(caught.exception)
+        self.assertIn(corpus_check.UNAVAILABLE_REFUSAL, message)
+        self.assertIn("jxl-jbr 0.2.1", message)
+        self.assertIn("reconstruct.rs:457", message)
 
     def test_jpeg_ls_near_lossless_holds_its_declared_near_bound(self) -> None:
         """ISO/IEC 14495-1 guarantees max abs error <= NEAR. This is the one
@@ -671,6 +741,12 @@ class Conformance(unittest.TestCase):
                 self.assertEqual(got.shape, want.shape)
                 full_scale = float(1 << ds.BitsStored) - 1.0
                 error = np.abs(got.astype(np.float64) - want.astype(np.float64))
+                if ds.PhotometricInterpretation == "XYB":
+                    self.assertGreater(float(error.max()), 0.0)
+                    self.assertLessEqual(float(error.max()), JPEGXL_XYB_MAX_ABS,
+                                         f"{name} exceeded the recorded "
+                                         f"JPEG XL ceiling")
+                    continue
                 bound = (YBR_EIGHT_BIT_MAX
                          if ds.PhotometricInterpretation.startswith("YBR")
                          else TRANSFORM_MAX)
@@ -707,12 +783,17 @@ class Conformance(unittest.TestCase):
         if frame[:4] == b"\xff\x4f\xff\x51":              # SOC then SIZ
             rsiz = struct.unpack(">H", frame[6:8])[0]
             return "ISO_15444_15" if rsiz & 0x4000 else "ISO_15444_1"
+        # ISO/IEC 18181-1. PS3.3 C.7.6.1.1.5.1 Defined Term ISO_18181_1,
+        # Supplement 232. A bare codestream starts FF 0A. An ISO BMFF
+        # container carries the box type JXL at byte 4.
+        if frame[:2] == b"\xff\x0a" or frame[4:8] == b"JXL ":
+            return "ISO_18181_1"
         self.fail(f"unrecognised codestream {frame[:4].hex()}")
 
     def test_the_classifier_refuses_a_codestream_it_cannot_name(self) -> None:
         """The fall-through is unreachable for the cases shipped today, so
         nothing else reaches it. A future lossy case whose codestream this
-        cannot parse must not be quietly declared to be one of the four."""
+        cannot parse must not be quietly given a name."""
         with self.assertRaises(self.failureException):
             self.codestream_method(b"\x00\x01\x02\x03")
 
@@ -723,7 +804,7 @@ class ReaderRoutes(unittest.TestCase):
     def test_every_syntax_has_one_declared_decoder(self) -> None:
         self.assertEqual(set(READ_BACK), set(corpus_synth.SYNTAX_CASES))
         allowed = {"native", "pylibjpeg", "pyjpegls", "ljpeg", "jpeg8",
-                   "jpeg8-rgb"}
+                   "jpeg8-rgb", "jpegxl", "unavailable"}
         for name, route in READ_BACK.items():
             with self.subTest(case=name):
                 self.assertIn(route, allowed)
@@ -739,6 +820,11 @@ class ReaderRoutes(unittest.TestCase):
         self.assertEqual(READ_BACK["j2k_lossy.dcm"], "pylibjpeg")
         self.assertEqual(READ_BACK["htj2k_lossy.dcm"], "pylibjpeg")
         self.assertEqual(READ_BACK["rle_lossless.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["jpegxl_lossless.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_lossless_rgb8.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_recompression_rgb8.dcm"], "unavailable")
+        self.assertEqual(READ_BACK["jpegxl_lossy.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_xyb_rgb8.dcm"], "jpegxl")
 
     def test_reader_versions_match_decoded_with(self) -> None:
         import imagecodecs
@@ -864,7 +950,8 @@ class ToolchainPins(unittest.TestCase):
     # BUILT_WITH entries uv does not install directly. OpenJPH and DCMTK have
     # a test below each. OpenJPEG has none, because it ships inside the pinned
     # pylibjpeg-openjpeg wheel. Everything else must be a project pin.
-    NOT_UV = ("OpenJPEG (the library inside it)", "DCMTK", "OpenJPH")
+    NOT_UV = ("OpenJPEG (the library inside it)", "DCMTK", "OpenJPH",
+              "libjxl (the library inside imagecodecs)")
 
     def test_uv_pins_agree_with_built_with(self) -> None:
         project = tomllib.loads(self.PROJECT.read_text(encoding="utf-8"))
@@ -1107,11 +1194,65 @@ class CaseSelector(unittest.TestCase):
     def test_the_manifest_categories_name_every_synthetic_case(self) -> None:
         """A case that generates a file with no CATEGORIES row would make
         `--write-manifest` raise, but only after the file was written."""
+        # syntax, jpegls_rgb8 and jpegxl write under syntax/ and are named
+        # by SYNTAX_CASES rather than by CATEGORIES.
         synthetic = {name for name in corpus_synth.case_callables(Path("."))
-                     if name not in ("syntax", "jpegls_rgb8")}
+                     if name not in ("syntax", "jpegls_rgb8", "jpegxl")}
         recorded = {Path(path).stem for path in corpus_synth.CATEGORIES}
         recorded |= set(corpus_synth.SERIES_CATEGORY)
         self.assertEqual(synthetic - recorded, set())
+
+
+class JpegXlEncoderRefusals(unittest.TestCase):
+    """F-229's three generator refusals, each driven by a stubbed encoder.
+
+    The locked imagecodecs never returns these shapes, so each test replaces
+    one imagecodecs entry point for the duration of one call. The bases are
+    copied out of the module's generated corpus so nothing there is written.
+    """
+
+    def bases(self, scratch: str) -> Path:
+        target = Path(scratch) / "syntax"
+        target.mkdir()
+        for name in (corpus_synth.REFERENCE_MONO16, corpus_synth.REFERENCE_MONO12,
+                     corpus_synth.REFERENCE_RGB8, "jpeg_baseline_rgb8.dcm"):
+            shutil.copyfile(CORPUS / "syntax" / name, target / name)
+        return target
+
+    def test_a_frame_encoder_returning_no_bytes_is_refused(self) -> None:
+        import imagecodecs
+        pixels = np.zeros((2, 2), dtype=np.uint8)
+        with mock.patch.object(imagecodecs, "jpegxl_encode", return_value=None):
+            with self.assertRaises(RuntimeError) as caught:
+                corpus_synth.jpegxl_encode_frame(
+                    pixels, lossless=True, bits=8, photometric="GRAY")
+        self.assertIn("jpegxl_encode did not return bytes", str(caught.exception))
+
+    def test_a_recompression_returning_no_bytes_is_refused(self) -> None:
+        import imagecodecs
+        with tempfile.TemporaryDirectory(prefix="ocelli-jxl-") as scratch:
+            directory = self.bases(scratch)
+            with mock.patch.object(imagecodecs, "jpegxl_encode_jpeg",
+                                   return_value=None):
+                with self.assertRaises(RuntimeError) as caught:
+                    corpus_synth.encode_jpegxl_cases(directory)
+            self.assertFalse(
+                (directory / "jpegxl_recompression_rgb8.dcm").exists())
+        self.assertIn("jpegxl_encode_jpeg did not return bytes",
+                      str(caught.exception))
+
+    def test_a_recompression_that_does_not_restore_the_jpeg_is_refused(self) -> None:
+        """PS3.5 10.19. A `.111` fragment must reconstruct the `.50` bytes."""
+        import imagecodecs
+        with tempfile.TemporaryDirectory(prefix="ocelli-jxl-") as scratch:
+            directory = self.bases(scratch)
+            with mock.patch.object(imagecodecs, "jpegxl_decode_jpeg",
+                                   return_value=b"\xff\xd8\xff\xd9"):
+                with self.assertRaises(RuntimeError) as caught:
+                    corpus_synth.encode_jpegxl_cases(directory)
+            self.assertFalse(
+                (directory / "jpegxl_recompression_rgb8.dcm").exists())
+        self.assertIn("did not restore the JPEG fragment", str(caught.exception))
 
 
 class MultiComponentJpegLs(unittest.TestCase):

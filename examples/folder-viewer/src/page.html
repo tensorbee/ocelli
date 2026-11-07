@@ -328,6 +328,28 @@
   .edge.right { right: 10px; top: 50%; transform: translateY(-50%); }
   .edge.top { top: 8px; left: 50%; transform: translateX(-50%); }
   .edge.bottom { bottom: 8px; left: 50%; transform: translateX(-50%); }
+  /* The scale bar sits above the two lines of the bottom right corner. */
+  .scale {
+    position: absolute;
+    right: 10px;
+    bottom: 46px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    color: #f0f0f0;
+    font: 12px/1.35 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    text-shadow: 0 0 2px #000000, 0 1px 2px #000000;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .scale-line {
+    box-sizing: border-box;
+    height: 4px;
+    border: 1px solid #f0f0f0;
+    border-top: none;
+    box-shadow: 0 1px 2px #000000;
+  }
   #cross-h, #cross-v {
     position: absolute;
     background: rgba(240, 240, 240, 0.75);
@@ -750,6 +772,7 @@
     <div class="overlay tr"></div>
     <div class="overlay bl"></div>
     <div class="overlay br"></div>
+    <div class="scale" hidden><span class="scale-label"></span><div class="scale-line"></div></div>
     <div class="edge left" hidden></div>
     <div class="edge right" hidden></div>
     <div class="edge top" hidden></div>
@@ -904,10 +927,10 @@ const SENTENCE = {
   rotate: "The displayed picture turns. The pixels are not changed and the marks turn with them.",
   "flip-h": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
   "flip-v": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
-  "toggle-corners": "Show or hide the labels in the four corners.",
+  "toggle-corners": "Show or hide the labels in the four corners and the scale bar.",
   "toggle-cross": "Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT whose file states HU, or states no unit and is not multi-energy. The local process computes the value.",
   "toggle-mag": "This circle enlarges the grey pixels already drawn. It copies them and does not blend them.",
-  "toggle-letters": "The patient direction at each edge, read from Image Orientation (Patient). The letters are hidden while the picture is turned or flipped.",
+  "toggle-letters": "The patient direction at each edge, read from Image Orientation (Patient), or from Patient Orientation on an image without Image Orientation (Patient). The letters are hidden while the picture is turned or flipped.",
   "key-image": "Marks this image in the series list for this session. It is not saved and it does not write a Key Object Selection.",
   headers: "Show the DICOM headers for this image.",
   play: "Play through the images in this series.",
@@ -2478,7 +2501,9 @@ async function requestGrey(image, options) {
         left: response.headers.get("X-Ocelli-Edge-Left") || "",
         right: response.headers.get("X-Ocelli-Edge-Right") || "",
         top: response.headers.get("X-Ocelli-Edge-Top") || "",
-        bottom: response.headers.get("X-Ocelli-Edge-Bottom") || ""
+        bottom: response.headers.get("X-Ocelli-Edge-Bottom") || "",
+        calibrationSource: response.headers.get("X-Ocelli-Calibration-Source") || "",
+        calibrationColumn: headerNumber(response, "X-Ocelli-Calibration-Column")
       }
     };
   }
@@ -2803,15 +2828,22 @@ function paintOverlays(vp) {
     assignText(corners.tr, "");
     assignText(corners.bl, "");
     assignText(corners.br, "");
+    paintScale(vp);
     return;
   }
   const info = image.info || {};
   const series = seriesOf(vp);
   const count = series ? series.images.length : 0;
   const viewIndex = vp.viewIndex;
-  assignText(corners.tl, [personName(info.patientName), info.patientId, dicomDate(info.studyDate)].filter(Boolean).join("\n"));
+  // Each attribute value below was formatted by the local process, and the
+  // page adds only labels and units. A field the file does not have leaves
+  // its line out. A DS arrives as a JSON number and prints as JavaScript
+  // writes it, so a stored -12.50 shows as -12.5.
+  const person = [info.birthDate, info.sex, info.age].filter(Boolean).join("  ");
+  assignText(corners.tl, [info.patientNameText, info.patientId, person, info.institution].filter(Boolean).join("\n"));
   const head = [info.modality, info.seriesDescription].filter(Boolean).join(" ");
-  assignText(corners.tr, [head, info.studyDescription, info.accession ? "Acc " + info.accession : ""].filter(Boolean).join("\n"));
+  const when = [info.studyDateText, info.studyTime].filter(Boolean).join("  ");
+  assignText(corners.tr, [head, info.studyDescription, when, info.accession ? "Acc " + info.accession : ""].filter(Boolean).join("\n"));
   const last = Math.min(count, viewIndex + 4);
   const lower = [vp.tileMode && last > viewIndex + 1
     ? "Images " + (viewIndex + 1) + " to " + last + " / " + count
@@ -2819,6 +2851,12 @@ function paintOverlays(vp) {
   if (series && series.omitted) lower.push("Series shortened");
   if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
   if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
+  if (info.sliceLocation != null) lower.push("Location " + info.sliceLocation + " mm");
+  if (info.sliceThickness != null) lower.push("Thickness " + info.sliceThickness + " mm");
+  const tube = [info.kvp != null ? info.kvp + " kVp" : "", info.exposureMas != null ? info.exposureMas + " mAs" : ""].filter(Boolean).join("  ");
+  if (tube) lower.push(tube);
+  const timing = [info.repetitionTime != null ? "TR " + info.repetitionTime + " ms" : "", info.echoTime != null ? "TE " + info.echoTime + " ms" : ""].filter(Boolean).join("  ");
+  if (timing) lower.push(timing);
   assignText(corners.bl, lower.join("\n"));
   const win = vp.draftWindow || vp.overrideWindow || vp.shownWindow;
   const center = win ? win.center : (info.windowCenter || "");
@@ -2828,23 +2866,34 @@ function paintOverlays(vp) {
   // The file window describes a picture this page does not show.
   if (!info.monochrome) windowLine = "Window not applicable";
   assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
+  paintScale(vp);
 }
 
-function personName(text) {
-  const value = String(text || "").split("=").map((group) => group.trim()).find(Boolean) || "";
-  if (!value) return "";
-  const parts = value.split("^").map((part) => part.trim());
-  const family = parts[0] || "";
-  const given = parts.slice(1, 3).filter(Boolean).join(" ");
-  const prefix = parts[3] || "";
-  const suffix = parts[4] || "";
-  const rest = [prefix, given].filter(Boolean).join(" ") + (suffix ? ", " + suffix : "");
-  return family && rest ? family + ", " + rest : family || rest;
-}
+// cornerstone3D 5.8.2 `ScaleOverlayTool.computeScaleSize`: the first of
+// these lengths in mm that is above 0.2 and below 0.6 of the view width.
+const SCALE_SIZES = [16000, 8000, 4000, 2000, 1000, 500, 250, 100, 50, 25, 10, 5, 2];
 
-function dicomDate(text) {
-  const value = String(text || "").trim();
-  return /^\d{8}$/.test(value) ? value.slice(0, 4) + "-" + value.slice(4, 6) + "-" + value.slice(6, 8) : value;
+// The bar uses the calibration the local process chose for the length tool,
+// so the two always agree. Screen pixels per mm are the same along both
+// axes, because the display stretches each axis by its own spacing.
+function paintScale(vp) {
+  const dom = vp.dom;
+  const facts = vp.shownFacts;
+  const column = facts ? facts.calibrationColumn : null;
+  const show = showCorners && !vp.tileMode && !dom.stage.hidden && currentImage(vp) && column > 0 && vp.scale > 0;
+  const perMm = show ? vp.scale * vp.aspectX / column : 0;
+  const viewMm = perMm > 0 ? dom.cell.clientWidth / perMm : 0;
+  const size = SCALE_SIZES.find((mm) => mm < viewMm * 0.6 && mm > viewMm * 0.2);
+  if (!size) {
+    if (!dom.scale.hidden) dom.scale.hidden = true;
+    return;
+  }
+  // `ScaleOverlayTool._getTextLines`: centimetres from 50 mm.
+  let label = size >= 50 ? size / 10 + " cm" : size + " mm";
+  if (facts.calibrationSource === "detector") label += " at the detector";
+  assignText(dom.scaleLabel, label);
+  dom.scaleLine.style.width = (size * perMm) + "px";
+  if (dom.scale.hidden) dom.scale.hidden = false;
 }
 
 function paintEdges(vp) {
@@ -2872,6 +2921,7 @@ function showFault(vp, message) {
   dom.fault.hidden = false;
   dom.fault.textContent = message;
   dom.stage.hidden = true;
+  dom.scale.hidden = true;
   dom.frame.hidden = true;
   vp.tileToken += 1;
   dom.tiles.hidden = true;
@@ -4758,6 +4808,9 @@ function ensureViewport(cell) {
         bl: node.querySelector(".overlay.bl"),
         br: node.querySelector(".overlay.br")
       },
+      scale: node.querySelector(".scale"),
+      scaleLabel: node.querySelector(".scale-label"),
+      scaleLine: node.querySelector(".scale-line"),
       edges: {
         left: node.querySelector(".edge.left"),
         right: node.querySelector(".edge.right"),

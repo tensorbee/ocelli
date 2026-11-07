@@ -24,7 +24,8 @@ use dicom_object::{DefaultDicomObject, StandardDataDictionary};
 use ocelli_codec::{
     DecodePhotometricInterpretation, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation,
     RawDecoder, Registry, register_htj2k_decoders, register_jpeg_decoders,
-    register_jpeg2000_decoders, register_jpegls_decoders, register_native_and_rle_decoders,
+    register_jpeg2000_decoders, register_jpegls_decoders, register_jpegxl_decoders,
+    register_native_and_rle_decoders,
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
@@ -41,7 +42,11 @@ use ocelli_render::display_index;
 use ocelli_viewport::presentation::WindowPreset;
 use ocelli_viewport::view::f32_from_f64;
 
-use crate::measure::{CalibrationInputs, FactorInput, SpacingInput};
+use crate::corners::{
+    age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
+    person_name_text,
+};
+use crate::measure::{CalibrationInputs, FactorInput, SpacingInput, choose_spacing};
 use crate::value::{ValueFacts, value_facts};
 
 const ROWS: Tag = Tag(0x0028, 0x0010);
@@ -84,6 +89,23 @@ const STUDY_DATE: Tag = Tag(0x0008, 0x0020);
 const STUDY_DESCRIPTION: Tag = Tag(0x0008, 0x1030);
 const ACCESSION: Tag = Tag(0x0008, 0x0050);
 const FRAME_OF_REFERENCE: Tag = Tag(0x0020, 0x0052);
+const PATIENT_BIRTH_DATE: Tag = Tag(0x0010, 0x0030);
+const PATIENT_SEX: Tag = Tag(0x0010, 0x0040);
+const PATIENT_AGE: Tag = Tag(0x0010, 0x1010);
+const STUDY_TIME: Tag = Tag(0x0008, 0x0030);
+const INSTITUTION: Tag = Tag(0x0008, 0x0080);
+const SLICE_LOCATION: Tag = Tag(0x0020, 0x1041);
+const SLICE_THICKNESS: Tag = Tag(0x0018, 0x0050);
+const KVP: Tag = Tag(0x0018, 0x0060);
+const EXPOSURE: Tag = Tag(0x0018, 0x1152);
+const EXPOSURE_MICRO: Tag = Tag(0x0018, 0x1153);
+const REPETITION_TIME: Tag = Tag(0x0018, 0x0080);
+const ECHO_TIME: Tag = Tag(0x0018, 0x0081);
+/// Patient Orientation, PS3.3 C.7.6.1.1.1.
+const PATIENT_ORIENTATION: Tag = Tag(0x0020, 0x0020);
+/// Anatomical Orientation Type, whose `QUADRUPED` value PS3.3 C.7.6.1.1.1
+/// gives letters of its own.
+const ANATOMICAL_ORIENTATION_TYPE: Tag = Tag(0x0010, 0x2210);
 
 /// The most images the page lists for one file, and the most planes
 /// `inspect_json` writes for it. The page's `FRAME_LIST_CAP` has the same
@@ -123,13 +145,23 @@ pub struct Preview {
     pub inverted: bool,
     /// Spacing and edge letters for the shown frame.
     pub facts: FrameFacts,
+    /// The calibration source the length tool chooses for this frame,
+    /// `pixel-spacing`, `imager-spacing`, `detector` or `uncalibrated`, or
+    /// empty when that choice refuses. The scale bar reads it.
+    pub calibration_source: &'static str,
+    /// Millimetres per row and per column of that choice, row first. Absent
+    /// when uncalibrated or refused.
+    pub calibration_mm: Option<(f64, f64)>,
 }
 
 /// Spacing and patient-direction letters for one frame.
 ///
 /// Spacing tokens are row then column. A token that is already a JSON
-/// number is kept. Any other finite DS is the parsed value. Letters are
-/// empty when Image Orientation (Patient) is absent or not a unit vector.
+/// number is kept. Any other finite DS is the parsed value. Letters come
+/// from Image Orientation (Patient), and from Patient Orientation only when
+/// Image Orientation (Patient) is absent or has zero length. They are empty
+/// when the attribute that decides cannot be used, or when Anatomical
+/// Orientation Type is `QUADRUPED`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrameFacts {
     /// Adjacent row spacing, when the file has a usable pair.
@@ -146,6 +178,9 @@ pub struct FrameFacts {
     pub edge_top: String,
     /// Patient direction at the bottom edge.
     pub edge_bottom: String,
+    /// `ImageOrientationPatient` or `PatientOrientation`, the attribute the
+    /// letters came from, or empty when there are no letters.
+    pub edge_source: &'static str,
 }
 
 /// Which frame to decode, and an optional replacement window.
@@ -957,6 +992,17 @@ pub(crate) fn render_held(
         .map_err(|_| PreviewError::Window)?;
     let chain_us = chain_started.map(|started| started.elapsed().as_micros());
     let facts = held.facts.clone()?;
+    // F-211's choice, the one `/measure` makes for this frame, so the scale
+    // bar and a length cannot disagree. A refusal shows no bar.
+    let chosen = held
+        .calibration
+        .as_ref()
+        .ok()
+        .and_then(|inputs| choose_spacing(inputs).ok());
+    let calibration_source = chosen.map_or("", |spacing| spacing.source);
+    let calibration_mm = chosen
+        .and_then(|spacing| spacing.mm)
+        .map(|mm| (mm.row, mm.column));
     // PS3.3 C.11.2.1.2 and C.11.2.1.3. The table is `LutChain::apply` once per
     // stored integer. `display_index` quantises those entries, then each
     // sample selects one byte. Wider stored widths keep the per-sample loop.
@@ -981,6 +1027,8 @@ pub(crate) fn render_held(
         window_function: function_label(function),
         inverted: request.invert,
         facts,
+        calibration_source,
+        calibration_mm,
     })
 }
 
@@ -1168,6 +1216,9 @@ fn photometric_name(photometric: PhotometricInterpretation) -> &'static str {
         PhotometricInterpretation::YbrPartial422 => "YBR_PARTIAL_422",
         PhotometricInterpretation::YbrIct => "YBR_ICT",
         PhotometricInterpretation::YbrRct => "YBR_RCT",
+        // XYB is three samples, so this preview refuses it as not-monochrome
+        // before decode. The arm exists so the match stays exhaustive.
+        PhotometricInterpretation::Xyb => "XYB",
     }
 }
 
@@ -1439,6 +1490,7 @@ fn codecs() -> Result<Registry, PreviewError> {
     register_jpeg2000_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     register_jpegls_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     register_htj2k_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
+    register_jpegxl_decoders(&mut registry).map_err(|_| PreviewError::Decode)?;
     Ok(registry)
 }
 
@@ -1706,6 +1758,7 @@ impl FrameFacts {
             edge_right: String::new(),
             edge_top: String::new(),
             edge_bottom: String::new(),
+            edge_source: "",
         }
     }
 }
@@ -1733,16 +1786,85 @@ fn frame_facts(
             }
         }
     };
-    let letters = orientation_letters(multi, frame)?;
+    let (letters, edge_source) = edge_letters(metadata, multi, frame)?;
+    let [edge_left, edge_right, edge_top, edge_bottom] = letters;
     Ok(FrameFacts {
         row_spacing,
         column_spacing,
         spacing_source,
-        edge_left: letters.0,
-        edge_right: letters.1,
-        edge_top: letters.2,
-        edge_bottom: letters.3,
+        edge_left,
+        edge_right,
+        edge_top,
+        edge_bottom,
+        edge_source,
     })
+}
+
+/// Left, right, top and bottom letters and the attribute they came from.
+///
+/// Image Orientation (Patient) decides whenever it is present, and one that
+/// cannot be used gives no letters rather than reading Patient Orientation.
+/// Only an absent or zero-length one reads Patient Orientation, from the top
+/// level. PS3.3 C.7.6.1.1.1: a `QUADRUPED` Anatomical Orientation Type uses
+/// letters that overlap the human set, so it gives no letters at all.
+fn edge_letters(
+    metadata: &MetadataSet,
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Result<([String; 4], &'static str), PreviewError> {
+    let none = || {
+        (
+            [String::new(), String::new(), String::new(), String::new()],
+            "",
+        )
+    };
+    let quadruped = metadata
+        .get(ANATOMICAL_ORIENTATION_TYPE)
+        .and_then(MetadataElement::semantic_text)
+        .is_some_and(|parts| parts.first().is_some_and(|text| *text == "QUADRUPED"));
+    if quadruped {
+        return Ok(none());
+    }
+    if let Some(parts) = token_list(multi, frame, PLANE_ORIENTATION_SEQUENCE, IMAGE_ORIENTATION)? {
+        return Ok(match orientation_letters(&parts) {
+            Some(letters) => (letters, "ImageOrientationPatient"),
+            None => none(),
+        });
+    }
+    if image_orientation_present(multi, frame)? {
+        return Ok(none());
+    }
+    let Some(element) = metadata.get(PATIENT_ORIENTATION) else {
+        return Ok(none());
+    };
+    let Some(parts) = element.semantic_text() else {
+        return Ok(none());
+    };
+    let values: Vec<&str> = parts.into_iter().filter(|part| !part.is_empty()).collect();
+    Ok(match patient_orientation_letters(&values) {
+        Some(letters) => (letters, "PatientOrientation"),
+        None => none(),
+    })
+}
+
+/// Image Orientation (Patient) is present with a value that is not zero length.
+///
+/// It is asked only after [`token_list`] found no text, so a true answer is a
+/// value that is not text. [`token_list`] reports that the same as an absent
+/// attribute, and here it must still decide.
+fn image_orientation_present(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Result<bool, PreviewError> {
+    let found = multi
+        .resolve(
+            frame,
+            PLANE_ORIENTATION_SEQUENCE,
+            IMAGE_ORIENTATION,
+            TopLevelFallback::Allowed,
+        )
+        .map_err(|_| PreviewError::Attribute)?;
+    Ok(found.is_some_and(|found| !matches!(found.element().value(), MetadataValue::Empty)))
 }
 
 enum SpacingRead {
@@ -1885,22 +2007,14 @@ fn token_list(
     ))
 }
 
-fn orientation_letters(
-    multi: &MultiframeMetadata<'_>,
-    frame: usize,
-) -> Result<(String, String, String, String), PreviewError> {
-    let Some(parts) = token_list(multi, frame, PLANE_ORIENTATION_SEQUENCE, IMAGE_ORIENTATION)?
-    else {
-        return Ok((String::new(), String::new(), String::new(), String::new()));
-    };
+/// F-206's letters from the six Image Orientation (Patient) values, or `None`.
+fn orientation_letters(parts: &[String]) -> Option<[String; 4]> {
     if parts.len() != 6 {
-        return Ok((String::new(), String::new(), String::new(), String::new()));
+        return None;
     }
     let mut values = Vec::new();
-    for part in &parts {
-        let Some(parsed) = clean_decimal(part).and_then(|text| parse_decimal_string(&text)) else {
-            return Ok((String::new(), String::new(), String::new(), String::new()));
-        };
+    for part in parts {
+        let parsed = clean_decimal(part).and_then(|text| parse_decimal_string(&text))?;
         values.push(parsed);
     }
     let component = |index: usize| values.get(index).copied().unwrap_or(0.0);
@@ -1913,11 +2027,11 @@ fn orientation_letters(
     // A cosine that is not a unit vector has no patient edge.
     // 1e-4 covers a DS that is not written to full precision.
     if !unit_cosine(right_x, right_y, right_z) || !unit_cosine(bottom_x, bottom_y, bottom_z) {
-        return Ok((String::new(), String::new(), String::new(), String::new()));
+        return None;
     }
     let right = direction_letter(right_x, right_y, right_z);
     let bottom = direction_letter(bottom_x, bottom_y, bottom_z);
-    Ok((opposite(&right), right, opposite(&bottom), bottom))
+    Some([opposite(&right), right, opposite(&bottom), bottom])
 }
 
 fn unit_cosine(x: f64, y: f64, z: f64) -> bool {
@@ -2445,12 +2559,14 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     push_field(&mut out, "edgeRight", &facts.edge_right, false);
     push_field(&mut out, "edgeTop", &facts.edge_top, false);
     push_field(&mut out, "edgeBottom", &facts.edge_bottom, false);
+    push_field(&mut out, "edgeSource", facts.edge_source, false);
     push_field(
         &mut out,
         "frameOfReferenceUid",
         &sendable_uid(optional_text(object, FRAME_OF_REFERENCE).ok().flatten()),
         false,
     );
+    push_corner_fields(&mut out, object);
     out.push_str(",\"planes\":[");
     for (index, token) in plane_tokens(object, frames).iter().enumerate() {
         if index > 0 {
@@ -2463,6 +2579,125 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     }
     out.push_str("]}");
     Ok(out)
+}
+
+/// One top-level attribute read for a corner line.
+enum CornerText {
+    /// Absent, zero length, or only padding.
+    Absent,
+    /// The stored text, trimmed of its padding. A multi-valued element
+    /// keeps its `\` separators.
+    Text(String),
+    /// Present with a value that is not text, such as a binary VR.
+    NotText,
+}
+
+impl CornerText {
+    fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Absent | Self::NotText => None,
+        }
+    }
+}
+
+/// Read one attribute for the corners without ever refusing the scan.
+///
+/// This is the non-failing form of the `frameOfReferenceUid` read, with a
+/// value that is not text kept apart from an absent one, so a binary value
+/// shows an empty corner field rather than its numbers as text.
+fn corner_text(object: &DefaultDicomObject, tag: Tag) -> CornerText {
+    let Ok(element) = object.element(tag) else {
+        return CornerText::Absent;
+    };
+    match element.value() {
+        DicomValue::Primitive(PrimitiveValue::Empty) => CornerText::Absent,
+        DicomValue::Primitive(PrimitiveValue::Str(_) | PrimitiveValue::Strs(_)) => {
+            match optional_text(object, tag).ok().flatten() {
+                Some(text) => CornerText::Text(text),
+                None => CornerText::Absent,
+            }
+        }
+        DicomValue::Primitive(_) | DicomValue::Sequence(_) | DicomValue::PixelSequence(_) => {
+            CornerText::NotText
+        }
+    }
+}
+
+/// A VM 1 DS as F-206's JSON number token, or `None` for anything else.
+///
+/// A multi-valued element keeps its `\` separator, which [`clean_decimal`]
+/// does not parse, so it is `None` too.
+fn corner_decimal(object: &DefaultDicomObject, tag: Tag) -> Option<String> {
+    clean_decimal(corner_text(object, tag).text()?)
+}
+
+/// The F-212 corner fields, already formatted. None of them refuses the file.
+fn push_corner_fields(out: &mut String, object: &DefaultDicomObject) {
+    let name = corner_text(object, PATIENT_NAME);
+    push_field(
+        out,
+        "patientNameText",
+        &name.text().map(person_name_text).unwrap_or_default(),
+        false,
+    );
+    let birth = corner_text(object, PATIENT_BIRTH_DATE);
+    push_field(
+        out,
+        "birthDate",
+        &birth.text().map(dicom_date_text).unwrap_or_default(),
+        false,
+    );
+    // PS3.3 C.7.1.1. Only the enumerated values are shown.
+    let sex = corner_text(object, PATIENT_SEX);
+    let sex = sex
+        .text()
+        .filter(|value| matches!(*value, "M" | "F" | "O"))
+        .unwrap_or_default();
+    push_field(out, "sex", sex, false);
+    let study = corner_text(object, STUDY_DATE);
+    // A Patient's Age that is present but not text is not an AS, so it
+    // gives no age and does not fall through to the computed one.
+    let (age, age_source) = match corner_text(object, PATIENT_AGE) {
+        CornerText::NotText => (String::new(), ""),
+        read => age_text(read.text(), birth.text(), study.text()),
+    };
+    push_field(out, "age", &age, false);
+    push_field(out, "ageSource", age_source, false);
+    push_field(
+        out,
+        "studyDateText",
+        &study.text().map(dicom_date_text).unwrap_or_default(),
+        false,
+    );
+    let time = corner_text(object, STUDY_TIME);
+    push_field(
+        out,
+        "studyTime",
+        &time.text().map(dicom_time_text).unwrap_or_default(),
+        false,
+    );
+    let institution = corner_text(object, INSTITUTION);
+    push_field(
+        out,
+        "institution",
+        institution.text().unwrap_or_default(),
+        false,
+    );
+    for (field, tag) in [
+        ("sliceLocation", SLICE_LOCATION),
+        ("sliceThickness", SLICE_THICKNESS),
+        ("kvp", KVP),
+        ("repetitionTime", REPETITION_TIME),
+        ("echoTime", ECHO_TIME),
+    ] {
+        push_json_token(out, field, corner_decimal(object, tag).as_deref());
+    }
+    let exposure = corner_text(object, EXPOSURE);
+    let micro = corner_text(object, EXPOSURE_MICRO);
+    let (mas, mas_source) = exposure_mas(exposure.text(), micro.text());
+    push_json_token(out, "exposureMas", mas.as_deref());
+    push_field(out, "exposureSource", mas_source, false);
 }
 
 /// The UID as the page may send it back, or `""`.

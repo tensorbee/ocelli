@@ -19,6 +19,7 @@
 //! and `FrameLookup` in `image`, so a held frame is served only for the
 //! bytes it was decoded from.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

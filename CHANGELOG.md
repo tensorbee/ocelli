@@ -590,6 +590,26 @@ Repository bootstrap. Nothing is published.
   per-load page token, so `GET /held` counts only what is open. A late reply
   for the folder left does not post its file again, and a decode already
   running for a forgotten file stores nothing.
+- JPEG XL decoding. `register_jpegxl_decoders` registers a sixth decoder
+  family in `ocelli-codec` for JPEG XL Lossless, `1.2.840.10008.1.2.4.110`,
+  and JPEG XL, `.112`, through `jxl-oxide` with default features off.
+  Lossless frames decode to their exact stored values and lossy frames are
+  quantised to Bits Stored. JPEG XL JPEG Recompression, `.111`, is known and
+  unavailable until an upstream panic, jxl-oxide issue 512, is fixed. A
+  signed, ICC, HDR, oriented or extra-channel frame is refused as
+  unavailable, and a frame of more than one keyframe is refused as a
+  mismatch, rather than drawn. `XYB` is a recognised
+  Photometric Interpretation whose colour conversion the codec owns. The
+  local folder viewer opens monochrome `.110` and `.112` frames.
+- The local folder viewer's four corners show the birth date, sex, age,
+  study time, institution, slice location and thickness, kVp, mAs, TR and TE
+  when the file has them. Names, dates, times and ages are formatted by the
+  local process from PS3.5's PN, DA, TM and AS rules, and with no Patient's
+  Age the age is the age at the study date. Edge letters come from Patient
+  Orientation on an image without Image Orientation (Patient), and an image
+  whose Anatomical Orientation Type is `QUADRUPED` shows none. A scale bar
+  in each viewport follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice
+  rule and reads the same calibration as the length tool.
 
 ### Changed
 
@@ -601,3 +621,16 @@ Repository bootstrap. Nothing is published.
   or `TypeError` from a view over wasm memory still passes through.
 - `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
   the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.
+- A contributor's `bin/ocelli.sh gate native` builds the `+simd128`
+  codec verification modules with the flag on every crate, so each
+  dependency's `simd128` code paths are compiled, and two new steps refuse a
+  SIMD module holding no SIMD instruction and a plain module holding any. The
+  modules hold SIMD loads, stores and constants and no lane arithmetic.
+  Nothing published changes.

@@ -344,3 +344,49 @@ None open. Each is a lead decision under the operator's delegation of 2026-11-05
 - Q7, order against F-220. Answered: lead decision under the operator's delegation of 2026-11-05. After F-220 integrates, which is safe in either order because the shipped closure does not change (fact 3).
 - Q8, XYB. Answered: lead decision under the operator's delegation of 2026-11-05. A codec-owned `ocelli-pixel` variant, decision 10.
 - Q9, a panic in the dependency. Answered: lead decision under the operator's delegation of 2026-11-05. AC16 is the test, and a panic found there stops the story and goes to the operator with options, decision 12. This is a conditional escalation, not an open question today.
+
+### Operator answer after the robustness stop
+
+Given by the operator on 2026-11-05, after `malformed_jpegxl_never_panics` found that a bit-flipped `.111` codestream reaches an unconditional `expect("is_last not found")` at `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`, in the DHT branch of JPEG reconstruction, which under `panic = "abort"` ends the process.
+
+- **`.110` and `.112` ship. `.111` is reported unavailable.** JPEG XL JPEG Recompression is registered as a known syntax that is unavailable, with a reason naming the upstream defect, and no Ocelli path calls `reconstruct_jpeg` or any other `jxl-jbr` entry point. A `.111` frame is refused before any byte reaches `jxl-oxide`, the same way Deflated is unavailable today. ACs that required a `.111` decode are replaced by AC7b: a `.111` frame, intact or malformed, returns the unavailable refusal and never panics.
+- **The corruption scan is complete before the story ships.** `malformed_jpegxl_never_panics` runs every truncation and every fixed-seed bit flip over every `.110` and `.112` fixture, not stopping at the first panic, and must pass. A panic on any of them stops the story again.
+- **The upstream defect is filed** with jxl-oxide by the sprint lead as https://github.com/tirr-c/jxl-oxide/issues/512, and a later story turns `.111` on once a released version fixes it.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-2.md`, which found that the hand-written ICC pre-check read two fields differently from `jxl-oxide` and so still let a 29-byte input reach a 256 MiB allocation.
+
+- **The pre-check refuses on the ICC flag, not on a size.** Every codestream that declares an embedded ICC profile is refused anyway (AC13, `UnsupportedPixelFormat`), so the pre-check refuses as soon as it reads `want_icc`, with no size comparison.
+- **Prefer the library's own header parser.** If `jxl-image`'s `ImageHeader::parse` reads the header up to and including `want_icc` without allocating the profile, the pre-check calls it and the hand-written walker is deleted. `jxl-image` is then pinned exactly beside `jxl-oxide` and `jxl-render`, and D-28 names it. If it cannot be used without the allocation, the walker stays and a seeded differential test against `ImageHeader::parse` must show zero disagreements on whether `want_icc` is set.
+- **The pre-check fails closed.** Any header it cannot read to `want_icc`, a container box whose size runs past the input included, is refused before `jxl-oxide` sees a byte.
+
+### Lead amendments after review pass 3
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-3.md`, which found that a 1,129 byte container with a compressed `brob` box makes `jxl-oxide` allocate 1 GiB outside the `AllocTracker` and then decode successfully.
+
+- **`jxl-oxide` receives the codestream alone.** For a container, the pre-check extracts the codestream from the `jxlc` box or the `jxlp` boxes in order, and passes only those bytes. No other box (`brob`, `jbrd`, `Exif`, `xml `, `jumb` or any other) ever reaches `jxl-oxide`. A container with no codestream, two `jxlc` boxes, a `jxlc` beside `jxlp` boxes, or `jxlp` boxes out of order or missing the last flag is refused before decode.
+- **A header that declares extra channels is refused in the pre-check.** Extra channels are refused later anyway, so the pre-check refuses a non-empty `ec_info` with `UnsupportedPixelFormat` before any parse that could grow with the header. `read_header` also grows its window geometrically rather than one byte at a time, so its cost is linear in the header length.
+- **`jxl-image` is not a direct dependency.** `jxl-oxide` re-exports the crate, so only `jxl-bitstream` and `jxl-oxide-common` stay direct, and D-28 says so.
+
+### Lead rulings after review pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-7.md`.
+
+- **The scanner's string rule is fixed in this story.** `scripts/unsafe_allowlist_check.py`'s string pattern must not treat a Rust string continuation as the end of a string, so code after it is scanned. A test pins it, and the fix must leave every tracked file's count unchanged.
+- **The audit's scope is a named commit.** The section names base commit `4165d1e8` rather than a merge-base command, and says that neither `ocelli-wasm` nor `ocelli-native` reaches `ocelli-codec`, so the shipped modules do not carry this closure today.
+
+### Lead rulings after review pass 8
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-229-working-pass-8.md`. The sentence naming which builds compile the closure for wasm32 is deleted, because no build passes `+simd128` to the closure's crates and step 2 of `bin/ocelli.sh native` also compiles it. The scanner's remaining blind spots, after a `'"'` character literal, a raw string holding a quote and a line comment with an unpaired quote, predate this story and change no audit count, so they leave F-229 and go to their own story with a real lexer, recorded for the operator.
+
+### Lead amendments for the viewer and documentation half
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against the sprint head after F-209. Where these differ from the text above, these win.
+
+- **The numbers are the ones after the operator's `.111` answer,** measured from `crates/ocelli-codec/tests/registry.rs` at implementation, not from this plan: the known transfer syntaxes, the available ones, the unavailable ones with their reasons, the families and the registered names. Every document sentence uses the measured numbers. AC2, AC7, AC8 and AC15's `.111` decoding text is superseded by that answer.
+- **The folder viewer registers JPEG XL.** `codecs()` in `examples/folder-viewer/src/preview.rs` calls `register_jpegxl_decoders`. A viewer test shows a monochrome `.110` frame draws and a colour one refuses with `NotMonochrome`, red before the registration.
+- **README** gains one sentence in its local series viewer section naming what the viewer opens, because README has no such list today. `use.html` section 8 and `more.html` say the same measured facts.
+- **The four LLDs** the plan names, `codecs.md`, `corpus.md`, `pixel-pipeline.md` and `frame-open.md`, and the dicom-expert skill with its regenerated adapters, are brought current. The stale counts pass 10 found in `docs/lld/oracle.md` and the `$notes` of `tools/oracle/unsupported.json` are corrected to measured values.
+- **The serialisation clause** after F-215 and F-225 is withdrawn. The remaining edits share no region with them.
+- **AC20's wasm budget half** is measured by `bin/ocelli.sh wasm` and `bin/ocelli.sh wasm-decode` with no budget file edited, and the result is recorded.

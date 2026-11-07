@@ -559,11 +559,11 @@ match DicomwebSource.consume(response)? {
 
   <section class="chapter" id="rust-decode">
     <h2><span class="num">8</span>Rust, decode</h2>
-    <p><code>ocelli_codec::Registry::new()</code> knows the sixteen UIDs in <code>KNOWN_TRANSFER_SYNTAXES</code> and has no decoder until you register one. Five functions register the five families.</p>
+    <p><code>ocelli_codec::Registry::new()</code> knows the nineteen UIDs in <code>KNOWN_TRANSFER_SYNTAXES</code> and has no decoder until you register one. Six functions register the six families.</p>
 <pre><code>use ocelli_codec::{
     register_htj2k_decoders, register_jpeg2000_decoders, register_jpeg_decoders,
-    register_jpegls_decoders, register_native_and_rle_decoders, Capability, Registry,
-    RegistryError,
+    register_jpegls_decoders, register_jpegxl_decoders, register_native_and_rle_decoders,
+    Capability, Registry, RegistryError,
 };
 
 fn registry() -&gt; Result&lt;Registry, RegistryError&gt; {
@@ -573,6 +573,7 @@ fn registry() -&gt; Result&lt;Registry, RegistryError&gt; {
     register_jpeg2000_decoders(&amp;mut registry)?;
     register_jpegls_decoders(&amp;mut registry)?;
     register_htj2k_decoders(&amp;mut registry)?;
+    register_jpegxl_decoders(&amp;mut registry)?;
     Ok(registry)
 }
 
@@ -594,9 +595,12 @@ registry.decode(transfer_syntax_uid, encoded, &amp;desc, &amp;mut out)?;</code><
         <tr><td><code>1.2.840.10008.1.2.4.80</code>, <code>.81</code></td><td>JPEG-LS Lossless, Near Lossless</td><td>JPEG-LS</td></tr>
         <tr><td><code>1.2.840.10008.1.2.4.90</code>, <code>.91</code></td><td>JPEG 2000 Lossless, JPEG 2000</td><td>JPEG 2000</td></tr>
         <tr><td><code>1.2.840.10008.1.2.4.201</code>, <code>.202</code>, <code>.203</code></td><td>HTJ2K Lossless, Lossless RPCL, HTJ2K</td><td>HTJ2K</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.110</code></td><td>JPEG XL Lossless</td><td>JPEG XL</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.111</code></td><td>JPEG XL JPEG Recompression</td><td>None, unavailable</td></tr>
+        <tr><td><code>1.2.840.10008.1.2.4.112</code></td><td>JPEG XL</td><td>JPEG XL</td></tr>
       </tbody>
     </table></div>
-    <p>Fifteen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. <code>crates/ocelli-codec/tests/registry.rs</code> asserts both halves.</p>
+    <p>Seventeen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. JPEG XL JPEG Recompression has no decoder either: <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. <code>crates/ocelli-codec/tests/registry.rs</code> asserts the nineteen, the seventeen and which two are unavailable.</p>
   </section>
 
   <section class="chapter" id="lut">

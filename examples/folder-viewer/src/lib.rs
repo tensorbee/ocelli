@@ -4,6 +4,9 @@
 //! decodes with the codec registry, and maps samples with `LutChain`.
 //! It does not read a path of its own.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
+mod corners;
 mod link;
 mod measure;
 mod preview;
@@ -15,6 +18,10 @@ mod held;
 #[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
+pub use corners::{
+    age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
+    person_name_text,
+};
 pub use link::plane_from_token;
 pub use measure::{FREEFORM_POINT_CAP, MeasureShape, measure_frame};
 pub use preview::{
