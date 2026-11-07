@@ -88,7 +88,7 @@ No public API change. The scanner's command line, its `--staged` mode and its OK
 | every `cargo` build, check, clippy and test of a member | `[workspace.lints.rust] unsafe_code = "forbid"` | all targets of all 16 members | rustc error on any `unsafe` or weakening attribute |
 | `gate unsafe`, CI floor | `unsafe_allowlist_check.py` | every tracked `.rs`, worktree or index | OK line, or a refusal naming file and line |
 | pre-commit hook | the same script, `--staged` | index blobs | the same |
-| `gate guards`, first command | `lint_policy_check.py` | `Cargo.toml` and member manifests | refusal if the table is weaker than `forbid` or the script leaves the gate |
+| `gate guards`, first command | `lint_policy_check.py` | `Cargo.toml`, member manifests and every member library root | refusal if the table is weaker than `forbid`, a root lacks the doctest attribute at its position, or the script leaves the gate |
 | `gate guards` | catalogue probes | floor sandbox | each probe's expected fragment |
 
 ## State transitions and invariants
@@ -145,7 +145,8 @@ Write set:
 ```text
 Cargo.toml                                       [workspace.lints.rust], one table
 scripts/unsafe_allowlist_check.py, scripts/tests/test_unsafe_allowlist_check.py
-scripts/lint_policy_check.py
+scripts/lint_policy_check.py, scripts/tests/test_guard_readers.py
+the 16 member library roots                      one attribute line each, after the pass 3 ruling
 scripts/guards/catalogue.py, ci/guard-probe-budget.json, docs/runbooks/guard-verification.md
 docs/lld/guards.md
 ```
@@ -193,7 +194,7 @@ None. The table implements HLD 27.1's row at a stronger level, and R5's allow-li
 
 ## LLD impact
 
-`docs/lld/guards.md`, the `unsafe_code` paragraphs at lines 1045 and 1104: the substitution becomes both mechanisms, the tokenizer replaces the three regexes, the five triggers and their probes, and the sequence the first story writing an allowed file must follow.
+`docs/lld/guards.md`, the `unsafe_code` paragraphs at lines 1045 and 1104: the substitution becomes both mechanisms, the tokenizer replaces the three regexes, the five triggers and their probes, the sequence the first story writing an allowed file must follow, and the crate-root doctest attribute with its position rule.
 
 ## User-facing documentation impact
 
@@ -212,7 +213,7 @@ None open.
 Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-232-working-pass-1.md`.
 
 - **`unsafe` inside an attribute is reported.** `#[unsafe(no_mangle)]` and its `cfg_attr` forms are `unsafe` code that rustc's lint refuses, so the scanner reports them, and an unclosed `#[` is an error rather than a silent skip.
-- **Doctests are code.** The scanner reads the Rust code fences of doc comments as code and reports `unsafe` there, because no lint table reaches a doctest. The documents say exactly which targets the lint reaches and that the scanner covers doctests.
+- **Doctests are code.** Withdrawn by the ruling after review pass 3. The scanner reads the Rust code fences of doc comments as code and reports `unsafe` there, because no lint table reaches a doctest. The documents say exactly which targets the lint reaches and that the scanner covers doctests.
 - **A weakening attribute is found with any whitespace or comment between `#` and `[`.**
 - **The two `guards-deep` lint-policy probes are corrected here.** Their expected `#[path]` count is the one measured on the tree, because the floor and the sprint gate run them.
 
@@ -227,10 +228,10 @@ Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-
 
 ### Lead ruling after review pass 3
 
-Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-3.md`, which measured 50 doc items rustdoc 1.97.1 compiles that the scanner passes. Reproducing rustdoc's reading of doc text in a Python scanner is a chase with no end, because every form it misses is another finding. The pass 2 rulings on doc text are withdrawn.
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-3.md`, which measured 50 doc items rustdoc 1.97.1 compiles that the scanner passes. Reproducing rustdoc's reading of doc text in a Python scanner is a chase with no end, because every form it misses is another finding. The pass 1 ruling that doctests are read as code, and the pass 2 rulings on doc text, are withdrawn.
 
 - **The compiler enforces doctests.** Every workspace member with a library target carries `#![doc(test(attr(forbid(unsafe_code))))]` at its crate root, which rustdoc injects into every doctest of that crate, so a doctest holding `unsafe` fails to compile however its fence or doc string is written. The implementer measures this on the pinned toolchain against the shapes pass 3 found, including the edition tags, comments and newlines after `unsafe`, `/*!` opener lines, indented and block-quoted code, `cfg_attr` doc, escapes and `include_str!`, and records the result.
-- **A guard checks the attribute is present.** The lint policy check refuses a member library root without that exact attribute, and a catalogue probe removes it from one crate and goes red. `cargo test --workspace`, which the floor runs, compiles the doctests, so the attribute is exercised on every floor run.
+- **A guard checks the attribute is present.** The lint policy check refuses a member library root without that exact attribute, and a catalogue probe removes it from one crate and goes red. `cargo test --workspace`, which the floor runs, compiles the doctests. The workspace has none today, so the floor checks the attribute is present and it acts on the first doctest written.
 - **The scanner stops reading doc text.** The fence and doc-string logic is removed, and the scanner states that doctests are enforced by the attribute and not by it. Its handling of attributes, raw strings and weakening attributes from passes 1 and 2 stays.
 - **Prose states exactly this.** Every coverage sentence, including the `unsafe.third-file` note, says what enforces doctests and nothing wider.
 
@@ -247,4 +248,4 @@ Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-
 Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-232-working-pass-5.md`, which showed that Python's line splitting and rustc's disagree on nine separators, so a `//` comment could carry the attribute text.
 
 - **The root is read as rustc reads it.** It is decoded from its bytes as UTF-8 and split on LF only, with one trailing CR removed.
-- **The header fails closed on anything but printable ASCII and tab.** A root whose lines, down to and including the attribute line, hold any other character is refused, with a message naming the line. This deliberately refuses harmless headers such as a copyright sign, because naming separators one at a time would leave every unnamed one open. A later change may not narrow this rule to a list of separators.
+- **The header fails closed on anything but printable ASCII and tab.** A root whose lines, down to and including the attribute line, hold any other character is refused, and on a root without the attribute the rule covers the lines down to the place it belongs, with a message naming the line. This deliberately refuses harmless headers such as a copyright sign, because naming separators one at a time would leave every unnamed one open. A later change may not narrow this rule to a list of separators.
