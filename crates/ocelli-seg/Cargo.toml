@@ -15,3 +15,8 @@ workspace = true
 # F-064. A contour point is `Pt<World>`. The segmentation crate does not
 # gain a renderer.
 ocelli-core = { path = "../ocelli-core" }
+
+[dev-dependencies]
+# F-211. AC4 holds `ocelli_geom::region_contains` equal to this crate's
+# F-085 polygon rule. The library source does not depend on it.
+ocelli-geom = { path = "../ocelli-geom" }

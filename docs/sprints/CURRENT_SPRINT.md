@@ -8,15 +8,15 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-119 | E30.1 | Brick decomposition and multiscale pyramid generation | Rust | 10w | done |
-| F-208 | E38.18 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | pending |
-| F-209 | E38.19 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | pending |
-| F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | pending |
-| F-211 | E38.21 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | pending |
+| F-208 | E38.18 | Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode | TS | 6w | done |
+| F-209 | E38.19 | Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library | TS | 4w | done |
+| F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | done |
+| F-211 | E38.21 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | done |
 | F-212 | E38.22 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | pending |
 | F-213 | E38.23 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | pending |
 | F-214 | E38.24 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | pending |
 | F-215 | E38.25 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | pending |
-| F-216 | E38.26 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | in-progress |
+| F-216 | E38.26 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | done |
 | F-217 | E38.27 | Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file | All | 2w | done |
 | F-218 | E38.28 | Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies | TS | 1w | done |
 | F-219 | E38.29 | Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red | Test | 1w | done |
@@ -32,6 +32,9 @@
 | F-229 | E4.10 | JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows | Rust | 3w | in-progress |
 | F-230 | E16.6 | Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false | TS | 2w | done |
 | F-231 | E5.9 | Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core | Rust+TS | 4w | pending |
+| F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
+| F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
+| F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -103,6 +106,10 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   outside its scope. Not blocking S46, because S46 publishes nothing. The
   choice is a story that packs the module, or a release rule that says where
   the module ships instead.
+  **Answered by the operator on 2026-11-06:** change the release rule. The
+  module ships outside the `@ocelli/core` tarball and `docs/RELEASE.md` item 6
+  says where. A story in S47 decides where and rewrites the rule. F-237
+  implements it.
 
 - **The objc2 crates in the native binaries may carry an Apple SDK
   redistribution question.** F-220's first review read the upstream objc2
@@ -111,12 +118,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   native binaries through wgpu's Metal backend. Not blocking S46, because
   S46 publishes nothing. The choice is legal advice before a native release,
   or a native build that leaves them out.
+  **Answered by the operator on 2026-11-06:** a native build without wgpu's
+  Metal backend, so the objc2 crates are not shipped. A story in S47.
+  F-238 implements it.
 
 - **`acceptTransferredFrame` ignores a correctly spelt `stackIndex` and
   `stackEpoch`.** Found by F-230's first review and older than F-230. Now
   that both keys are on F-230's accepted list, a caller who sets them gets
   neither a refusal nor the effect. The choice is a story that honours them,
   or removing them from that entry point's accepted keys.
+  **Answered by the operator on 2026-11-06:** a story in S47 honours both keys
+  with tests. F-236 implements it.
 
 - **A deeply nested sequence overflows the stack in `parse_part10`.** Found
   by F-225's first review while fuzzing, before the conformance checker runs,
@@ -124,6 +136,9 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   process, so one crafted file can stop the folder viewer's local process.
   The choice is a story that bounds sequence depth in the parser and refuses
   deeper input with an error, or accepting the risk for local files.
+  **Answered by the operator on 2026-11-06:** fixed in S46. A new story bounds
+  sequence depth in the parser and refuses deeper input with a typed error.
+  F-234 implements it.
 
 - **A Rust advisory nobody gates: RUSTSEC-2021-0153 on the `encoding` crate.**
   Found by F-229's first review running `cargo deny check`. The crate comes
@@ -141,14 +156,34 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   compiles to a fused multiply-add, so tier A can differ from `LutChain` by up
   to eight f32 units at the top of the range, not the two F-041 recorded. In a
   window one unit wide this drew the 99th percentile black on tier A and white
-  on tier C. F-227 now accepts a window only with a 16 unit margin, so its own
-  windows hold. Any other narrow window on tier A is still exposed. The choice
+  on tier C. F-227 now accepts a window only with a 16 unit margin, which covers a
+  shader rescale within 16 units of the CPU value. Any other narrow window on tier A is still exposed. The choice
   is a story that makes the shader's rescale match `LutChain` on every tier, or
   a recorded divergence with a minimum window width.
   F-227's fifth review found a second case: where `stored * slope` nearly
   cancels the intercept, the fused rounding error reaches hundreds of millions
   of units and flips greys at any window width, in 15,879 of 800,000 adversarial
-  draws. A minimum window width cannot cover that case.
+  draws. A minimum window width cannot cover that case, and F-227's own
+  constant window is exposed to it too.
+  **Answered by the operator on 2026-11-06:** a story in S47 makes the shader's
+  rescale match `LutChain` on every tier, with a tier A fixture that fails today.
+  F-235 implements it.
+- **The unsafe guard has blind spots.** F-229's eighth review found that
+  `scripts/unsafe_allowlist_check.py`'s string pattern opens a false string
+  after a `'"'` character literal, after a raw string holding a quote or
+  ending in a backslash, and after a line comment with an unpaired quote, and blanks the code that follows. An
+  `unsafe` block planted at `crates/ocelli-dicom/src/dicomweb.rs:418` passed the
+  guard. No audited count changes. The choice is a story that gives the guard a
+  real Rust lexer, or a recorded limit on the guard.
+  **Answered by the operator on 2026-11-06:** fixed in S46. A new story makes
+  the guard sound against every trigger above. F-232 implements it.
+- **No build compiles the jxl-oxide SIMD code.** The same review found that
+  `bin/ocelli.sh native` passes `+simd128` after `cargo rustc --`, which reaches
+  only the final example crate, so the SIMD code of its dependencies is never
+  built. D-22's F-X013 SIMD check is built the same way and may not test what it
+  says.
+  **Answered by the operator on 2026-11-06:** fixed in S46. A new story builds
+  every crate with `+simd128` for the SIMD variants and rechecks F-X013's claim. F-233 implements it.
 
 ## What is carried in
 

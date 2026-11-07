@@ -27,7 +27,8 @@ pub use image_plane::{
 };
 pub use lut::{
     LutChain, LutDescriptor, ModalityTransform, PresentationLutEvidence, PresentationLutShape,
-    PresentationTransform, VoiFunction, VoiTransform, lut_descriptor_clones, modality,
+    PresentationTransform, StoredSampleTable, VoiFunction, VoiTransform, lut_descriptor_clones,
+    modality,
 };
 pub use stored_pixel::{
     ByteOrder, PhotometricInterpretation, PixelRepresentation, PlanarConfiguration, SampleLayout,

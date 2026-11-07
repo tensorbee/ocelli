@@ -19,14 +19,14 @@ row here in the same hand.
 
 | File | Area | F-IDs |
 |------|------|-------|
-| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces | F-001, F-005, F-018 |
-| [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection, measurement, ultrasound direction and rectangular redaction | F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195 |
-| [calibration.md](calibration.md) | Spacing provenance, SUVlbm, SUVbsa, length ratio and contour volume | F-195 |
-| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025 |
-| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191 |
+| [core-types.md](core-types.md) | `crates/ocelli-core`, the coordinate and value spaces, and the one spacing equality | F-001, F-005, F-018, F-211 |
+| [geometry.md](geometry.md) | `crates/ocelli-geom`, hit-testing, projection, measurement, ultrasound direction and rectangular redaction | F-070, F-073, F-074, F-075, F-076, F-077, F-079, F-195, F-211 |
+| [calibration.md](calibration.md) | Spacing provenance, SUVlbm, SUVbsa, length ratio and contour volume | F-195, F-211 |
+| [dicom-ingest.md](dicom-ingest.md) | Part 10 parsing, DICOMweb source responses, lossless metadata providers, multiframe projection, frame indexing, transfer-syntax dispatch and refusal boundaries | F-016, F-017, F-019, F-020, F-021, F-025, F-211 |
+| [frame-open.md](frame-open.md) | Chain inputs for one Part 10 frame, padding fill, lossy and burned-in flags, private creators, and the example-viewer helper | F-191, F-210 |
 | [series-open.md](series-open.md) | Display groups, projected order, temporal slots, cine timing, and the example-viewer series panel | F-192 |
 | [overlays.md](overlays.md) | Overlay planes, display shutters, and the example-viewer overlay panel | F-193 |
-| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046 |
+| [pixel-pipeline.md](pixel-pipeline.md) | Image-plane evidence, stored-value extraction, and all four stages of DICOM PS3.3 C.11: modality, VOI, presentation and colour | F-018, F-029, F-030, F-041, F-044, F-046, F-216 |
 | [dicomweb.md](dicomweb.md) | TypeScript DICOMweb transport and the pure Rust response contract | F-021, F-101, F-198, F-230 |
 | [nifti-ingest.md](nifti-ingest.md) | NIfTI-1.1 header, affine, coordinate conversion, and payload validation | F-022 |
 | [codecs.md](codecs.md) | Explicit decoder registration, capability, exact Transfer Syntax UID dispatch, native normalization, RLE, JPEG and JPEG 2000 decode | F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217 |
@@ -47,7 +47,7 @@ row here in the same hand.
 | [release-policy.md](release-policy.md) | The stable claim, the deprecation window, and the refusal to publish | F-117, F-217, F-220 |
 | [oracle.md](oracle.md) | The differential harness's reference half, cornerstone3D under headless Chromium | F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026, F-X021 |
 | [comparator.md](comparator.md) | The harness's judging half: the tolerance predicate, the verdict vocabulary, the attribution ladder and the census | F-011, F-012, F-013, F-015, F-X012, F-X003, F-103, F-X021 |
-| [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111 |
+| [benchmarks.md](benchmarks.md) | The benchmark harness of HLD section 26, its subject registry, the host class and the `bench` gate | F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216 |
 | [guards.md](guards.md) | The guard harness: discovery, the catalogue, the sandbox, the probe runner, the census and executable skill examples | F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-219, F-218, F-220 |
-| [cache.md](cache.md) | `crates/ocelli-cache`: the budgeted LRU, brick addressing, what `Budgeted::bytes` promises, section 8's three tiers, and a load profile from dimensions, and level bricks keyed in the same cache | F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119 |
+| [cache.md](cache.md) | `crates/ocelli-cache`: the budgeted LRU, brick addressing, what `Budgeted::bytes` promises, section 8's three tiers, and a load profile from dimensions, and level bricks keyed in the same cache | F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216 |
 | [volumes.md](volumes.md) | `crates/ocelli-volume`: grouping, projected spacing, construction from stored samples, the contiguous store, the volume cache, the brick grid, ready bricks, `resident`, a ready-brick cut, a present slice as f32, the level axis and its multiscale pyramid, orthographic reslice, oblique reslice, thick-slab sampling, the index of one patient point on a held plane, world-point sampling on a shared fusion plane, the tier C present of those same samples through `CpuRaster`, and a tilted stack that keeps its lateral step | F-033, F-036, F-043, F-051, F-052, F-053, F-057, F-058, F-059, F-054, F-055, F-056, F-X004, F-197, F-119, F-222 |

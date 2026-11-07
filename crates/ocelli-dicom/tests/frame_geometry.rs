@@ -482,7 +482,7 @@ fn non_uniform_frame_spacing_is_refused_rather_than_averaged() {
 
 #[test]
 fn calibrated_pixel_spacing_wins_and_imager_spacing_is_retained() {
-    // DICOM PS3.3 C.7.6.1.1.5. When both are present and differ, Pixel Spacing
+    // DICOM PS3.3 10.7.1.1. When both are present and differ, Pixel Spacing
     // has been calibrated to a plane other than the detector plane, and it is
     // the one that applies to measurements in the image. Imager Pixel Spacing
     // is detector spacing and is retained as evidence only.
@@ -533,6 +533,28 @@ fn agreeing_imager_spacing_is_reported_as_agreement_rather_than_calibration() {
 }
 
 #[test]
+fn imager_spacing_within_the_one_tolerance_agrees() {
+    // F-211 review pass 2, S1. PS3.3 10.7.1.1. `ImagerAgrees` and
+    // `ocelli_geom::select_calibration` share `ocelli_core::spacing_pair_agrees`.
+    // 0.1430000001 against 0.143 differs by about 1e-10 mm, inside the
+    // 1e-9 mm tolerance, so both call the pair equal. 0.143001 is outside it.
+    for (image, want) in [
+        ("0.1430000001", SpacingRelationship::ImagerAgrees),
+        ("0.143001", SpacingRelationship::Calibrated),
+    ] {
+        let mut metadata = legacy_instance(&[image, image]);
+        insert(
+            &mut metadata,
+            IMAGER_PIXEL_SPACING,
+            texts(VR::DS, &["0.143", "0.143"]),
+        );
+        let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
+        let geometry = require_ok!(FrameGeometry::derive(&multiframe, 0));
+        assert_eq!(geometry.spacing().relationship(), want, "{image}");
+    }
+}
+
+#[test]
 fn pixel_spacing_alone_is_reported_as_image_only() {
     let metadata = legacy_instance(&["2.0", "0.5"]);
     let multiframe = require_ok!(MultiframeMetadata::new(&metadata));
@@ -546,10 +568,10 @@ fn pixel_spacing_alone_is_reported_as_image_only() {
 
 #[test]
 fn imager_pixel_spacing_alone_is_refused_and_never_substituted() {
-    // DICOM PS3.3 C.7.6.1.1.5. Imager Pixel Spacing is spacing at the DETECTOR
-    // plane. On a projection radiograph it differs from spacing in the image by
-    // the source-to-image magnification factor, typically 10 to 20 per cent.
-    // Substituting it produces a geometry that renders and measures wrong, so
+    // DICOM PS3.3 C.8.11.4. Imager Pixel Spacing is measured at the front
+    // plane of the DETECTOR housing and is never adjusted for geometric
+    // magnification. PS3.3 C.8.7.5's magnification factor relates it to the
+    // patient plane. Substituting it would measure in the detector plane, so
     // the answer is a refusal and the caller decides.
     let mut metadata = legacy_instance_omitting(&["2.0", "0.5"], Some(PIXEL_SPACING));
     insert(

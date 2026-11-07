@@ -2,14 +2,14 @@
 
 **Area**: `crates/ocelli-core`
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1
-**F-IDs that contributed:** F-001, F-005, F-018
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-001, F-005, F-018, F-211
+**Last updated:** 2026-11-06
 
 Living current-state document. It describes what the code does today.
 
 ## What is here
 
-`ocelli-core` holds four modules, all re-exported at the crate root so callers
+`ocelli-core` holds five modules, all re-exported at the crate root so callers
 write `ocelli_core::Pt` rather than `ocelli_core::space::Pt`.
 
 | Module | Contents |
@@ -18,6 +18,14 @@ write `ocelli_core::Pt` rather than `ocelli_core::space::Pt`.
 | `value` | `Stored`, `Modality`, `Display` |
 | `error` | `ErrorCode`, `Severity`, `LogLevel`, `Record`, `RecordError` |
 | `exact_f32` | `exact_f32_integer`, `ExactF32Integer`, `ExactF32Error` |
+| `spacing` | `SPACING_EQUALITY_MM`, `spacing_pair_agrees` |
+
+`spacing` is the one rule for whether two in-plane spacing pairs, row then
+column, are the same: each half within `SPACING_EQUALITY_MM`, 1e-9 mm, and a
+non-finite half never agrees. F-211 moved it here from `ocelli-dicom` so that
+`ocelli-dicom`'s `ImagerAgrees` and frame and series spacing agreement, and
+`ocelli-geom`'s `select_calibration` test of PS3.3 10.7.1.1, all call it. The
+tolerance is not physical, and changing it is a design-plan decision.
 
 The crate is `#![cfg_attr(not(test), no_std)]` and has two dependencies, `glam`
 for `DMat4` and `thiserror` for the error model. No `unsafe`, no

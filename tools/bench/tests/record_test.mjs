@@ -26,6 +26,7 @@ import { SUBJECTS_PATH } from "../src/paths.mjs";
 import { parseRegistry } from "../src/registry.mjs";
 import { hostClassKey } from "../src/hostclass.mjs";
 import { INCOMPARABLE, MEASURED, UNAVAILABLE } from "../src/state.mjs";
+import { profileFromHeld } from "../src/viewer_work.mjs";
 
 const HOST = {
   platform: "darwin",
@@ -410,6 +411,66 @@ test("--accept refuses a re-baseline with no story and no reason", () => {
       { story: "F-006", today: "2026-09-05" }),
     /needs both a story and a reason/,
   );
+});
+
+test("a viewer subject measured on a debug binary is refused", () => {
+  const run = record({
+    subjects: [
+      {
+        id: "viewer.window_step",
+        unit: "ms",
+        state: MEASURED,
+        value: 1,
+        detail: { profile: "debug" },
+      },
+    ],
+  });
+  assert.throws(
+    () => acceptRecord(emptyBaseline(), run, {
+      story: "F-216", why: "x", today: "2026-09-05",
+    }),
+    /refusing to record a release subject from a debug binary/,
+  );
+});
+
+test("a debug build reported by the server is refused for a viewer subject", () => {
+  const profile = profileFromHeld({ build: "debug" });
+  const run = record({
+    subjects: [
+      {
+        id: "viewer.resident_memory",
+        unit: "bytes",
+        state: MEASURED,
+        value: 1,
+        detail: { profile },
+      },
+    ],
+  });
+  assert.throws(
+    () => acceptRecord(emptyBaseline(), run, {
+      story: "F-216", why: "x", today: "2026-09-05",
+    }),
+    /refusing to record a release subject from a debug binary/,
+  );
+});
+
+test("a viewer subject measured on a release binary is recorded", () => {
+  const run = record({
+    subjects: [
+      {
+        id: "viewer.window_step",
+        unit: "ms",
+        state: MEASURED,
+        value: 1,
+        detail: { profile: "release" },
+      },
+    ],
+  });
+  const after = acceptRecord(emptyBaseline(), run, {
+    story: "F-216", why: "x", today: "2026-09-05",
+  });
+  const entry = baselineEntry(after, hostClassKey(HOST), "viewer.window_step");
+  assert.equal(entry.detail.profile, "release");
 });
 
 test("--accept refuses a subject this run did not measure", () => {

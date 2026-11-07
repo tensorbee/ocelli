@@ -282,3 +282,19 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 - Q5. Answered: the flag stays, and AC20 makes the reviewer check the transcription against dicom.nema.org, current edition, before implementation of the unit rule and the fixtures.
 
 Protocol change from the same round: the pointer cross now shows the modality value and its unit, which deliberately changes the operator protocol line "shows a column and a row, not a Hounsfield value". It is named in the table under Problem and reproducer. No question is left open.
+
+### Lead rulings and corrections after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-210-working-pass-1.md`, which checked the transcriptions above against PS3.3 2026d as AC20 asks. Where this section and the text above differ, this section holds.
+
+- **Corrected transcriptions.** PS3.3 C.8.2.1 makes Rescale Type required if the Rescale Type is not HU, or Multi-energy CT Acquisition (0018,9361) is YES. Units (0054,1001) for PET is described in C.8.9.4, the PET Image Module, and C.8.9.1 is the PET Series Module. The sentence quoted for Rescale Type is the C.11.1 table's, and C.11.1.1.2 says "Specifies the units of the output of the Modality LUT or rescale operation." Masking above Bits Stored and sign extension from Bits Stored minus 1 are cited to PS3.5 8.1.1 and PS3.3 C.7.6.3.3, not C.7.6.3.1.
+- **A multi-energy CT without Rescale Type has no assumed unit.** When Multi-energy CT Acquisition is YES and Rescale Type is absent, the unit is reported as unspecified, not HU.
+- **On PET, Units decides the unit.** For PT, Units (0054,1001) is reported when present, whatever Rescale Type says, per C.8.9.4.
+- **The value depends only on the file, the frame and the cell.** Stage 1 is taken from the held frame's modality recipe, which AC12 proves equal to the preview's, so a window, presentation, lossy or burned-in attribute the value never reads cannot refuse it.
+- **The value's facts are charged to the cache budget.** Their heap bytes count in the held frame's bytes like every other owned buffer.
+
+### Lead ruling on the value's claim, after the review pass 1 remediation
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call. The pre-decode claim for a frame covers its value's facts and the longest unit the file can name, Rescale Type being LO, at most 64 characters in PS3.5 Table 6.2-1, held as UTF-8. A Rescale Type or Units longer than 64 characters refuses the value with `attribute`. Every route that gives a claim its room makes room for that whole cost, so a frame a reply is reading is never evicted by a longer unit.
+
+AC12 now holds by construction, because stage 1 is the held frame's recipe. Its test pins that the value and the preview share that recipe, so a later change that gives the value its own stage 1 goes red.
