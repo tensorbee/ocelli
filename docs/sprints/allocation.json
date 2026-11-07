@@ -3099,7 +3099,7 @@
       "epic_key": "E38",
       "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name",
       "layer": "All",
-      "weeks": 11,
+      "weeks": 12,
       "depends_eids": [
         "E4.8",
         "E38.19",
@@ -3122,7 +3122,7 @@
       "epic_key": "E38",
       "story": "Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145",
       "layer": "All",
-      "weeks": 4,
+      "weeks": 5,
       "depends_eids": [
         "E38.37"
       ],

@@ -35,8 +35,8 @@
 | F-232 | E38.35 | Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found | Build | 2w | pending |
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | pending |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
-| F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 11w | pending |
-| F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 4w | pending |
+| F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
+| F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -203,11 +203,15 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   on each colour channel as cornerstone3D 5.8.2 does, a region on a colour
   frame reports R, G and B statistics, colour above 8 bits and palette entries
   above 255 are scaled by one `ocelli-pixel` rule, and a file with an ICC
-  profile is drawn with a sentence that the profile was not applied. F-239's
-  estimate rose from 4w to 11w. Its plan stays draft on one question the
-  widening raised: neither vendored JPEG 2000 decoder produces correct colour
-  without a source change, and the route is the operator's. F-240 applies
-  matrix and tone-curve ICC profiles after F-239, filed the same day.
+  profile is drawn with a sentence that the profile was not applied. F-240
+  applies matrix and tone-curve ICC profiles after F-239, filed the same day.
+  **Answered by the operator later on 2026-11-07:** the vendored JPEG 2000
+  crates are patched with recorded provenance, HTJ2K first, the ICC subset is
+  built with no dependency, a profile outside it is drawn and named, neither
+  story may grow the wasm build or slow the viewer, and cornerstone3D 5.8.2 is
+  the floor that both stories must meet or beat on a measured axis. Both plans
+  are approved, with deviations D-29, D-30 and D-31. F-239 is 12w in a codec
+  part and a viewer part, and F-240 is 5w.
 
 ## What is carried in
 
