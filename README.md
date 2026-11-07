@@ -262,8 +262,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    radiograph, and hide while the picture is flipped or rotated. An image
    whose Anatomical Orientation Type is `QUADRUPED` shows no letters. A scale
    bar shows above the window line when the file gives a spacing a length can
-   use, from that same spacing, and says `at the detector` for Imager Pixel
-   Spacing alone. It hides with the corners and in Four images. The pointer
+   use, from that same spacing, and says `at the detector` when that spacing
+   is at the detector: Imager Pixel Spacing with no magnification factor,
+   alone or with a Pixel Spacing equal to it. It hides with the corners and in Four images. The pointer
    cross shows the column, the row and the modality value of the pixel under
    it with its unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
    not multi-energy, `unspecified` for Rescale Type `US`, the Units

@@ -3921,6 +3921,9 @@ fn computed_age_is_the_age_at_the_study() -> Result<(), String> {
     // 9 days to 29 February and 5 more, 14 days. 2020 is a leap year as
     // well, so 2020-02-20 to 2020-03-05 is also 14 days. 2023 is not, so
     // 2023-02-20 to 2023-03-05 is 8 days to 28 February and 5 more, 13.
+    // 2000-12-15 to 2001-01-05 crosses the end of the leap year 2000: 0
+    // years, 1 * 12 + 1 - 12 = 1 month less one for day 5, so 0 months, and
+    // 16 days to 31 December and 5 more, 21 days.
     // A study before the birth, or no study date, is empty.
     for (birth, study, want, source) in [
         (Some("19700102"), Some("20240305"), "54 years", "computed"),
@@ -3934,6 +3937,7 @@ fn computed_age_is_the_age_at_the_study() -> Result<(), String> {
         (Some("20240220"), Some("20240305"), "14 days", "computed"),
         (Some("20200220"), Some("20200305"), "14 days", "computed"),
         (Some("20230220"), Some("20230305"), "13 days", "computed"),
+        (Some("20001215"), Some("20010105"), "21 days", "computed"),
         (Some("20240305"), Some("20240301"), "", ""),
         (Some("19700102"), None, "", ""),
         (Some("19000229"), Some("20240305"), "", ""),
@@ -4421,7 +4425,8 @@ fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
     // move together. PS3.3 C.8.11.4 and C.8.7.5: Imager Pixel Spacing 0.2
     // alone is at the detector. With a magnification factor 2 it is
     // 0.2 / 2 = 0.1 mm at the patient. A Pixel Spacing 0.5 decides alone,
-    // no spacing is uncalibrated, and a Pixel Spacing of 0\0.5 refuses.
+    // and 0.25\0.5 is row 0.25 then column 0.5, PS3.3 10.7.1.3. No spacing
+    // is uncalibrated, and a Pixel Spacing of 0\0.5 refuses.
     let imager = planted_text((0x0018, 0x1164), *b"DS", "0.2\\0.2");
     let factor = planted_text((0x0018, 0x1114), *b"DS", "2");
     let segment = [ImagePoint { x: 0.0, y: 0.0 }, ImagePoint { x: 1.0, y: 0.0 }];
@@ -4443,6 +4448,12 @@ fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
             vec![planted_text((0x0028, 0x0030), *b"DS", "0.5\\0.5")],
             "pixel-spacing",
             Some((0.5, 0.5)),
+        ),
+        (
+            "non-square",
+            vec![planted_text((0x0028, 0x0030), *b"DS", "0.25\\0.5")],
+            "pixel-spacing",
+            Some((0.25, 0.5)),
         ),
         ("none", Vec::new(), "uncalibrated", None),
         (
@@ -4489,6 +4500,15 @@ fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
         || header_line(header, "X-Ocelli-Calibration-Column") != Some("0.2")
     {
         return Err(format!("the reply did not carry the calibration: {header}"));
+    }
+    // A non-square pair keeps row and column apart. The bar reads the column.
+    let file = corner_object(&[planted_text((0x0028, 0x0030), *b"DS", "0.25\\0.5")])?;
+    let response = one_exchange(&http_post(&file))?;
+    let (header, _) = split_http(&response)?;
+    if header_line(header, "X-Ocelli-Calibration-Row") != Some("0.25")
+        || header_line(header, "X-Ocelli-Calibration-Column") != Some("0.5")
+    {
+        return Err(format!("the reply swapped the calibration pair: {header}"));
     }
     Ok(())
 }
