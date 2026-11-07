@@ -20,7 +20,13 @@ every dependency's rlib carries LLVM bitcode and all code generation runs
 once, at the example's link, under the example's flags. What the flag changes
 per crate is `cfg(target_feature = "simd128")` source selection, and
 `docs/lld/build-targets.md` records that as a measurement taken once, not as
-something this check asserts.
+something this check asserts. What pins the build shape instead is
+`build_shape_problems`, a structural pin on the runner text that
+`scripts/tests/test_simd_variant_check.py` applies to the tracked
+`bin/ocelli.sh`: every SIMD variant step passes `+simd128` through
+`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` and none passes a target
+feature after `cargo rustc --`. It reads spelling and proves nothing about a
+build.
 
 The module is decoded with the standard library only, per the WebAssembly Core
 Specification 2.0 section 5. Every function body in the code section is
@@ -331,6 +337,73 @@ def check(plain: Path, simd: Path) -> list[str]:
             f"the SIMD module {simd} holds no SIMD instruction the plain "
             f"module lacks. The build did not enable `+simd128` at code "
             f"generation, which under fat LTO is the example's link.")
+    return problems
+
+
+SIMD_RUSTFLAGS = ('CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='
+                  '"-C target-feature=+simd128"')
+SIMD_TARGET_DIR = "--target-dir target/codec-wasm-simd"
+
+
+def _native_arm(text: str) -> list[str] | None:
+    """The native arm's commands, one per logical line, continuations joined.
+
+    The arm runs from `  native)` to the next four-space `;;`, which is how
+    bin/ocelli.sh writes every arm of its dispatch `case`.
+    """
+    lines = text.splitlines()
+    try:
+        start = lines.index("  native)")
+    except ValueError:
+        return None
+    commands: list[str] = []
+    pending = ""
+    for line in lines[start + 1:]:
+        if line == "    ;;":
+            return commands
+        stripped = line.strip()
+        if not pending and (not stripped or stripped.startswith("#")):
+            continue
+        if stripped.endswith("\\"):
+            pending += stripped[:-1].strip() + " "
+            continue
+        commands.append(pending + stripped)
+        pending = ""
+    return None
+
+
+def build_shape_problems(text: str) -> list[str]:
+    """A structural pin on the runner text, F-233 decision 1.
+
+    F-233's lead ruling after the pass 1 repair: every SIMD variant step
+    passes the feature through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`
+    and none passes it after `cargo rustc --`. The module check cannot
+    separate those two shapes, because under fat LTO both link a module with
+    the same SIMD instructions, so this reads the arm's text instead. It pins
+    the spelling and proves nothing about a build.
+    """
+    commands = _native_arm(text)
+    if commands is None:
+        return ["bin/ocelli.sh has no `  native)` arm ending at `    ;;`, so "
+                "the SIMD variant steps cannot be read."]
+    problems: list[str] = []
+    steps = [c for c in commands if SIMD_TARGET_DIR in c]
+    if not steps:
+        problems.append(
+            f"the native arm has no SIMD variant step, no command naming "
+            f"`{SIMD_TARGET_DIR}`.")
+    for step in steps:
+        if not step.startswith(SIMD_RUSTFLAGS + " cargo build "):
+            problems.append(
+                f"a SIMD variant step does not start with `{SIMD_RUSTFLAGS} "
+                f"cargo build`, which is the only spelling that reaches every "
+                f"crate's cfg: {step}")
+    for command in commands:
+        head, sep, tail = command.partition(" -- ")
+        if sep and "cargo rustc" in head and "target-feature" in tail:
+            problems.append(
+                f"a step passes a target feature after `cargo rustc --`, "
+                f"which reaches the final crate only: {command}")
     return problems
 
 

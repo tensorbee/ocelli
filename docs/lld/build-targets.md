@@ -220,7 +220,17 @@ scratch copy of the tree or with the arm's commands:
 The third row is not refused. The pre-F-233 module and the F-233 module differ
 in bytes and hold the same SIMD inventory, so no check over the linked module
 separates them. The per-crate `cfg` facts above are the only measured
-difference, and nothing asserts them on each run. In the fourth row cargo
+difference, and nothing asserts them on each run. What pins the build shape
+is structural: `build_shape_problems` in `scripts/simd_variant_check.py`
+reads the native arm and refuses a SIMD variant step that does not pass
+`+simd128` through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`, and any
+step passing a target feature after `cargo rustc --`.
+`scripts/tests/test_simd_variant_check.py` applies it to the tracked
+`bin/ocelli.sh` in `gate native`, and probe
+`simd-variant.cargo-rustc-shape` drives it red in `gate guards`. It reads the
+runner's spelling, so it catches the pre-F-233 shape, measured at four
+refusals over that commit's `bin/ocelli.sh`, and says nothing about a build
+that reaches the crates some other way. In the fourth row cargo
 links the fresh unit's module into `examples/` again, so the check reads the
 build that just ran.
 

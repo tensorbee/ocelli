@@ -240,5 +240,73 @@ class Check(unittest.TestCase):
         self.assertIn("cannot be decoded", problems[0])
 
 
+# The two SIMD variant step shapes, as bin/ocelli.sh writes them. F-233's
+# lead ruling after the pass 1 repair: every SIMD variant step passes the
+# feature through CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS and none passes
+# it after `cargo rustc --`.
+F233_STEP = """    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \\
+      cargo build -p ocelli-codec --release --example verify_htj2k \\
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
+"""
+PRE_F233_STEP = """    cargo rustc -p ocelli-codec --release --example verify_htj2k \\
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \\
+      -C target-feature=+simd128
+"""
+PLAIN_STEP = """    cargo build -p ocelli-codec --release --example verify_htj2k \\
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
+"""
+
+
+def runner(*steps: str) -> str:
+    return ("case x in\n  native)\n" + "".join(steps)
+            + "    ;;\n  other)\n    ;;\nesac\n")
+
+
+class BuildShape(unittest.TestCase):
+    """A structural pin on the runner text, not a measurement of a build.
+
+    The module check cannot separate the F-233 build from the pre-F-233
+    `cargo rustc --` shape, because under fat LTO both link a module with
+    the same SIMD instructions. This reads the native arm instead.
+    """
+
+    def test_the_tracked_runner_passes_the_flag_to_every_crate(self) -> None:
+        text = (ROOT / "bin" / "ocelli.sh").read_text(encoding="utf-8")
+        self.assertEqual(simd_variant_check.build_shape_problems(text), [])
+
+    def test_the_f233_shape_passes(self) -> None:
+        self.assertEqual(simd_variant_check.build_shape_problems(
+            runner(PLAIN_STEP, F233_STEP, PLAIN_STEP, F233_STEP)), [])
+
+    def test_the_pre_f233_shape_is_refused(self) -> None:
+        problems = simd_variant_check.build_shape_problems(
+            runner(PLAIN_STEP, PRE_F233_STEP))
+        self.assertTrue(any("cargo rustc --" in p for p in problems),
+                        problems)
+        self.assertTrue(any("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS"
+                            in p for p in problems), problems)
+
+    def test_one_regressed_step_among_correct_ones_is_refused(self) -> None:
+        problems = simd_variant_check.build_shape_problems(
+            runner(F233_STEP, PRE_F233_STEP))
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_the_variable_with_another_feature_is_refused(self) -> None:
+        problems = simd_variant_check.build_shape_problems(runner(
+            F233_STEP.replace("+simd128", "+bulk-memory")))
+        self.assertEqual(len(problems), 1, problems)
+
+    def test_an_arm_with_no_simd_variant_step_is_refused(self) -> None:
+        problems = simd_variant_check.build_shape_problems(
+            runner(PLAIN_STEP))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no SIMD variant step", problems[0])
+
+    def test_a_runner_without_a_native_arm_is_refused(self) -> None:
+        problems = simd_variant_check.build_shape_problems("echo hi\n")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("native", problems[0])
+
+
 if __name__ == "__main__":
     unittest.main()

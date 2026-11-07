@@ -11222,7 +11222,10 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A SIMD verification module holding no SIMD instruction the "
                 "plain module lacks, a plain module holding any SIMD "
                 "instruction, and a module that is missing or that the "
-                "decoder cannot walk to its last byte.",
+                "decoder cannot walk to its last byte. As a structural pin on "
+                "`bin/ocelli.sh`, a SIMD variant step that does not pass "
+                "`+simd128` through the target rustflags variable and a step "
+                "passing a target feature after `cargo rustc --`.",
         claims=("*",),
         probes=(
             Probe(
@@ -11282,6 +11285,49 @@ GUARDS: tuple[Guard, ...] = (
                      "module, missing and undecodable refusals are driven by "
                      "`scripts/tests/test_simd_variant_check.py`, which `gate "
                      "native` runs after the arm."),
+            Probe(
+                "simd-variant.cargo-rustc-shape", None,
+                python_snippet(
+                    "simd_variant_check.build_shape_problems, cargo rustc --",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "text = ('  native)\\n'\n"
+                    "        '    cargo rustc -p ocelli-codec --example verify_htj2k '\n"
+                    "        '--target-dir target/codec-wasm-simd -- '\n"
+                    "        '-C target-feature=+simd128\\n'\n"
+                    "        '    ;;\\n')\n"
+                    "bad = s.build_shape_problems(text)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "after `cargo rustc --`",
+                level=1,
+                control=python_snippet(
+                    "simd_variant_check.build_shape_problems, target rustflags",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "text = ('  native)\\n'\n"
+                    "        '    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='\n"
+                    "        '\"-C target-feature=+simd128\" cargo build '\n"
+                    "        '-p ocelli-codec --example verify_htj2k '\n"
+                    "        '--target-dir target/codec-wasm-simd\\n'\n"
+                    "        '    ;;\\n')\n"
+                    "bad = s.build_shape_problems(text)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1, and a structural pin rather than a measurement "
+                     "of a build. It reads runner text and refuses a SIMD "
+                     "variant step that does not pass `+simd128` through "
+                     "`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`, and "
+                     "any step that passes a target feature after `cargo "
+                     "rustc --`. The module check cannot separate that "
+                     "pre-F-233 shape from the F-233 one, because under fat "
+                     "LTO both link a module with the same SIMD "
+                     "instructions. The probe plants the pre-F-233 step and "
+                     "the control the F-233 one. "
+                     "`scripts/tests/test_simd_variant_check.py` applies the "
+                     "same function to the tracked `bin/ocelli.sh`."),
         ),
     ),
     Guard(
