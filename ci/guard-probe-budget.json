@@ -1,7 +1,7 @@
 {
   "constants": {
     "Cargo.toml:workspace.lints": {
-      "digest": "7a1e1435df619534",
+      "digest": "40d2e2955a07bcc4",
       "guard": "lint-policy",
       "tunable": false
     },
@@ -91,7 +91,7 @@
       "tunable": false
     },
     "scripts/ci_floor_check.py:NOT_IN_FLOOR": {
-      "digest": "0c3bd9dbaf33b7c1",
+      "digest": "243920034e033599",
       "guard": "ci-floor",
       "tunable": false
     },
@@ -261,9 +261,9 @@
     "bench.jpeg2000": 9,
     "bench.jpegls": 9,
     "bench.page": 2,
-    "bench.record": 6,
+    "bench.record": 7,
     "bench.registry": 13,
-    "bench.runner": 9,
+    "bench.runner": 15,
     "bench.session": 16,
     "bench.session.page": 4,
     "bench.session.worker": 5,
@@ -277,8 +277,8 @@
     "ci-floor": 25,
     "codec.wasm-runner": 2,
     "content": 9,
-    "corpus": 43,
-    "corpus-synth": 6,
+    "corpus": 46,
+    "corpus-synth": 9,
     "corpus-tests": 2,
     "decode-graph": 26,
     "deviations": 5,
@@ -290,7 +290,7 @@
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
     "licences": 121,
-    "lint-policy": 28,
+    "lint-policy": 32,
     "nostd": 8,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,
@@ -319,6 +319,7 @@
     "quirks": 4,
     "runner": 1,
     "sandbox": 13,
+    "simd-variant": 19,
     "skill-examples": 15,
     "skills": 10,
     "source-dir": 2,
@@ -328,9 +329,9 @@
     "sprint-lifecycle": 34,
     "sprint-plan": 16,
     "target-features": 6,
-    "unsafe": 7
+    "unsafe": 9
   },
-  "gates_declared": 34,
+  "gates_declared": 35,
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {

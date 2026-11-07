@@ -15,7 +15,7 @@ use dicom_core::PrimitiveValue;
 use ocelli_codec::{
     DecodePhotometricInterpretation, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation,
     Registry, register_htj2k_decoders, register_jpeg_decoders, register_jpeg2000_decoders,
-    register_jpegls_decoders, register_native_and_rle_decoders,
+    register_jpegls_decoders, register_jpegxl_decoders, register_native_and_rle_decoders,
 };
 use ocelli_core::{Canvas, Index, Pt, Stored, Transform};
 use ocelli_dicom::{DispatchPath, EncapsulatedFrameIndex, Tag, parse_part10};
@@ -1616,6 +1616,7 @@ fn build_registry() -> Result<Registry, &'static str> {
     register_jpeg2000_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     register_jpegls_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     register_htj2k_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
+    register_jpegxl_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     Ok(registry)
 }
 

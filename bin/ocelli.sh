@@ -65,6 +65,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs and changed.mjs (F-208, F-209, F-226, F-224)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -153,6 +154,31 @@ run_gate() {
     # `npm run test:browser` in tools/bench sets. So this stays a no-browser
     # gate and gains workspaceVersion, median, atClockPrecision and
     # resolveServedPath.
+    # F-208 AC14. The folder viewer's displayed width over height on the
+    # synthetic study, measured in headless Chromium through tools/bench's
+    # pinned Playwright. Then F-208's pointer readout check: a layout
+    # change, a window resize, a zoom and a tile toggle with the pointer
+    # still each hide the readout, and a move shows it again. F-209's
+    # reference line check follows, then F-226's forget check: the process
+    # forgets the folder the page left, a late reply does not post the old
+    # file again, and leaving the page forgets the folder open. F-224's
+    # changed-file check is last: a file rewritten on disk after the folder
+    # was opened is refused rather than shown, choosing the folder again
+    # shows the new bytes, and the probe reads one byte a file. Chained on
+    # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
+    # the viewer, so it is outside the floor. The CI step that runs it is the
+    # `viewer-browser` job, which installs both.
+    viewer-browser)
+                 if [ ! -d tools/bench/node_modules ]; then
+                   echo "The benchmark harness's browser is not installed." >&2
+                   echo "Run: (cd tools/bench && npm ci && npx playwright install chromium)" >&2
+                   return 1
+                 fi
+                 node examples/folder-viewer/tests/browser/aspect.mjs &&
+                 node examples/folder-viewer/tests/browser/readout.mjs &&
+                 node examples/folder-viewer/tests/browser/link.mjs &&
+                 node examples/folder-viewer/tests/browser/forget.mjs &&
+                 node examples/folder-viewer/tests/browser/changed.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
@@ -167,7 +193,8 @@ run_gate() {
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
-                   tools/bench/tests/tier_startup_test.mjs ;;
+                   tools/bench/tests/tier_startup_test.mjs \
+                   tools/bench/tests/viewer_work_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_source_provenance_check.py ;;
@@ -207,7 +234,13 @@ run_gate() {
                  python3 scripts/pin_and_size_check.py --with-size &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_pin_and_size_check.py ;;
-    native)      "$0" native ;;
+    # The unit suite travels with the gate whose arm runs the check, the
+    # same pattern as test_bench_check.py in `bench` and
+    # test_pin_and_size_check.py in `wasm`. Chained on `&&` for the reason
+    # the backlog arm gives.
+    native)      "$0" native &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_simd_variant_check.py ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
     # F-X009. A green run of the gates is not evidence that the gates work, it
@@ -471,7 +504,9 @@ gates_cmd() {
         # has `needs_gpu = no` and an `#[ignore]`d test therefore ran in NO
         # profile at all, including `--sprint`. It is an ADDITION to the set CI
         # does not run, so D-04's row stays true.
-        case "$name" in oracle|corpus|guards-deep|quirk-mutations|gpu|licences-wheels) continue ;; esac
+        # `viewer-browser` is outside the floor because it needs Chromium and
+        # a release build of the viewer. The `viewer-browser` CI job runs it.
+        case "$name" in oracle|corpus|guards-deep|quirk-mutations|gpu|licences-wheels|viewer-browser) continue ;; esac
         selected+=("$name")
       done ;;
     --sprint|--all)
@@ -549,7 +584,7 @@ case "$command" in
     # D2 honest over time: if the core stopped being WebAssembly-agnostic,
     # this is where it shows up first.
     #
-    # Eight steps, and each one's exit code is read from the command itself
+    # Thirteen steps, and each one's exit code is read from the command itself
     # rather than from the end of a pipe. `set -e` is on, so the first failure
     # ends the arm.
     #
@@ -559,7 +594,7 @@ case "$command" in
 
     # 1. The two entry points LINK, not merely type-check. A stub that only
     #    checks would hide a missing symbol until Phase 2.
-    echo "  1/11 native entry points link"
+    echo "  1/13 native entry points link"
     cargo build -p ocelli-native --bins
 
     # 2. Every crate HLD section 4 marks `wasm: yes` builds for wasm32.
@@ -573,14 +608,14 @@ case "$command" in
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
     #    runner, which is F-101's and the oracle's ground, not this gate's.
-    echo "  2/11 eleven shared crates plus ocelli-wasm build for wasm32"
+    echo "  2/13 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown
 
     # 3. Every crate the table marks `native: yes` builds natively.
     #    --all-targets IS right here: a native build runs the test suite, so
     #    the tests have to compile.
-    echo "  3/11 the same crates build natively, tests included"
+    echo "  3/13 the same crates build natively, tests included"
     cargo check --workspace --all-targets
 
     # 4. Resolved features agree across the two targets, or the difference is
@@ -588,43 +623,72 @@ case "$command" in
     #    both targets compiling while one quietly resolved a different feature
     #    set is the sprint's stated false-portability defect, and nothing goes
     #    red on its own.
-    echo "  4/11 resolved features agree across targets"
+    echo "  4/13 resolved features agree across targets"
     python3 scripts/target_feature_check.py
 
-    # 5. The same production JPEG 2000 proof executes natively. Steps 6 and 7
-    # run that exact source as plain and SIMD-enabled wasm under Node.
-    echo "  5/11 codec wasm runner refusals and control"
+    # 5. The Node executor's own refusals and control. Step 6 runs the
+    # production JPEG 2000 proof natively, and step 9 runs that exact source
+    # as plain and SIMD-enabled wasm under Node.
+    echo "  5/13 codec wasm runner refusals and control"
     node --test scripts/tests/test_run_codec_wasm.mjs
 
-    echo "  6/11 JPEG 2000 production decoder executes natively"
+    echo "  6/13 JPEG 2000 production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_jpeg2000
 
-    echo "  7/11 JPEG 2000 production decoder builds as plain and SIMD wasm"
+    # 7. The SIMD flag travels in
+    # CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS and not in `cargo rustc
+    # --`, which hands its arguments to the final crate only, the example,
+    # and compiles every dependency without them. With an explicit --target,
+    # cargo applies a target's rustflags to the target's crates and to no
+    # build script or proc macro, which run on the host. The SIMD variants
+    # keep their own --target-dir, so the flag change never invalidates the
+    # plain or default caches. F-233.
+    #
+    # What the flag changes per crate is `cfg(target_feature = "simd128")`
+    # source selection. Code generation is not per crate: the release
+    # profile is `lto = "fat"`, so every dependency's rlib carries bitcode
+    # and all of it is code-generated once, at the example's link, under the
+    # example's flags. docs/lld/build-targets.md records what was measured.
+    echo "  7/13 JPEG 2000 production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
-    cargo rustc -p ocelli-codec --release --example verify_jpeg2000 \
-      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
-      -C target-feature=+simd128
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
+      cargo build -p ocelli-codec --release --example verify_jpeg2000 \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  8/11 plain and SIMD JPEG 2000 wasm execute under Node"
+    # 8. The check reads the two linked modules. It refuses a SIMD module
+    # holding no SIMD instruction the plain module lacks, and a plain module
+    # holding any. It says nothing about which crate's code the SIMD
+    # instructions came from, and the OK line names every one it found.
+    echo "  8/13 the SIMD JPEG 2000 module holds SIMD instructions, the plain one none"
+    python3 scripts/simd_variant_check.py \
+      target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
+      target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
+
+    echo "  9/13 plain and SIMD JPEG 2000 wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
 
-    # 9 to 11 are the standing version of F-X013's central claim, that
+    # 10 to 13 are the standing version of F-X013's central claim, that
     # openjph-core produces identical samples on native, plain wasm and
     # +simd128 wasm. The spike that measured it once is deleted. D-22.
-    echo "  9/11 HTJ2K production decoder executes natively"
+    echo "  10/13 HTJ2K production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_htj2k
 
-    echo "  10/11 HTJ2K production decoder builds as plain and SIMD wasm"
+    echo "  11/13 HTJ2K production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_htj2k \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
-    cargo rustc -p ocelli-codec --release --example verify_htj2k \
-      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd -- \
-      -C target-feature=+simd128
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
+      cargo build -p ocelli-codec --release --example verify_htj2k \
+      --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  11/11 plain and SIMD HTJ2K wasm execute under Node"
+    echo "  12/13 the SIMD HTJ2K module holds SIMD instructions, the plain one none"
+    python3 scripts/simd_variant_check.py \
+      target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
+      target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm
+
+    echo "  13/13 plain and SIMD HTJ2K wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm

@@ -542,6 +542,96 @@ Repository bootstrap. Nothing is published.
   compiled into the wasm module and the native binaries, with the Rust
   standard library's notice. The licences gate checks that it matches the
   lockfile, offline.
+- The local folder viewer posts each file once and holds it in a bounded
+  cache, keeps a decoded frame for window changes, and draws a frame larger
+  than its design size on its own. Previews that wait are admitted in the
+  order they first waited. Open, first image, scroll, window step and
+  resident memory have recorded budgets on the operator's machine.
+- The local folder viewer shows the modality value and its unit under the
+  pointer, HU on a CT that states HU or states no unit and is not
+  multi-energy, and Units on a PET. The local process computes it from the
+  held frame, and `ocelli-dicom` gains `read_padding`.
+- The local folder viewer measures angle, Cobb angle, bidirectional, arrow,
+  probe and regions with area, mean, SD, minimum and maximum in modality
+  units, with editable handles and a measurement list. An outline that
+  crosses or touches itself is not measured. A projection image whose Pixel
+  Spacing equals its Imager Pixel Spacing is measured at the detector plane
+  unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
+  gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
+  `spacing_pair_agrees`, the one definition of an equal spacing pair.
+- The local folder viewer lays out 1 by 1 up to 3 by 3 viewports from a
+  picker on `G`, each with its own series, image, zoom, pan and window. A
+  series row dragged onto a viewport opens there, and the four-image view is
+  a tile mode of one viewport on `Shift G`. Bare digits no longer choose a
+  layout. A `viewer-browser` gate measures the displayed aspect and the
+  pointer readout in headless Chromium.
+- The local folder viewer links its viewports. A Link menu turns on Scroll,
+  Window and Zoom over every visible viewport, with the outlined one as the
+  source, and Reference lines draw where the source image's plane cuts each
+  other viewport. Scroll moves to the nearest image by Image Position
+  (Patient) when both series share a Frame of Reference UID and their planes
+  are within cornerstone3D 5.8.2's coplanar threshold. The local process
+  chooses the image and computes the line through the new
+  `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
+  and `reference_segment`, and `SyncScene` now uses the same UID rule. The
+  corner of an image that is not monochrome reads `Window not applicable`.
+- Release by series and by volume. `ImageCache::release_series` releases
+  every frame of one series and returns one `Released` event, which the ring
+  carries as the new kind 7, `cache.released`, with the series, the frame
+  count and the bytes. `BrickCache::release_volume` releases every brick of
+  every level of one volume and returns a `ReleaseSummary`. Both go through
+  the new `Lru::remove_range`, an explicit release that is not an eviction.
+  `@ocelli/core` decodes `cache.released` and lists it in `UNMAPPED_EVENTS`,
+  because cornerstone3D 5.8.2 reports a removed image per image. The cache
+  has no study, so a study is released by its owner's series and volumes.
+  The local folder viewer now forgets the folder it left. Opening another
+  folder or the synthetic study sends that folder's ids to the new
+  `POST /forget`, and leaving the page sends one short beacon naming a
+  per-load page token, so `GET /held` counts only what is open. A late reply
+  for the folder left does not post its file again, and a decode already
+  running for a forgotten file stores nothing.
+- JPEG XL decoding. `register_jpegxl_decoders` registers a sixth decoder
+  family in `ocelli-codec` for JPEG XL Lossless, `1.2.840.10008.1.2.4.110`,
+  and JPEG XL, `.112`, through `jxl-oxide` with default features off.
+  Lossless frames decode to their exact stored values and lossy frames are
+  quantised to Bits Stored. JPEG XL JPEG Recompression, `.111`, is known and
+  unavailable until an upstream panic, jxl-oxide issue 512, is fixed. A
+  signed, ICC, HDR, oriented or extra-channel frame is refused as
+  unavailable, and a frame of more than one keyframe is refused as a
+  mismatch, rather than drawn. `XYB` is a recognised
+  Photometric Interpretation whose colour conversion the codec owns. The
+  local folder viewer opens monochrome `.110` and `.112` frames.
+- The local folder viewer's four corners show the birth date, sex, age,
+  study time, institution, slice location and thickness, kVp, mAs, TR and TE
+  when the file has them. Names, dates, times and ages are formatted by the
+  local process from PS3.5's PN, DA, TM and AS rules, and with no Patient's
+  Age the age is the age at the study date. Edge letters come from Patient
+  Orientation on an image without Image Orientation (Patient), and an image
+  whose Anatomical Orientation Type is `QUADRUPED` shows none. A scale bar
+  in each viewport follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice
+  rule and reads the same calibration as the length tool.
+- Frame identity in the decoded tier. `ContentId::of` is a 64-bit FNV-1a
+  over the length-prefixed SOP Instance UID, transfer syntax UID and encoded
+  bytes, and `FrameSource` is what a lookup presents, that id with the
+  frame's stored pixel description and image plane. `ImageCache::get` answers
+  `FrameLookup::Hit` only when all three match the held frame, and otherwise
+  removes it and answers `Stale` with the bytes released, so a frame decoded
+  from one object is never returned to a caller holding another in the same
+  slot. A stale removal is an explicit release and emits no event.
+  `FrameKey` and the stack, handoff and event wire formats are unchanged.
+  `DicomwebClient` and `postWadoInstance` take an optional `cache`, the fetch
+  cache mode sent on every request, one of `"no-cache"`, `"no-store"`,
+  `"reload"` and `"default"`. `"force-cache"` and `"only-if-cached"` are
+  refused with `DicomwebError` code `InvalidRequest`, because both can serve
+  a stale response.
+- The local folder viewer reads a folder again when the same folder is
+  chosen again, and keys every grey it keeps by the file object that choice
+  gave it rather than by name, size and time. A file rewritten on disk with a
+  new modification time is found when the window regains focus, the page
+  becomes visible, a series is selected or another viewport becomes active.
+  The page then forgets it in the local process and shows a sentence in its
+  place. A rewrite that keeps the modification time is not detected, and only
+  Chromium was measured.
 
 ### Changed
 
@@ -553,3 +643,26 @@ Repository bootstrap. Nothing is published.
   or `TypeError` from a view over wasm memory still passes through.
 - `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
   the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.
+- A contributor's `bin/ocelli.sh gate native` builds the `+simd128`
+  codec verification modules with the flag on every crate, so each
+  dependency's `simd128` code paths are compiled, and two new steps refuse a
+  SIMD module holding no SIMD instruction and a plain module holding any. The
+  modules hold SIMD loads, stores and constants and no lane arithmetic.
+  Nothing published changes.
+- `ImageCache::insert` takes the frame's `ContentId` beside its key,
+  `ImageCache::get` takes a `FrameSource` and returns a `FrameLookup` rather
+  than an `Option`, and `StackSequence::samples_for_upload` takes a
+  `FrameSource` and can fail with the new `ScrollError::Stale`. A caller
+  passes the identity of the bytes it decoded.
+- `DicomwebClient` now sends every request with the fetch cache mode
+  `"no-cache"` unless its `cache` option says otherwise. It used to send no
+  mode, so a browser applied `"default"` and could serve a re-processed
+  object from its HTTP cache by heuristic freshness without asking the
+  server. A server with validators answers an unchanged object with 304.

@@ -5,12 +5,14 @@
 //! F-045 fills the camera. F-046 fills presentation state. F-047 fills
 //! stack scroll. F-049 fills measured spacing and the index shift.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
 pub mod boundary;
 pub mod commands;
+pub mod link;
 pub mod placement;
 pub mod presentation;
 pub mod ring;

@@ -341,3 +341,16 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 6. Answered: recommended, keep the Load marks file input.
 
 The transcriptions written from memory keep their flag, and AC20 names every section the reviewer checks. No question is left open.
+
+## Lead amendments before implementation, against F-209's tree
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-209-xai` at 3c206f67, under the operator's delegation of the quality call. Where these differ from the text above, these win. F-215 starts after F-214 lands and re-checks every path and line named here.
+
+1. **A saved length is the mark's own `/measure` reply.** The page does no arithmetic on a measurement. The SR NUM is written only when the reply's calibration source is Pixel Spacing or Imager Pixel Spacing, in the units the reply states. Otherwise the mark is saved without a NUM and the page says so.
+2. **Kinds that are not saved stay pinned.** The "It is not saved." sentences pinned in `tests/preview.rs` change only for the kinds this story saves. Angle, Cobb, bidirectional, arrow and probe keep theirs.
+3. **Supersession, SR.** Each save names in Predecessor Documents Sequence every document this viewer loaded or saved earlier in the session for that study, so a mark deleted between saves does not come back. A test saves, deletes a mark, saves again, loads both files and shows the mark absent.
+4. **Supersession, Key Object Selection.** PS3.3 C.17.6.2 has no Predecessor Documents Sequence. On load, among Key Object Selections this viewer wrote for a study, the newest by Content Date and Content Time, then Instance Number, is shown, and the page names the one shown. A test loads two and shows the newer.
+5. **Key images are IMAGE items.** Per TID 2010 row 8 and PS3.3 C.18.4, a key image with a frame is an IMAGE content item with Referenced Frame Number. If F-196's writer in `@ocelli/core` writes COMPOSITE for an image, F-215 corrects it with a test, because F-215 is the first consumer of that output.
+6. **Coordinates stay inside the image.** Moving a mark or a freeform handle clamps every point to the range PS3.3 Table C.18.6-1 allows, so every saved mark loads back. A test drags a mark past an edge, saves, loads and finds it.
+7. **The mandatory template content is written.** TID 1500 row 3 Observation Context, and the Type 2 attributes Referenced Performed Procedure Step Sequence and Manufacturer on both documents and Performed Procedure Code Sequence on the SR, are present, empty where unknown. The AC20 codes are as transcribed in the groundwork.
+8. **Citations and names.** The coordinate rule is PS3.3 Table C.18.6-1. New `inspect_json` UID reads use the non-failing form. Study Time comes from F-212's field. Ellipse axes use absolute widths. The page module is named so that its stem does not collide with `packages/core/src/marks.ts`. Line numbers in the docs are measured at implementation.

@@ -328,7 +328,8 @@ fn resolve_palette(
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => 3,
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => 3,
     };
     let planar = if samples == 1 {
         None

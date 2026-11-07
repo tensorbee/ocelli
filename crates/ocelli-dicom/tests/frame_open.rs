@@ -5,12 +5,19 @@
 //! output 0 to 255:
 //! `((50 - 100) / 200 + 0.5) * 255 = 63.75`.
 
+use ocelli_codec::{
+    DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescInput, JpegDecoder, PixelDataVr,
+    PixelRepresentation,
+};
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, WindowInput,
-    fill_padding, open_frame, parse_part10,
+    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, MetadataSet, OpenedFrame,
+    WindowInput, fill_padding, open_frame, parse_part10, read_padding,
 };
-use ocelli_pixel::{LutChain, VoiFunction};
+use ocelli_pixel::{
+    ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PhotometricInterpretation,
+    PixelDataEncoding, PlanarConfiguration, Rgb, SampleLayout, VoiFunction,
+};
 
 fn require<T: std::fmt::Debug>(result: Result<T, impl std::fmt::Debug>) -> T {
     assert!(result.is_ok(), "{result:?}");
@@ -176,6 +183,55 @@ fn a_reversed_monochrome2_padding_range_is_refused() {
         unreachable!("asserted immediately above")
     };
     assert_eq!(error, FrameOpenError::PaddingOrder);
+}
+
+#[test]
+fn padding_is_read_alone_where_frame_open_refuses_a_flag() {
+    // PS3.3 C.7.5.1.1.2. Pixel Padding Value 0 and Range Limit 10, US, in
+    // MONOCHROME2 order (value at or below limit). Burned In Annotation
+    // MAYBE is outside the enumerated values YES and NO of the General
+    // Image Module, PS3.3 C.7.6.1, so `open_frame` refuses the object, and
+    // the padding range alone is still the inclusive 0 to 10.
+    let mut padded = require(image_module());
+    padded.extend(require(rescale_one()));
+    padded.extend(require(short_le(
+        (0x0028, 0x0120),
+        *b"US",
+        &0_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0121),
+        *b"US",
+        &10_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0301),
+        *b"CS",
+        &text_pad("MAYBE"),
+    )));
+    let parsed = require(parse_part10(&require(part10(padded))));
+    assert_eq!(
+        open_frame(&parsed, 0).err(),
+        Some(FrameOpenError::BurnedInCode)
+    );
+    let metadata = require(MetadataSet::from_object(parsed.object()));
+    let range = require(read_padding(
+        &metadata,
+        PhotometricInterpretation::Monochrome2,
+        false,
+    ));
+    let Some(range) = range else {
+        unreachable!("the padding value is present")
+    };
+    assert_eq!((range.value(), range.limit()), (0, Some(10)));
+    assert!(range.contains(10));
+    assert!(!range.contains(11));
+    // The same pair is out of order for MONOCHROME1, where the value is at
+    // or above the limit.
+    assert_eq!(
+        read_padding(&metadata, PhotometricInterpretation::Monochrome1, false).err(),
+        Some(FrameOpenError::PaddingOrder)
+    );
 }
 
 #[test]
@@ -491,6 +547,91 @@ fn codec_rgb_is_once_and_only_on_colour() {
 }
 
 #[test]
+fn xyb_opens_as_the_named_photometric() {
+    // PS3.3 C.7.6.3.1.2. `XYB` is a real photometric interpretation.
+    // Samples per Pixel is 3, which is what that term requires.
+    let parsed = require(parse_part10(&require(part10(require(colour_pixels(
+        "XYB", 3, 8, 8, 8,
+    ))))));
+    let opened = require(open_frame(&parsed, 0));
+    assert_eq!(opened.photometric(), PhotometricInterpretation::Xyb);
+    assert_eq!(
+        opened.colour(),
+        ColourSelection::Colour {
+            codec_already_rgb: false,
+        }
+    );
+}
+
+#[test]
+fn ybr_full_422_reported_as_rgb_is_converted_once() {
+    // PS3.3 C.7.6.3.1.2. A decoder that already produced RGB is not converted
+    // again. `.111` is not decoded here. `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`
+    // makes that syntax unavailable, so the bytes are the `.50` baseline path.
+    let desc = require(FrameDesc::new(FrameDescInput {
+        rows: 64,
+        columns: 96,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "YBR_FULL_422".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    }));
+    let jpeg = include_bytes!("../../ocelli-codec/tests/fixtures/jpeg_baseline_rgb.jpg");
+    let mut from_jpeg = vec![0_u8; desc.output_len()];
+    require(JpegDecoder::baseline().decode(jpeg, &desc, &mut from_jpeg));
+
+    let parsed = require(parse_part10(&require(part10(require(colour_pixels(
+        "YBR_FULL_422",
+        3,
+        64,
+        96,
+        8,
+    ))))));
+    let opened = require(open_frame(&parsed, 0));
+    assert_eq!(opened.photometric(), PhotometricInterpretation::YbrFull422);
+    let reported = JpegDecoder::baseline().decode_photometric_interpretation(&desc);
+    assert_eq!(reported, DecodePhotometricInterpretation::Rgb);
+    let opened = require(opened.with_codec_rgb(true));
+    assert_eq!(
+        opened.colour(),
+        ColourSelection::Colour {
+            codec_already_rgb: true,
+        }
+    );
+    let transform = require(ColorTransform::resolve(
+        require(SampleLayout::new(
+            3,
+            PhotometricInterpretation::YbrFull422,
+            Some(PlanarConfiguration::Interleaved),
+        )),
+        PixelDataEncoding::Encapsulated,
+        DecodedPhotometric::Rgb,
+        DecodedLayout::Interleaved,
+        None,
+    ));
+    let stored: Vec<Stored> = from_jpeg
+        .iter()
+        .copied()
+        .map(|byte| Stored(f32::from(byte)))
+        .collect();
+    let pixels = usize::from(desc.rows()) * usize::from(desc.columns());
+    let mut rgb = vec![Rgb::BLACK; pixels];
+    require(transform.map_into(&stored, &mut rgb, usize::from(desc.columns())));
+    assert_eq!(from_jpeg.len(), rgb.len() * 3);
+    for (pixel, sample) in rgb.iter().zip(from_jpeg.chunks_exact(3)) {
+        let &[red, green, blue] = sample else {
+            continue;
+        };
+        assert_eq!(pixel.r.to_bits(), f32::from(red).to_bits());
+        assert_eq!(pixel.g.to_bits(), f32::from(green).to_bits());
+        assert_eq!(pixel.b.to_bits(), f32::from(blue).to_bits());
+    }
+}
+
+#[test]
 fn an_unreadable_creator_and_a_reserved_group_do_not_refuse_the_frame() {
     let mut data = require(image_module());
     data.extend(require(long_le(
@@ -722,6 +863,32 @@ fn image_module() -> Result<Vec<u8>, String> {
 
 fn image_pixels(photometric: &str) -> Result<Vec<u8>, String> {
     image_pixels_signed(photometric, false)
+}
+
+fn colour_pixels(
+    photometric: &str,
+    samples: u16,
+    rows: u16,
+    columns: u16,
+    bits: u16,
+) -> Result<Vec<u8>, String> {
+    let high = bits.checked_sub(1).ok_or("bits")?;
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &samples.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(photometric))?);
+    data.extend(short_le((0x0028, 0x0006), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &bits.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &bits.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &high.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    Ok(data)
 }
 
 fn image_pixels_signed(photometric: &str, signed: bool) -> Result<Vec<u8>, String> {

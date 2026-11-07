@@ -1,7 +1,7 @@
 # Events
 
-**F-IDs that contributed:** F-032, F-034, F-101, F-103
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-032, F-034, F-101, F-103, F-226
+**Last updated:** 2026-11-07
 
 The shell's names for what the ring delivers and for what stays in the shell.
 Decision D4. The catalogue is `packages/core/src/events.ts`. This file says

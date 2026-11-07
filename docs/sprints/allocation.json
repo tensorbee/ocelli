@@ -2951,6 +2951,233 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-232",
+      "eid": "E38.35",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-229"
+      ],
+      "notes": "Found by F-229's eighth and ninth reviews. Answered by the operator on 2026-11-06: fixed in S46, the guard made sound against every trigger.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-233",
+      "eid": "E38.36",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E4.10",
+        "E38.35"
+      ],
+      "depends_fids": [
+        "F-229",
+        "F-232"
+      ],
+      "notes": "Found by F-229's eighth review, defect D2. Answered by the operator on 2026-11-06: fixed in S46, every crate built with +simd128 for the SIMD variants and F-X013's claim rechecked.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-234",
+      "eid": "E3.9",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E3.8",
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-225",
+        "F-229"
+      ],
+      "notes": "Found by F-225's first review while fuzzing. Answered by the operator on 2026-11-06: fixed in S46 with a typed error.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-235",
+      "eid": "E6.9",
+      "phase": "P1",
+      "epic": "E6 Render core (wgpu)",
+      "epic_key": "E6",
+      "story": "VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.33"
+      ],
+      "depends_fids": [
+        "F-227"
+      ],
+      "notes": "Found by F-227's fourth and fifth reviews on Apple M4 Max under Metal. Answered by the operator on 2026-11-06: a story in S47 with a tier A fixture that fails today.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-236",
+      "eid": "E16.7",
+      "phase": "P1",
+      "epic": "E16 Public API & TypeScript shell",
+      "epic_key": "E16",
+      "story": "acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [
+        "E5.9"
+      ],
+      "depends_fids": [
+        "F-231"
+      ],
+      "notes": "Found by F-230's first review. Answered by the operator on 2026-11-06: a story in S47 honours both keys with tests.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-237",
+      "eid": "E19.6",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.30",
+        "E38.34"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-228"
+      ],
+      "notes": "Found while designing F-220. Answered by the operator on 2026-11-06: change the release rule, the module ships outside the @ocelli/core tarball and a story in S47 decides where.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-238",
+      "eid": "E19.7",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.30",
+        "E38.36"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-233"
+      ],
+      "notes": "Found by F-220's first review reading the objc2 LICENSE.md. Answered by the operator on 2026-11-06: a native build without wgpu's Metal backend, a story in S47.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-239",
+      "eid": "E38.37",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name",
+      "layer": "All",
+      "weeks": 12,
+      "depends_eids": [
+        "E4.8",
+        "E38.19",
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-030",
+        "F-209",
+        "F-216"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212. Questions 1 to 8 answered by the operator on 2026-11-07, widening the story to JPEG 2000 and HTJ2K colour decoding and cornerstone3D's colour window, and F-240 filed to apply matrix ICC profiles after it.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-240",
+      "eid": "E38.38",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145",
+      "layer": "All",
+      "weeks": 5,
+      "depends_eids": [
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-239"
+      ],
+      "notes": "Filed by the operator on 2026-11-07 with the answers to F-239's questions. F-239 draws a frame carrying ICC Profile (0028,2000) with a sentence that the profile was not applied, and this story applies the matrix and tone-curve subset. Scheduled right after F-239. A subset of F-145, which keeps its own row and its recorded E4.9 defect.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-241",
+      "eid": "E4.11",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name",
+      "layer": "All",
+      "weeks": 12,
+      "depends_eids": [
+        "E38.24",
+        "E38.32",
+        "E5.9",
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-214",
+        "F-223",
+        "F-231",
+        "F-239"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: file a video story now. Ocelli refuses YBR_PARTIAL_420 by name after F-239, and no decoder handles the video transfer syntaxes. cornerstone3D 5.8.2 is the floor and Ocelli must be better on a stated measured axis. Questions 1 to 9 answered by the operator on 2026-11-07: WebCodecs in a worker for both targets, no shipped software H.264 or HEVC decoder, MPEG-2 decoded in Rust by F-242, the stream's colour description first, the VideoFrame held in the worker accepted as D-32, one F-ID in two parts. E4.11 rather than E4.9, which F-145's recorded defect declares.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-242",
+      "eid": "E4.12",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name",
+      "layer": "All",
+      "weeks": 8,
+      "depends_eids": [
+        "E4.11"
+      ],
+      "depends_fids": [
+        "F-241"
+      ],
+      "notes": "Decided by the operator on 2026-11-07, F-241 question 4: a Rust MPEG-2 decoder now, so local MPEG-2 files play, beating cornerstone, its own story by question 9. No dependency unless docs/SOURCE-POLICY.md is satisfied. The patent position is what the policy's patent section relies on and is marked for verification. Open questions are the operator's. Questions 1 to 6 answered by the operator on 2026-11-07: proceed on patents with the Malaysian risk recorded, f64 IDCT, MONOCHROME2 as the Y plane, libmpeg2 and ffmpeg's decoder source read-blocked and enforced by the provenance checker, real-time thresholds, synthetic clips with a recorded assessment of the conformance streams.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",
@@ -3044,13 +3271,15 @@
       "layer": "All",
       "weeks": 4,
       "depends_eids": [
-        "E38.16"
+        "E38.16",
+        "E38.37"
       ],
-      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today.",
+      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today. F-239 lands first, by the operator's order of 2026-11-07.",
       "milestone": "M20",
       "sprint": "S46",
       "depends_fids": [
-        "F-206"
+        "F-206",
+        "F-239"
       ]
     },
     {

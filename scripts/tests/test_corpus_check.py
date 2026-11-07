@@ -16,9 +16,11 @@ from __future__ import annotations
 import io
 import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -229,13 +231,19 @@ class RegistryTable(unittest.TestCase):
 
     def test_the_registry_list_is_the_codec_registry_table(self) -> None:
         """PS3.5 Annex A, typed in rather than read back from the module under
-        test. Sixteen syntaxes: the two native ones, deflate, the retired
-        big-endian one, RLE, four JPEG, two JPEG-LS, two JPEG 2000 and three
-        HTJ2K.
+        test. Nineteen syntaxes: the two native ones, deflate, the retired
+        big-endian one, RLE, four JPEG, two JPEG-LS, two JPEG 2000, three
+        HTJ2K and three JPEG XL. The JPEG XL UIDs are PS3.5 A.4.12.
 
         HLD section 21 specifies the registry and names the two open gates but
         lists no syntaxes, so the standard is the only source for this.
         """
+        self.assertEqual(
+            corpus_check.UNAVAILABLE_REGISTRY_SYNTAXES,
+            ("1.2.840.10008.1.2.4.111",))
+        self.assertEqual(
+            corpus_check.UNAVAILABLE_REFUSAL,
+            "known DICOM transfer syntax has no registered decoder")
         self.assertEqual(list(corpus_check.REGISTRY_TRANSFER_SYNTAXES), [
             "1.2.840.10008.1.2",
             "1.2.840.10008.1.2.1",
@@ -253,7 +261,71 @@ class RegistryTable(unittest.TestCase):
             "1.2.840.10008.1.2.4.201",
             "1.2.840.10008.1.2.4.202",
             "1.2.840.10008.1.2.4.203",
+            "1.2.840.10008.1.2.4.110",
+            "1.2.840.10008.1.2.4.111",
+            "1.2.840.10008.1.2.4.112",
         ])
+
+
+class UnavailableDecodeDigests(unittest.TestCase):
+    """F-229. A known syntax with no decoder keeps its row and has no digest.
+
+    `verify_decode_digests` is pointed at a temporary corpus, a temporary
+    digest table and a stub route table. The three refusals here are all
+    reached before any file is decoded, so the DICOM tooling is stubbed in
+    `sys.modules` and this module still needs only the standard library.
+    """
+
+    RECOMPRESSION = "1.2.840.10008.1.2.4.111"
+    GENERAL = "1.2.840.10008.1.2.4.112"
+
+    def run_check(self, syntax: str, route: str, recorded: bool) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory(prefix="ocelli-digests-") as scratch:
+            base = Path(scratch)
+            case = base / "data" / "syntax" / "case.dcm"
+            case.parent.mkdir(parents=True)
+            case.write_bytes(b"not decoded by this test\n")
+            sha = corpus_check.digest(case)
+            table = base / "decode-digests.tsv"
+            lines = [corpus_check.DECODE_HEADER]
+            if recorded:
+                lines.append(f"syntax/case.dcm\t{sha}\t{'0' * 64}")
+            table.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            rows = [{"path": "syntax/case.dcm", "sha256": sha,
+                     "transfer_syntax": syntax}]
+            routes = types.SimpleNamespace(READ_BACK={"case.dcm": route})
+            stubs = {name: types.ModuleType(name)
+                     for name in ("imagecodecs", "numpy", "pydicom")}
+            out = io.StringIO()
+            with mock.patch.dict(sys.modules, stubs), \
+                    mock.patch.object(corpus_check, "DECODE_DIGESTS", table), \
+                    mock.patch.object(corpus_check, "corpus_dir",
+                                      lambda: base / "data"), \
+                    mock.patch.object(corpus_check, "_route_module",
+                                      lambda: routes), \
+                    redirect_stdout(out):
+                status = corpus_check.verify_decode_digests(rows)
+            return status, out.getvalue()
+
+    def test_an_unavailable_row_with_no_digest_passes(self) -> None:
+        status, out = self.run_check(self.RECOMPRESSION, "unavailable", False)
+        self.assertEqual(status, 0, out)
+        self.assertIn("OK: 0 syntax decode digests match", out)
+
+    def test_an_unavailable_row_routed_to_a_decoder_fails(self) -> None:
+        status, out = self.run_check(self.RECOMPRESSION, "jpegxl", False)
+        self.assertEqual(status, 1)
+        self.assertIn("syntax/case.dcm must expect the unavailable refusal", out)
+
+    def test_an_unavailable_row_with_a_decode_digest_fails(self) -> None:
+        status, out = self.run_check(self.RECOMPRESSION, "unavailable", True)
+        self.assertEqual(status, 1)
+        self.assertIn("syntax/case.dcm is unavailable and has a decode digest", out)
+
+    def test_an_available_row_expecting_the_refusal_fails(self) -> None:
+        status, out = self.run_check(self.GENERAL, "unavailable", False)
+        self.assertEqual(status, 1)
+        self.assertIn("is not in UNAVAILABLE_REGISTRY_SYNTAXES", out)
 
 
 class PopulationSeed(unittest.TestCase):

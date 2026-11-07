@@ -67,6 +67,8 @@
 //! needs `std`. That is part of deviation D-10 and it is recorded there rather
 //! than left as an unexplained absence.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 pub mod brick_upload;
 pub mod caps;
 pub mod clip;

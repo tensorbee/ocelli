@@ -24,6 +24,7 @@
 //! the default, so the wasm session reuses this cache instead of a second
 //! one. The two tiers share the `Lru`, the events and the stale rule.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

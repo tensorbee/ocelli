@@ -9,6 +9,8 @@
 //! F-192 orders a bag of frames into display groups and reads cine timing.
 //! F-193 reads overlay planes and display shutters.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod dicomweb;
 mod frame_geometry;
 mod frame_index;
@@ -34,7 +36,7 @@ pub use frame_geometry::{
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
 pub use frame_open::{
     BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, PaddingRange,
-    PrivateCreator, WindowInput, fill_padding, open_frame,
+    PrivateCreator, WindowInput, fill_padding, open_frame, read_padding,
 };
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,

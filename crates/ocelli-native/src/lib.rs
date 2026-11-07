@@ -12,6 +12,8 @@
 //! Scaffold only. F-001 creates the crate, F-007 gives it its two entry
 //! points and proves the cross-target build.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 // HLD section 4's crate table says `wasm: no` for this crate, and this is what
 // makes that cell mean something.
 //

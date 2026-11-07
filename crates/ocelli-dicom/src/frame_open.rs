@@ -465,6 +465,7 @@ fn photometric_of(metadata: &MetadataSet) -> Result<PhotometricInterpretation, F
         "YBR_PARTIAL_422" => Ok(PhotometricInterpretation::YbrPartial422),
         "YBR_ICT" => Ok(PhotometricInterpretation::YbrIct),
         "YBR_RCT" => Ok(PhotometricInterpretation::YbrRct),
+        "XYB" => Ok(PhotometricInterpretation::Xyb),
         _ => Err(FrameOpenError::Photometric),
     }
 }
@@ -480,7 +481,8 @@ fn colour_of(photometric: PhotometricInterpretation) -> ColourSelection {
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => ColourSelection::Colour {
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => ColourSelection::Colour {
             codec_already_rgb: false,
         },
     }
@@ -641,6 +643,27 @@ fn presentation_of(metadata: &MetadataSet) -> Result<PresentationLutEvidence, Fr
     }
 }
 
+/// Read Pixel Padding Value and Pixel Padding Range Limit, and nothing else.
+///
+/// PS3.3 C.7.5.1.1.2. This is the reader [`open_frame`] uses, for a caller
+/// that needs the stored padding range without the window, presentation,
+/// lossy, burned-in and private creator attributes that `open_frame` also
+/// reads and can refuse. `signed` is Pixel Representation 1.
+///
+/// # Errors
+///
+/// [`FrameOpenError::PaddingLimitWithoutValue`] for a limit with no value,
+/// [`FrameOpenError::PaddingOrder`] for a range in the wrong order for the
+/// photometric interpretation, and an attribute error for a value that is
+/// not one US or SS.
+pub fn read_padding(
+    metadata: &MetadataSet,
+    photometric: PhotometricInterpretation,
+    signed: bool,
+) -> Result<Option<PaddingRange>, FrameOpenError> {
+    padding_of(metadata, photometric, signed)
+}
+
 fn padding_of(
     metadata: &MetadataSet,
     photometric: PhotometricInterpretation,
@@ -670,7 +693,8 @@ fn padding_of(
             | PhotometricInterpretation::YbrFull422
             | PhotometricInterpretation::YbrPartial422
             | PhotometricInterpretation::YbrIct
-            | PhotometricInterpretation::YbrRct => value <= limit,
+            | PhotometricInterpretation::YbrRct
+            | PhotometricInterpretation::Xyb => value <= limit,
         };
         if !ordered {
             return Err(FrameOpenError::PaddingOrder);

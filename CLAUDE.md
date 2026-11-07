@@ -110,7 +110,11 @@ rendering.
   must not be depended on either, and
   `scripts/source_provenance_check.py` enforces all three.
 - **No `unsafe`** outside `ocelli-wasm/src/ring.rs` and
-  `ocelli-core/src/cast.rs`.
+  `ocelli-core/src/cast.rs`. rustc forbids it through `[workspace.lints.rust]`,
+  every library root forbids it in doctests, and
+  `scripts/unsafe_allowlist_check.py` audits what rustc does not reach. The
+  first story that writes one of the two files follows the sequence in that
+  script's docstring.
 - **wgpu is pinned exactly.** Treat GPU code that compiles first try with
   suspicion. Agents confidently emit APIs that have not existed for two years.
 - **Never re-type file content from tool output.** Tool output truncates and
@@ -177,23 +181,27 @@ What exists, in the order it matters:
   compare against, so detection is proved by a declared mutation catalogue
   applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
   halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
-- **The corpus**, behind `corpus/manifest.tsv`, covering all sixteen transfer
+- **The corpus**, behind `corpus/manifest.tsv`, covering all nineteen transfer
   syntaxes the codec registry knows. **No row count is written here**, because
   this line said 91 while the file held 92 and a number in prose beside the file
   that holds it is stale the next time a row lands.
   `tail -n +2 corpus/manifest.tsv | grep -c .` prints it.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
-- **The codec registry and five decoder families.** Raw, RLE, JPEG, JPEG 2000,
-  JPEG-LS and HTJ2K. **Six names, five families**, because Raw and RLE register
-  together through `register_native_and_rle_decoders` and
+- **The codec registry and six decoder families.** Raw, RLE, JPEG, JPEG 2000,
+  JPEG-LS, HTJ2K and JPEG XL. **Seven names, six families**, because Raw and
+  RLE register together through `register_native_and_rle_decoders` and
   `crates/ocelli-codec/tests/registry.rs` says so. S11's sprint review changed
-  this to six and its next pass changed it back, which is what counting names
-  instead of `register_*` functions costs. **Fifteen of the sixteen known transfer syntaxes are
-  available**, and the sixteenth, Deflated Explicit VR Little Endian, is
-  unavailable by design: PS3.5 A.5 deflates the whole data set rather than a
-  frame, so it is `ocelli-dicom`'s route under D-18.
-  `crates/ocelli-codec/tests/registry.rs` asserts both halves.
+  the then-current five families to six and its next pass changed that count
+  back, which is what counting names instead of `register_*` functions costs.
+  **Seventeen of the nineteen known transfer syntaxes are available**, and two
+  are known and unregistered. Deflated Explicit VR Little Endian is unavailable
+  by design: PS3.5 A.5 deflates the whole data set rather than a frame, so it
+  is `ocelli-dicom`'s route under D-18. JPEG XL JPEG Recompression is
+  unavailable until upstream fixes it: `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`
+  panics in its DHT branch on a malformed codestream, which is jxl-oxide issue
+  512. `crates/ocelli-codec/tests/registry.rs` asserts the counts and both
+  names.
 - **The pixel pipeline**, all four stages of DICOM PS3.3 C.11 in `ocelli-pixel`,
   with the section 18.3 fixtures behind them, inversion resolved exactly once,
   and the colour transform applied exactly once against the decoder's own
