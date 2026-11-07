@@ -390,7 +390,7 @@ const parsed = parseSnapshot(session.snapshot());</code></pre>
   <section class="feature" id="worker">
     <h2>Worker decode and the wasm path</h2>
     <span class="status part">Partial. Fetch, hand-off and the worker pool are built. Decoding those bytes in the worker is not.</span>
-    <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts each file once while the local process holds it, and posts it again after eviction or a restart. Opening another folder, or leaving the page, tells that process to forget the previous folder's files and frames through <code>POST /forget</code>. It is still not the wasm path.</p>
+    <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts each file once while the local process holds it, and posts it again after eviction or a restart. Opening another folder tells that process to forget the previous folder's files and frames through <code>POST /forget</code>. Leaving the page sends the same forget in beacons, and only the first 1,700 ids were measured to arrive. It is still not the wasm path.</p>
     <p class="where">Lives in <code>@ocelli/core</code>: <code>postWadoInstance</code> in <code>instance-bytes.ts</code>, <code>holdSessionBytes</code> in <code>bulk.ts</code>, and <code>openDecodePool</code> in <code>pool.ts</code>.</p>
 <pre><code>import {
   DEFAULT_DECODE_WORKERS, MAX_DECODE_WORKERS, holdSessionBytes, openDecodePool, postWadoInstance,

@@ -184,13 +184,13 @@ function writeFolder(root, name, tag, count) {
 }
 
 async function heldCensus(url) {
-  const response = await fetch(`${url}held`, { cache: "no-store" });
+  const response = await globalThis.fetch(`${url}held`, { cache: "no-store" });
   if (!response.ok) throw new Error(`GET /held answered ${response.status}`);
   return response.json();
 }
 
 async function previewStatus(url, id) {
-  const response = await fetch(`${url}preview`, {
+  const response = await globalThis.fetch(`${url}preview`, {
     method: "POST",
     headers: { "X-Ocelli-File": id },
     body: "",
@@ -334,7 +334,7 @@ export async function observeHide(url, chromium, folder) {
     page.on("response", (response) => {
       if (response.url().endsWith("/forget")) answered.push(response.status());
     });
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: false })));
+    await page.evaluate(() => window.dispatchEvent(new window.PageTransitionEvent("pagehide", { persisted: false })));
     await until(() => answered.length >= Math.ceil(ids.length / BEACON_IDS), "the beacon replies", 10000).catch(() => {});
     await page.waitForTimeout(500);
     const census = await heldCensus(url);
