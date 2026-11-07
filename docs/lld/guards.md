@@ -1112,17 +1112,23 @@ mechanisms are required now.** `Cargo.toml` carries
 section's literal `deny` because an inner `allow` silences a deny and cannot
 silence a forbid, and F-232 measured the whole workspace clean under it, the
 lib, bin, test and example roots included, with no exception for the two
-allowed files because neither exists yet. The lint covers every target of
-every member. `scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate
-beside it because the lint does not reach the vendored packages or the
-trybuild files, which the script audits, and because the script was one
-string regex away from the blindness F-229 measured. The check refuses a
-table below `forbid` naming `forbid`, and refuses the script dropped from
-the `unsafe` gate even with the table present. Its scanner is a
-left-to-right tokenizer since F-232, not a strip-and-search: it reports
-`unsafe` only as a keyword token, refuses an unterminated literal or comment
-naming the file and line, and refuses an allow, an expect or a warn of
-`unsafe_code` in any tracked Rust file. The sequence for the first story
+allowed files because neither exists yet. The lint covers every lib, bin,
+test, bench, example and build script target of every member. It does not
+cover doctests, which rustdoc compiles without the table.
+`scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate
+beside it because the lint does not reach the doctests, the vendored
+packages or the trybuild files, which the script audits, and because the
+script was one string regex away from the blindness F-229 measured. The
+check refuses a table below `forbid` naming `forbid`, and refuses the
+script dropped from the `unsafe` gate even with the table present. Its
+scanner is a left-to-right tokenizer since F-232, not a strip-and-search:
+it reports `unsafe` only as a keyword token, inside an attribute as well,
+reads the `rust` tagged and untagged code fences of doc comments as code
+because rustdoc compiles and runs them as doctests and no lint table
+reaches them, refuses an unterminated literal, comment or attribute naming
+the file and line, and refuses an allow, an expect or a warn of
+`unsafe_code` in every tracked Rust file outside `vendor/`, where the
+recorded counts are the audit. The sequence for the first story
 that writes one of the two allowed files, recorded in the scanner's
 docstring, is to move the table to `deny`, add `#![forbid(unsafe_code)]` to
 every other crate root, put `#[allow(unsafe_code)]` on that one `mod`

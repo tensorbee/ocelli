@@ -24,14 +24,23 @@ nested block comments, string literals, byte strings, C strings, raw
 strings of any hash count in their byte and C forms, character and byte
 literals, lifetimes and labels, and raw identifiers, and reports `unsafe`
 only as a keyword token: `r#unsafe` is an identifier and is not reported.
-An unterminated literal or comment is a refusal naming the file and the
-line the construct starts on, never a blank to the end of the file.
+The token is reported inside an attribute too, where `#[unsafe(no_mangle)]`
+is edition 2024's spelling and rustc refuses it. An unterminated literal,
+comment or attribute is a refusal naming the file and the line the
+construct starts on, never a blank to the end of the file.
 
 It also refuses an attribute that weakens `unsafe_code`: an allow, an
-expect or a warn of the lint, inner or outer, in any tracked Rust file.
-The workspace table is `forbid` since F-232, so rustc refuses those too,
-and this refusal is what keeps the trybuild files and the vendored
-packages, which no lint table reaches, honest about the same rule.
+expect or a warn of the lint, inner or outer, in every tracked Rust file
+outside `vendor/`. The workspace table is `forbid` since F-232, so rustc
+refuses those too, and this refusal is what keeps the trybuild files,
+which no lint table reaches, honest about the same rule. The vendored
+packages are audited by their recorded counts instead, and an allow
+inside one lowers nothing because no lint table reaches them.
+
+A doc comment's `rust` tagged and untagged code fences are read as code,
+recursively: rustdoc compiles and runs them as doctests, `cargo test`
+reaches them, and no lint table does. Fences tagged `text` or another
+language are comment text.
 
 ## The first story that writes an allowed file
 
@@ -160,8 +169,9 @@ def _scan_raw_string(text: str, i: int, hashes: int,
     `hashes` is the count in the opening delimiter, which is part of the
     delimiter and not decoration: `r#"a " b"#` holds a quote and
     `br##"x "# y"##` holds one and ends in one. A closing quote followed by
-    MORE hashes than the opening is rustc error E0766, so it is refused
-    rather than read as a terminator or as body text.
+    MORE hashes than the opening is refused, as rustc 1.97.1 refuses it
+    with "too many `#` when terminating raw string", rather than read as
+    a terminator or as body text.
     """
     n = len(text)
     start_line = line
@@ -176,7 +186,8 @@ def _scan_raw_string(text: str, i: int, hashes: int,
             if found == hashes:
                 return j, line
             if found > hashes:
-                raise LexError(start_line, "unterminated raw string literal")
+                raise LexError(start_line,
+                               "too many `#` when terminating raw string")
             i += 1
             continue
         if c == "\n":
@@ -229,13 +240,213 @@ def _scan_quote(text: str, i: int, line: int) -> tuple[int, int]:
     raise LexError(line, "unterminated character literal")
 
 
+def _is_doc_line(text: str, i: int) -> bool:
+    """Whether `text[i:]` starts a `///` or `//!` doc comment line.
+
+    `////` and longer are divider comments, which rustc lexes as plain
+    comments and rustdoc does not read as documentation.
+    """
+    n = len(text)
+    if not (i + 2 < n and text[i] == "/" and text[i + 1] == "/"):
+        return False
+    third = text[i + 2]
+    fourth = text[i + 3] if i + 3 < n else ""
+    return third == "!" or (third == "/" and fourth != "/")
+
+
+def _is_doc_block(text: str, i: int) -> bool:
+    """Whether `text[i:]` starts a `/** ... */` or `/*! ... */` doc comment.
+
+    `/**/` is the empty plain comment and `/***` opens a plain comment,
+    which is how rustc lexes them and rustdoc reads none of them.
+    """
+    n = len(text)
+    if not (i + 1 < n and text[i] == "/" and text[i + 1] == "*"):
+        return False
+    third = text[i + 2] if i + 2 < n else ""
+    if third == "!":
+        return True
+    if third != "*":
+        return False
+    fourth = text[i + 3] if i + 3 < n else ""
+    return fourth != "/" and fourth != "*"
+
+
+def _skip_trivia(text: str, i: int, line: int) -> tuple[int, int]:
+    """Past whitespace and plain comments, which Rust allows between tokens.
+
+    Stops on a doc comment (`///`, `//!`, `/**`, `/*!`) for the caller to
+    read, and on any other token. An unterminated block comment raises
+    `LexError` naming the line it starts on.
+    """
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif c in " \t\r":
+            i += 1
+        elif c == "/":
+            nxt = text[i + 1] if i + 1 < n else ""
+            if nxt == "/":
+                if _is_doc_line(text, i):
+                    break  # a doc comment, which the caller reads
+                # `//` ends at the newline. The quote of a `// say "`
+                # comment is text and opens nothing.
+                end = text.find("\n", i + 2)
+                i = n if end == -1 else end
+            elif nxt == "*":
+                if _is_doc_block(text, i):
+                    break  # a doc comment, which the caller reads
+                i, line, _body = _block_comment(text, i, line)
+            else:
+                break
+        else:
+            break
+    return i, line
+
+
+def _block_comment(text: str, i: int, line: int) -> tuple[int, int, str]:
+    """Consume one block comment. `text[i]` is its opening `/`.
+
+    Block comments nest, so `/* /* unsafe */ unsafe */` is one comment and
+    neither half is code. Returns the index and line just past the closing
+    `*/`, and the body between the delimiters. An unterminated comment
+    raises `LexError` naming the line it starts on.
+    """
+    n = len(text)
+    start_line = line
+    body_start = i + 2
+    depth = 1
+    i += 2
+    while depth and i < n:
+        if text[i] == "/" and i + 1 < n and text[i + 1] == "*":
+            depth += 1
+            i += 2
+        elif text[i] == "*" and i + 1 < n and text[i + 1] == "/":
+            depth -= 1
+            i += 2
+        else:
+            if text[i] == "\n":
+                line += 1
+            i += 1
+    if depth:
+        raise LexError(start_line, "unterminated block comment")
+    return i, line, text[body_start:i - 2]
+
+
+def _fence_code(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """The (start line, code) of every Rust fence in one doc comment.
+
+    `lines` pairs each content line of the comment with its number in the
+    file. A fence tagged `rust` or untagged is what rustdoc compiles and
+    runs as a doctest, so its content is read as code. A fence tagged
+    `text` or any other language is comment text, and its lines are still
+    tracked so that they cannot open a fence of their own. A fence still
+    open when the comment ends runs to its end, as markdown closes it.
+    """
+    blocks: list[tuple[int, str]] = []
+    open_fence: tuple[int, int, bool, list[str]] | None = None
+    for abs_line, content in lines:
+        body = content.lstrip()
+        if open_fence is None:
+            if body.startswith("```"):
+                ticks = len(body) - len(body.lstrip("`"))
+                info = body[ticks:].strip()
+                lang = info.replace(",", " ").split()[0] if info else ""
+                open_fence = (ticks, abs_line, lang in ("", "rust"), [])
+        else:
+            ticks, start, is_rust, buffer_ = open_fence
+            seen = len(body) - len(body.lstrip("`"))
+            if seen >= ticks and body[seen:].strip() == "":
+                # The opener line is the fence marker and its info string,
+                # never code, so the content starts on the next line.
+                if is_rust and buffer_:
+                    blocks.append((start + 1, "\n".join(buffer_)))
+                open_fence = None
+            else:
+                buffer_.append(content)
+    if open_fence is not None:
+        ticks, start, is_rust, buffer_ = open_fence
+        if is_rust and buffer_:
+            blocks.append((start + 1, "\n".join(buffer_)))
+    return blocks
+
+
+def _fence_hits(blocks: list[tuple[int, str]]) -> tuple[list[int], list[int]]:
+    """Scan each fence's code and map its lines back onto the file's."""
+    unsafe: list[int] = []
+    weakening: list[int] = []
+    for start, code in blocks:
+        more_unsafe, more_weakening = scan(code)
+        unsafe.extend(start - 1 + hit for hit in more_unsafe)
+        weakening.extend(start - 1 + hit for hit in more_weakening)
+    return unsafe, weakening
+
+
+def _doc_line_fences(text: str, i: int,
+                     line: int) -> tuple[int, int, list[int], list[int]]:
+    """Read the Rust code fences of one doc comment block as code.
+
+    `text[i]` is the first `/` of a `///` or `//!` line. The block is the
+    consecutive doc comment lines from here, which rustdoc reads as one
+    document. Returns the index and line just past the block, then the
+    absolute `unsafe` and weakening line numbers of its `rust` tagged and
+    untagged fences.
+    """
+    n = len(text)
+    lines: list[tuple[int, str]] = []
+    while True:
+        end = text.find("\n", i)
+        lines.append((line, text[i + 3:] if end == -1 else text[i + 3:end]))
+        if end == -1:
+            i = n
+            break
+        i = end + 1
+        line += 1
+        j = i
+        while j < n and text[j] in " \t\r":
+            j += 1
+        if not _is_doc_line(text, j):
+            break
+    return i, line, *_fence_hits(_fence_code(lines))
+
+
+def _doc_block_fences(text: str, i: int,
+                      line: int) -> tuple[int, int, list[int], list[int]]:
+    """Read the Rust code fences of one `/** ... */` or `/*! ... */` doc
+    comment as code.
+
+    `text[i]` is the opening `/`. The comment is skipped with nesting, and
+    its body lines get the `* ` unindent rustdoc applies to block doc
+    lines. Returns the index and line just past the comment, then the
+    absolute `unsafe` and weakening line numbers of its fences.
+    """
+    start_line = line
+    i, line, body = _block_comment(text, i, line)
+    lines: list[tuple[int, str]] = []
+    for offset, raw in enumerate(body.split("\n")):
+        content = raw.lstrip()
+        if content.startswith("*"):
+            content = content[1:]
+        lines.append((start_line + offset, content))
+    return i, line, *_fence_hits(_fence_code(lines))
+
+
 def scan(text: str) -> tuple[list[int], list[int]]:
     """One left-to-right pass over Rust source.
 
     Returns the line numbers of `unsafe` keyword tokens and of attributes
-    weakening `unsafe_code`. Raises `LexError` for an unterminated literal or
-    comment. Comments and literals are skipped whole rather than blanked, so
-    nothing after one is ever read as code or the reverse.
+    weakening `unsafe_code`. Raises `LexError` for an unterminated literal,
+    comment or attribute. Comments and literals are skipped whole rather
+    than blanked, so nothing after one is ever read as code or the reverse.
+
+    `unsafe` is reported inside an attribute too: `#[unsafe(no_mangle)]` is
+    edition 2024's spelling and rustc refuses it. The `rust` tagged and
+    untagged code fences of doc comments are read as code, recursively,
+    because rustdoc compiles and runs them as doctests and no lint table
+    reaches them.
     """
     unsafe_lines: list[int] = []
     weakening: list[int] = []
@@ -250,54 +461,48 @@ def scan(text: str) -> tuple[list[int], list[int]]:
     attr_line = 0
     attr_names: list[str] = []
     while i < n:
+        i, line = _skip_trivia(text, i, line)
+        if i >= n:
+            break
         c = text[i]
-        if c == "\n":
-            line += 1
-            i += 1
-        elif c in " \t\r":
-            i += 1
-        elif c == "/":
+        if c == "/":
+            # The only comments left here are doc comments, which
+            # _skip_trivia stops on. Their `rust` and untagged fences are
+            # code, and their hits are file lines already.
             nxt = text[i + 1] if i + 1 < n else ""
             if nxt == "/":
-                # `//`, `///` and `//!` all end at the newline. The quote of
-                # a `// say "` comment is text and opens nothing.
-                end = text.find("\n", i + 2)
-                i = n if end == -1 else end
+                i, line, doc_unsafe, doc_weakening = \
+                    _doc_line_fences(text, i, line)
+                unsafe_lines.extend(doc_unsafe)
+                weakening.extend(doc_weakening)
             elif nxt == "*":
-                # Block comments nest, so `/* /* unsafe */ unsafe */` is one
-                # comment and neither half is code.
-                start_line = line
-                depth = 1
-                i += 2
-                while depth and i < n:
-                    if text[i] == "/" and i + 1 < n and text[i + 1] == "*":
-                        depth += 1
-                        i += 2
-                    elif text[i] == "*" and i + 1 < n and text[i + 1] == "/":
-                        depth -= 1
-                        i += 2
-                    else:
-                        if text[i] == "\n":
-                            line += 1
-                        i += 1
-                if depth:
-                    raise LexError(start_line, "unterminated block comment")
+                i, line, doc_unsafe, doc_weakening = \
+                    _doc_block_fences(text, i, line)
+                unsafe_lines.extend(doc_unsafe)
+                weakening.extend(doc_weakening)
             else:
-                i += 1
+                i += 1  # a lone slash is punctuation, not a comment
         elif c == '"':
             i, line = _scan_string(text, i, line)
         elif c == "'":
             i, line = _scan_quote(text, i, line)
         elif c == "#":
-            j = i + 1
+            # `#`, an optional `!` and `[` are three tokens, and Rust allows
+            # whitespace and comments between any two of them, so
+            # `# [allow(unsafe_code)]` and `#/**/[allow(unsafe_code)]` are
+            # spellings of the attribute the weakening refusal must find.
+            # The line counter is only committed when the `[` follows,
+            # because the trivia is re-read otherwise.
+            j, probe_line = _skip_trivia(text, i + 1, line)
             if j < n and text[j] == "!":
-                j += 1
+                j, probe_line = _skip_trivia(text, j + 1, probe_line)
             if j < n and text[j] == "[":
                 if attr_depth == 0:
                     attr_names = []
                     attr_line = line
                 attr_depth += 1
                 i = j + 1
+                line = probe_line
             else:
                 i += 1
         elif c == "[":
@@ -334,13 +539,22 @@ def scan(text: str) -> tuple[list[int], list[int]]:
                     i, line = _scan_string(text, end, line)
             elif word == "b" and nxt == "'":
                 i, line = _scan_quote(text, end, line)
-            elif word == "unsafe" and not attr_depth:
+            elif word == "unsafe":
+                # Inside an attribute too: `#[unsafe(no_mangle)]` and
+                # `#[cfg_attr(x, unsafe(no_mangle))]` are `unsafe` code
+                # rustc refuses, so the token is reported wherever it is.
                 unsafe_lines.append(line)
             elif attr_depth:
                 attr_names.append(word)
             i = max(i, end)
         else:
             i += 1
+    if attr_depth:
+        # An attribute still open at end of file is a lexically broken
+        # file. Skipping it silently would hide every `unsafe` after the
+        # unclosed `#[`, which is the blank-to-EOF shape this scanner
+        # exists to refuse.
+        raise LexError(attr_line, "unterminated attribute")
     return unsafe_lines, weakening
 
 

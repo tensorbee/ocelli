@@ -259,10 +259,13 @@ read as an empty table, which is the direction the regexes had wrong.
 HLD 27.1's row is in `Cargo.toml` at `forbid`, one level above the section's
 literal `deny`: an inner `allow` silences a deny and cannot silence a
 forbid. `scripts/unsafe_allowlist_check.py` stays beside it in the `unsafe`
-gate. Neither alone is the rule. The table reaches every target of every
-workspace member and does not reach the vendored packages or the trybuild
-files, and the script reaches every tracked `.rs` file and was one string
-regex away from the blindness F-229 measured. This check requires BOTH: a
+gate. Neither alone is the rule. The table reaches every lib, bin, test,
+bench, example and build script target of every workspace member. It does
+not reach the doctests, which rustdoc compiles without it, the vendored
+packages or the trybuild files, and the script reaches every tracked `.rs`
+file and was one string regex away from the blindness F-229 measured. Its
+scanner reads the `rust` tagged and untagged code fences of doc comments
+as code, which is what covers the doctests. This check requires BOTH: a
 table below `forbid` is refused naming `forbid`, and the script dropped
 from the `unsafe` gate is refused even with the table present.
 
@@ -1801,15 +1804,18 @@ def main() -> int:
                 f"that needs it, with a reason.")
 
     # HLD 27.1's row and HLD 27.2 R5's script, and BOTH are required since
-    # F-232. The table reaches every target of every member and misses the
-    # vendored packages and the trybuild files. The script reaches every
-    # tracked `.rs` file and was one string regex away from the blindness
-    # F-229 measured. Dropping either half is refused on its own.
+    # F-232. The table reaches every lib, bin, test, bench, example and
+    # build script target of every member. It misses the doctests, which
+    # rustdoc compiles without it, the vendored packages and the trybuild
+    # files. The script reaches every tracked `.rs` file and was one string
+    # regex away from the blindness F-229 measured, and its scanner reads
+    # doc comment code fences as code, which covers the doctests. Dropping
+    # either half is refused on its own.
     lint_level = rust.get("unsafe_code")
     if lint_level is None or STRENGTH.get(lint_level, 0) < STRENGTH["forbid"]:
         found = f"'{lint_level}'" if lint_level is not None else "absent"
         problems.append(
-            f"HLD 27.1's [workspace.lints.rust] carries `unsafe_code` at "
+            f"The [workspace.lints.rust] table's `unsafe_code` row is "
             f"{found} and the level must be 'forbid'. An inner `allow` "
             f"silences 'deny' and cannot silence a forbid, and F-232 "
             f"measured the whole workspace clean under it, the lib, bin, "

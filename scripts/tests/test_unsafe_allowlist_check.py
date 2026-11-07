@@ -258,6 +258,83 @@ class Tokenizer(StagedIndex):
             self.assertEqual(code, 1)
             self.assertIn("unsafe_code` lowered", output)
 
+    def test_unsafe_attribute_is_reported(self):
+        # D1, review pass 1. `#[unsafe(no_mangle)]` is edition 2024's only
+        # accepted spelling and rustc refuses it with "declaration of a
+        # `no_mangle` function", so the attribute body is code and not a
+        # suppression. The old scanner dropped every token between `#[` and
+        # `]`, which also blinded the vendored count to the same shape.
+        for source in ('#[unsafe(no_mangle)]\npub fn planted() -> i32 { 0 }\n',
+                       '#[unsafe(export_name = "planted")]\npub fn f() {}\n',
+                       '#[cfg_attr(all(), unsafe(no_mangle))]\n'
+                       'pub fn planted() -> i32 { 0 }\n'):
+            self.write("crates/example/tests/ui/planted.rs", source)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("crates/example/tests/ui/planted.rs:1", output)
+
+    def test_unterminated_attribute_is_refused(self):
+        # D1, review pass 1. An attribute still open at end of file is a
+        # lexically broken file. The old scanner returned without a refusal,
+        # so every `unsafe` after an unclosed `#[` was hidden.
+        for source in ("#[cfg(any())\npub unsafe fn planted() {}\n",
+                       "#[derive(\npub fn g() { unsafe { 1 } }\n"):
+            self.write("crates/example/tests/ui/planted.rs", source)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("crates/example/tests/ui/planted.rs:1", output)
+            self.assertIn("unterminated attribute", output)
+
+    def test_weakening_attribute_with_space_or_comment_is_refused(self):
+        # S1, review pass 1. `#`, an optional `!` and `[` are three tokens,
+        # and Rust allows whitespace and comments between any two of them.
+        # rustc 1.97.1 compiled `# [allow(unsafe_code)] mod m` holding an
+        # unsafe block with warnings only, so the refusal must find the
+        # spaced spellings and not only the tight one.
+        for attribute in ("# [allow(unsafe_code)]\npub fn clean() {}\n",
+                          "#! [allow(unsafe_code)]\npub fn clean() {}\n",
+                          "#/**/[allow(unsafe_code)]\npub fn clean() {}\n"):
+            self.write("crates/example/tests/ui/planted.rs", attribute)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn("unsafe_code` lowered", output)
+
+    def test_unsafe_in_a_doc_code_fence_is_reported(self):
+        # D4, review pass 1. rustdoc compiles and runs the `rust` tagged and
+        # untagged fences of a doc comment as a doctest, and no lint table
+        # reaches it, so the fence content is code. The first fixture is the
+        # three lines the review planted in ocelli-core's lib. The old
+        # scanner read every doc comment as comment text.
+        code_line = "let _x = unsafe { core::ptr::read(&0u8) };\n"
+        cases = (("/// ```\n/// " + code_line + "/// ```\n", 2),
+                 ("/// ```rust\n/// " + code_line + "/// ```\n", 2),
+                 ("//! ```\n//! " + code_line + "//! ```\n", 2),
+                 ("/**\n * ```\n * " + code_line + " * ```\n */\n", 3))
+        for source, at_line in cases:
+            self.write("crates/example/src/lib.rs", source)
+            self.stage()
+            code, output = self.run_guard()
+            self.assertEqual(code, 1)
+            self.assertIn(f"crates/example/src/lib.rs:{at_line}", output)
+
+    def test_unsafe_in_a_text_fence_is_comment_text(self):
+        # D4. A fence tagged `text` or another language is not a doctest, so
+        # naming `unsafe` in one stays comment text and is not reported.
+        self.write(
+            "crates/example/src/lib.rs",
+            "/// ```text\n"
+            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
+            "/// ```\n"
+            "/// ```wgsl\n"
+            "/// unsafe { 0 }\n"
+            "/// ```\n"
+            "pub fn clean() {}\n")
+        self.stage()
+        self.assertEqual(self.run_guard()[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

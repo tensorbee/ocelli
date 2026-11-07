@@ -7668,8 +7668,10 @@ GUARDS: tuple[Guard, ...] = (
                   note="F-232's second refusal. The workspace table is "
                        "forbid, so rustc refuses an allow, an expect or a "
                        "warn of `unsafe_code` as well. This half keeps the "
-                       "trybuild files and the vendored packages honest, "
-                       "which no lint table reaches."),
+                       "trybuild files honest, which no lint table reaches. "
+                       "The vendored packages are audited by their recorded "
+                       "counts, and an allow inside one lowers nothing "
+                       "because no lint table reaches them."),
         ),
     ),
 
@@ -12130,7 +12132,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
@@ -12142,7 +12144,9 @@ GUARDS: tuple[Guard, ...] = (
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
                        "`produce` already follows one path module, so the "
-                       "planted module is the second.",
+                       "planted module is the second. The count is the one "
+                       "measured on the F-232 tree, where a third `#[path]` "
+                       "module had landed since the probe was written.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -12176,7 +12180,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  "3 `#[path]` module(s) followed",
                   polarity="accept",
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
@@ -12185,7 +12189,10 @@ GUARDS: tuple[Guard, ...] = (
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
                        "read. `produce` already follows one path module, so "
-                       "the planted module is the second.",
+                       "the planted module is the second. The count is the "
+                       "one measured on the F-232 tree, where a third "
+                       "`#[path]` module had landed since the probe was "
+                       "written.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
