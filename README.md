@@ -179,9 +179,12 @@ DICOM files on this machine, use the local series page below.
 in up to nine viewports, from 1 by 1 to 3 by 3. Each viewport has its own
 series, image, zoom, pan and window, and Link can make the others follow the
 outlined one's scroll, window and zoom. The preview registers all six decoder
-families of `ocelli-codec`, so it opens the monochrome frames of the seventeen
-of the nineteen known transfer syntaxes that have a registered decoder, and a
-colour frame is refused as not monochrome. It listens on this machine only.
+families of `ocelli-codec`. It opens the monochrome frames of eighteen of the
+nineteen known transfer syntaxes: the seventeen with a registered decoder and
+Deflated Explicit VR Little Endian, whose whole data set `parse_part10`
+inflates before the raw decoder reads it. JPEG XL JPEG Recompression is the
+only one refused for every frame, and a colour frame is refused as not
+monochrome. It listens on this machine only.
 
 ```bash
 cargo run --release -p ocelli-folder-viewer

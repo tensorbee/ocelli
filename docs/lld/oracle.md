@@ -1141,7 +1141,7 @@ one exception.
   means something exact.
 - new `volumeParamsSha256` and `volumeTruthSha256`, beside `renderParamsSha256`
   and `unsupportedSha256`. **`renderParamsSha256` not moving is mechanical
-  evidence that the ninety-three stack frames are the same artefact F-011
+  evidence that the ninety stack frames are the same artefact F-011
   started against**, which is why F-X007 does not touch `render-params.json` at
   all.
 - new `volumes[]`, one entry per subject, and `framePairs[]`, one per declared

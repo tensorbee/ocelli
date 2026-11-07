@@ -135,7 +135,7 @@
     <li><a href="#metadata">Metadata browser</a><span class="mark">partial</span></li>
     <li><a href="#one">One to one</a><span class="mark">not yet</span></li>
     <li><a href="#preferences">Preferences</a><span class="mark">not yet</span></li>
-    <li><a href="#jpegxl">JPEG XL</a><span class="mark">implemented</span></li>
+    <li><a href="#jpegxl">JPEG XL</a><span class="mark">partial</span></li>
     <li><a href="#worker">Worker decode</a><span class="mark">partial</span></li>
     <li><a href="#documents">Documents</a><span class="mark">implemented</span></li>
   </ul>
@@ -390,8 +390,9 @@ const parsed = parseSnapshot(session.snapshot());</code></pre>
 
   <section class="feature" id="jpegxl">
     <h2>JPEG XL and the transfer syntaxes</h2>
-    <span class="status done">Implemented in <code>ocelli-codec</code>.</span>
+    <span class="status part">Partial. JPEG XL Lossless and JPEG XL decode. JPEG XL JPEG Recompression has no decoder.</span>
     <p>The decoder registry knows nineteen transfer syntaxes and six registration functions cover them: raw and RLE Lossless together, JPEG, JPEG 2000, JPEG-LS, HTJ2K and JPEG XL. Seventeen have a decoder. Two do not. Deflated Explicit VR Little Endian deflates the whole data set rather than one frame, PS3.5 A.5, and JPEG XL JPEG Recompression is left unregistered because <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. JPEG XL Lossless and JPEG XL decode through <code>jxl-oxide</code> 0.12.6, and this folder viewer registers all six families, so its preview draws the monochrome frames. cornerstone3D 5.8.2 cannot decode any of the three JPEG XL syntaxes, so the differential oracle has no reference frame for those rows, and their correctness comes instead from round trips against the synthetic sources, exact for the two lossless rows and worst-pixel bounded for the two lossy ones, which libjxl encoded.</p>
+    <p class="tiers">Tiers A, B and C decode on the CPU and do not select different registry behaviour.</p>
   </section>
 
   <section class="feature" id="worker">

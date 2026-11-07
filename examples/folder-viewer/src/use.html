@@ -585,7 +585,7 @@ registry.decode(transfer_syntax_uid, encoded, &amp;desc, &amp;mut out)?;</code><
         <tr><td><code>1.2.840.10008.1.2.4.112</code></td><td>JPEG XL</td><td>JPEG XL</td></tr>
       </tbody>
     </table></div>
-    <p>Seventeen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. JPEG XL JPEG Recompression has no decoder either: <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. <code>crates/ocelli-codec/tests/registry.rs</code> asserts all of this.</p>
+    <p>Seventeen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. JPEG XL JPEG Recompression has no decoder either: <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. <code>crates/ocelli-codec/tests/registry.rs</code> asserts the nineteen, the seventeen and which two are unavailable.</p>
   </section>
 
   <section class="chapter" id="lut">

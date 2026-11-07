@@ -617,6 +617,123 @@ fn a_single_sample_colour_photometric_refuses_not_monochrome() -> Result<(), Str
     }
 }
 
+#[test]
+fn every_registration_in_codecs_decodes_a_monochrome_frame() -> Result<(), String> {
+    // One file per registration function in codecs(), so dropping any one
+    // register_* call leaves that call's UIDs known but unavailable and its
+    // file refused with PreviewError::Decode, which turns this test red.
+    // Expected values are hand-computed or read from the fixture reference,
+    // none from a previous run of this preview.
+    //
+    // RLE Lossless, PS3.5 G.2 and G.3.1: a 64 byte header naming one segment
+    // at offset 64, then one literal run of count 3 carrying the samples
+    // 10, 20, 30 and 40, padded to even length with one zero byte. Full range
+    // over 10 to 40 maps them to grey 0, 85, 170 and 255.
+    let mut rle = Vec::new();
+    rle.extend_from_slice(&1_u32.to_le_bytes());
+    rle.extend_from_slice(&64_u32.to_le_bytes());
+    rle.resize(64, 0);
+    rle.extend_from_slice(&[3, 10, 20, 30, 40, 0]);
+    let preview = preview_first_frame(&encapsulated_frame(
+        &rle,
+        "1.2.840.10008.1.2.5",
+        1,
+        4,
+        1,
+        "MONOCHROME2",
+        8,
+    )?)
+    .map_err(|error| format!("the RLE Lossless frame was refused: {error}"))?;
+    assert_eq!(preview.grey, vec![0, 85, 170, 255]);
+
+    // JPEG lossless process 14, UID .57. The codec suite hand-computes this
+    // fixture's four samples as 0, 2047, 2048 and 4095 from PS3.5 Annex F,
+    // so they come from the standard and not from the decoder. Full range
+    // maps the first to grey 0 and the last to grey 255.
+    let preview = preview_first_frame(&encapsulated_frame(
+        include_bytes!(
+            "../../../crates/ocelli-codec/tests/fixtures/jpeg_lossless_process14_12bit.jpg"
+        ),
+        "1.2.840.10008.1.2.4.57",
+        1,
+        4,
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG lossless frame was refused: {error}"))?;
+    assert_eq!(preview.grey.first(), Some(&0));
+    assert_eq!(preview.grey.last(), Some(&255));
+
+    // JPEG 2000 lossless, UID .90. The codec suite states that this fixture
+    // repeats the boundary values 0, 2047, 2048 and 4095 across a 64 by 64
+    // frame, so its grey minimum is 0 and its grey maximum is 255.
+    let preview = preview_first_frame(&encapsulated_frame(
+        include_bytes!("../../../crates/ocelli-codec/tests/fixtures/jpeg2000_lossless_u12.j2k"),
+        "1.2.840.10008.1.2.4.90",
+        64,
+        64,
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG 2000 frame was refused: {error}"))?;
+    assert_eq!(preview.grey.len(), 64 * 64);
+    assert_eq!(preview.grey.iter().min(), Some(&0));
+    assert_eq!(preview.grey.iter().max(), Some(&255));
+
+    // JPEG-LS lossless and HTJ2K lossless, UIDs .80 and .201. The codec suite
+    // reproduces the uncompressed corpus ramp from both fixtures byte for
+    // byte, a 64 by 96 unsigned 16-bit ramp whose first sample is 0 and whose
+    // last is 65535. Full range maps those to grey 0 and 255.
+    for (uid, codestream, name) in [
+        (
+            "1.2.840.10008.1.2.4.80",
+            &include_bytes!(
+                "../../../crates/ocelli-codec/tests/fixtures/jpegls_corpus_lossless.jls"
+            )[..],
+            "JPEG-LS",
+        ),
+        (
+            "1.2.840.10008.1.2.4.201",
+            &include_bytes!(
+                "../../../crates/ocelli-codec/tests/fixtures/htj2k_corpus_lossless.j2c"
+            )[..],
+            "HTJ2K",
+        ),
+    ] {
+        let preview = preview_first_frame(&encapsulated_frame(
+            codestream,
+            uid,
+            64,
+            96,
+            1,
+            "MONOCHROME2",
+            16,
+        )?)
+        .map_err(|error| format!("the {name} frame was refused: {error}"))?;
+        assert_eq!(preview.width, 96);
+        assert_eq!(preview.height, 64);
+        assert_eq!(preview.grey.len(), 64 * 96);
+        assert_eq!(preview.grey.first(), Some(&0));
+        assert_eq!(preview.grey.last(), Some(&255));
+    }
+
+    // JPEG XL Lossless, UID .110, the same file `a_jpegxl_lossless_frame_draws`
+    // previews. It is listed here so all six registrations have a file.
+    let preview = preview_first_frame(&jpegxl_frame(
+        "jpegxl_lossless_12.jxl",
+        "1.2.840.10008.1.2.4.110",
+        1,
+        "MONOCHROME2",
+        12,
+    )?)
+    .map_err(|error| format!("the JPEG XL frame was refused: {error}"))?;
+    assert_eq!(preview.grey.first(), Some(&0));
+    assert_eq!(preview.grey.last(), Some(&255));
+    Ok(())
+}
+
 fn only_byte(preview: &Preview) -> Result<u8, String> {
     if preview.grey.len() != 1 {
         return Err("the frame is not one pixel".to_owned());
@@ -867,6 +984,20 @@ fn jpegxl_frame(
         .join(fixture);
     let codestream =
         std::fs::read(&path).map_err(|_| format!("{} is not readable", path.display()))?;
+    encapsulated_frame(&codestream, uid, 64, 96, samples, photometric, bits_stored)
+}
+
+/// One encapsulated frame around a codestream, in the wrapper shape described
+/// on `jpegxl_frame`.
+fn encapsulated_frame(
+    codestream: &[u8],
+    uid: &str,
+    rows: u16,
+    columns: u16,
+    samples: u16,
+    photometric: &str,
+    bits_stored: u16,
+) -> Result<Vec<u8>, String> {
     let bits_allocated: u16 = if bits_stored > 8 { 16 } else { 8 };
     let mut data = Vec::new();
     data.extend(short_le(
@@ -876,8 +1007,8 @@ fn jpegxl_frame(
     )?);
     data.extend(short_le((0x0028, 0x0002), *b"US", &samples.to_le_bytes())?);
     data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(photometric))?);
-    data.extend(short_le((0x0028, 0x0010), *b"US", &64_u16.to_le_bytes())?);
-    data.extend(short_le((0x0028, 0x0011), *b"US", &96_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
     data.extend(short_le(
         (0x0028, 0x0100),
         *b"US",
@@ -894,7 +1025,7 @@ fn jpegxl_frame(
         &(bits_stored - 1).to_le_bytes(),
     )?);
     data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
-    let mut fragment = codestream;
+    let mut fragment = codestream.to_vec();
     if fragment.len() % 2 == 1 {
         fragment.push(0);
     }

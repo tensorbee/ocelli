@@ -342,8 +342,9 @@ parse `try_init` runs, so there is no hand-written walk to desynchronise from
 the parser it protects. A header that declares an embedded ICC profile or any
 extra channel refuses with `UnsupportedPixelFormat`, and a header that cannot
 be read to those fields refuses fail-closed. On the crafted streams above, a
-probe that parsed the header and stopped at the ICC flag peaked at
-2,260,992 bytes of resident set against 270,811,136 for the unguarded parse.
+probe that parsed the header and then read the encoded ICC size behind the
+flag peaked at 2,260,992 bytes of resident set against 270,811,136 for the
+unguarded parse.
 
 ### Exact stored values, and the float quantiser
 
@@ -384,7 +385,7 @@ the colour stage applies no second conversion. One sample reports
 | `bits_per_sample` differing from Bits Stored | codestream header | `FrameMismatch` |
 | Width or height differing from Columns or Rows | codestream header | `FrameMismatch` |
 | Colour channels differing from Samples per Pixel | codestream header | `FrameMismatch` |
-| More than one keyframe | after load | `FrameMismatch` |
+| Other than one keyframe | after load | `FrameMismatch` |
 | A VarDCT frame under `.110` | after load | `FrameMismatch` |
 | `xyb_encoded` under `.110` | codestream header | `FrameMismatch` |
 | A sample outside the stored range | after render | `UnsupportedPixelFormat` |
@@ -422,11 +423,12 @@ a numerator of 12 and passes from 13, and the binding case is the 64 by 96
 lossy 12-bit `jpegxl_lossy_12.jxl`, measured on 2026-11-05. A decode that
 exceeds the doubled limit returns `DecoderFailure` and writes nothing.
 
-Two bounds sit outside the tracker by measurement and are recorded on the
-constants: the extracted codestream copy of a container, at most the input
-length, and the extra channel vector the header parser grows for a header
-that declares them, constant bounded by the format's own limits. Extra
-channels refuse in the pre-check, so the vector is never filled.
+Two bounds sit outside the tracker by measurement and are recorded in the
+module documentation: the extracted codestream copy of a container, at most
+the input length, and the extra channel vector the header parser grows while
+it parses a header that declares them, constant bounded by the format's own
+limits. Extra channels refuse in the pre-check after that parse, so the
+refusal stops the `try_init` reparse, not the growth.
 
 ### The forward wasm cost, which no shipped module pays today
 
