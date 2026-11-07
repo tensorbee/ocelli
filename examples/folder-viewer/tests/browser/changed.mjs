@@ -19,10 +19,12 @@
 //             through. The sentence must show and no grey of file 0 may stay.
 //   thumb     the file the series thumbnail was drawn from changes. The
 //             thumbnail must go black and image 1 must still draw.
-//   tiles     in the four-image view file 1 changes, then file 0. Each
-//             changed tile must carry the sentence and the others must draw.
-//   cells     two cells on two series. Activating the other cell must drop
-//             the first series' count, and must find a change in its own
+//   tiles     in Four images file 1 changes, then file 0. Each changed tile
+//             must carry the sentence and the others must draw. One step on,
+//             a tile that held a changed file loses the changed style.
+//   cells     three cells, two series and one empty. Activating the empty
+//             cell or the other series' cell must drop the first series'
+//             count, and activating that cell must find a change in its own
 //             series with no focus.
 //   probe     a folder of 1,693 files, one series. A click on the series row
 //             must read one byte of each file, at most four at a time, in
@@ -95,14 +97,17 @@ function grey16(canvas, grey) {
  * `late` is `{ caught, fault, keys }`: whether a preview of file 0 was held,
  * the viewport's fault text after the release, and file 0's grey keys left.
  *
- * `thumb` is `{ before, after, fault }`, the thumbnail's red sum before and
- * after the change and image 1's fault text.
+ * `thumb` is `{ before, after, fault, canvas, grey }`, the thumbnail's red
+ * sum before and after the change, and image 1's fault text, canvas and
+ * process grey.
  *
- * `tiles` is `{ second, first }`, each `{ hidden, widths, labels, fault }`
- * after file 1 and then file 0 changed.
+ * `tiles` is `{ second, first, stepped }`, each `{ hidden, widths, labels,
+ * marked }` and the first two with `fault`, after file 1 and then file 0
+ * changed, and after one step on.
  *
- * `cells` is `{ aStatus, bQuiet, bFault, bStatus }`, the status with A's
- * change, the status once B's cell was active, and B's fault and status after
+ * `cells` is `{ aStatus, emptyStatus, bQuiet, bFault, bStatus }`, the
+ * status with A's change, the status once the empty third cell and then B's
+ * cell were active, and B's fault and status after
  * B's file changed and its cell was activated again.
  *
  * `probe` is `{ files, reads, bytes, peak, ms }`, the reads one series
@@ -173,9 +178,10 @@ export function changedProblems(seen) {
     if (!(thumb.before > 0)) problems.push("the thumbnail was never drawn, so the case shows nothing");
     if (thumb.after !== 0) problems.push(`the thumbnail drawn from the changed file still showed it, red sum ${thumb.after}`);
     if (thumb.fault !== "") problems.push(`image 1, whose file did not change, showed "${thumb.fault}"`);
+    for (const line of grey16(thumb.canvas, thumb.grey)) problems.push(`image 1, whose file did not change, ${line}`);
   }
   const tiles = seen && seen.tiles;
-  if (!tiles || !tiles.second || !tiles.first) {
+  if (!tiles || !tiles.second || !tiles.first || !tiles.stepped) {
     problems.push("the tile case was not observed");
   } else {
     const expect = [
@@ -192,12 +198,24 @@ export function changedProblems(seen) {
         if (!changed && (state.labels || [])[at] === CHANGED_SENTENCE) problems.push(`with ${name} tile ${at + 1}, whose file did not change, read the changed-file sentence`);
       }
     }
+    const stepped = tiles.stepped;
+    const labels = stepped.labels || [];
+    const marked = stepped.marked || [];
+    if (!labels.some((label, at) => label !== CHANGED_SENTENCE && label !== "" && tiles.first.labels[at] === CHANGED_SENTENCE)) {
+      problems.push("after a step no tile that held a changed file showed an unchanged one, so the case shows nothing");
+    }
+    for (let at = 0; at < labels.length; at += 1) {
+      if (marked[at] !== (labels[at] === CHANGED_SENTENCE)) {
+        problems.push(`after a step tile ${at + 1} read "${labels[at]}" with the changed style ${marked[at] ? "on" : "off"}`);
+      }
+    }
   }
   const cells = seen && seen.cells;
   if (!cells) {
     problems.push("the two-cell case was not observed");
   } else {
     if (!String(cells.aStatus || "").endsWith(CHANGED_STATUS)) problems.push(`with A's file changed the status read "${cells.aStatus}"`);
+    if (String(cells.emptyStatus || "changed").includes("changed")) problems.push(`after the empty cell became active the status read "${cells.emptyStatus}"`);
     if (String(cells.bQuiet || "").includes("changed")) problems.push(`after B's cell became active the status read "${cells.bQuiet}" for a series with no changed file`);
     if (cells.bFault !== CHANGED_SENTENCE) problems.push(`activating B's cell after its file changed showed "${cells.bFault}", not the changed-file sentence`);
     if (!String(cells.bStatus || "").endsWith(CHANGED_STATUS)) problems.push(`activating B's cell after its file changed left the status "${cells.bStatus}"`);
@@ -398,6 +416,7 @@ function tileState(page) {
       hidden: tiles.hidden,
       widths: canvases.map((node) => node.width),
       labels: labels.map((node) => node.textContent || ""),
+      marked: labels.map((node) => node.classList.contains("changed")),
     };
   });
 }
@@ -681,13 +700,15 @@ export async function observeThumb(url, chromium, set) {
     await quiet(page);
     const after = await thumbSum(page);
     const fault = await faultText(page);
-    return { before, after, fault };
+    const canvas = await canvasGrey(page);
+    const grey = await processGrey(url, set.paths[0]);
+    return { before, after, fault, canvas, grey };
   } finally {
     await browser.close();
   }
 }
 
-/** The four-image view, file 1 changed and then file 0. */
+/** Four images, file 1 changed and then file 0, then one step on. */
 export async function observeTiles(url, chromium, set) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -711,7 +732,13 @@ export async function observeTiles(url, chromium, set) {
     await quiet(page);
     await page.waitForTimeout(300);
     const first = { ...(await tileState(page)), fault: await faultText(page) };
-    return { second, first };
+    // One step on, a tile that held a changed file shows an unchanged one,
+    // and its label must lose the changed style with the sentence.
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(300);
+    await quiet(page);
+    const stepped = await tileState(page);
+    return { second, first, stepped };
   } finally {
     await browser.close();
   }
@@ -736,7 +763,7 @@ export async function observeCells(url, chromium, set) {
     await drawn;
     await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
     await page.locator("#layout").click();
-    await page.locator('#layout-picker [data-columns="2"][data-rows="1"]').click();
+    await page.locator('#layout-picker [data-columns="3"][data-rows="1"]').click();
     await until(() => page.evaluate(() => {
       const view = document.querySelector('.cell[data-cell="1"] canvas.view');
       return Boolean(view && view.width === 8);
@@ -746,6 +773,11 @@ export async function observeCells(url, chromium, set) {
     await focus(page);
     await until(async () => (await statusText(page)).endsWith(CHANGED_STATUS), "A's change counted", 5000).catch(() => {});
     const aStatus = await statusText(page);
+    // Cell 3 is empty, so no series is active and nothing is counted. The
+    // probe does not run there, so only the activation itself can drop it.
+    await page.locator('.cell[data-cell="2"]').click();
+    await quiet(page);
+    const emptyStatus = await statusText(page);
     await page.locator('.cell[data-cell="1"]').click();
     await quiet(page);
     const bQuiet = await statusText(page);
@@ -757,7 +789,7 @@ export async function observeCells(url, chromium, set) {
     await quiet(page);
     const bFault = await faultText(page, 1);
     const bStatus = await statusText(page);
-    return { aStatus, bQuiet, bFault, bStatus };
+    return { aStatus, emptyStatus, bQuiet, bFault, bStatus };
   } finally {
     await browser.close();
   }
@@ -797,7 +829,7 @@ async function main() {
     seen.tiles = await withViewer(binary, (url) => observeTiles(url, chromium, tileSet));
     console.log(`tiles: file 1 changed ${seen.tiles.second.widths.join(" ")}, then file 0 ${seen.tiles.first.widths.join(" ")}, fault "${seen.tiles.first.fault}"`);
     seen.cells = await withViewer(binary, (url) => observeCells(url, chromium, cellSet));
-    console.log(`cells: A "${seen.cells.aStatus}", B active "${seen.cells.bQuiet}", B changed "${seen.cells.bFault}"`);
+    console.log(`cells: A "${seen.cells.aStatus}", empty "${seen.cells.emptyStatus}", B active "${seen.cells.bQuiet}", B changed "${seen.cells.bFault}"`);
     seen.probe = await withViewer(binary, (url) => observeProbe(url, chromium, probeSet));
     console.log(`probe: ${seen.probe.reads} reads of ${seen.probe.bytes} bytes for ${seen.probe.files} files, at most ${seen.probe.peak} in flight, ${seen.probe.ms} ms`);
   } finally {
