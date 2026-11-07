@@ -225,6 +225,19 @@ function f64(value: number): number[] {
   return [...new Uint8Array(buffer)];
 }
 
+/** The refusal code of one drive, or a marker when nothing was refused. */
+function codeOf(drive: () => unknown): string {
+  try {
+    drive();
+  } catch (error) {
+    if (error instanceof OcelliError) {
+      return error.code;
+    }
+    throw error;
+  }
+  return "no refusal";
+}
+
 const EVERY_KIND: readonly PackedCommand[] = [
   { kind: "Fit", width: 800, height: 600, columns: 512, rows: 512 },
   { kind: "Pan", x: 1, y: 2 },
@@ -269,6 +282,70 @@ describe("wasm session boundary", () => {
     expect(() => writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: epoch })).toThrow(/commit refused/);
     expect(() => writeFrame(wasm, sink, frame, META)).toThrow(/commit refused/);
     writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: next });
+  });
+  it("commits a transferred frame at the current selection and refuses a stale one", async () => {
+    // AC5, the built module over the public helpers. The transferred-frame
+    // copy of the writeStack test above. With the epoch writeStack
+    // returned and the current index the frame commits, and a stale epoch
+    // or a different index is the coded refusal. The slot is released by
+    // the session inside the refused export, so bulk_ticket() answers 0
+    // and the committed frame at slice 0 is kept.
+    const wasm = await loadModule();
+    const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    const sink = sessionBulkSink(wasm);
+    const meta = { series: 5, instance: 0, frame: 0, bytes: 4 };
+    const target = { viewport: 1, columns: 1, rows: 1, generation: 1 };
+    const sliceIndex = () => readViewportState(wasm.copy_state())?.sliceIndex;
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([40]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([41]).buffer,
+          meta,
+          { ...target, stackIndex: 0, stackEpoch: epoch - 1 },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([42]).buffer,
+          meta,
+          { ...target, stackIndex: 1, stackEpoch: epoch },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+
+    // The refusals leave the slot free, so the next current transfer
+    // commits through the same caller.
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([43]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
   });
   it("refuses address 0, reuses an address only with a new ticket, and commits through writeFrame", async () => {
     const wasm = await loadModule();
@@ -862,6 +939,42 @@ describe("wasm session boundary", () => {
     expect(payload?.series).toBe(series);
     expect(payload?.frames).toBe(3);
     expect(payload?.bytes).toBe(3_145_728n);
+  });
+
+  it("a transferred frame with content is committed and cached", async () => {
+    // AC7's built-module half, beside F-231's cache test. A transfer
+    // carrying both stack keys and a content id commits through
+    // `commit_cached_frame`, so the frame is resident for its identity
+    // and extent once the budget is set and the committed length is a
+    // multiple of four, which a four-byte frame is.
+    const wasm = await loadModule();
+    const keys = [{ series: 7n, instance: 0, frame: 0 }];
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 1_048_576);
+    // The budget change is setup, not the observation.
+    drainRing(wasm.drain_events());
+    const sink = sessionBulkSink(wasm);
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Uint8Array([1, 2, 3, 4]).buffer,
+      { series: 7, instance: 0, frame: 0, bytes: 4 },
+      {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 1,
+        stackIndex: 0,
+        stackEpoch: epoch,
+        content: 0x1_0000_0001n,
+      },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(
+      frameResident(wasm, { index: 0, epoch, content: 0x1_0000_0001n, columns: 1, rows: 1 }),
+    ).toBe(true);
   });
 
   it("showResident throws the coded CommitRefused for an unselected index and answers false only for a miss", async () => {
