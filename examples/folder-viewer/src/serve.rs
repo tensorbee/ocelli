@@ -14,7 +14,7 @@ use ocelli_pixel::VoiFunction;
 
 use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
-    PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey, retire_bytes,
+    PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey, retire_bytes,
     with_decode_workspace,
 };
 use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
@@ -52,6 +52,8 @@ struct Request {
     body: Vec<u8>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    /// `X-Ocelli-Page`, read only by `/file`.
+    page: Option<PageToken>,
     /// `X-Ocelli-Points`, read only by `/value`.
     points: PointsHeader,
     /// `X-Ocelli-Shape` as it arrived, read only by `/measure`.
@@ -1539,6 +1541,7 @@ fn decode_for_value(
 
 fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) -> Reply {
     let frame = request.frame.frame;
+    let page = request.page;
     let body = request.body;
     let inspected = if let Some(slot) = charge.slot.as_ref() {
         let worker = slot.worker();
@@ -1559,7 +1562,7 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
             // Leave inflight before the bytes are visible in the LRU.
             charge.release_for_cache();
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
-            match viewer.insert_posted(body, worker, retire) {
+            match viewer.insert_posted(body, worker, retire, page) {
                 Some(id) => {
                     reply.file_id = Some(id.header_value());
                     reply.held_flag = Some(1);
@@ -1598,13 +1601,15 @@ fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
     json_or_error(headers_json(&request.body))
 }
 
-/// `POST /forget`: drop held files and every frame of them, named by id.
+/// `POST /forget`: drop held files and every frame of them.
 ///
-/// The body is ids, one `<generation>.<serial>` per line, LF separated, at
-/// most [`FORGET_LINES`] of them. Every line is parsed before anything is
-/// removed, so a body with one line that is not an id forgets nothing and is
-/// `400` with `X-Ocelli-Error: forget`. The reply counts what left, and
-/// `unknown` counts the ids that held nothing.
+/// The body is either ids, one `<generation>.<serial>` per line, LF
+/// separated, at most [`FORGET_LINES`] of them, or the one line `page
+/// <token>`, which names every file posted under that page token. Every line
+/// is parsed before anything is removed, so a body with one line that is not
+/// an id, or a token that is not 32 lowercase hex digits, forgets nothing and
+/// is `400` with `X-Ocelli-Error: forget`. The reply counts what left, and
+/// `unknown` counts the ids that held nothing. An unknown token names no id.
 fn forget_route(viewer: &Viewer, request: &Request) -> Reply {
     if request.file_id.is_some() {
         return text_reply(
@@ -1613,15 +1618,23 @@ fn forget_route(viewer: &Viewer, request: &Request) -> Reply {
             "a forget request names its ids in the body",
         );
     }
-    let Some(ids) = parse_forget_ids(&request.body) else {
-        return text_reply(400, Some("forget"), "the forget list is not usable");
+    let forgotten = if let Some(rest) = request.body.strip_prefix(PAGE_WORD) {
+        let token = std::str::from_utf8(rest).ok().and_then(PageToken::parse);
+        let Some(token) = token else {
+            return text_reply(400, Some("forget"), "the forget page token is not usable");
+        };
+        viewer.forget_page(token)
+    } else {
+        let Some(ids) = parse_forget_ids(&request.body) else {
+            return text_reply(400, Some("forget"), "the forget list is not usable");
+        };
+        viewer.forget(&ids)
     };
-    let forgotten = viewer.forget(&ids);
     let body = format!(
         "{{\"files\":{},\"frames\":{},\"bytes\":{},\"unknown\":{}}}",
         forgotten.files, forgotten.frames, forgotten.bytes, forgotten.unknown
     );
-    bare(200, "application/json", body.into_bytes())
+    bare(200, "application/json; charset=utf-8", body.into_bytes())
 }
 
 /// Every line of `body` as an id, or `None` when one line is not an id or
@@ -2026,6 +2039,7 @@ fn read_request(
         body,
         frame: parsed.frame,
         file_id: parsed.file_id,
+        page: parsed.page,
         points: parsed.points,
         shape: parsed.shape,
         close: parsed.close,
@@ -2262,6 +2276,7 @@ struct HeaderParts {
     length: Option<usize>,
     frame: FrameRequest,
     file_id: Option<FileId>,
+    page: Option<PageToken>,
     points: PointsHeader,
     shape: Option<String>,
     close: bool,
@@ -2283,6 +2298,10 @@ const MAX_POINTS: usize = 64;
 /// Longest `/measure` body, 256 KiB. A longer one is refused from its
 /// declared length, before any of it is read.
 const MEASURE_BODY_CAP: usize = 256 * 1024;
+
+/// The `/forget` body that names a page token: these five bytes, then the
+/// token. No id starts with it, because `p` and `g` are not hex digits.
+const PAGE_WORD: &[u8] = b"page ";
 
 /// Most ids one `/forget` body may name.
 const FORGET_LINES: usize = 65_536;
@@ -2377,6 +2396,8 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_preset = false;
     let mut seen_file = false;
     let mut seen_shape = false;
+    let mut seen_page = false;
+    let mut page = None;
     let mut shape = None;
     let mut frame = FrameRequest::default();
     let mut file_id = None;
@@ -2417,6 +2438,9 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         } else if name.eq_ignore_ascii_case("x-ocelli-file") {
             once(&mut seen_file)?;
             file_id = Some(FileId::parse(text).ok_or_else(header_unusable)?);
+        } else if name.eq_ignore_ascii_case("x-ocelli-page") {
+            once(&mut seen_page)?;
+            page = Some(PageToken::parse(text).ok_or_else(header_unusable)?);
         } else if name.eq_ignore_ascii_case("x-ocelli-frame") {
             once(&mut seen_frame)?;
             frame.frame = text.parse::<u32>().map_err(|_| header_unusable())?;
@@ -2456,6 +2480,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         length,
         frame,
         file_id,
+        page,
         points,
         shape,
         close,
@@ -2596,6 +2621,7 @@ mod tests {
                 body,
                 frame: FrameRequest::default(),
                 file_id: None,
+                page: None,
                 points: PointsHeader::Absent,
                 shape: None,
                 close: true,

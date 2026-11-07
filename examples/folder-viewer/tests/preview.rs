@@ -3812,7 +3812,7 @@ fn forget_drops_files_and_frames() -> Result<(), String> {
     let body = format!("{two_id}\n{one_id}\n{other}\n{two_id}");
     let (header, reply) = forget_exchange(addr, "", body.as_bytes())?;
     if !header.starts_with("HTTP/1.1 200 ")
-        || header_line(&header, "Content-Type") != Some("application/json")
+        || header_line(&header, "Content-Type") != Some("application/json; charset=utf-8")
     {
         return Err(format!("the forget was not a JSON 200: {header}"));
     }
@@ -3930,6 +3930,122 @@ fn forget_refusals() -> Result<(), String> {
             "the census after the forget was {:?}",
             held_counts(addr)?
         ));
+    }
+    Ok(())
+}
+
+/// Post `file` under the page token `page` and return its id.
+fn page_post(addr: SocketAddr, file: &[u8], page: &str) -> Result<String, String> {
+    let posted = exchange(
+        addr,
+        &http_post_to("/file", &format!("X-Ocelli-Page: {page}\r\n"), file),
+    )?;
+    let (header, _) = split_http(&posted)?;
+    header_line(header, "X-Ocelli-File")
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the file posted under {page} had no id: {header}"))
+}
+
+#[test]
+fn forget_by_page_drops_only_that_pages_files() -> Result<(), String> {
+    // F-226 AC15 as the lead restated it, on the process side. Page `left`
+    // posts a one-frame object and previews it, so only its frame is held,
+    // and posts a second one-frame object that is never previewed, so its
+    // bytes are held. Page `stays` posts a third. `page <left>` forgets the
+    // frame and the bytes, files 1 and frames 1, and leaves the third
+    // object exactly as held. The tokens are 32 lowercase hex digits.
+    let left = "0123456789abcdef0123456789abcdef";
+    let stays = "fedcba9876543210fedcba9876543210";
+    let unknown = "00000000000000000000000000000001";
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let drawn_file = mono_frame(true)?;
+    let posted_file = mono_frame(false)?;
+    let kept_file = tagged_frame(1, &50_u16.to_le_bytes())?;
+    let drawn = page_post(addr, &drawn_file, left)?;
+    let preview = exchange(addr, &preview_id(&drawn, ""))?;
+    if !split_http(&preview)?.0.starts_with("HTTP/1.1 200 ") {
+        return Err("the left page's file did not draw".to_owned());
+    }
+    let (_, _, drawn_used) = held_counts(addr)?;
+    let posted = page_post(addr, &posted_file, left)?;
+    let kept = page_post(addr, &kept_file, stays)?;
+    let before = held_counts(addr)?;
+    if before != (2, 1, drawn_used + posted_file.len() + kept_file.len()) {
+        return Err(format!("before the forget the census was {before:?}"));
+    }
+    let refusals = [
+        (
+            "a short token",
+            "page 0123456789abcdef0123456789abcde".to_owned(),
+        ),
+        ("a long token", format!("page {left}0")),
+        (
+            "an uppercase token",
+            format!("page {}", left.to_uppercase()),
+        ),
+        ("a token and an id", format!("page {left}\n{kept}")),
+        ("no space", format!("page{left}")),
+    ];
+    for (name, body) in &refusals {
+        let (header, _) = forget_exchange(addr, "", body.as_bytes())?;
+        if !header.starts_with("HTTP/1.1 400 ")
+            || header_line(&header, "X-Ocelli-Error") != Some("forget")
+        {
+            return Err(format!("{name} was not 400 forget: {header}"));
+        }
+        if held_counts(addr)? != before {
+            return Err(format!("{name} changed the census"));
+        }
+    }
+    let zeros = "{\"files\":0,\"frames\":0,\"bytes\":0,\"unknown\":0}";
+    let (header, reply) = forget_exchange(addr, "", format!("page {unknown}").as_bytes())?;
+    if !header.starts_with("HTTP/1.1 200 ") || reply != zeros || held_counts(addr)? != before {
+        return Err(format!("an unknown token answered {header} {reply}"));
+    }
+    let (header, reply) = forget_exchange(addr, "", format!("page {left}").as_bytes())?;
+    let expected = format!(
+        "{{\"files\":1,\"frames\":1,\"bytes\":{},\"unknown\":0}}",
+        drawn_used + posted_file.len()
+    );
+    if !header.starts_with("HTTP/1.1 200 ") || reply != expected {
+        return Err(format!(
+            "the page forget answered {header} {reply}, not {expected}"
+        ));
+    }
+    if held_counts(addr)? != (1, 0, kept_file.len()) {
+        return Err(format!(
+            "after the page forget the census was {:?}",
+            held_counts(addr)?
+        ));
+    }
+    for (name, id) in [("drawn", &drawn), ("posted", &posted)] {
+        let gone = exchange(addr, &preview_id(id, ""))?;
+        if !split_http(&gone)?.0.starts_with("HTTP/1.1 410 ") {
+            return Err(format!("the {name} file of the left page was still served"));
+        }
+    }
+    let again = forget_exchange(addr, "", format!("page {left}").as_bytes())?;
+    if again.1 != zeros {
+        return Err(format!("a second page forget answered {}", again.1));
+    }
+    let bad_post = exchange(
+        addr,
+        &http_post_to("/file", "X-Ocelli-Page: not-a-token\r\n", &kept_file),
+    )?;
+    let (bad_header, _) = split_http(&bad_post)?;
+    if !bad_header.starts_with("HTTP/1.1 400 ")
+        || header_line(bad_header, "X-Ocelli-Error") != Some("header")
+    {
+        return Err(format!(
+            "a malformed page token on /file was accepted: {bad_header}"
+        ));
+    }
+    if held_counts(addr)? != (1, 0, kept_file.len()) {
+        return Err("a refused post changed the census".to_owned());
+    }
+    let survivor = exchange(addr, &preview_id(&kept, ""))?;
+    if !split_http(&survivor)?.0.starts_with("HTTP/1.1 200 ") {
+        return Err("the staying page's file was not served".to_owned());
     }
     Ok(())
 }

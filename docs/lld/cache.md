@@ -265,14 +265,22 @@ The page forgets. Every open, a folder or the synthetic study, sends the
 previous open's ids with `fetch` and replaces the set of files the page may
 post, so `ensureFile` refuses a file of an open the page has left and a late
 `410` for it does not post it again. An id that arrives after another open
-began is forgotten at once. On `pagehide` the page sends the open's ids with
-`navigator.sendBeacon` in chunks of at most 1,700. Chromium refuses a beacon
-while 64 KiB of earlier keepalive bytes are in flight, which is a limit over
-all beacons at once rather than over each. Measured, two beacons of 1,700
-ids and 35,699 bytes each, sent together, returned true and then false, and
-in the 3,400-file browser check only the first beacon's 1,700 ids were
-forgotten. A forget that fails is not retried, and the budget still bounds
-what the process holds.
+began is forgotten at once.
+
+Leaving the page forgets by page rather than by id. Each page load makes a
+random token of 32 lowercase hex digits and sends it as `X-Ocelli-Page` with
+every `/file` post, and `CacheState` records it beside the id. On `pagehide`
+the page sends one beacon whose body is `page <token>`, and
+`Viewer::forget_page` forgets every id recorded under that token through the
+same `forget_ids` as `/forget` by id, so a doomed decode and the counts are
+kept one way and another page's files are untouched. A malformed token is
+`400 forget` and an unknown one forgets nothing. A list of ids would not do:
+Chromium allows 64 KiB of beacons in flight at once, over all of them rather
+than each, and measured two beacons of 1,700 ids, 35,699 bytes each, returned
+true and then false. Eviction does not touch the token record, so
+`sweep_pages` drops the ids that hold nothing once the record passes 4,096
+and twice the entries held. A forget that fails is not retried, and the
+budget still bounds what the process holds.
 
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.

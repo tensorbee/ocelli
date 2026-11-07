@@ -924,9 +924,11 @@ const DEBUG_STATUS = "This is the slow debug build. Run " + RELEASE_COMMAND + ".
 const FILE_GONE = "the file is no longer held by this process";
 // Most ids one /forget names. The process refuses a longer list.
 const FORGET_LINES = 65536;
-// Most ids one pagehide beacon carries. An id is at most 33 characters and a
-// line feed, so a beacon is at most 57,800 bytes, under Chromium's 64 KiB.
-const BEACON_IDS = 1700;
+// This page load's token, 32 lowercase hex digits, sent with every /file
+// post. Leaving the page forgets every file posted under it in one beacon of
+// a few dozen bytes, because Chromium allows only 64 KiB of beacons in flight
+// at once and a list of ids can be longer than that.
+const PAGE_TOKEN = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 const GREY_WORD = new Uint32Array(256);
 for (let greyIndex = 0; greyIndex < 256; greyIndex += 1) {
@@ -1121,11 +1123,11 @@ folderInput.addEventListener("change", () => {
   readFolder(files);
 });
 document.getElementById("source-synthetic").addEventListener("click", openSynthetic);
-// Leaving the page forgets the open's ids, in beacons a closing page still sends.
+// Leaving the page forgets every file this page load posted, in one beacon
+// a closing page still sends.
 window.addEventListener("pagehide", () => {
-  const ids = Array.from(openIds);
   openIds = new Set();
-  forgetIds(ids, true);
+  try { navigator.sendBeacon("/forget", "page " + PAGE_TOKEN); } catch {}
 });
 document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
 for (const button of document.querySelectorAll("[data-open]")) {
@@ -1390,18 +1392,12 @@ async function noteBuild() {
   } catch {}
 }
 
-// Tell the process to drop these ids, with a fetch while the page stays and
-// with beacons as it is left. A failed forget is not retried, because the
-// process budget still bounds what it holds.
-function forgetIds(ids, beacon) {
-  const chunk = beacon ? BEACON_IDS : FORGET_LINES;
-  for (let at = 0; at < ids.length; at += chunk) {
-    const body = ids.slice(at, at + chunk).join("\n");
-    if (beacon) {
-      try { navigator.sendBeacon("/forget", body); } catch {}
-    } else {
-      fetch("/forget", { method: "POST", body }).then((response) => response.arrayBuffer()).catch(() => {});
-    }
+// Tell the process to drop these ids. A failed forget is not retried,
+// because the process budget still bounds what it holds.
+function forgetIds(ids) {
+  for (let at = 0; at < ids.length; at += FORGET_LINES) {
+    const body = ids.slice(at, at + FORGET_LINES).join("\n");
+    fetch("/forget", { method: "POST", body }).then((response) => response.arrayBuffer()).catch(() => {});
   }
 }
 
@@ -1411,7 +1407,7 @@ function beginOpen(files) {
   const left = Array.from(openIds);
   openIds = new Set();
   openFiles = new WeakSet(files);
-  forgetIds(left, false);
+  forgetIds(left);
 }
 
 // Keep an id the process gave a file of the open `ids` belongs to. An id that
@@ -1419,7 +1415,7 @@ function beginOpen(files) {
 function keepId(ids, id) {
   if (!id) return;
   if (ids === openIds) ids.add(id);
-  else forgetIds([id], false);
+  else forgetIds([id]);
 }
 
 async function ensureFile(file) {
@@ -1438,7 +1434,7 @@ async function ensureFile(file) {
 
 async function postFile(file) {
   const ids = openIds;
-  const response = await fetch("/file", { method: "POST", body: file });
+  const response = await fetch("/file", { method: "POST", headers: { "X-Ocelli-Page": PAGE_TOKEN }, body: file });
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || "the file could not be held");
@@ -1654,7 +1650,7 @@ async function readFolder(fileList) {
       }
       let response;
       try {
-        response = await fetch("/file", { method: "POST", body: file });
+        response = await fetch("/file", { method: "POST", headers: { "X-Ocelli-Page": PAGE_TOKEN }, body: file });
       } catch {
         failed += 1;
         continue;

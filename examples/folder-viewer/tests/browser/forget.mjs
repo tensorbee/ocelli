@@ -7,12 +7,14 @@
 //            Playwright route. Folder B is opened, then the held preview is
 //            let through. It must answer 410, and the page must not post A's
 //            file again.
-//   hide     a folder of 3,400 files is opened and a `pagehide` event is
-//            dispatched to the page. The beacons to `/forget` must carry at
-//            most 1,700 ids each, so the 3,400 ids go in exactly two, and
-//            `GET /held` must then count nothing. The event is dispatched
-//            rather than caused by leaving, because Playwright reports no
-//            request a document sends while it unloads.
+//   hide     a second page opens folder B and draws it. A folder of
+//            3,400 files is opened on the first page and a `pagehide` event
+//            is dispatched to it. The first page must send exactly one
+//            request to `/forget`, under 1 KiB, and `GET /held` must then
+//            count B's three files and frames and none of the 3,400. The
+//            event is dispatched rather than caused by leaving, because
+//            Playwright reports no request a document sends while it
+//            unloads.
 //   leave    folder B is opened and drawn, and the page navigates away. The
 //            process must then hold none of B, which is the real `pagehide`
 //            seen from the process side.
@@ -32,10 +34,10 @@ import { fileURLToPath } from "node:url";
 import { ensureViewerBinary, longEl, shortEl, startViewer } from "../../../../tools/bench/src/viewer_work.mjs";
 import { loadPlaywright, stopByPid } from "./aspect.mjs";
 
-/** The page's chunk, so one beacon body stays under Chromium's 64 KiB. */
-export const BEACON_IDS = 1700;
-/** Files in the `hide` folder, two full beacons. */
-export const HIDE_FILES = 2 * BEACON_IDS;
+/** Files in the `hide` folder, more ids than one 64 KiB beacon could list. */
+export const HIDE_FILES = 3400;
+/** The most bytes the one `pagehide` beacon may carry. */
+export const BEACON_BYTES = 1024;
 const A_FILES = 4;
 const B_FILES = 3;
 
@@ -49,9 +51,10 @@ const B_FILES = 3;
  * was held, what it answered once let through after B opened, and how many
  * `/file` bodies carried A's file after that.
  *
- * `hide` is `{ ids, beacons, held }`: how many ids the page received, the
- * id count of each `/forget` request the `pagehide` event sent, and the
- * files and frames `GET /held` counted afterwards.
+ * `hide` is `{ ids, beacons, held, other }`: how many ids the first page
+ * received, the body length in bytes of each `/forget` request its
+ * `pagehide` sent, the files and frames `GET /held` counted afterwards, and
+ * the files the second page holds.
  *
  * `leave` is `{ held }`, the files and frames `GET /held` counted after the
  * page navigated away.
@@ -88,19 +91,14 @@ export function forgetProblems(seen) {
   if (!hide || !Array.isArray(hide.beacons)) {
     problems.push("leaving the page was not observed");
   } else {
-    for (const count of hide.beacons) {
-      if (count > BEACON_IDS) problems.push(`a beacon carried ${count} ids, over ${BEACON_IDS}`);
+    if (hide.beacons.length !== 1) {
+      problems.push(`the pagehide sent ${hide.beacons.length} forget requests for ${hide.ids} ids, not 1`);
     }
-    const expected = Math.ceil(hide.ids / BEACON_IDS);
-    if (hide.beacons.length !== expected) {
-      problems.push(`leaving the page sent ${hide.beacons.length} forget requests for ${hide.ids} ids, not ${expected}`);
+    for (const bytes of hide.beacons) {
+      if (bytes >= BEACON_BYTES) problems.push(`a pagehide beacon carried ${bytes} bytes, not under ${BEACON_BYTES}`);
     }
-    const sent = hide.beacons.reduce((sum, count) => sum + count, 0);
-    if (sent !== hide.ids) {
-      problems.push(`the forget requests carried ${sent} ids, not the ${hide.ids} the page held`);
-    }
-    if (hide.held !== 0) {
-      problems.push(`after the beacons GET /held still counted ${hide.held} files and frames`);
+    if (hide.held !== hide.other) {
+      problems.push(`after the pagehide GET /held counted ${hide.held} files and frames, not the second page's ${hide.other}`);
     }
   }
   const leave = seen && seen.leave;
@@ -312,33 +310,39 @@ export async function observeLate(url, chromium, folders) {
   }
 }
 
-/** 3,400 files are opened, then the page gets a `pagehide` event. */
-export async function observeHide(url, chromium, folder) {
+/** A second page holds B, the first holds 3,400 files and gets a `pagehide` event. */
+export async function observeHide(url, chromium, folders) {
   const browser = await chromium.launch({ headless: true });
   try {
+    const other = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const otherIds = [];
+    collectIds(other, otherIds);
+    await other.goto(url);
+    const drawn = drawnFor(other, otherIds);
+    await other.locator("#folder").setInputFiles(folders.b);
+    await until(() => otherIds.length === B_FILES, "the second page's posts");
+    await drawn;
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     page.setDefaultTimeout(180000);
     const ids = [];
     collectIds(page, ids);
     await page.goto(url);
-    await page.locator("#folder").setInputFiles(folder);
+    await page.locator("#folder").setInputFiles(folders.hide);
     await until(() => ids.length === HIDE_FILES, "the 3,400 posts", 180000);
     await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("1 series."));
     const beacons = [];
     const answered = [];
     page.on("request", (request) => {
-      if (!request.url().endsWith("/forget")) return;
-      const body = request.postData() || "";
-      beacons.push(body === "" ? 0 : body.split("\n").length);
+      if (request.url().endsWith("/forget")) beacons.push(request.postDataBuffer()?.length ?? 0);
     });
     page.on("response", (response) => {
       if (response.url().endsWith("/forget")) answered.push(response.status());
     });
     await page.evaluate(() => window.dispatchEvent(new window.PageTransitionEvent("pagehide", { persisted: false })));
-    await until(() => answered.length >= Math.ceil(ids.length / BEACON_IDS), "the beacon replies", 10000).catch(() => {});
+    await until(() => answered.length >= 1, "the beacon reply", 10000).catch(() => {});
     await page.waitForTimeout(500);
     const census = await heldCensus(url);
-    return { ids: ids.length, beacons, held: census.files + census.frames };
+    return { ids: ids.length, beacons, held: census.files + census.frames, other: B_FILES };
   } finally {
     await browser.close();
   }
@@ -393,8 +397,8 @@ async function main() {
     console.log(`left: B ${seen.left.bFiles} files, held ${seen.left.held.files} files and ${seen.left.held.frames} frames, A answered ${seen.left.aStatuses.join(" ")}`);
     seen.late = await withViewer(binary, (url) => observeLate(url, chromium, folders));
     console.log(`late: caught ${seen.late.caught}, answered ${seen.late.lateStatus}, ${seen.late.reposts} posts of A after B opened`);
-    seen.hide = await withViewer(binary, (url) => observeHide(url, chromium, folders.hide));
-    console.log(`hide: ${seen.hide.ids} ids, forget requests carrying ${seen.hide.beacons.join(" and ") || "nothing"}, then ${seen.hide.held} files and frames held`);
+    seen.hide = await withViewer(binary, (url) => observeHide(url, chromium, folders));
+    console.log(`hide: ${seen.hide.ids} ids, forget requests of ${seen.hide.beacons.join(" and ") || "no"} bytes, then ${seen.hide.held} files and frames held beside the second page's ${seen.hide.other}`);
     seen.leave = await withViewer(binary, (url) => observeLeave(url, chromium, folders));
     console.log(`leave: ${seen.leave.held} files and frames held after the page navigated away`);
   } finally {
@@ -406,7 +410,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log("the process forgets the folder the page left, and leaving the page forgets the one open");
+  console.log("the process forgets the folder the page left, and leaving the page forgets every file that page posted");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

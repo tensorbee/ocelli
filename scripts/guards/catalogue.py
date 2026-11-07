@@ -13470,12 +13470,12 @@ GUARDS: tuple[Guard, ...] = (
         refuses="A second open after which `GET /held` still counts files or "
                 "frames of the folder left, an id of that folder that does not "
                 "answer 410, a late preview of it that is not 410 or that is "
-                "followed by a post of its file, a `pagehide` that sends a "
-                "beacon of more than 1,700 ids, a number of forget requests "
-                "other than the ids over 1,700 rounded up, forget requests "
-                "that do not carry every id, files or frames still held after "
-                "the beacons or after the page navigates away, and a run in "
-                "which a case was not observed.",
+                "followed by a post of its file, a `pagehide` that sends "
+                "other than one forget request or one of 1 KiB or more, a "
+                "`GET /held` after it that does not count exactly the second "
+                "page's files and frames, files or frames still held after "
+                "the page navigates away, and a run in which a case was not "
+                "observed.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -13522,8 +13522,8 @@ GUARDS: tuple[Guard, ...] = (
               "observation itself needs Chromium and a release build of the "
               "viewer, which a disposable sandbox does not have, so it is "
               "watched by the `viewer-browser` gate and its CI job. The 410, "
-              "beacon size, beacon count, carried-id, held-after and "
-              "not-observed branches have no probe.",
+              "beacon count, beacon size, held-after and not-observed "
+              "branches have no probe.",
     ),
     Guard(
         id="bench.cold-start",
