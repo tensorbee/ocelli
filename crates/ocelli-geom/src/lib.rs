@@ -21,6 +21,7 @@
 //! false. [`distance`] stays the F-070 function. The HLD names the crate
 //! and does not give them. Camera transforms stay in `ocelli-viewport`.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

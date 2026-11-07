@@ -2,6 +2,8 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod htj2k;
 mod jpeg;
 mod jpeg2000;

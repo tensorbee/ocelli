@@ -290,7 +290,7 @@
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
     "licences": 121,
-    "lint-policy": 29,
+    "lint-policy": 31,
     "nostd": 8,
     "oracle.faults": 22,
     "oracle.faults-declaration": 2,

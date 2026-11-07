@@ -306,170 +306,47 @@ class Tokenizer(StagedIndex):
             self.assertEqual(code, 1)
             self.assertIn("unsafe_code` lowered", output)
 
-    def test_unsafe_in_a_doc_code_fence_is_reported(self):
-        # D4, review pass 1. rustdoc compiles and runs the `rust` tagged and
-        # untagged fences of a doc comment as a doctest, and no lint table
-        # reaches it, so the fence content is code. The first fixture is the
-        # three lines the review planted in ocelli-core's lib. The old
-        # scanner read every doc comment as comment text.
-        code_line = "let _x = unsafe { core::ptr::read(&0u8) };\n"
-        # The last case is N3, review pass 2: the weakening scan of the
-        # fence content is mapped to the file like the `unsafe` scan is.
-        cases = (("/// ```\n/// " + code_line + "/// ```\n", 2),
-                 ("/// ```rust\n/// " + code_line + "/// ```\n", 2),
-                 ("//! ```\n//! " + code_line + "//! ```\n", 2),
-                 ("/**\n * ```\n * " + code_line + " * ```\n */\n", 3),
-                 ("/// ```\n/// #![allow(unsafe_code)]\n/// ```\n", 2))
-        for source, at_line in cases:
-            self.write("crates/example/src/lib.rs", source)
-            self.stage()
-            code, output = self.run_guard()
-            self.assertEqual(code, 1)
-            self.assertIn(f"crates/example/src/lib.rs:{at_line}", output)
+    def test_doc_text_is_comment_text(self):
+        # Lead ruling after review pass 3. A doctest is refused by rustc,
+        # through `#![doc(test(attr(forbid(unsafe_code))))]` at each member
+        # library root, which scripts/lint_policy_check.py checks present.
+        # The scanner does not read doc text, so `unsafe` in a doc comment
+        # or a doc attribute's string, fenced or not, is not a finding here.
+        self.write(
+            "crates/example/src/lib.rs",
+            "/// ```\n"
+            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
+            "/// ```\n"
+            "//! unsafe fn f() {}\n"
+            "/** ```\n"
+            " * unsafe { 0 }\n"
+            " * ``` */\n"
+            "/*! ```\n"
+            "unsafe { 0 }\n"
+            "``` */\n"
+            '#[doc = "```\\nlet _x = unsafe { 0 };\\n```"]\n'
+            '#[doc = r#"unsafe impl Send for X {}"#]\n'
+            "pub fn clean() {}\n")
+        self.stage()
+        code, output = self.run_guard()
+        self.assertEqual(code, 0, output)
 
-    def assert_reported_at(self, source, at_line):
-        self.write("crates/example/src/lib.rs", source)
+    def test_code_after_doc_text_is_still_read(self):
+        # Doc comments are skipped whole, as comments, so the code after
+        # one is code. A doc string holding a quote does not open a string
+        # that blanks the planted line, and neither does a block doc
+        # comment holding one.
+        self.write(
+            "crates/example/src/lib.rs",
+            '/// say "\n'                                  # line 1
+            '/** say " */\n'                              # line 2
+            '#[doc = "say \\""]\n'                       # line 3
+            "pub fn planted() { unsafe { 0 }; }\n"        # line 4, refused
+            'pub const S: &str = "x";\n')
         self.stage()
         code, output = self.run_guard()
         self.assertEqual(code, 1)
-        self.assertIn(f"crates/example/src/lib.rs:{at_line}", output)
-
-    def test_unsafe_in_a_no_run_fence_is_reported(self):
-        # D1, review pass 2. rustdoc compiles a `no_run` fence and only
-        # skips running it, so its content is code. The old scanner read
-        # the first info word as a language and skipped the block.
-        self.assert_reported_at(
-            "/// ```no_run\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_should_panic_fence_is_reported(self):
-        # D1, review pass 2. `should_panic` is a recognised attribute word
-        # and sets no language, so the block is Rust and is compiled.
-        self.assert_reported_at(
-            "/// ```should_panic\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_compile_fail_fence_is_reported(self):
-        # D1, review pass 2. A `compile_fail` doctest is compiled, which
-        # is the whole point of the tag, so its content is code.
-        self.assert_reported_at(
-            "/// ```compile_fail\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_an_ignore_fence_is_reported(self):
-        # D1, review pass 2. `ignore` is a recognised attribute word: it
-        # is a Rust code block rustdoc chooses not to compile, and the
-        # fail-closed direction reports it.
-        self.assert_reported_at(
-            "/// ```ignore\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_an_edition2021_fence_is_reported(self):
-        # D1, review pass 2. An `edition` word is a recognised attribute
-        # and sets no language, so the block is Rust.
-        self.assert_reported_at(
-            "/// ```edition2021\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_standalone_crate_fence_is_reported(self):
-        # D1, review pass 2. `standalone_crate` is a recognised attribute
-        # word and sets no language, so the block is Rust.
-        self.assert_reported_at(
-            "/// ```standalone_crate\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_brace_attribute_fence_is_reported(self):
-        # D1, review pass 2. A brace group is a CSS class attribute and
-        # never an unknown word, so `{.rust}` sets no language and the
-        # block is Rust by rustdoc's default, measured compiled and run
-        # in the pass 2 matrix.
-        self.assert_reported_at(
-            "/// ```{.rust}\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_tilde_fence_is_reported(self):
-        # D1, review pass 2. Tilde fences are read by the same rule as
-        # backtick fences, which rustdoc's CommonMark base gives both.
-        self.assert_reported_at(
-            "/// ~~~\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ~~~\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_doc_attribute_string_is_reported(self):
-        # D1, review pass 2. A `#[doc = "..."]` string's value is doc text
-        # in rustdoc's document exactly as a `///` line's is, so a fence
-        # spread over the attributes is read as code.
-        self.assert_reported_at(
-            '#[doc = "```rust"]\n'
-            '#[doc = "let _x = unsafe { core::ptr::read(&0u8) };"]\n'
-            '#[doc = "```"]\n'
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_an_indented_code_block_is_reported(self):
-        # D1, review pass 2. rustdoc compiles an indented code block as a
-        # doctest, and it is not a fence, so the fail-closed prose rule is
-        # what reaches it: `unsafe` followed by `{` is reported.
-        self.assert_reported_at(
-            "/// Some example.\n"
-            "///\n"
-            "///     let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "pub fn clean() {}\n", 3)
-
-    def test_unsafe_in_a_fence_opened_on_the_inline_block_line(self):
-        # D1, review pass 2. A fence may open on the `/*!` line itself,
-        # and its tag class decides Rust-ness like any other opener's.
-        self.assert_reported_at(
-            "/*! ```no_run\n"
-            " * let _x = unsafe { core::ptr::read(&0u8) };\n"
-            " * ```\n"
-            " */\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unclosed_fence_is_read_to_the_end_of_the_doc_text(self):
-        # S1, review pass 2. rustdoc compiles a fence that is never
-        # closed, reading it to the end of the doc text. The tail of
-        # `_fence_code` appends the still open block, and removing that
-        # branch turns this test red, because the buffer's lines are
-        # neither a block nor prose.
-        self.assert_reported_at(
-            "/// ```\n"
-            "/// let _p = unsafe { core::ptr::read(&0u8) };\n"
-            "pub fn clean() {}\n", 2)
-
-    def test_unsafe_in_a_text_fence_is_comment_text(self):
-        # D1, review pass 2. A fence is skipped only when its info string
-        # carries a word rustdoc does not recognise as a Rust attribute
-        # and no `rust` word: `text` and `wgsl` are such words, so their
-        # fences are comment text, and prose that only names the word is
-        # not a finding either.
-        self.write(
-            "crates/example/src/lib.rs",
-            "/// ```text\n"
-            "/// let _x = unsafe { core::ptr::read(&0u8) };\n"
-            "/// ```\n"
-            "/// ```wgsl\n"
-            "/// unsafe { 0 }\n"
-            "/// ```\n"
-            "/// never write the word unsafe here.\n"
-            "pub fn clean() {}\n")
-        self.stage()
-        self.assertEqual(self.run_guard()[0], 0)
-
+        self.assertIn("crates/example/src/lib.rs:4", output)
 
 if __name__ == "__main__":
     unittest.main()

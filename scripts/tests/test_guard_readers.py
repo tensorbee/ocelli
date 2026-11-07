@@ -1434,5 +1434,86 @@ class WhichMembersInheritTheTable(unittest.TestCase):
         self.assertNotEqual(error, "")
 
 
+class EveryLibraryRootForbidsUnsafeDoctests(unittest.TestCase):
+    """`#![doc(test(attr(forbid(unsafe_code))))]` at each library root. F-232.
+
+    MEASURED under the pinned 1.97.1 toolchain on a scratch crate carrying the
+    package table `unsafe_code = "forbid"`: with no attribute every doctest
+    holding `unsafe` ran ok under `cargo test --doc`, so the table does not
+    reach a doctest. With the attribute every compiled one failed with
+    "usage of an `unsafe` block" or, for an inner `allow`, `warn` or
+    `expect` of `unsafe_code`, error E0453. rustdoc injects the attribute
+    into each doctest, so the root is the one place it can be written.
+    """
+
+    ATTRIBUTE = "#![doc(test(attr(forbid(unsafe_code))))]"
+
+    def test_the_attribute_after_the_crate_docs_is_found(self) -> None:
+        for source in (f"//! A crate.\n//!\n//! More.\n\n{self.ATTRIBUTE}\n\n"
+                       f"pub mod a;\n",
+                       f"//! A crate.\n\n{self.ATTRIBUTE}\n\n"
+                       f"#![cfg_attr(not(test), no_std)]\n\npub mod a;\n",
+                       f"//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n"
+                       f"// F-232.\n{self.ATTRIBUTE}\nuse a::b;\n",
+                       f"{self.ATTRIBUTE}\n"):
+            with self.subTest(source):
+                self.assertTrue(
+                    lint_policy_check.carries_doctest_forbid(source))
+
+    def test_a_root_without_it_is_refused(self) -> None:
+        self.assertFalse(lint_policy_check.carries_doctest_forbid(
+            "//! A crate.\n\n#![cfg_attr(not(test), no_std)]\n\npub mod a;\n"))
+
+    def test_only_the_exact_attribute_counts(self) -> None:
+        """A weaker level does not refuse a doctest, and a different spelling
+        is not what this check was asked to read, so both are refused."""
+        for line in ("#![doc(test(attr(deny(unsafe_code))))]",
+                     "#![doc(test(attr(warn(unsafe_code))))]",
+                     "#![doc(test(attr(forbid( unsafe_code ))))]",
+                     "#![doc(test(attr(forbid(unsafe_code))))] // x",
+                     "    #![doc(test(attr(forbid(unsafe_code))))]",
+                     "#![doc(test(no_crate_inject))]"):
+            with self.subTest(line):
+                self.assertFalse(lint_policy_check.carries_doctest_forbid(
+                    f"//! A crate.\n\n{line}\n\npub mod a;\n"))
+
+    def test_the_attribute_is_read_only_in_the_crate_header(self) -> None:
+        """Below the first item it is not an inner attribute of the crate, and
+        inside a block comment or a string it is no attribute at all."""
+        for source in (f"pub mod a;\n{self.ATTRIBUTE}\n",
+                       f"/*\n{self.ATTRIBUTE}\n*/\npub mod a;\n",
+                       f'const S: &str = r"\n{self.ATTRIBUTE}\n";\n'):
+            with self.subTest(source):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+
+    def test_library_roots_are_the_library_targets_only(self) -> None:
+        """A doctest is compiled from a library target and from nothing else,
+        so a bin, test, bench or example root owes no attribute."""
+        packages = [
+            {"manifest_path": "/w/crates/a/Cargo.toml",
+             "targets": [
+                 {"kind": ["lib"], "src_path": "/w/crates/a/src/lib.rs"},
+                 {"kind": ["bin"], "src_path": "/w/crates/a/src/main.rs"},
+                 {"kind": ["test"], "src_path": "/w/crates/a/tests/t.rs"},
+                 {"kind": ["example"], "src_path": "/w/crates/a/ex/e.rs"},
+                 {"kind": ["bench"], "src_path": "/w/crates/a/b/b.rs"}]},
+            {"manifest_path": "/w/crates/b/Cargo.toml",
+             "targets": [{"kind": ["cdylib", "rlib"],
+                          "src_path": "/w/crates/b/src/lib.rs"}]},
+            {"manifest_path": "/w/crates/c/Cargo.toml",
+             "targets": [{"kind": ["proc-macro"],
+                          "src_path": "/w/crates/c/src/lib.rs"}]},
+            {"manifest_path": "/w/crates/d/Cargo.toml",
+             "targets": [{"kind": ["bin"],
+                          "src_path": "/w/crates/d/src/main.rs"}]},
+        ]
+        self.assertEqual(
+            lint_policy_check.library_roots(packages),
+            {Path("/w/crates/a"): Path("/w/crates/a/src/lib.rs").resolve(),
+             Path("/w/crates/b"): Path("/w/crates/b/src/lib.rs").resolve(),
+             Path("/w/crates/c"): Path("/w/crates/c/src/lib.rs").resolve()})
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

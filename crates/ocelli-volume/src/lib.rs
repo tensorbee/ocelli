@@ -7,6 +7,7 @@
 //! C.7.6.2.1.1, and never from `SpacingBetweenSlices` or `SliceThickness`,
 //! which are not read here at all.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;

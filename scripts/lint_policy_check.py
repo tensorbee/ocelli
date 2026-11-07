@@ -263,13 +263,15 @@ gate. Neither alone is the rule. The table reaches every lib, bin, test,
 bench, example and build script target of every workspace member. It does
 not reach the doctests, which rustdoc compiles without it, the vendored
 packages or the trybuild files, and the script reaches every tracked `.rs`
-file and was one string regex away from the blindness F-229 measured. Its
-scanner reads doc text as code, `unsafe` followed by `{`, `fn`, `impl`,
-`trait` or `extern` outside fences and every keyword token inside a
-backtick or tilde fence whose info string rustdoc would compile, which is
-what covers the doctests. This check requires BOTH: a
-table below `forbid` is refused naming `forbid`, and the script dropped
-from the `unsafe` gate is refused even with the table present.
+file and was one string regex away from the blindness F-229 measured. The
+script reads doc text as comment text and does not cover the doctests.
+They are enforced by rustc through `DOCTEST_FORBID`,
+`#![doc(test(attr(forbid(unsafe_code))))]` at every member library root,
+which rustdoc injects into each doctest of the crate, measured in
+`carries_doctest_forbid`. This check requires all three: a table below
+`forbid` is refused naming `forbid`, the script dropped from the `unsafe`
+gate is refused even with the table present, and a member library root
+without the exact attribute line in its header is refused.
 
 Usage: python3 scripts/lint_policy_check.py
 """
@@ -945,8 +947,13 @@ def rustflag_problems() -> list[str]:
     return problems
 
 
-def cargo_metadata_members() -> tuple[dict[Path, list[Path]] | None, str]:
+def cargo_metadata_members(
+) -> tuple[dict[Path, list[Path]] | None, dict[Path, Path], str]:
     """Each member cargo reports and the source ROOTS it compiles, or why not.
+
+    The second value is each member's library root, from `library_roots`,
+    which the doctest attribute check reads. It is empty when cargo did not
+    answer.
 
     `[workspace] members` is not the member set. cargo additionally makes a
     PATH DEPENDENCY of a member a member when the dependency lives inside the
@@ -1018,7 +1025,7 @@ def cargo_metadata_members() -> tuple[dict[Path, list[Path]] | None, str]:
             done = subprocess.run(argv, cwd=ROOT, capture_output=True,
                                   text=True, check=False)
         except OSError as error:
-            return None, f"cargo could not be run at all ({error})"
+            return None, {}, f"cargo could not be run at all ({error})"
         if done.returncode != 0:
             tail = (done.stderr.strip().splitlines() or ["no output"])[-1]
             why = (f"`{' '.join(argv)}` exited {done.returncode}: {tail}")
@@ -1038,16 +1045,17 @@ def cargo_metadata_members() -> tuple[dict[Path, list[Path]] | None, str]:
                      for target in package.get("targets", [])
                      if target.get("src_path")}
             found[directory] = sorted(set(found.get(directory, [])) | roots)
-        return found, label
-    return None, why
+        return found, library_roots(packages), label
+    return None, {}, why
 
 
 def workspace_members(
-        text: str) -> tuple[list[Path], dict[Path, list[Path]], list[str], str]:
+        text: str) -> tuple[list[Path], dict[Path, list[Path]],
+                            dict[Path, Path], list[str], str]:
     """The member set cargo builds, with the manifest globs as a fallback.
 
-    Returns the members, the compilation ROOTS cargo reports for each, the
-    refusals and where the set came from. The roots are empty when cargo could
+    Returns the members, the compilation ROOTS cargo reports for each, each
+    member's library root, the refusals and where the set came from. The roots are empty when cargo could
     not be asked, which is a state this function already refuses on its own
     account, so the source walk falls back to the member directory rather than
     to nothing.
@@ -1064,7 +1072,7 @@ def workspace_members(
     quietly would be the narrowing this function exists to end.
     """
     members, problems = manifest_members(text)
-    reported, why = cargo_metadata_members()
+    reported, libraries, why = cargo_metadata_members()
     if reported is None:
         problems.append(
             f"the workspace member set could not be read from cargo, and "
@@ -1075,9 +1083,9 @@ def workspace_members(
             f"`cargo clippy --workspace` regardless. The globs are walked "
             f"below so the rest of this check still reports, and the run is "
             f"red because the set it walked is known to be the narrower one.")
-        return (members, {}, problems,
+        return (members, {}, {}, problems,
                 "the manifest globs, which cargo is wider than")
-    return (sorted(reported), reported, problems,
+    return (sorted(reported), reported, libraries, problems,
             f"`cargo metadata --no-deps` ({why})")
 
 
@@ -1434,6 +1442,62 @@ def member_sources(member: Path,
                 f"check never reads is the state an inner or module-level "
                 f"group allow was MEASURED to survive at cargo clippy exit 0.")
     return sorted(found.items()), problems, followed
+
+
+DOCTEST_FORBID = "#![doc(test(attr(forbid(unsafe_code))))]"
+LIBRARY_KINDS = frozenset({"lib", "rlib", "dylib", "cdylib", "staticlib",
+                           "proc-macro"})
+
+
+def library_roots(packages: list[dict]) -> dict[Path, Path]:
+    """Each package's library target root, from `cargo metadata` packages.
+
+    A doctest is compiled from a library target and from nothing else, so the
+    bin, test, bench and example roots owe no doctest attribute. The kinds
+    are the ones cargo reports for a `[lib]`, `cdylib` and `rlib` together
+    for `ocelli-wasm`.
+    """
+    found: dict[Path, Path] = {}
+    for package in packages:
+        directory = Path(package["manifest_path"]).parent
+        for target in package.get("targets", []):
+            if LIBRARY_KINDS & set(target.get("kind", [])) and \
+                    target.get("src_path"):
+                found[directory] = Path(target["src_path"]).resolve()
+    return found
+
+
+def carries_doctest_forbid(source: str) -> bool:
+    """Does this crate root carry `DOCTEST_FORBID` in its header, exactly.
+
+    F-232. The `[workspace.lints.rust]` table does not reach a doctest,
+    MEASURED under the pinned 1.97.1 toolchain: on a scratch crate whose
+    table forbids `unsafe_code`, every doctest holding `unsafe` ran ok under
+    `cargo test --doc`. rustdoc injects a crate root's
+    `#![doc(test(attr(...)))]` into every doctest of that crate, and with
+    this one every compiled doctest holding `unsafe` failed, whatever its
+    fence tag, indentation, block quote, list marker, `/*!` opener,
+    `cfg_attr` doc, escaped doc string, `concat!`, `include_str!` or macro
+    supplied it. An inner `allow`, `warn` or `expect` of `unsafe_code` in
+    the doctest, or in a module's own `doc(test(attr(...)))`, is error E0453.
+
+    The header is the run of blank lines, line comments and one-line inner
+    attributes before the first other line. The attribute is read there and
+    only as the whole line, so a weaker level, another spelling, a block
+    comment or a string holding the text are all refused. A header this
+    reader cannot follow, such as a multi-line inner attribute above the
+    line, is refused too: move the attribute above it.
+    """
+    for line in source.splitlines():
+        if line == DOCTEST_FORBID:
+            return True
+        stripped = line.strip()
+        if not stripped or stripped.startswith("//"):
+            continue
+        if line.startswith("#![") and line.rstrip().endswith("]"):
+            continue
+        return False
+    return False
 
 
 def inherits_workspace_lints(manifest: str) -> tuple[bool, str]:
@@ -1810,10 +1874,9 @@ def main() -> int:
     # build script target of every member. It misses the doctests, which
     # rustdoc compiles without it, the vendored packages and the trybuild
     # files. The script reaches every tracked `.rs` file and was one string
-    # regex away from the blindness F-229 measured, and its scanner reads
-    # doc text as code, `unsafe` followed by `{`, `fn`, `impl`, `trait` or
-    # `extern` outside fences and every keyword token inside a fence
-    # rustdoc would compile, which covers the doctests. Dropping
+    # regex away from the blindness F-229 measured. It reads doc text as
+    # comment text, so the doctests are enforced by rustc through the
+    # library root attribute checked below, not by the script. Dropping
     # either half is refused on its own.
     lint_level = rust.get("unsafe_code")
     if lint_level is None or STRENGTH.get(lint_level, 0) < STRENGTH["forbid"]:
@@ -1841,7 +1904,8 @@ def main() -> int:
     # second way to the same place, and no lint level notices it. The members
     # are read from the manifest rather than assumed to be `crates/*`, because
     # they are not: `tools/oracle` is the fourteenth.
-    members, roots, member_problems, member_source = workspace_members(text)
+    members, roots, libraries, member_problems, member_source = (
+        workspace_members(text))
     problems += member_problems
     for member in members:
         where = _relative(member)
@@ -1880,6 +1944,40 @@ def main() -> int:
                 f"`lints.workspace = true`, is what makes HLD 27.1 apply to "
                 f"it, and a member without it compiles under a smaller set of "
                 f"rules while the `clippy` gate stays green.")
+
+    # F-232. The table does not reach a doctest, so every member library
+    # root carries the attribute rustdoc injects into each of its doctests.
+    # The roots are cargo's. When cargo did not answer the run is already
+    # red above, and `src/lib.rs` is read so this still reports.
+    doctest_roots = 0
+    for member in members:
+        library = libraries.get(member)
+        if library is None and not libraries:
+            fallback = member / "src" / "lib.rs"
+            library = fallback if fallback.is_file() else None
+        if library is None:
+            continue
+        doctest_roots += 1
+        try:
+            root_source = library.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            problems.append(
+                f"{_relative(library)} is a member library root and could "
+                f"not be read as UTF-8 text ({error}). Whether its doctests "
+                f"forbid `unsafe_code` is therefore unknown, and an unknown "
+                f"is not a forbid.")
+            continue
+        if not carries_doctest_forbid(root_source):
+            problems.append(
+                f"{_relative(library)} is a member library root and does not "
+                f"carry `{DOCTEST_FORBID}` as a whole line in its header, "
+                f"above the first item. The [workspace.lints.rust] table "
+                f"does not reach a doctest, MEASURED under the pinned 1.97.1 "
+                f"toolchain, so without it a doctest holding `unsafe` "
+                f"compiles and runs under `cargo test`. rustdoc injects this "
+                f"attribute into every doctest of the crate, which is what "
+                f"refuses one, and an inner `allow` in a doctest cannot "
+                f"override a forbid.")
 
     # An inner `allow` or `expect` puts a denied lint back to sleep for a
     # whole crate or a whole module, and an OUTER one on a `mod` item does the
@@ -2017,7 +2115,8 @@ def main() -> int:
           f"none on a `mod` item, {len(configs)} cargo config(s) lower no "
           f"denied lint through rustflags, unsafe_code forbidden by the "
           f"workspace table at forbid and enforced beside it by "
-          f"scripts/unsafe_allowlist_check.py in the `unsafe` gate")
+          f"scripts/unsafe_allowlist_check.py in the `unsafe` gate, and "
+          f"{doctest_roots} library root(s) forbid it in their doctests")
     return 0
 
 

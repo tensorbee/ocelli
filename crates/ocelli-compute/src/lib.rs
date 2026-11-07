@@ -15,6 +15,8 @@
 //! **This crate is not `no_std`**, unlike the other core crates, because wgpu
 //! needs `std`. Deviation D-10.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 use ocelli_render::{Caps, GpuContext, Tier};
 use wgpu::CommandEncoder;
 
