@@ -117,6 +117,9 @@ struct Grey {
     edge_right: String,
     edge_top: String,
     edge_bottom: String,
+    edge_source: &'static str,
+    calibration_source: &'static str,
+    calibration_mm: Option<(f64, f64)>,
 }
 
 struct Reply {
@@ -1677,6 +1680,9 @@ fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
                 edge_right: preview.facts.edge_right,
                 edge_top: preview.facts.edge_top,
                 edge_bottom: preview.facts.edge_bottom,
+                edge_source: preview.facts.edge_source,
+                calibration_source: preview.calibration_source,
+                calibration_mm: preview.calibration_mm,
             })),
             body: preview.grey,
             source: None,
@@ -1882,7 +1888,17 @@ fn write_reply_by(
         head.push_str(&grey.edge_top);
         head.push_str("\r\nX-Ocelli-Edge-Bottom: ");
         head.push_str(&grey.edge_bottom);
+        head.push_str("\r\nX-Ocelli-Edge-Source: ");
+        head.push_str(grey.edge_source);
+        head.push_str("\r\nX-Ocelli-Calibration-Source: ");
+        head.push_str(grey.calibration_source);
         head.push_str("\r\n");
+        // `Display` for `f64` never uses an exponent, as `/measure` writes it.
+        if let Some((row, column)) = grey.calibration_mm {
+            head.push_str(&format!(
+                "X-Ocelli-Calibration-Row: {row}\r\nX-Ocelli-Calibration-Column: {column}\r\n"
+            ));
+        }
     }
     head.push_str("\r\n");
     stream.write_all(head.as_bytes())?;

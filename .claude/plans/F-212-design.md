@@ -106,7 +106,7 @@ in each value. Within each value, the letters shall be ordered with the
 principal orientation designated in the first character.
 ```
 
-PS3.3 C.7.6.1.1.1 also defines quadruped terms such as `LE`, `RT`, `CR`, `CA`, `D`, `V`, and in that set `R` means rostral. Patient Orientation is Type 2C in the General Image Module, required when the image does not require Image Orientation (Patient). F-206 already reads Image Orientation (Patient) under PS3.3 C.7.6.2.1.1 and keeps that rule.
+PS3.3 C.7.6.1.1.1 also defines quadruped terms such as `LE`, `RT`, `CR`, `CD`, `D`, `V`, and in that set `R` means rostral. Patient Orientation is Type 2C in the General Image Module, required when the image does not require Image Orientation (Patient). F-206 already reads Image Orientation (Patient) under PS3.3 C.7.6.2.1.1 and keeps that rule.
 
 Spacing provenance is F-206's and is not reopened. `FrameFacts` reports `PixelSpacing`, else `ImagerPixelSpacing`, else empty. A present but unusable Pixel Spacing does not fall through. PS3.3 C.7.6.2.1.1 gives row spacing then column spacing. F-207's `lengthText` labels an `ImagerPixelSpacing` length `mm at the detector`.
 

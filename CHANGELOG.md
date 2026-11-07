@@ -601,6 +601,15 @@ Repository bootstrap. Nothing is published.
   mismatch, rather than drawn. `XYB` is a recognised
   Photometric Interpretation whose colour conversion the codec owns. The
   local folder viewer opens monochrome `.110` and `.112` frames.
+- The local folder viewer's four corners show the birth date, sex, age,
+  study time, institution, slice location and thickness, kVp, mAs, TR and TE
+  when the file has them. Names, dates, times and ages are formatted by the
+  local process from PS3.5's PN, DA, TM and AS rules, and with no Patient's
+  Age the age is the age at the study date. Edge letters come from Patient
+  Orientation on an image without Image Orientation (Patient), and an image
+  whose Anatomical Orientation Type is `QUADRUPED` shows none. A scale bar
+  in each viewport follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice
+  rule and reads the same calibration as the length tool.
 
 ### Changed
 

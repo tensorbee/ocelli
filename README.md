@@ -261,10 +261,20 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. The corners show the current image's
    labels, with a person name in family, given order and a date as
-   year-month-day. Edge letters show the patient direction and hide
-   while the picture is flipped or rotated. The pointer cross shows the
-   column, the row and the modality value of the pixel under it with its
-   unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
+   year-month-day. They also show the birth date, sex, age, study time,
+   institution, slice location and thickness, kVp, mAs, TR and TE when the
+   file has them. With no Patient's Age, the age is worked out from the birth
+   date at the study date.
+   Edge letters show the patient direction from Image Orientation (Patient),
+   or from Patient Orientation on an image without it, such as a projection
+   radiograph, and hide while the picture is flipped or rotated. An image
+   whose Anatomical Orientation Type is `QUADRUPED` shows no letters. A scale
+   bar shows above the window line when the file gives a spacing a length can
+   use, from that same spacing, and says `at the detector` when that spacing
+   is at the detector: Imager Pixel Spacing with no magnification factor,
+   alone or with a Pixel Spacing equal to it. It hides with the corners and in Four images. The pointer
+   cross shows the column, the row and the modality value of the pixel under
+   it with its unit: HU on a CT whose Rescale Type is HU, or is absent on a CT that is
    not multi-energy, `unspecified` for Rescale Type `US`, the Units
    attribute on a PET, `padding` for a padded sample, and `not held`
    for a file the process could not hold. The cross, its readout and the
