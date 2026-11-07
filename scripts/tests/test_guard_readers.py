@@ -1498,6 +1498,74 @@ class EveryLibraryRootForbidsUnsafeDoctests(unittest.TestCase):
                 self.assertFalse(
                     lint_policy_check.carries_doctest_forbid(source))
 
+    # rustc ends a `//` comment at LF only. Each of these ends a line for
+    # Python's `splitlines`, so `// x`, the separator and the attribute
+    # text is one comment to rustc and forbids nothing. Review pass 5's D1.
+    SEPARATORS = ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85",
+                  " ", " ")
+
+    def test_a_separator_rustc_does_not_end_a_comment_at_is_refused(
+            self) -> None:
+        for separator in self.SEPARATORS:
+            source = (f"//! A crate.\n// x{separator}{self.ATTRIBUTE}\n"
+                      f"pub mod a;\n")
+            with self.subTest(hex(ord(separator))):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+                self.assertEqual(
+                    lint_policy_check.unprintable_head_line(source), 2)
+
+    def test_crlf_line_endings_are_accepted(self) -> None:
+        self.assertTrue(lint_policy_check.carries_doctest_forbid(
+            f"//! A crate.\r\n\r\n{self.ATTRIBUTE}\r\npub mod a;\r\n"))
+
+    def test_any_unprintable_character_above_it_is_refused(self) -> None:
+        """Fail closed, by the ruling after pass 5: a character outside
+        printable ASCII and tab on a head line refuses the root even where
+        it hides nothing, so no separator has to be named to be caught."""
+        for head in ("//! caf\u00e9.", "// x\x00", "//!\u00a0"):
+            source = f"{head}\n\n{self.ATTRIBUTE}\npub mod a;\n"
+            with self.subTest(head):
+                self.assertFalse(
+                    lint_policy_check.carries_doctest_forbid(source))
+                self.assertEqual(
+                    lint_policy_check.unprintable_head_line(source), 1)
+
+    def test_only_the_lines_down_to_the_attribute_must_be_ascii(
+            self) -> None:
+        """Below the attribute line the source is Rust and may hold any
+        character, so the printable rule stops at the attribute line."""
+        source = (f"//! A crate.\n\n{self.ATTRIBUTE}\n"
+                  f'pub const S: &str = "\u00e9\u2028";\n')
+        self.assertIsNone(lint_policy_check.unprintable_head_line(source))
+        self.assertTrue(lint_policy_check.carries_doctest_forbid(source))
+
+    def test_a_bare_cr_in_a_root_file_is_refused_naming_the_line(
+            self) -> None:
+        """Through the read as well as the split. A text-mode read turns a
+        bare CR into LF before any split sees it, so the file is written
+        as bytes and handed to the function `main` calls per root."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "lib.rs"
+            root.write_bytes(
+                f"//! A crate.\n\n// x\r{self.ATTRIBUTE}\npub mod a;\n"
+                .encode("utf-8"))
+            problems = lint_policy_check.library_root_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("line 3", problems[0])
+        self.assertIn("printable ASCII", problems[0])
+
+    def test_a_clean_root_file_has_no_problem(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "lib.rs"
+            root.write_bytes(
+                f"//! A crate.\r\n\r\n{self.ATTRIBUTE}\r\npub mod a;\r\n"
+                .encode("utf-8"))
+            self.assertEqual(lint_policy_check.library_root_problems(root),
+                             [])
+
     def test_library_roots_are_the_library_targets_only(self) -> None:
         """A doctest is compiled from a library target and from nothing else,
         so a bin, test, bench or example root owes no attribute."""

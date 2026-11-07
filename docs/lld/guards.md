@@ -1119,7 +1119,13 @@ enforced by rustc through a third piece: every member library root
 carries `#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects
 into each doctest of that crate, and this check refuses a member library
 root, found from `cargo metadata`, that does not carry that exact line as
-the first line after its leading `//!`, `//` and blank lines.
+the first line after its leading `//!`, `//` and blank lines. The root is
+read as bytes decoded as UTF-8 and split at LF only, one trailing CR
+removed, which is where rustc ends a `//` comment. A root holding anything
+but printable ASCII and tab on those lines or the attribute line is refused
+naming the line, because a CR, NEL, U+2028 or another separator Python
+splits at would hide the attribute text inside a comment rustc reads as
+one line.
 F-232 measured the attribute under the pinned 1.97.1 toolchain against
 every doctest shape the third review found the scanner missing, the
 `rust2015` to `rust2024` fence tags, `no_run`, indented, block-quoted and
@@ -1133,11 +1139,12 @@ compile, so neither produces a binary. The workspace has no doctests
 today, so what the floor checks is that the attribute is present, and
 `lint-policy.doctest-forbid-removed` removes it from one root and goes
 red. It acts on the first doctest anyone writes, which
-`cargo test --workspace` in the floor then compiles under it. `scripts/unsafe_allowlist_check.py` stays in the `unsafe`
-gate beside the table because the lint does not reach the vendored
-packages or the trybuild files, which the script audits, and because the
-script was one string regex away from the blindness F-229 measured. The
-check refuses a table below `forbid` naming `forbid`, and refuses the
+`cargo test --workspace` in the floor then compiles under it.
+`scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate beside the
+table because the lint does not reach the vendored packages or the
+trybuild files, which the script audits, and because the script was
+one string regex away from the blindness F-229 measured. The check
+refuses a table below `forbid` naming `forbid`, and refuses the
 script dropped from the `unsafe` gate even with the table present. Its
 scanner is a left-to-right tokenizer since F-232, not a strip-and-search:
 it reports `unsafe` only as a keyword token, inside an attribute as well,

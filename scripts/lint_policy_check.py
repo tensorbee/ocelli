@@ -272,9 +272,12 @@ which rustdoc injects into each doctest of the crate, measured in
 `forbid` is refused naming `forbid`, the script dropped from the `unsafe`
 gate is refused even with the table present, and a member library root
 whose first line after the leading `//!`, `//` and blank lines is not the
-exact attribute is refused. The workspace has no doctests today, so the
-floor checks the attribute is present, and it acts on the first doctest
-anyone writes.
+exact attribute is refused. A line there is rustc's, split at LF only, and
+a root holding anything but printable ASCII and tab on those lines is
+refused naming the line, because rustc does not end a `//` comment at CR,
+NEL, U+2028 or the other separators Python splits at. The workspace has no
+doctests today, so the floor checks the attribute is present, and it acts
+on the first doctest anyone writes.
 
 Usage: python3 scripts/lint_policy_check.py
 """
@@ -1058,10 +1061,10 @@ def workspace_members(
     """The member set cargo builds, with the manifest globs as a fallback.
 
     Returns the members, the compilation ROOTS cargo reports for each, each
-    member's library root, the refusals and where the set came from. The roots are empty when cargo could
-    not be asked, which is a state this function already refuses on its own
-    account, so the source walk falls back to the member directory rather than
-    to nothing.
+    member's library root, the refusals and where the set came from. The
+    roots are empty when cargo could not be asked, which is a state this
+    function already refuses on its own account, so the source walk falls
+    back to the member directory rather than to nothing.
 
     `manifest_members` below keeps every refusal the glob read already carried,
     because those are about the manifest a person writes and cargo's answer
@@ -1485,20 +1488,96 @@ def carries_doctest_forbid(source: str) -> bool:
     the doctest, or in a module's own `doc(test(attr(...)))`, is error E0453.
 
     The attribute is accepted in one place only: as the first line after
-    the crate's leading `//!`, `//` and blank lines, written exactly. Those
-    three line kinds open no string and no block comment, so the line that
-    follows them is Rust source and not literal text. Any other first line
-    is a refusal, whatever comes after it, because a reader that skipped an
-    inner attribute above the line accepted the text inside a string or a
-    block comment that attribute line opened, review pass 4's D1. A weaker
-    level, another spelling, an indented copy or one with a trailing comment
-    is refused as well. Every member root carries it in that place.
+    the crate's leading `//!`, `//` and blank lines, written exactly. Any
+    other first line is a refusal, whatever comes after it, because a
+    reader that skipped an inner attribute above the line accepted the text
+    inside a string or a block comment that attribute line opened, review
+    pass 4's D1. A weaker level, another spelling, an indented copy or one
+    with a trailing comment is refused as well. Every member root carries
+    it in that place.
+
+    A line is what rustc means by one: the text between two LFs, with one
+    trailing CR removed so CRLF files read the same. rustc ends a `//`
+    comment at LF only, and `str.splitlines` also splits at CR, VT, FF,
+    `\x1c` to `\x1e`, NEL, U+2028 and U+2029, so `// x`, U+2028 and the
+    attribute text was one comment to rustc and two lines here, review
+    pass 5's D1. So the split is on LF, and the read fails closed: a line
+    up to and including the attribute line holding anything other than
+    printable ASCII and tab is refused, see `unprintable_head_line`.
+    With only those characters a `//!`, `//` or blank line opens no
+    string and no block comment, so the line after them is Rust source.
     """
-    for line in source.splitlines():
+    if unprintable_head_line(source) is not None:
+        return False
+    for line in _rust_lines(source):
         if not line.strip() or line.startswith("//"):
             continue
         return line == DOCTEST_FORBID
     return False
+
+
+def _rust_lines(source: str) -> list[str]:
+    """The source split at LF, each line without one trailing CR."""
+    return [line.removesuffix("\r") for line in source.split("\n")]
+
+
+def _printable(line: str) -> bool:
+    """Only printable ASCII and tab."""
+    return all(c == "\t" or " " <= c <= "~" for c in line)
+
+
+def unprintable_head_line(source: str) -> int | None:
+    """The 1-based line, up to and including the first line that is not a
+    `//` or blank line, holding a character other than printable ASCII
+    and tab, or None when there is none."""
+    for number, line in enumerate(_rust_lines(source), 1):
+        if not _printable(line):
+            return number
+        if line.strip() and not line.startswith("//"):
+            return None
+    return None
+
+
+def library_root_problems(library: Path) -> list[str]:
+    """The refusals for one member library root, empty when it is clean.
+
+    Read as bytes and decoded as UTF-8, because a text-mode read turns a
+    bare CR into LF before any split sees it, and that bare CR is one of
+    the characters rustc does not end a comment at.
+    """
+    where = _relative(library)
+    problems: list[str] = []
+    try:
+        source = library.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        problems.append(
+            f"{where} is a member library root and could not be read "
+            f"as UTF-8 text ({error}). Whether its doctests forbid "
+            f"`unsafe_code` is therefore unknown, and an unknown is "
+            f"not a forbid.")
+        return problems
+    line = unprintable_head_line(source)
+    if line is not None:
+        problems.append(
+            f"{where} is a member library root and line {line}, at or "
+            f"above the place `{DOCTEST_FORBID}` must be, holds a "
+            f"character other than printable ASCII and tab. rustc "
+            f"ends a `//` comment at LF only, so a CR, NEL, U+2028 or "
+            f"another separator can hide the attribute text inside a "
+            f"comment. Write that line in printable ASCII.")
+        return problems
+    if not carries_doctest_forbid(source):
+        problems.append(
+            f"{where} is a member library root and does not carry "
+            f"`{DOCTEST_FORBID}` as the first line after its leading "
+            f"`//!`, `//` and blank lines, written exactly. The "
+            f"[workspace.lints.rust] table does not reach a doctest, "
+            f"MEASURED under the pinned 1.97.1 toolchain, so without "
+            f"it a doctest holding `unsafe` compiles and runs under "
+            f"`cargo test`. rustdoc injects this attribute into every "
+            f"doctest of the crate, which is what refuses one, and an "
+            f"inner `allow` in a doctest cannot override a forbid.")
+    return problems
 
 
 def inherits_workspace_lints(manifest: str) -> tuple[bool, str]:
@@ -1959,26 +2038,7 @@ def main() -> int:
         if library is None:
             continue
         doctest_roots += 1
-        try:
-            root_source = library.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as error:
-            problems.append(
-                f"{_relative(library)} is a member library root and could "
-                f"not be read as UTF-8 text ({error}). Whether its doctests "
-                f"forbid `unsafe_code` is therefore unknown, and an unknown "
-                f"is not a forbid.")
-            continue
-        if not carries_doctest_forbid(root_source):
-            problems.append(
-                f"{_relative(library)} is a member library root and does not "
-                f"carry `{DOCTEST_FORBID}` as the first line after its "
-                f"leading `//!`, `//` and blank lines. The [workspace.lints.rust] table "
-                f"does not reach a doctest, MEASURED under the pinned 1.97.1 "
-                f"toolchain, so without it a doctest holding `unsafe` "
-                f"compiles and runs under `cargo test`. rustdoc injects this "
-                f"attribute into every doctest of the crate, which is what "
-                f"refuses one, and an inner `allow` in a doctest cannot "
-                f"override a forbid.")
+        problems += library_root_problems(library)
 
     # An inner `allow` or `expect` puts a denied lint back to sleep for a
     # whole crate or a whole module, and an OUTER one on a `mod` item does the

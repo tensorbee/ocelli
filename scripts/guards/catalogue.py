@@ -3647,6 +3647,18 @@ def _lint_policy_uninherited(box: Sandbox) -> None:
                    "[lints]\nworkspace = true", "")
 
 
+def _doctest_forbid_behind_a_separator(box: Sandbox) -> None:
+    """The attribute text inside a `//` comment, behind U+2028. F-232.
+
+    rustc ends a `//` comment at LF only, so `// F-232.`, U+2028 and the
+    attribute text are one comment and the root forbids nothing, while
+    `str.splitlines` read two lines and accepted it, review pass 5's D1.
+    """
+    attribute = "#![doc(test(attr(forbid(unsafe_code))))]\n"
+    box.substitute(_a_crate_root(box), attribute,
+                   "// F-232.\u2028" + attribute)
+
+
 def _doctest_forbid_removed(box: Sandbox) -> None:
     """One member library root without the doctest forbid. F-232.
 
@@ -11807,6 +11819,18 @@ GUARDS: tuple[Guard, ...] = (
                        "moves. The workspace has no doctests today, so the "
                        "floor checks the attribute is present, and it acts "
                        "on the first doctest anyone writes."),
+            Probe("lint-policy.doctest-forbid-behind-a-separator",
+                  _doctest_forbid_behind_a_separator,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "holds a character other than printable ASCII and tab",
+                  needs="cargo", profile="deep",
+                  note="F-232, review pass 5. The root is split at LF "
+                       "only, as rustc ends a `//` comment, and a head "
+                       "line holding anything but printable ASCII and tab "
+                       "is refused naming the line, so CR, NEL, U+2028 and "
+                       "the other separators Python splits at cannot hide "
+                       "the attribute text inside a comment. The unit tests "
+                       "carry one case per separator."),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
