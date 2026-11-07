@@ -2331,7 +2331,7 @@ fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
 /// later frame of a different size does not reuse it. The list reads no pixel,
 /// so the value is replaced with an empty element. `None` means the encoding
 /// was not walked and the caller parses `bytes` unchanged.
-pub(crate) fn bytes_without_pixel_payload(bytes: &[u8]) -> Option<Vec<u8>> {
+fn bytes_without_pixel_payload(bytes: &[u8]) -> Option<Vec<u8>> {
     split_pixel_payload(bytes).map(|(header, _range)| header)
 }
 
@@ -2620,7 +2620,97 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     let stripped = bytes_without_pixel_payload(bytes);
     let bytes = stripped.as_deref().unwrap_or(bytes);
     let parsed = parse_part10(bytes).map_err(part10_error)?;
+    inspect_object(parsed.object(), frame)
+}
+
+/// Every frame's inspect reply for a multiframe whose windows come from a
+/// per-frame functional group.
+///
+/// The page asks again only for those files, and only by id, so this is what
+/// the process keeps once the posted bytes are dropped. It is computed from
+/// the parsed data set, which every transfer syntax reaches the same way.
+/// Each reply ends with the same `planes` list, so that tail is kept once.
+pub(crate) struct KeptReplies {
+    heads: Vec<String>,
+    planes: String,
+}
+
+impl KeptReplies {
+    /// The reply for `frame`, byte for byte what `inspect_json` writes.
+    pub(crate) fn reply(&self, frame: u32) -> Option<String> {
+        let head = self.heads.get(usize::try_from(frame).ok()?)?;
+        let mut out = String::with_capacity(head.len().saturating_add(self.planes.len()));
+        out.push_str(head);
+        out.push_str(&self.planes);
+        Some(out)
+    }
+
+    /// One frame's reply of `len` bytes, for the pool's own tests.
+    #[cfg(test)]
+    pub(crate) fn filler(len: usize) -> Self {
+        Self {
+            heads: vec![String::new()],
+            planes: "x".repeat(len),
+        }
+    }
+
+    /// The bytes these replies own on the heap.
+    pub(crate) fn bytes(&self) -> usize {
+        self.heads
+            .iter()
+            .map(String::capacity)
+            .fold(self.planes.capacity(), usize::saturating_add)
+            .saturating_add(self.heads.capacity().saturating_mul(size_of::<String>()))
+    }
+}
+
+/// [`KeptReplies`] for a per-frame multiframe, or `None` for any other file
+/// or when they would pass `cap` bytes.
+pub(crate) fn per_frame_replies(bytes: &[u8], cap: usize) -> Option<KeptReplies> {
+    let stripped = bytes_without_pixel_payload(bytes);
+    let bytes = stripped.as_deref().unwrap_or(bytes);
+    let parsed = parse_part10(bytes).ok()?;
     let object = parsed.object();
+    let frames = frame_count(object).ok()?;
+    if frames < 2 {
+        return None;
+    }
+    let metadata = project_metadata(object).ok()?;
+    let (_, _, per_frame) = window_rows(&metadata, 0)?;
+    if !per_frame {
+        return None;
+    }
+    let mut heads = Vec::new();
+    let mut planes: Option<String> = None;
+    let mut total = 0_usize;
+    for frame in 0..frames {
+        let mut reply = inspect_object(object, frame).ok()?;
+        let at = reply.rfind(",\"planes\":[")?;
+        let tail = reply.split_off(at);
+        match &planes {
+            Some(kept) if *kept != tail => return None,
+            Some(_) => {}
+            None => {
+                total = total.saturating_add(tail.len());
+                planes = Some(tail);
+            }
+        }
+        reply.shrink_to_fit();
+        total = total
+            .saturating_add(reply.capacity())
+            .saturating_add(size_of::<String>());
+        if total > cap {
+            return None;
+        }
+        heads.push(reply);
+    }
+    heads.shrink_to_fit();
+    let mut planes = planes?;
+    planes.shrink_to_fit();
+    Some(KeptReplies { heads, planes })
+}
+
+fn inspect_object(object: &DefaultDicomObject, frame: u32) -> Result<String, PreviewError> {
     let mut sop = text_or_empty(object, SOP_INSTANCE)?;
     if sop.is_empty() {
         sop = object

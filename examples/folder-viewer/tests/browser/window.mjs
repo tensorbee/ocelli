@@ -36,6 +36,12 @@
 // the posted bytes, so the frame's list must come from `/inspect` by id
 // with no `POST /file`.
 //
+// Review pass 2, D2. In Four images every tile follows the single view's
+// rule. A four-frame enhanced CT stores `40\-600` and `400\1500` in every
+// frame, explained `Ak\Bk` for frame k. Key 5 then Shift G must draw all
+// four tiles at lung, grey 236 and 94, each labelled with its own frame's
+// B name, once each frame's list is known.
+//
 // The files are written by this script into a temporary folder, carry no
 // patient attributes, and are removed afterwards. It starts the viewer with
 // OCELLI_PORT=0, reads the URL it prints and stops it by its PID, through
@@ -88,6 +94,21 @@ export function multiframeProblems(seen) {
   if (seen.posts !== 0) {
     problems.push(`one ArrowDown on a fully held multiframe posted the file ${seen.posts} times`);
   }
+  return problems;
+}
+
+/** `tiles` is one `{ label, soft, lung }` per tile of the four-frame file. */
+export function tileProblems(tiles) {
+  const problems = [];
+  if (!Array.isArray(tiles) || tiles.length !== 4) {
+    problems.push("the four tiles were not observed");
+    return problems;
+  }
+  tiles.forEach((tile, k) => {
+    if (!String(tile.label).endsWith("  B" + k) || tile.soft !== 236 || tile.lung !== 94) {
+      problems.push(`tile ${k + 1} showed ${JSON.stringify(tile.label)}, grey ${tile.soft} and ${tile.lung}, wanted B${k} with 236 and 94`);
+    }
+  });
   return problems;
 }
 
@@ -245,6 +266,37 @@ function enhanced(frames) {
   ]);
 }
 
+function writeTiles(folder) {
+  const frames = [0, 1, 2, 3].map((k) => ({ centers: "40\\-600", widths: "400\\1500", explanation: `A${k}\\B${k}` }));
+  writeFileSync(join(folder, "tiles.dcm"), enhanced(frames));
+}
+
+export async function observeTiles(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("1 series."));
+    await settle(page, { word: "A0" });
+    await page.keyboard.press("5");
+    await settle(page, { word: "B0" });
+    await page.keyboard.press("Shift+G");
+    await page.waitForFunction(() => Array.from(document.querySelectorAll(".cell.active .tile-label"))
+      .every((node, k) => (node.textContent || "").endsWith("  B" + k)), null, { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    return await page.evaluate(() => Array.from(document.querySelectorAll(".cell.active .tiles .tile")).map((tile) => {
+      const canvas = tile.querySelector("canvas");
+      const label = tile.querySelector(".tile-label").textContent;
+      if (!canvas || canvas.width !== 32) return { label, soft: null, lung: null };
+      const context = canvas.getContext("2d");
+      return { label, soft: context.getImageData(24, 16, 1, 1).data[0], lung: context.getImageData(8, 16, 1, 1).data[0] };
+    }));
+  } finally {
+    await browser.close();
+  }
+}
+
 function writeMultiframe(folder) {
   writeFileSync(join(folder, "enhanced.dcm"), enhanced([
     { centers: "40\\-600", widths: "400\\1500", explanation: "F0A\\F0B" },
@@ -272,7 +324,7 @@ export async function observeMultiframe(url, chromium, folder) {
     await page.waitForFunction(async () => {
       const held = await (await window.fetch("/held")).json();
       return held.files === 0 && held.frames === 2;
-    }, null, { timeout: 8000, polling: 100 }).catch(() => {});
+    }, null, { timeout: 8000, polling: 100 });
     const first = await sample(page);
     const before = { line: first.corner.split("\n")[0], soft: first.soft, lung: first.lung };
     await page.evaluate(() => {
@@ -418,18 +470,23 @@ async function main() {
   const binary = await ensureViewerBinary("release", true);
   const folder = mkdtempSync(join(tmpdir(), "ocelli-f213-"));
   const multi = mkdtempSync(join(tmpdir(), "ocelli-f213-multi-"));
+  const tiled = mkdtempSync(join(tmpdir(), "ocelli-f213-tiles-"));
   const server = await startViewer(binary);
   let seen;
   let frames;
+  let tiles;
   try {
     writeFolder(folder);
     writeMultiframe(multi);
+    writeTiles(tiled);
     seen = await observeWindows(server.url, chromium, folder);
     frames = await observeMultiframe(server.url, chromium, multi);
+    tiles = await observeTiles(server.url, chromium, tiled);
   } finally {
     await stopByPid(server.pid);
     rmSync(folder, { recursive: true, force: true });
     rmSync(multi, { recursive: true, force: true });
+    rmSync(tiled, { recursive: true, force: true });
   }
   for (const step of seen.steps) {
     console.log(`${step.name}: ${JSON.stringify(step.corner.split("\n")[0])}, grey ${step.soft} and ${step.lung}`);
@@ -439,7 +496,8 @@ async function main() {
     ? `region window: ${JSON.stringify(String(seen.region.corner).split("\n")[0])}`
     : `region window, no library build: ${JSON.stringify(seen.region.sentence)}`);
   console.log(`multiframe: key 5 ${JSON.stringify(frames.before.line)} grey ${frames.before.soft} and ${frames.before.lung}, ArrowDown ${JSON.stringify(frames.after.line)} grey ${frames.after.soft} and ${frames.after.lung}, ${frames.faults.length} faults seen, ${frames.posts} file posts`);
-  const problems = windowProblems(seen).concat(multiframeProblems(frames));
+  console.log(`tiles: ${tiles.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
+  const problems = windowProblems(seen).concat(multiframeProblems(frames), tileProblems(tiles));
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;

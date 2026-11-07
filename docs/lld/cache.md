@@ -188,6 +188,22 @@ buffer handed out is owned by that decode. Its old bytes are overwritten
 before they are read. `GET /held` reports `free`, the bytes of sample buffers
 on the free list, beside `used`.
 
+One more pool sits outside the budget. A multiframe whose windows come from a
+per-frame functional group keeps every frame's inspect reply in
+`CacheState::kept`, so `POST /inspect` by id answers a frame's window list
+after `take_encoded_if_ready` drops the posted bytes. The replies are
+computed from the parsed data set by `per_frame_replies`, so every transfer
+syntax keeps them the same way. Each reply ends with the same plane list,
+which `KeptReplies` keeps once, and the pool is charged at
+`KeptReplies::bytes`, the heap bytes it owns. No other file keeps anything.
+The pool is not in the LRU and stays under `KEPT_INSPECT_CAP`, 16 MiB across
+every id. A set that would pass the cap after `sweep_kept` drops the ids
+holding nothing is not kept, and that id's `/inspect` by id is then 410 once
+its bytes are gone. `forget_ids` drops an id's replies, and `kept_reply`
+drops those of an id the cache has evicted when it is asked for, so
+`/inspect` by id and `/preview` by id agree that it is gone. `GET /held`
+reports the pool as `kept`.
+
 Every grey byte the folder viewer holds counts against one fixed cap of
 17,400,000 bytes, which is the resident bound's grey term `P * N_max`, with
 `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts,
@@ -286,7 +302,7 @@ than each, and measured two beacons of 1,700 ids, 35,699 bytes each, returned
 true and then false. Eviction does not touch the token record, so
 `sweep_pages` drops the ids that hold nothing once the record passes 4,096
 and twice the entries held. A forget that fails is not retried, and the
-budget still bounds what the process holds.
+budget and the 16 MiB reply pool still bound what the process holds.
 
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.

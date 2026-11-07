@@ -13977,8 +13977,10 @@ GUARDS: tuple[Guard, ...] = (
                 "per-frame multiframe frame that shows a fault before its "
                 "own window list arrives or is not drawn at its own first "
                 "window, a frame change on a fully held multiframe that "
-                "posts the file again, and a run in which a step was not "
-                "observed.",
+                "posts the file again, a Four images tile that is not drawn "
+                "at the chosen file window once its frame's list is known or "
+                "whose label does not name that window, and a run in which a "
+                "step was not observed.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -14016,7 +14018,8 @@ GUARDS: tuple[Guard, ...] = (
               "its CI job. Which region leg runs depends on whether "
               "`packages/core/dist` is built, and CI does not build it, so "
               "CI observes the library sentence. The corner, fault, MR row, "
-              "region and `multiframeProblems` branches have no probe.",
+              "region, `multiframeProblems` and `tileProblems` branches have "
+              "no probe.",
     ),
     Guard(
         id="bench.cold-start",

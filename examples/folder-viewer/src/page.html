@@ -2539,6 +2539,13 @@ async function paintTiles(vp) {
       if (lastPointer && lastPointer.tile === node) refreshMag(vp);
       continue;
     }
+    // Each tile follows the single view's rule: until its frame's own window
+    // list is known it is drawn at that frame's first usable window, the list
+    // is asked for, and the tiles are drawn again when it arrives. The label
+    // names the window this tile is drawn at, read with the same state as
+    // its key.
+    refreshFrameWindows(image);
+    const word = windowWord(vp, image);
     try {
       const key = cacheKey(image, vp);
       let grey = takeGrey(key);
@@ -2550,6 +2557,7 @@ async function paintTiles(vp) {
       const context = node.getContext("2d");
       if (!context) continue;
       paintGrey(context, node, grey);
+      labels[index].textContent = "Image " + (vp.viewIndex + index + 1) + (word ? "  " + word : "");
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
       sizeTile(node);
@@ -2563,6 +2571,11 @@ async function paintTiles(vp) {
       if (lastPointer && lastPointer.tile === node) refreshMag(vp);
     }
   }
+}
+
+function tileImages(vp) {
+  const series = seriesOf(vp);
+  return series ? series.images.slice(vp.viewIndex, vp.viewIndex + 4) : [];
 }
 
 function sizeTile(node) {
@@ -3075,9 +3088,11 @@ async function refreshFrameWindows(image) {
     image.frameWindowsFailed = true;
   }
   // The frame's own list can move a viewport's file window back to the
-  // first, so each viewport showing it asks again under its new key.
+  // first, so each viewport showing it, in its single view or in a tile,
+  // asks again under its new key.
   for (const vp of shownViewports()) {
     if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
+    else if (vp.tileMode && tileImages(vp).includes(image)) paintTiles(vp);
   }
   syncWindowList();
 }

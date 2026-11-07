@@ -14,15 +14,15 @@ use ocelli_pixel::VoiFunction;
 
 use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
-    PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey, retire_bytes,
-    with_decode_workspace,
+    KEPT_INSPECT_CAP, PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey,
+    retire_bytes, with_decode_workspace,
 };
 use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
 use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json, region_extent, region_json};
 use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    bytes_without_pixel_payload, decode_held, decode_ticks, merge_worker_phases, note_lookup,
-    note_write, phases, profiling, render_held, reset_phases, validate_frame_request,
+    decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, per_frame_replies,
+    phases, profiling, render_held, reset_phases, validate_frame_request,
 };
 use crate::value::value_json;
 use crate::{
@@ -574,7 +574,7 @@ fn held_reply(viewer: &Viewer) -> Reply {
         "release"
     };
     let body = format!(
-        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free},\"grey\":{grey},\"grey_replies\":{grey_replies}}}",
+        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free},\"grey\":{grey},\"grey_replies\":{grey_replies},\"kept\":{kept}}}",
         budget = memory.pressure.budget,
         used = memory.pressure.used,
         files = memory.files,
@@ -584,6 +584,7 @@ fn held_reply(viewer: &Viewer) -> Reply {
         free = memory.free,
         grey = memory.grey,
         grey_replies = memory.grey_replies,
+        kept = memory.kept,
     );
     bare(200, "application/json", body.into_bytes())
 }
@@ -1657,15 +1658,15 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
         let retire = slot.retire();
         slot.call(move || {
             let result = inspect_json(&body, frame);
-            let header = bytes_without_pixel_payload(&body);
-            (result, header, body, Some(worker), Some(retire))
+            let replies = per_frame_replies(&body, KEPT_INSPECT_CAP);
+            (result, replies, body, Some(worker), Some(retire))
         })
     } else {
         let result = inspect_json(&body, frame);
-        let header = bytes_without_pixel_payload(&body);
-        Some((result, header, body, None, None))
+        let replies = per_frame_replies(&body, KEPT_INSPECT_CAP);
+        Some((result, replies, body, None, None))
     };
-    let Some((result, header, body, worker, retire)) = inspected else {
+    let Some((result, replies, body, worker, retire)) = inspected else {
         return busy_reply();
     };
     match result {
@@ -1675,11 +1676,11 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
             match viewer.insert_posted(body, worker, retire, page) {
                 Some(id) => {
-                    // The data set without its pixels outlives the posted
+                    // A per-frame multiframe's replies outlive the posted
                     // bytes, so a frame's windows are asked for by id after
                     // every frame is held.
-                    if let Some(header) = header {
-                        viewer.keep_inspect(id, header);
+                    if let Some(replies) = replies {
+                        viewer.keep_inspect(id, replies);
                     }
                     reply.file_id = Some(id.header_value());
                     reply.held_flag = Some(1);
@@ -1715,8 +1716,8 @@ fn inspect_route(viewer: &Viewer, request: &Request) -> Reply {
         );
     }
     if let Some(id) = request.file_id {
-        if let Some(kept) = viewer.kept_inspect(id) {
-            return json_or_error(inspect_json(kept.as_slice(), request.frame.frame));
+        if let Some(reply) = viewer.kept_reply(id, request.frame.frame) {
+            return bare(200, "application/json; charset=utf-8", reply.into_bytes());
         }
         return match viewer.file_bytes(id) {
             Some(bytes) => json_or_error(inspect_json(bytes.as_slice(), request.frame.frame)),

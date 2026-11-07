@@ -5997,3 +5997,159 @@ fn an_empty_first_window_slot_opens_at_the_first_usable_pair() -> Result<(), Str
     }
     Ok(())
 }
+
+/// The enhanced two-frame fixture as RLE Lossless, PS3.5 Annex G.
+///
+/// Each 1 by 1 frame of 16-bit samples is two RLE segments, the most
+/// significant byte first (G.2), each a literal run of one byte: header
+/// byte 0 then the byte (G.3.1). The RLE header is 16 little-endian `u32`,
+/// the segment count then the offsets, so the segments sit at 64 and 66.
+/// Stored 50 is high byte 0 and low byte 50. PS3.5 A.4 Basic Offset Table
+/// carries each frame's first fragment offset.
+fn enhanced_frames_rle() -> Result<Vec<u8>, String> {
+    let plain = enhanced_frames()?;
+    let pixel_at = plain
+        .windows(4)
+        .rposition(|window| window == [0xE0, 0x7F, 0x10, 0x00])
+        .ok_or_else(|| "the fixture has no pixel data".to_owned())?;
+    let mut fragment = Vec::new();
+    fragment.extend_from_slice(&2_u32.to_le_bytes());
+    fragment.extend_from_slice(&64_u32.to_le_bytes());
+    fragment.extend_from_slice(&66_u32.to_le_bytes());
+    fragment.extend_from_slice(&[0_u8; 52]);
+    fragment.extend_from_slice(&[0, 0, 0, 50]);
+    // The Basic Offset Table names both frames: 0, then one 8-byte item
+    // header plus the 68-byte fragment, 76.
+    let mut table = Vec::new();
+    table.extend_from_slice(&0_u32.to_le_bytes());
+    table.extend_from_slice(&76_u32.to_le_bytes());
+    let mut pixels = item(&table)?;
+    for _ in 0..2 {
+        pixels.extend(item(&fragment)?);
+    }
+    pixels.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+    pixels.extend_from_slice(&0xE0DD_u16.to_le_bytes());
+    pixels.extend_from_slice(&0_u32.to_le_bytes());
+    let mut data = plain
+        .get(..pixel_at)
+        .ok_or_else(|| "the fixture is short".to_owned())?
+        .to_vec();
+    // The dataset starts after the 128-byte preamble, `DICM` and the meta.
+    let meta = file_meta("1.2.840.10008.1.2.1")?;
+    let start = 132 + meta.len();
+    let body = data.split_off(start);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta("1.2.840.10008.1.2.5")?);
+    bytes.extend(body);
+    bytes.extend_from_slice(&0x7FE0_u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0010_u16.to_le_bytes());
+    bytes.extend_from_slice(b"OB");
+    bytes.extend_from_slice(&[0, 0]);
+    bytes.extend_from_slice(&0xFFFF_FFFF_u32.to_le_bytes());
+    bytes.extend(pixels);
+    Ok(bytes)
+}
+
+#[test]
+fn a_compressed_per_frame_multiframe_is_inspected_by_id_after_every_frame_is_held()
+-> Result<(), String> {
+    // Review pass 2, D1 and S1. The kept reply does not depend on the
+    // transfer syntax. Both RLE frames decode to 50 and the enhanced file's
+    // LINEAR_EXACT windows give grey 64 and 128, as in
+    // `an_enhanced_frame_uses_its_functional_group_window`.
+    let file = enhanced_frames_rle()?;
+    for (frame, grey) in [(0_u32, 64_u8), (1, 128)] {
+        let preview = preview_frame(
+            &file,
+            FrameRequest {
+                frame,
+                ..FrameRequest::default()
+            },
+        )
+        .map_err(|error| format!("RLE frame {frame} refused as {}", error.code()))?;
+        if only_byte(&preview)? != grey {
+            return Err(format!("RLE frame {frame} drew {:?}", preview.grey));
+        }
+    }
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id = header_line(header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?
+        .to_owned();
+    // Charged at its real length. Each frame's reply ends with the same
+    // `planes` list, which is kept once, so the pool holds both reply heads,
+    // one tail and the two `String` slots of the head list.
+    let mut replies = 0_usize;
+    let mut tail = 0_usize;
+    for frame in 0..2 {
+        let json =
+            inspect_json(&file, frame).map_err(|_| "inspect refused the RLE file".to_owned())?;
+        let at = json
+            .rfind(",\"planes\":[")
+            .ok_or_else(|| "a reply has no planes".to_owned())?;
+        replies += at + std::mem::size_of::<String>();
+        tail = json.len() - at;
+    }
+    let replies = replies + tail;
+    let kept = json_number(&held_census(addr)?, "kept")?;
+    if kept != replies {
+        return Err(format!(
+            "the pool holds {kept} bytes, the two replies are {replies}"
+        ));
+    }
+    for frame in 0..2 {
+        let drawn = exchange(
+            addr,
+            &preview_id(&id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        let (drawn_header, _) = split_http(&drawn)?;
+        if !drawn_header.contains("200") {
+            return Err(format!("RLE frame {frame} by id: {drawn_header}"));
+        }
+    }
+    let (files, frames, _) = held_counts(addr)?;
+    if files != 0 || frames != 2 {
+        return Err(format!(
+            "the process held {files} files and {frames} frames"
+        ));
+    }
+    let by_body = exchange(
+        addr,
+        &http_post_to("/inspect", "X-Ocelli-Frame: 1\r\n", &file),
+    )?;
+    let by_id = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (_, body_json) = split_http(&by_body)?;
+    let (id_header, id_json) = split_http(&by_id)?;
+    if !id_header.contains("200") || id_json != body_json {
+        return Err(format!("the RLE file by id answered {id_header}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_file_whose_windows_do_not_change_by_frame_keeps_nothing() -> Result<(), String> {
+    // S1. A one-frame file, and a multiframe whose windows are top level,
+    // never ask by id, so neither spends the pool.
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    for file in [two_windows("CT")?, tagged_frame(2, &[50, 0, 60, 0])?] {
+        let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+        let (header, _) = split_http(&posted)?;
+        if !header.contains("200") {
+            return Err(format!("the post answered {header}"));
+        }
+    }
+    let kept = json_number(&held_census(addr)?, "kept")?;
+    if kept != 0 {
+        return Err(format!("files without per-frame windows kept {kept} bytes"));
+    }
+    Ok(())
+}
