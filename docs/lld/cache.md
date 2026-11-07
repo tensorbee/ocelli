@@ -194,8 +194,10 @@ reply in
 `CacheState::kept`, so `POST /inspect` by id answers a frame's window list
 after `take_encoded_if_ready` drops the posted bytes. The replies are
 computed from the parsed data set by `per_frame_replies`, so every transfer
-syntax keeps them the same way. `InspectParts` projects the metadata and
-builds the frame-independent fields and the plane list once per post, and
+syntax keeps them the same way. `inspect_post` parses the file once per
+`POST /file` and takes both the scan reply and the kept set from one
+`InspectParts`, which projects the metadata and builds the
+frame-independent fields and the plane list once, and
 only each frame's spacing, edge and window fields per frame, so a post is
 linear in the frame count. `KeptReplies` keeps the shared parts once beside
 those per-frame fields, and the pool is charged at `KeptReplies::bytes`, the

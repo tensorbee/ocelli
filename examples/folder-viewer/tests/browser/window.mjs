@@ -123,6 +123,30 @@ export function tileProblems(tiles) {
 }
 
 /**
+ * Review pass 4, S2. `tiles` is the four tiles read while every `/inspect`
+ * is held back. Tile 1 is frame 0, whose list the scan gave, so it is B0 at
+ * lung, grey 236 and 94. Tiles 2 to 4 are drawn at their frame's first
+ * usable window, centre 40 width 400, which gives HU 40 grey 128 and HU -800
+ * grey 0, and their labels must give those numbers.
+ */
+export function interimProblems(tiles) {
+  const problems = [];
+  if (!Array.isArray(tiles) || tiles.length !== 4) {
+    problems.push("the interim tiles were not observed");
+    return problems;
+  }
+  tiles.forEach((tile, k) => {
+    const want = k === 0
+      ? { tail: "  B0", soft: 236, lung: 94 }
+      : { tail: "  WW 400  WL 40", soft: 128, lung: 0 };
+    if (!String(tile.label).endsWith(want.tail) || tile.soft !== want.soft || tile.lung !== want.lung) {
+      problems.push(`while its list was on its way tile ${k + 1} showed ${JSON.stringify(tile.label)}, grey ${tile.soft} and ${tile.lung}, wanted ${want.tail.trim()} with ${want.soft} and ${want.lung}`);
+    }
+  });
+  return problems;
+}
+
+/**
  * `seen` is `{ steps, mrRows, region }`. Each step is `{ name, corner, soft,
  * lung, fault }`. `region` is `{ served, corner, sentence }`.
  */
@@ -291,10 +315,27 @@ function writeTiles(folder) {
   writeFileSync(join(folder, "tiles.dcm"), enhanced(frames));
 }
 
-export async function observeTiles(url, chromium, folder) {
+function readTiles(page) {
+  return page.evaluate(() => Array.from(document.querySelectorAll(".cell.active .tiles .tile")).map((tile) => {
+    const canvas = tile.querySelector("canvas");
+    const label = tile.querySelector(".tile-label").textContent;
+    if (!canvas || canvas.width !== 32) return { label, soft: null, lung: null };
+    const context = canvas.getContext("2d");
+    return { label, soft: context.getImageData(24, 16, 1, 1).data[0], lung: context.getImageData(8, 16, 1, 1).data[0] };
+  }));
+}
+
+/** The tiles while every `/inspect` is held back for `delay` ms, then settled. */
+export async function observeTiles(url, chromium, folder, delay = 0) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    if (delay > 0) {
+      await page.route("**/inspect", async (route) => {
+        await page.waitForTimeout(delay);
+        await route.continue();
+      });
+    }
     await page.goto(url);
     await page.locator("#folder").setInputFiles(folder);
     await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("1 series."));
@@ -302,16 +343,18 @@ export async function observeTiles(url, chromium, folder) {
     await page.keyboard.press("5");
     await settle(page, { word: "B0" });
     await page.keyboard.press("Shift+G");
+    let interim = null;
+    if (delay > 0) {
+      // Every tile is drawn before any held-back list is answered.
+      await page.waitForFunction(() => Array.from(document.querySelectorAll(".cell.active .tiles canvas"))
+        .every((node) => node.width === 32), null, { timeout: Math.max(500, delay - 300) }).catch(() => {});
+      interim = await readTiles(page);
+    }
     await page.waitForFunction(() => Array.from(document.querySelectorAll(".cell.active .tile-label"))
       .every((node, k) => (node.textContent || "").endsWith("  B" + k)), null, { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(300);
-    return await page.evaluate(() => Array.from(document.querySelectorAll(".cell.active .tiles .tile")).map((tile) => {
-      const canvas = tile.querySelector("canvas");
-      const label = tile.querySelector(".tile-label").textContent;
-      if (!canvas || canvas.width !== 32) return { label, soft: null, lung: null };
-      const context = canvas.getContext("2d");
-      return { label, soft: context.getImageData(24, 16, 1, 1).data[0], lung: context.getImageData(8, 16, 1, 1).data[0] };
-    }));
+    const settled = await readTiles(page);
+    return delay > 0 ? { interim, settled } : settled;
   } finally {
     await browser.close();
   }
@@ -522,6 +565,7 @@ async function main() {
   let frames;
   let tiles;
   let lateFrames;
+  let delayed;
   try {
     writeFolder(folder);
     writeMultiframe(multi);
@@ -530,6 +574,7 @@ async function main() {
     seen = await alone((url) => observeWindows(url, chromium, folder));
     frames = await alone((url) => observeMultiframe(url, chromium, multi));
     tiles = await alone((url) => observeTiles(url, chromium, tiled));
+    delayed = await alone((url) => observeTiles(url, chromium, tiled, 2500));
     lateFrames = await alone((url) => observeMultiframe(url, chromium, late, LATE));
   } finally {
     rmSync(folder, { recursive: true, force: true });
@@ -546,11 +591,14 @@ async function main() {
     : `region window, no library build: ${JSON.stringify(seen.region.sentence)}`);
   console.log(`multiframe: key 5 ${JSON.stringify(frames.before.line)} grey ${frames.before.soft} and ${frames.before.lung}, ArrowDown ${JSON.stringify(frames.after.line)} grey ${frames.after.soft} and ${frames.after.lung}, ${frames.faults.length} faults seen, ${frames.posts} file posts`);
   console.log(`tiles: ${tiles.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
+  console.log(`tiles, lists held back: ${delayed.interim.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
   console.log(`late: key 5 ${JSON.stringify(lateFrames.before.line)} grey ${lateFrames.before.soft} and ${lateFrames.before.lung}, ArrowDown ${JSON.stringify(lateFrames.after.line)} grey ${lateFrames.after.soft} and ${lateFrames.after.lung}, ${lateFrames.faults.length} faults seen, ${lateFrames.posts} file posts`);
   const problems = windowProblems(seen).concat(
     multiframeProblems(frames),
     tileProblems(tiles),
     multiframeProblems(lateFrames, LATE),
+    interimProblems(delayed.interim),
+    tileProblems(delayed.settled),
   );
   if (problems.length) {
     for (const problem of problems) console.error(problem);

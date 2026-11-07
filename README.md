@@ -273,7 +273,8 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    per-frame group, not only frame 0's. Each tile of Four images follows the
    same rule. While its frame's list is on its way its label gives the WW and
    WL it is drawn at, and once the list arrives it is drawn at the chosen
-   window and its label names it. A file opens at its first window that has both a centre and a
+   window and its label names it. A tile of a file that stores no window
+   gives its numbers and says `full range`, as the corner does. A file opens at its first window that has both a centre and a
    width, and a slot missing either is listed as a row that cannot be
    chosen. A slice keeps its window, and a file window past the next
    image's list shows that image's first usable one. A series change and

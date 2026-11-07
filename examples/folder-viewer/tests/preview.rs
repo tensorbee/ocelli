@@ -6152,6 +6152,13 @@ fn a_file_whose_windows_do_not_change_by_frame_keeps_nothing() -> Result<(), Str
 /// it falls back to the top-level `40\-600`, `400\1500`, `TOPA\TOPB`.
 /// Frames 1 and 2 carry 300 and 1500 explained `F1ONLY` per frame.
 fn late_per_frame() -> Result<Vec<u8>, String> {
+    own_window_frames(&[false, true, true])
+}
+
+/// [`late_per_frame`]'s file with one 1 by 1 frame per entry, each `true`
+/// frame carrying its own `F1ONLY` window and each `false` frame taking the
+/// top-level one.
+fn own_window_frames(own_frames: &[bool]) -> Result<Vec<u8>, String> {
     let rescale = item(&concat_bytes(&[
         &short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?,
         &short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
@@ -6166,7 +6173,17 @@ fn late_per_frame() -> Result<Vec<u8>, String> {
             &short_le((0x0028, 0x1055), *b"LO", &text_pad("F1ONLY"))?,
         ]))?,
     )?)?;
-    let per_frame = concat_bytes(&[&item(&[])?, &own, &own]);
+    let empty = item(&[])?;
+    let per_frame: Vec<u8> = own_frames
+        .iter()
+        .flat_map(|own_window| {
+            if *own_window {
+                own.clone()
+            } else {
+                empty.clone()
+            }
+        })
+        .collect();
     let mut data = Vec::new();
     data.extend(short_le(
         (0x0008, 0x0016),
@@ -6180,7 +6197,11 @@ fn late_per_frame() -> Result<Vec<u8>, String> {
         *b"CS",
         &text_pad("MONOCHROME2"),
     )?);
-    data.extend(short_le((0x0028, 0x0008), *b"IS", &text_pad("3"))?);
+    data.extend(short_le(
+        (0x0028, 0x0008),
+        *b"IS",
+        &text_pad(&own_frames.len().to_string()),
+    )?);
     for (tag, value) in [
         ((0x0028, 0x0010), 1_u16),
         ((0x0028, 0x0011), 1),
@@ -6199,11 +6220,7 @@ fn late_per_frame() -> Result<Vec<u8>, String> {
     data.extend(long_le(
         (0x7FE0, 0x0010),
         *b"OW",
-        &concat_bytes(&[
-            &50_u16.to_le_bytes(),
-            &50_u16.to_le_bytes(),
-            &50_u16.to_le_bytes(),
-        ]),
+        &50_u16.to_le_bytes().repeat(own_frames.len()),
     )?);
     part10(data)
 }
@@ -6246,6 +6263,34 @@ fn later_frames_with_their_own_windows_are_per_frame() -> Result<(), String> {
     let (header, _) = split_http(&posted)?;
     if !header.contains("200") || json_number(&held_census(addr)?, "kept")? == 0 {
         return Err("the replies of a late per-frame file were not kept".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn a_middle_frame_alone_with_its_own_window_is_per_frame() -> Result<(), String> {
+    // Review pass 4, S1. Five frames, and only frame 2 carries its own
+    // window. A decision that read only frame 1, only the last frame or only
+    // frame 0 would say no, and the page would name frame 2 with the
+    // top-level label beside its own window.
+    let file = own_window_frames(&[false, false, true, false, false])?;
+    let first = inspect_json(&file, 0).map_err(|_| "inspect frame 0".to_owned())?;
+    if field(&first, "windowsPerFrame")? != "true" {
+        return Err(format!("frame 0 did not say per frame: {first}"));
+    }
+    let middle = inspect_json(&file, 2).map_err(|_| "inspect frame 2".to_owned())?;
+    if field(&middle, "windows")?
+        != "[{\"center\":300,\"width\":1500,\"explanation\":\"F1ONLY\",\"label\":\"F1ONLY\"}]"
+    {
+        return Err(format!("frame 2 did not list its own window: {middle}"));
+    }
+    if !field(
+        &inspect_json(&file, 3).map_err(|_| "inspect frame 3".to_owned())?,
+        "windows",
+    )?
+    .contains("\"TOPB\"")
+    {
+        return Err("frame 3 lost the top-level list".to_owned());
     }
     Ok(())
 }

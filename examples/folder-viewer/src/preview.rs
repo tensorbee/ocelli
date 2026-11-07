@@ -1635,6 +1635,18 @@ thread_local! {
     static INSPECT_WORK: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
 }
 
+/// Zero this thread's [`INSPECT_WORK`].
+#[cfg(test)]
+pub(crate) fn reset_inspect_work() {
+    INSPECT_WORK.with(|work| work.set((0, 0)));
+}
+
+/// This thread's projections and plane-list builds since the last reset.
+#[cfg(test)]
+pub(crate) fn inspect_work() -> (u64, u64) {
+    INSPECT_WORK.with(Cell::get)
+}
+
 fn project_item(
     object: &InMemDicomObject<StandardDataDictionary>,
 ) -> Result<MetadataSet, PreviewError> {
@@ -2701,13 +2713,45 @@ impl KeptReplies {
     }
 }
 
-/// [`KeptReplies`] for a per-frame multiframe, or `None` for any other file
-/// or when they would pass `cap` bytes.
-pub(crate) fn per_frame_replies(bytes: &[u8], cap: usize) -> Option<KeptReplies> {
+/// One `POST /file`'s inspect reply for `frame` and its [`KeptReplies`].
+///
+/// The bytes are parsed, the metadata projected and the plane list built
+/// once, and both the reply and the kept set are taken from that one
+/// [`InspectParts`]. The kept set is `None` for a file that is not a
+/// per-frame multiframe, or when it would pass `cap` bytes.
+pub(crate) fn inspect_post(
+    bytes: &[u8],
+    frame: u32,
+    cap: usize,
+) -> (Result<String, PreviewError>, Option<KeptReplies>) {
     let stripped = bytes_without_pixel_payload(bytes);
     let bytes = stripped.as_deref().unwrap_or(bytes);
-    let parsed = parse_part10(bytes).ok()?;
-    let parts = InspectParts::new(parsed.object()).ok()?;
+    let parsed = match parse_part10(bytes) {
+        Ok(parsed) => parsed,
+        Err(error) => return (Err(part10_error(error)), None),
+    };
+    let parts = match InspectParts::new(parsed.object()) {
+        Ok(parts) => parts,
+        Err(error) => return (Err(error), None),
+    };
+    let reply = parts.reply(frame);
+    let kept = if reply.is_ok() {
+        kept_replies(parts, cap)
+    } else {
+        None
+    };
+    (reply, kept)
+}
+
+/// [`inspect_post`]'s kept set alone, for the pool's own tests.
+#[cfg(test)]
+pub(crate) fn per_frame_replies(bytes: &[u8], cap: usize) -> Option<KeptReplies> {
+    inspect_post(bytes, 0, cap).1
+}
+
+/// [`KeptReplies`] from one post's parts, or `None` for a file that is not a
+/// per-frame multiframe or when they would pass `cap` bytes.
+fn kept_replies(parts: InspectParts, cap: usize) -> Option<KeptReplies> {
     if parts.frames < 2 || !parts.per_frame {
         return None;
     }
@@ -3649,9 +3693,9 @@ fn file_order_pixels(object: &DefaultDicomObject, little: bool) -> Result<Vec<u8
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
-        INSPECT_WORK, borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels,
+        INSPECT_WORK, borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, inspect_post,
         per_frame_replies, preview_frame, split_pixel_payload,
     };
 
@@ -3687,7 +3731,7 @@ mod tests {
 
     /// An N-frame 1 by 1 enhanced CT whose every frame carries its own
     /// Frame VOI LUT item, centre 40 and width 400.
-    fn per_frame_file(frames: usize) -> Vec<u8> {
+    pub(crate) fn per_frame_file(frames: usize) -> Vec<u8> {
         let mut meta = Vec::new();
         meta.extend(element(0x0002, 0x0001, b"OB", &[0, 1]));
         meta.extend(element(0x0002, 0x0010, b"UI", b"1.2.840.10008.1.2.1\0"));
@@ -3774,17 +3818,20 @@ mod tests {
 
     #[test]
     fn per_frame_replies_build_the_shared_parts_once() -> Result<(), String> {
-        // Review pass 3, D1. One post builds the frame-independent part and
-        // the plane list once, so the work does not grow with the frame
-        // count beyond the per-frame window and spacing fields.
+        // Review pass 3, D1, and pass 4, D1. One post, the reply and the kept
+        // set together, projects the metadata once and builds the plane list
+        // once, so the work does not grow with the frame count beyond the
+        // per-frame window and spacing fields.
         let mut work = Vec::new();
         for frames in [4_usize, 12] {
             INSPECT_WORK.with(|cell| cell.set((0, 0)));
-            per_frame_replies(&per_frame_file(frames), usize::MAX)
-                .ok_or_else(|| format!("{frames} frames kept nothing"))?;
+            let (reply, kept) = inspect_post(&per_frame_file(frames), 0, usize::MAX);
+            if reply.is_err() || kept.is_none() {
+                return Err(format!("{frames} frames gave no reply or kept nothing"));
+            }
             work.push(INSPECT_WORK.with(std::cell::Cell::get));
         }
-        if !matches!(work[..], [small, large] if small == large && large.1 == 1) {
+        if !matches!(work[..], [(1, 1), (1, 1)]) {
             return Err(format!(
                 "projections and plane builds by frame count: {work:?}"
             ));

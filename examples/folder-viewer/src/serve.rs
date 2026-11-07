@@ -21,8 +21,8 @@ use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_
 use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json, region_extent, region_json};
 use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, per_frame_replies,
-    phases, profiling, render_held, reset_phases, validate_frame_request,
+    decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup, note_write, phases,
+    profiling, render_held, reset_phases, validate_frame_request,
 };
 use crate::value::value_json;
 use crate::{
@@ -1657,13 +1657,11 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
         let worker = slot.worker();
         let retire = slot.retire();
         slot.call(move || {
-            let result = inspect_json(&body, frame);
-            let replies = per_frame_replies(&body, KEPT_INSPECT_CAP);
+            let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
             (result, replies, body, Some(worker), Some(retire))
         })
     } else {
-        let result = inspect_json(&body, frame);
-        let replies = per_frame_replies(&body, KEPT_INSPECT_CAP);
+        let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
         Some((result, replies, body, None, None))
     };
     let Some((result, replies, body, worker, retire)) = inspected else {
@@ -2802,6 +2800,57 @@ mod tests {
         std::fs::write(dcmjs.join("dcmjs.es.js"), b"export default {};\n")
             .map_err(|error| error.to_string())?;
         Ok(root)
+    }
+
+    #[test]
+    fn one_file_post_parses_and_builds_its_planes_once() -> Result<(), String> {
+        // Review pass 4, D1. The scan reply and the kept replies come from
+        // one parse, so a whole `POST /file` of a per-frame multiframe
+        // projects the metadata once and builds the plane list once.
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+        let body = crate::preview::tests::per_frame_file(12);
+        let capacity = body.capacity();
+        let mut charge = BodyCharge {
+            viewer: &viewer,
+            bytes: capacity,
+            counted: false,
+            slot: None,
+        };
+        crate::preview::reset_inspect_work();
+        let reply = file_route(
+            &viewer,
+            Request {
+                method: "POST".to_owned(),
+                path: "/file".to_owned(),
+                body,
+                frame: FrameRequest::default(),
+                file_id: None,
+                page: None,
+                points: PointsHeader::Absent,
+                shape: None,
+                region: None,
+                close: true,
+                body_charge: capacity,
+                body_counted: false,
+                body_slot: None,
+            },
+            &mut charge,
+        );
+        let work = crate::preview::inspect_work();
+        if reply.status != 200 || viewer.kept_bytes() == 0 {
+            return Err(format!(
+                "the post answered {} and kept nothing",
+                reply.status
+            ));
+        }
+        if work != (1, 1) {
+            return Err(format!(
+                "one post projected and built planes {work:?} times"
+            ));
+        }
+        Ok(())
     }
 
     #[test]

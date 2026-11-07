@@ -2557,9 +2557,11 @@ async function paintTiles(vp) {
       const context = node.getContext("2d");
       if (!context) continue;
       paintGrey(context, node, grey);
-      // Until the frame's list is known the tile is drawn at that frame's
-      // first usable window, which has no name yet, so its numbers name it.
-      labels[index].textContent = "Image " + (vp.viewIndex + index + 1) + "  " + (word || "WW " + grey.widthText + "  WL " + grey.center);
+      // A tile with no window name, because its frame's list is not known
+      // yet or the file stores no window, is named by the numbers it is
+      // drawn at, and by "full range" as the corner says.
+      const drawnAt = "WW " + grey.widthText + "  WL " + grey.center + (grey.fullRange ? "  full range" : "");
+      labels[index].textContent = "Image " + (vp.viewIndex + index + 1) + "  " + (word || drawnAt);
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
       sizeTile(node);

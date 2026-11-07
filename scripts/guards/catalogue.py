@@ -13981,7 +13981,9 @@ GUARDS: tuple[Guard, ...] = (
                 "at the chosen file window once its frame's list is known or "
                 "whose label does not name that window, a later frame of a "
                 "file whose frame 0 takes the top-level window that is named "
-                "with frame 0's label or shows a fault, a multiframe step "
+                "with frame 0's label or shows a fault, a tile whose frame "
+                "list is held back and whose label does not give the WW and "
+                "WL it is drawn at, a multiframe step "
                 "whose process never holds every frame without the posted "
                 "bytes, and a run in which a step was not observed.",
         claims=(),
