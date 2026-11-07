@@ -13973,8 +13973,12 @@ GUARDS: tuple[Guard, ...] = (
                 "that shows a fault or another window than its first, an MR "
                 "that lists a preset row or a key that reaches past its one "
                 "window, a region window that does not read WW 840 WL -380 "
-                "region, a missing library build that does not say so, and "
-                "a run in which a step was not observed.",
+                "region, a missing library build that does not say so, a "
+                "per-frame multiframe frame that shows a fault before its "
+                "own window list arrives or is not drawn at its own first "
+                "window, a frame change on a fully held multiframe that "
+                "posts the file again, and a run in which a step was not "
+                "observed.",
         claims=(),
         silent="The file is under examples/, which scripts/guards/discover.py "
                "does not scan, so the census finds no refusal site to claim. "
@@ -14011,8 +14015,8 @@ GUARDS: tuple[Guard, ...] = (
               "not have, so it is watched by the `viewer-browser` gate and "
               "its CI job. Which region leg runs depends on whether "
               "`packages/core/dist` is built, and CI does not build it, so "
-              "CI observes the library sentence. The corner, fault, MR row "
-              "and region branches have no probe.",
+              "CI observes the library sentence. The corner, fault, MR row, "
+              "region and `multiframeProblems` branches have no probe.",
     ),
     Guard(
         id="bench.cold-start",

@@ -30,6 +30,15 @@ const DEFAULT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 /// Page records kept before a sweep is considered, so a small cache does
 /// not sweep on every post.
 const PAGE_SWEEP_FLOOR: usize = 4096;
+
+/// Most bytes of kept inspect metadata across every held id, 16 MiB.
+///
+/// Each held file keeps its data set without the pixel value, so `/inspect`
+/// by id answers a frame's window list after the posted bytes leave the
+/// cache. A metadata set that would pass this cap, after the ids that hold
+/// nothing are dropped, is not kept, and that id's `/inspect` is 410 once
+/// its bytes are gone, as before.
+const KEPT_INSPECT_CAP: usize = 16 * 1024 * 1024;
 const CONNECTION_CAP: usize = 32;
 const PERMITS: usize = 2;
 
@@ -369,6 +378,12 @@ struct CacheState {
     /// The page token each posted id arrived under. A forget removes its
     /// ids, and [`CacheState::sweep_pages`] drops ids that hold nothing.
     pages: BTreeMap<FileId, PageToken>,
+    /// Each held id's data set without its pixel value, for `/inspect` by
+    /// id. It is not in the LRU, so `take_encoded_if_ready` does not drop
+    /// it. A forget drops it with the id, and an id that holds nothing loses
+    /// it when the total would pass [`KEPT_INSPECT_CAP`].
+    kept: BTreeMap<FileId, Arc<Vec<u8>>>,
+    kept_bytes: usize,
     #[cfg(test)]
     reused: usize,
     #[cfg(test)]
@@ -1011,6 +1026,8 @@ impl Viewer {
                     in_flight: BTreeMap::new(),
                     doomed: BTreeSet::new(),
                     pages: BTreeMap::new(),
+                    kept: BTreeMap::new(),
+                    kept_bytes: 0,
                     #[cfg(test)]
                     reused: 0,
                     #[cfg(test)]
@@ -1458,6 +1475,32 @@ impl Viewer {
         true
     }
 
+    /// Keep `header`, the data set of a just-posted id without its pixel
+    /// value, for [`Self::kept_inspect`]. Nothing is kept for an id that is
+    /// not held, or past [`KEPT_INSPECT_CAP`].
+    pub(crate) fn keep_inspect(&self, id: FileId, header: Vec<u8>) {
+        let mut state = self.lock_cache();
+        if !state.lru.contains_key(&HeldKey::File(id)) {
+            return;
+        }
+        let len = header.capacity();
+        if state.kept_bytes.saturating_add(len) > KEPT_INSPECT_CAP {
+            state.sweep_kept();
+        }
+        if state.kept_bytes.saturating_add(len) > KEPT_INSPECT_CAP {
+            return;
+        }
+        state.kept_bytes = state.kept_bytes.saturating_add(len);
+        if let Some(old) = state.kept.insert(id, Arc::new(header)) {
+            state.kept_bytes = state.kept_bytes.saturating_sub(old.capacity());
+        }
+    }
+
+    /// The kept data set of a held id, which outlives its posted bytes.
+    pub(crate) fn kept_inspect(&self, id: FileId) -> Option<Arc<Vec<u8>>> {
+        self.lock_cache().kept.get(&id).map(Arc::clone)
+    }
+
     pub(crate) fn file_bytes(&self, id: FileId) -> Option<Arc<PostedBytes>> {
         let mut state = self.lock_cache();
         match state.lru.get(&HeldKey::File(id))? {
@@ -1632,6 +1675,9 @@ impl CacheState {
         self.drain_recycled();
         for &id in ids {
             self.pages.remove(&id);
+            if let Some(kept) = self.kept.remove(&id) {
+                self.kept_bytes = self.kept_bytes.saturating_sub(kept.capacity());
+            }
             if self.in_flight.contains_key(&id) {
                 self.doomed.insert(id);
             }
@@ -1681,6 +1727,28 @@ impl CacheState {
         let lru = &self.lru;
         self.pages
             .retain(|id, _| framed.contains(id) || lru.contains_key(&HeldKey::File(*id)));
+    }
+
+    /// Drop the kept metadata of ids that hold no posted bytes and no frame.
+    fn sweep_kept(&mut self) {
+        let framed: BTreeSet<FileId> = self
+            .frame_order
+            .iter()
+            .filter_map(|frame| match frame.key {
+                HeldKey::Frame(id, _) => Some(id),
+                HeldKey::File(_) => None,
+            })
+            .collect();
+        let lru = &self.lru;
+        let mut freed = 0_usize;
+        self.kept.retain(|id, kept| {
+            let keep = framed.contains(id) || lru.contains_key(&HeldKey::File(*id));
+            if !keep {
+                freed = freed.saturating_add(kept.capacity());
+            }
+            keep
+        });
+        self.kept_bytes = self.kept_bytes.saturating_sub(freed);
     }
 
     /// Count one more decode holding `id`'s posted bytes.

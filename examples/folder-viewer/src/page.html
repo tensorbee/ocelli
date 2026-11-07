@@ -948,7 +948,7 @@ const SENTENCE = {
   "tile-mode": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
   link: "Link every visible viewport to the outlined one. Scroll, Window and Zoom each start off.",
   "link-scroll": "The other viewports show their image nearest the outlined one's position, when both series share a Frame of Reference UID and lie in nearly the same plane. The local process chooses the image.",
-  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a window row, a region window or Reset. A preset is not sent to an image the local process does not offer it on, a file window past an image's own list shows that image's first window, and no window is sent to an image that is not monochrome.",
+  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a window row, a region window or Reset. A preset is not sent to an image the local process does not offer it on, a file window past an image's own list shows that image's first usable window, and no window is sent to an image that is not monochrome.",
   "link-zoom": "The other viewports take the outlined one's zoom over their own fit. Pan is not copied.",
   "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
@@ -963,6 +963,7 @@ const FILE_ROW = "A window stored in the file, named by its Window Center & Widt
 const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
 const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.";
 const LIBRARY_MISSING = "The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.";
+const DCMJS_MISSING = "The region window needs dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.";
 const ONE_VALUE = "This region holds one value, so it gives no window.";
 const RELEASE_COMMAND = "cargo run --release -p ocelli-folder-viewer";
 const GONE = "the viewer process at this address is not answering. Run " + RELEASE_COMMAND + " again and open the address it prints";
@@ -2185,7 +2186,7 @@ function applyGrey(vp, grey, image) {
 function cacheKey(image, view) {
   const win = view.overrideWindow
     ? view.overrideWindow.center + "/" + view.overrideWindow.width + "/" + view.overrideWindow.fn
-    : (view.activePreset || "file" + effectiveIndex(image, view));
+    : (view.activePreset || "file" + fileKeyIndex(image, view));
   return fileIdentity(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
 }
 
@@ -2296,7 +2297,7 @@ async function requestGrey(image, options) {
     // Index 0 is the file window with no header, which a file storing no
     // window also takes.
     const index = effectiveIndex(image, view);
-    if (index > 0) headers["X-Ocelli-Window-Index"] = String(index);
+    if (index != null && index > 0) headers["X-Ocelli-Window-Index"] = String(index);
   }
   const wantedView = view.viewIndex;
   const wantedToken = view.loadToken;
@@ -2883,13 +2884,33 @@ function windowInfo(image) {
 // this image's own list, or on a slot with no centre or width, is this
 // image's first usable window, the one the local process opens with, so a
 // shorter list or an empty slot shows that window and no fault.
+//
+// On a multiframe whose windows are per frame, a frame other than 0 has no
+// confirmed list until its own `/inspect` answers. Until then this is
+// `null`: no index is sent, the local process opens that frame at its own
+// first usable window, and the frame is drawn again at the chosen index
+// once its list arrives. So no request names an index the frame's own list
+// has not confirmed.
 function effectiveIndex(image, view) {
+  if (!windowsKnown(image)) return null;
   const windows = windowInfo(image).windows;
   const usable = (win) => Boolean(win) && win.center != null && win.width != null;
   const index = view.windowIndex || 0;
   if (usable(windows[index])) return index;
   const first = windows.findIndex(usable);
   return first < 0 ? 0 : first;
+}
+
+function windowsKnown(image) {
+  if (!image || !image.info || !image.info.windowsPerFrame || image.frame === 0) return true;
+  return Boolean(image.frameWindows);
+}
+
+// The file window part of a cache key. A frame drawn before its list is
+// known is the process's default, which has its own key.
+function fileKeyIndex(image, view) {
+  const index = effectiveIndex(image, view);
+  return index == null ? "default" : String(index);
 }
 
 function presetOffered(image, token) {
@@ -3077,9 +3098,15 @@ function loadLibrary() {
 }
 
 // The region window reads unavailable. Nothing takes its place.
-function libraryMissing() {
+async function libraryMissing() {
   const button = document.getElementById("tool-wlregion");
-  SENTENCE["tool-wlregion"] = LIBRARY_MISSING;
+  // The local process answers `library` for whichever listed file is not on
+  // disk. When the built modules are there, the missing part is dcmjs.
+  let built = false;
+  try {
+    built = (await fetch("/lib/ocelli-core/index.js", { method: "GET" })).ok;
+  } catch {}
+  SENTENCE["tool-wlregion"] = built ? DCMJS_MISSING : LIBRARY_MISSING;
   button.setAttribute("aria-disabled", "true");
   button.classList.add("dim");
   showSentence();
@@ -3122,7 +3149,7 @@ async function applyRegion(vp, a, b) {
   if (!image || !image.info.monochrome) return;
   const core = await loadLibrary();
   if (!core) {
-    setWindowNotice(LIBRARY_MISSING);
+    setWindowNotice(SENTENCE["tool-wlregion"]);
     return;
   }
   const token = vp.loadToken;

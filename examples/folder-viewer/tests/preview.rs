@@ -415,11 +415,19 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     }
     // Amendment 2. The file window index is in every viewport's cache key,
     // is sent as its header, and travels with a linked window.
-    if !function_body(page, "cacheKey")?.contains("\"file\" + effectiveIndex(image, view)") {
+    if !function_body(page, "cacheKey")?.contains("\"file\" + fileKeyIndex(image, view)")
+        || !function_body(page, "fileKeyIndex")?
+            .contains("const index = effectiveIndex(image, view);")
+    {
         return Err("the cache key leaves out the file window index".to_owned());
     }
+    // Review pass 1, D2. An index is sent only when the frame's own list
+    // has confirmed it.
+    if !function_body(page, "effectiveIndex")?.contains("if (!windowsKnown(image)) return null;") {
+        return Err("an index is sent before the frame's list is known".to_owned());
+    }
     if !page.contains(
-        "const index = effectiveIndex(image, view);\n    if (index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
+        "const index = effectiveIndex(image, view);\n    if (index != null && index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
     ) {
         return Err("the file window index is not sent".to_owned());
     }
@@ -440,6 +448,9 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     }
     if !page.contains("\"The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.\"") {
         return Err("the page lacks the library sentence".to_owned());
+    }
+    if !page.contains("\"The region window needs dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.\"") {
+        return Err("the page does not name dcmjs when it is what is missing".to_owned());
     }
     // The region and the per-frame windows are asked for by file id with
     // no body, so a frame change never posts the file again.
@@ -5872,6 +5883,39 @@ fn inspect_by_id_matches_the_posted_body() -> Result<(), String> {
             "by id {id_header} differs from the body form {body_header}"
         ));
     }
+    // Review pass 1, D1. Once every frame is held the process drops the
+    // posted bytes. The id form must still answer, from metadata the
+    // process keeps for the id's lifetime, and give the same body.
+    for frame in 0..2 {
+        let drawn = exchange(
+            addr,
+            &preview_id(&id, &format!("X-Ocelli-Frame: {frame}\r\n")),
+        )?;
+        let (drawn_header, _) = split_http(&drawn)?;
+        if !drawn_header.contains("200") {
+            return Err(format!("frame {frame} did not draw: {drawn_header}"));
+        }
+    }
+    let (files, frames, _) = held_counts(addr)?;
+    if files != 0 || frames != 2 {
+        return Err(format!(
+            "after both frames the process held {files} files and {frames} frames"
+        ));
+    }
+    let after = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (after_header, after_json) = split_http(&after)?;
+    if !after_header.contains("200") || after_json != body_json {
+        return Err(format!(
+            "by id after every frame is held answered {after_header}"
+        ));
+    }
     let both = exchange(
         addr,
         &http_post_to("/inspect", &format!("X-Ocelli-File: {id}\r\n"), &file),
@@ -5894,6 +5938,20 @@ fn inspect_by_id_matches_the_posted_body() -> Result<(), String> {
         || header_line(gone_header, "X-Ocelli-Error") != Some("file-gone")
     {
         return Err(format!("an unknown id answered {gone_header}"));
+    }
+    // The kept metadata leaves with the id through F-226's forget path.
+    forget_exchange(addr, "", id.as_bytes())?;
+    let forgotten = exchange(
+        addr,
+        &http_post_to(
+            "/inspect",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 1\r\n"),
+            b"",
+        ),
+    )?;
+    let (forgotten_header, _) = split_http(&forgotten)?;
+    if !forgotten_header.contains("410") {
+        return Err(format!("a forgotten id answered {forgotten_header}"));
     }
     Ok(())
 }

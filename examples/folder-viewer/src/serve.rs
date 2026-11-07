@@ -21,8 +21,8 @@ use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_
 use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json, region_extent, region_json};
 use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
-    render_held, reset_phases, validate_frame_request,
+    bytes_without_pixel_payload, decode_held, decode_ticks, merge_worker_phases, note_lookup,
+    note_write, phases, profiling, render_held, reset_phases, validate_frame_request,
 };
 use crate::value::value_json;
 use crate::{
@@ -543,24 +543,26 @@ fn library_root() -> std::path::PathBuf {
 /// file that is not on disk is 404 with `X-Ocelli-Error: library`, which is
 /// how the page knows the library build is missing.
 fn library_reply(root: &std::path::Path, path: &str) -> Reply {
-    let file = if path == "/lib/dcmjs.js" {
-        Some(root.join("node_modules/dcmjs/build/dcmjs.es.js"))
+    let (file, missing) = if path == "/lib/dcmjs.js" {
+        (
+            Some(root.join("node_modules/dcmjs/build/dcmjs.es.js")),
+            "dcmjs is not installed. Run npm ci in the repository",
+        )
     } else {
-        path.strip_prefix("/lib/ocelli-core/")
-            .and_then(|rest| rest.strip_suffix(".js"))
-            .and_then(|asked| LIBRARY_FILES.iter().find(|name| **name == asked))
-            .map(|name| root.join("packages/core/dist").join(format!("{name}.js")))
+        (
+            path.strip_prefix("/lib/ocelli-core/")
+                .and_then(|rest| rest.strip_suffix(".js"))
+                .and_then(|asked| LIBRARY_FILES.iter().find(|name| **name == asked))
+                .map(|name| root.join("packages/core/dist").join(format!("{name}.js"))),
+            "the library build is not on disk. Run npm run build -w @ocelli/core in the repository",
+        )
     };
     let Some(file) = file else {
         return text_reply(404, None, "not found");
     };
     match std::fs::read(file) {
         Ok(bytes) => bare(200, "text/javascript; charset=utf-8", bytes),
-        Err(_) => text_reply(
-            404,
-            Some("library"),
-            "the library build is not on disk. Run npm run build -w @ocelli/core in the repository",
-        ),
+        Err(_) => text_reply(404, Some("library"), missing),
     }
 }
 
@@ -1655,13 +1657,15 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
         let retire = slot.retire();
         slot.call(move || {
             let result = inspect_json(&body, frame);
-            (result, body, Some(worker), Some(retire))
+            let header = bytes_without_pixel_payload(&body);
+            (result, header, body, Some(worker), Some(retire))
         })
     } else {
         let result = inspect_json(&body, frame);
-        Some((result, body, None, None))
+        let header = bytes_without_pixel_payload(&body);
+        Some((result, header, body, None, None))
     };
-    let Some((result, body, worker, retire)) = inspected else {
+    let Some((result, header, body, worker, retire)) = inspected else {
         return busy_reply();
     };
     match result {
@@ -1671,6 +1675,12 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
             match viewer.insert_posted(body, worker, retire, page) {
                 Some(id) => {
+                    // The data set without its pixels outlives the posted
+                    // bytes, so a frame's windows are asked for by id after
+                    // every frame is held.
+                    if let Some(header) = header {
+                        viewer.keep_inspect(id, header);
+                    }
                     reply.file_id = Some(id.header_value());
                     reply.held_flag = Some(1);
                 }
@@ -1705,6 +1715,9 @@ fn inspect_route(viewer: &Viewer, request: &Request) -> Reply {
         );
     }
     if let Some(id) = request.file_id {
+        if let Some(kept) = viewer.kept_inspect(id) {
+            return json_or_error(inspect_json(kept.as_slice(), request.frame.frame));
+        }
         return match viewer.file_bytes(id) {
             Some(bytes) => json_or_error(inspect_json(bytes.as_slice(), request.frame.frame)),
             None => gone(),
@@ -2838,8 +2851,16 @@ mod tests {
             }
             std::fs::remove_file(root.join("node_modules/dcmjs/build/dcmjs.es.js"))
                 .map_err(|error| error.to_string())?;
+            if reply.body
+                != b"the library build is not on disk. Run npm run build -w @ocelli/core in the repository"
+            {
+                return Err("a missing module did not name the library build".to_owned());
+            }
             let reply = library_reply(&root, "/lib/dcmjs.js");
-            if reply.status != 404 || reply.error != Some("library") {
+            if reply.status != 404
+                || reply.error != Some("library")
+                || reply.body != b"dcmjs is not installed. Run npm ci in the repository"
+            {
                 return Err(format!("a missing dcmjs answered {}", reply.status));
             }
             Ok(())

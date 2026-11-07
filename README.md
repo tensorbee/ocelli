@@ -234,7 +234,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Reset. A preset is not sent to a viewport whose image the local process
    does not offer it on, which is any image that is not CT. A file window is
    sent by its place in the list, and a viewport whose image lists fewer
-   windows shows its first. No window is sent to one whose image is not
+   windows shows its first usable one. No window is sent to one whose image is not
    monochrome. Zoom
    copies the source's zoom over each viewport's own fit, and pan is not
    copied. A click on a series row is a new load and copies nothing.
@@ -266,7 +266,10 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    row that cannot be chosen, because this preview does not apply one, and
    while a file has one its other rows cannot be chosen either. A multiframe
    whose windows change per frame lists the shown frame's own, asked for by
-   file id. A file opens at its first window that has both a centre and a
+   file id, which the process answers from the data set it keeps for each
+   held file, without the pixels, up to 16 MiB across every file, after the
+   posted bytes are dropped. Until that list arrives the frame is drawn at
+   its own first usable window, then at the chosen one. A file opens at its first window that has both a centre and a
    width, and a slot missing either is listed as a row that cannot be
    chosen. A slice keeps its window, and a file window past the next
    image's list shows that image's first usable one. A series change and
@@ -281,7 +284,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    through `POST /region`, and `windowRegion` from `@ocelli/core` makes the
    window. The process serves the built `packages/core/dist` under `/lib/`,
    so run `npm run build -w @ocelli/core` before starting the viewer, or the region window
-   reads unavailable and says so. Its centre is the middle of that span.
+   reads unavailable and says so. The library's SR modules import dcmjs,
+   which `npm ci` installs, and the region window names that when it is the
+   part that is missing. Its centre is the middle of that span.
    cornerstone3D 5.8.2's `WindowLevelRegionTool` centres on the mean and
    keeps a width of at least 10, so the two can give different windows.
 7. The left button uses the active tool. The right button pans. Control with

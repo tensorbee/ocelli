@@ -2331,7 +2331,7 @@ fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
 /// later frame of a different size does not reuse it. The list reads no pixel,
 /// so the value is replaced with an empty element. `None` means the encoding
 /// was not walked and the caller parses `bytes` unchanged.
-fn bytes_without_pixel_payload(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn bytes_without_pixel_payload(bytes: &[u8]) -> Option<Vec<u8>> {
     split_pixel_payload(bytes).map(|(header, _range)| header)
 }
 
