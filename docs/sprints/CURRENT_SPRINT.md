@@ -222,6 +222,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   better on a measured axis. F-241 is filed for S47 at 12w, E4.11, with a draft
   plan. Its nine questions, among them the decode route, the patent position
   and MPEG-2, are open for the operator, each with the lead's recommendation.
+  **Answered by the operator later on 2026-11-07:** H.264 and HEVC decode
+  through WebCodecs in a worker on both targets, with the stream demuxed in
+  Rust and the colour converted once in `ocelli-pixel`, and no shipped artefact
+  may contain a software H.264 or HEVC decoder, now a section of
+  `docs/SOURCE-POLICY.md`. The stream's own colour description wins over
+  PS3.3's matrix when present. The `VideoFrame` held in the worker for one
+  copy is deviation D-32. F-241 is approved at 12w in a library part and a
+  viewer part. MPEG-2 is decoded in Rust by F-242, filed for S48 at 7w, E4.12,
+  with a draft plan whose six questions are open for the operator, the
+  patent position among them, because the pool's list still names patents
+  active in Malaysia.
 
 ## What is carried in
 
