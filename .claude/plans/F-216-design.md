@@ -324,6 +324,8 @@ Focused: `bin/ocelli.sh check ocelli-folder-viewer`, `bin/ocelli.sh test ocelli-
 | `viewer.open` | `setInputFiles` on `#folder` | status text matches the series sentence | 1,693 synthetic 512 by 512 16-bit files, one series | Median of 9 fresh pages |
 | `viewer.first_image` | the series sentence | first `putImageData` on `#view` | Same, and one 3000 by 2900 16-bit synthetic DX | Median of 9 |
 | `viewer.scroll_rate` | first ArrowDown | 3 s later plus 300 ms settle | ArrowDown every 16 ms on the 1,693 series. Reports keys delivered, frames presented per second, and blank samples | Median of 5. Invalid if fewer than 120 keys delivered |
+
+Lead amendment, 2026-11-05, under the operator's delegation of the quality call that night: the first implementation measured that an empty `setTimeout(16)` loop in the pinned headless Chromium already tops out at 51 to 52 dispatches per second, so a 16 ms timer cadence cannot demonstrate 55 frames per second whatever the page does. `viewer.scroll_rate` therefore dispatches one ArrowDown per `requestAnimationFrame` callback instead, and counts a frame as presented when the image index the page drew changed since the previous callback. The 55 frames per second budget is unchanged, blank samples must still be 0, and the run is still invalid below 120 keys delivered. The runner also reports the plain timer ceiling it measured, so a reader can see the instrument's own limit beside the result.
 | `viewer.window_step` | `requestGrey` call from the page | `drawGrey` return | 9 window steps on each workload. Also counts bodies on `/preview` | Median of 9 |
 | `viewer.resident_memory` | process start | end of the four subjects above in one process | Peak `ps -o rss=` sampled every 20 ms, `GET /held`, JS heap | One run, the bound above is the threshold |
 
@@ -382,7 +384,7 @@ none proposed. Open question C asks whether holding a multi-frame object's encod
 
 ## LLD impact
 
-`docs/lld/benchmarks.md` gains the five `viewer.*` subjects. `docs/lld/cache.md` gains the folder viewer as an `Lru` consumer whose value is an enum over two kinds and why `ImageCache` was not used.
+`docs/lld/benchmarks.md` gains the five `viewer.*` subjects. `docs/lld/pixel-pipeline.md` gains a paragraph on `stored_sample_table`, under the lead amendment below. `docs/lld/cache.md` gains the folder viewer as an `Lru` consumer whose value is an enum over two kinds and why `ImageCache` was not used.
 
 ## User-facing documentation impact
 
@@ -427,3 +429,89 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 - I. Answered: recommended, a header-only open is out of scope, and a new story is filed if `viewer.open` misses A.
 
 No question is left open.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-1.md`.
+
+- **`ocelli-pixel` gains an additive API.** The non-goal above excluded any change to `ocelli-pixel`. The window path needs a table of display values for every stored sample, and building that table in the viewer would be a second copy of the LUT chain, which HLD section 18 forbids. So `LutChain::stored_sample_table`, `StoredSampleTable`, `StoredBits::meaningful_bits` and `StoredBits::stored_sample` are allowed in `ocelli-pixel`, each evaluating the existing chain and adding no arithmetic of its own. Every other change to `ocelli-pixel` is still out of scope. `docs/lld/pixel-pipeline.md` joins the LLD impact list.
+- **The page heap bound counts only canvases the workload sizes.** The four tile canvases are counted only when the run sizes them. The `viewer.resident_memory` workload sizes the main view alone, so its bound is `64 MiB + 4 * W * H + 16 MiB` for the main view.
+- **Debug blank samples are measured.** The scroll budget's debug half is taken by running `viewer.scroll_rate` once on the debug build, with the stage sampled on every animation frame, not only after a draw.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-2.md`.
+
+- **The page heap bound is a bound on retained heap.** It is read after forced collection until two readings agree, because a heap read before collection counts greys the page has already discarded. The reading before any collection is reported beside it as information, and has no threshold.
+- **The resident memory subject measures one process.** `viewer.resident_memory` runs the open, first image, scroll and window workloads against one server process with no restart, and the server's peak is that process's peak. The restart recovery check in `viewer.first_image` stays, outside this measurement.
+- **Every byte the process holds for pixels counts.** Bytes waiting for a decode permit and any recycle pool are inside the 256 MiB budget or inside the formula's named terms. The bound and its formula do not change.
+
+### Operator answer after review pass 2
+
+Given by the operator on 2026-11-05, after the third remediation measured the folder viewer's live heap at about 330 MB while macOS libmalloc kept freed small and large magazines resident, so one process read 703 to 736 MB against the 528,194,192 byte bound.
+
+- **The folder viewer binary uses mimalloc.** `examples/folder-viewer` declares `mimalloc` as its global allocator, pinned exactly in the workspace manifest, default features only, and no other crate uses it. It is MIT licensed, within `deny.toml` and `ci/licences.toml`. Declaring a global allocator needs no `unsafe` block of ours. The resident bound and its formula do not change, and the one-process run is measured again against them.
+
+### Lead amendments after review pass 3
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-3.md`.
+
+- **`GET /held` also reports `inflight`, `workspace` and `free`.** The `/held` row in the scope table above is extended by this line, and corrected after review pass 4, because the upload pool this section removes no longer exists and the free list added later reports `free`. Each is a byte count the runner reads, and each doc comment says only what the counter counts.
+- **The recycle pool and the sample-class reservation are removed.** Under mimalloc a build without them measured 492.2 and 500.2 MB, the same spread as with them, so they no longer pay for their code. An upload is held only while it is read and decoded, and its bytes are the formula's upload term.
+- **Prose names the allocator, not its version.** The pin in the manifest is the one place the version is written.
+
+### Operator answer after review pass 3
+
+Given by the operator on 2026-11-05, after two long-lived decode threads bounded the thread count but a quiet one-process run still peaked at 566,018,048 bytes, with about 268 MB live and the rest held by the allocator for frames the cache had evicted.
+
+- **An evicted frame's buffer is reused, not freed.** A decoded frame's sample buffer that leaves the cache goes to a free list keyed by its exact byte length, and the next decode of that length takes it instead of allocating. The free list is counted inside the 256 MiB cache budget, so cached frames plus free buffers never exceed it, and the cache evicts to make room for either. The bound and its formula do not change.
+- **Fallback.** If ten one-process runs, five quiet and five beside a CPU load above 10, do not all stay under the bound with the free list in place, the story records allocator retention as a term of the formula and sets the bound to the measured worst case plus a stated margin.
+- **User-facing documentation for the free list.** `README.md`, `examples/folder-viewer/src/use.html` and `docs/lld/cache.md` say that a decoded frame's sample buffer waits on a free list inside the 256 MiB budget. A request body is still freed on the thread that allocated it. The folder viewer binary is the one that uses mimalloc.
+
+### Lead amendments after review pass 4
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-4.md`.
+
+- **Every decode runs on the two decode threads.** A preview that carries the file's bytes is decoded by the same scheduler as one that names a held id, under a decode permit and charged as in flight. No connection thread decodes.
+- **A decode permit ends with the decode.** The permit is released when the grey bytes are ready, before the reply is written, so a client that stops reading holds no decode permit. Either decode thread takes the next job.
+- **A buffer leaving the cache waits on the free list only when it fits.** When cached bytes plus free bytes would exceed the budget, the buffer is freed instead. The steal takes the oldest cached frame of that length only when no reply holds it, and otherwise allocates.
+
+### Lead amendments after review pass 5
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-5.md`.
+
+- **A body-form preview never evicts or steals.** Its decode takes a free buffer of the right length when one is parked, and otherwise allocates. It never evicts a cached entry or steals a cached frame, because its frame is never stored.
+- **Grey reply bytes are bounded by a cap, not by the permits.** Grey bytes held by replies that are not yet written count against one fixed cap equal to the formula's existing grey term. A preview whose grey would exceed it waits for capacity, up to the write timeout, then answers `503 busy`. The bound and its formula do not change.
+
+### Lead rulings on the pass 5 remediation
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, on questions the implementer raised.
+
+- **The grey cap is `PERMITS` times the largest grey admitted so far.** That is the formula's `P * N_max` with `N_max` taken from frames actually seen, never above the design `N_max`, so the bound holds.
+- **Each worker's one returned grey buffer counts under the per-permit term.** The cap governs grey bytes held by unwritten replies. The returned buffer per worker is the existing per-permit allowance of the formula.
+- **A waiting body-form preview keeps its body slot.** With four such waiters, a `/file` post can wait up to the 60 s write timeout. This is accepted degradation under a client that stops reading, and the user documents say so.
+
+### Lead amendments after review pass 6
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-6.md`. These supersede rulings 1 and 2 of "Lead rulings on the pass 5 remediation".
+
+- **The grey cap is the formula's design term, and it holds every grey.** The cap is `P * N_max` with `N_max` the design maximum frame of the formula, not the largest grey seen. Grey bytes held by unwritten replies and each worker's returned grey buffer both count inside it, so nothing is counted twice. A worker that cannot keep its returned buffer inside the cap frees it.
+- **A client that stops reading may delay other previews, and the documents say so.** On this loopback viewer a page that abandons a request closes the connection, which releases its grey at once. A client that keeps a connection open without reading holds its grey until the write timeout. When such clients fill the cap, other previews wait up to the write timeout and then answer `503 busy`, and while body-form previews wait a `/file` post can wait as long. README.md, the Use book and `docs/lld/cache.md` state both.
+- **`GET /held` reports the grey bytes held, and every release path has a test.** Each path that releases a grey reservation, the frame gone after the wait, a refused body-form render and a body-form wait failure included, has a test that fails when its release is removed.
+
+### Operator answer after review pass 6
+
+Given by the operator on 2026-11-06, after sizing the grey cap to the design `N_max` made a frame over 3000 by 2900, a 4740 by 5928 mammogram for example, refused outright where it had been drawn.
+
+- **A frame over the design size draws alone.** Its grey is admitted only when the gate holds no other grey, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. It is never refused for size alone below the library's `MAX_PIXELS`. The documented resident bound adds that one frame's grey above the design term, and the measured workload's bound is unchanged.
+
+### Lead ruling after review pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-216-working-pass-7.md`, which showed that holding back every new request while an oversized grey waits lets a stream of oversized previews starve a normal one until its 503.
+
+- **Waiters are admitted in arrival order.** A request that must wait takes a place in one queue when it first fails to fit. A waiting request is admitted only when it is at the head of the queue and fits under the existing rules, so a frame over the design size still draws alone. A request that fits at once and finds the queue empty is admitted without queueing. A request that already holds room is never queued behind anything. No other hold-back rule remains.
+- **The resident bound is stated for frames within the design size.** Documents say a frame over the design size draws alone and can raise resident memory above the bound, without a figure, and say nothing about adding exactly one frame's grey.
+
+### Lead ruling on review pass 6 S1, carried through pass 7
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call. The cap absorbs the workers' returned grey buffers: a kept grey counts against the cap for as long as it is kept, so the cap and the per-permit grey byte are not two names for one set of bytes. The documents say which bytes each term of the bound counts, as the code does it, and nothing more.

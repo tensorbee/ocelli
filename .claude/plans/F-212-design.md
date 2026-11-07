@@ -357,3 +357,16 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 4. Answered: recommended, enhanced multiframe acquisition fields stay empty in this story, and a follow-up story is filed by the sprint lead at `/complete-feature`.
 
 No question is left open.
+
+## Lead amendments before implementation, against F-209's tree
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-209-xai` at 3c206f67. Where these differ from the text above, these win. The implementer starts from the sprint head after F-209 lands and re-checks every path and line named here.
+
+1. **The scale bar reads F-211's calibration choice.** There is no `lengthText`. Length labelling is server-side through `choose_spacing` in `examples/folder-viewer/src/measure.rs`. The preview reply carries the calibration that choice makes, value and source, and the bar draws from it, so the bar and the length tool can never disagree. A test changes one input that moves the choice and shows both move together.
+2. **Edge letters follow Anatomical Orientation Type.** Per PS3.3 C.7.6.1.1.1, when (0010,2210) is QUADRUPED the letters are empty, because the quadruped letter set overlaps the human one and would be drawn as human directions. A fixture with QUADRUPED and Patient Orientation `R\PL` shows empty letters.
+3. **No new read can refuse the scan.** Every new optional attribute read uses the non-failing form the `frameOfReferenceUid` read already uses, and a test plants a non-text value in each new attribute and shows the scan still succeeds with that corner field empty.
+4. **The bar is per viewport.** Every F-208 cell, single view or grid, sizes its bar from its own `vp.dom.cell` inside `layoutViewport(vp)`. The text above that names `wrap.clientWidth` and `layout` is superseded.
+5. **Value ranges and citations.** Pixel Spacing order is PS3.3 10.7.1.3. AC3 gains a `143012.` Study Time row per PS3.5 TM. `exposure_mas` honours the IS range of PS3.5 6.2. The "uncommitted opening polish" was committed as 965f6fbd and F-208 already removed the digits from the layout picker, so neither is in scope. `pro-viewer-research.md` is not tracked and is not cited.
+6. **Order.** F-212 lands before F-213. Both edit `inspect_json`, `struct Grey`, `from_preview`, the reply header writer, `paintOverlays`, the preview reply parser, the help-sentence map, `the_page_offers_a_folder_picker` and README's local viewer section. F-212 places its fields before F-209's `planes` tail.
+7. **README** step numbers are measured from the tree at implementation, not from this plan.
+8. **F-239 lands first.** The operator scheduled F-239, colour frames in the folder viewer, first in the folder viewer chain on 2026-11-07, and this story now depends on it. F-239 changes `inspect_json`, `struct Grey`, `from_preview`, the reply header writer and the preview reply parser before this story does, adding `colour` and `X-Ocelli-Channels`. This story's fields follow F-239's, and its corner text is shown on a colour image too.

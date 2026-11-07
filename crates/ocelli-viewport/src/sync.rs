@@ -1,12 +1,15 @@
 //! Viewports that share one `FrameOfReferenceUID` keep one patient point.
 //!
-//! The UID is compared as a string. A missing UID moves nobody. The index
+//! The UID rule is `link::same_frame_of_reference`, a string comparison
+//! in which a missing UID moves nobody. The index
 //! is `HeldPlane::index_through_point`. This module creates no device.
 
 use alloc::vec::Vec;
 
 use ocelli_core::{Pt, World};
 use ocelli_volume::{FrameOfReferenceUid, HeldPlane, PlaneSyncError};
+
+use crate::link::same_frame_of_reference;
 
 /// Registered planes. Slots stay in registration order.
 #[derive(Clone, Debug, Default)]
@@ -80,15 +83,17 @@ impl SyncScene {
         let Some(source_at) = self.slots.iter().position(|slot| slot.id == source) else {
             return Err(SyncError::Unavailable);
         };
-        let Some(uid) = self.slots.get(source_at).and_then(|slot| slot.uid.clone()) else {
+        let Some(uid) = self.slots.get(source_at).map(|slot| slot.uid.clone()) else {
             return Err(SyncError::Unavailable);
         };
+        // The one frame-of-reference rule. A source that is not in the same
+        // frame as itself has no UID, and moves nobody.
+        if !same_frame_of_reference(uid.as_ref(), uid.as_ref()) {
+            return Err(SyncError::Unavailable);
+        }
         let mut staged = Vec::new();
         for (at, slot) in self.slots.iter().enumerate() {
-            let Some(peer) = slot.uid.as_ref() else {
-                continue;
-            };
-            if peer != &uid {
+            if !same_frame_of_reference(uid.as_ref(), slot.uid.as_ref()) {
                 continue;
             }
             match slot.plane.index_through_point(point) {

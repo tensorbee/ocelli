@@ -34,7 +34,7 @@ pub use frame_geometry::{
 pub use frame_index::{EncapsulatedFrameIndex, FrameIndexError};
 pub use frame_open::{
     BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, PaddingRange,
-    PrivateCreator, WindowInput, fill_padding, open_frame,
+    PrivateCreator, WindowInput, fill_padding, open_frame, read_padding,
 };
 pub use metadata::{
     BulkDataUri, InlineBinary, MetadataElement, MetadataError, MetadataSet, MetadataValue,

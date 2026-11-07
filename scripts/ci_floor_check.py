@@ -469,7 +469,7 @@ MANUAL_EVENTS = {"workflow_dispatch", "repository_dispatch", "schedule"}
 # Kept here so this script fails if the runner's exclusion list changes without
 # anyone thinking about CI.
 NOT_IN_FLOOR = {"oracle", "corpus", "guards-deep", "quirk-mutations", "gpu",
-                "licences-wheels"}
+                "licences-wheels", "viewer-browser"}
 
 
 # The `GATES=( ... )` array literal. The array is read as SHELL WORDS by

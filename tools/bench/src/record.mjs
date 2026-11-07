@@ -56,10 +56,11 @@ export const WORSE = "worse";
  * the durations because it is not one and the words `slower` and `faster` were
  * never right for it either.
  *
- * **An unrecognised unit throws.** The registry is the authority on units and
- * it declares four. A fifth arriving with a new subject is a decision about
- * which way is better, and defaulting it to "an increase is worse" would make
- * that decision silently and in the wrong direction half the time.
+ * **An unrecognised unit throws.** The registry is the authority on units.
+ * A new unit arriving with a new subject is a decision about which way is
+ * better, and defaulting it to "an increase is worse" would make that
+ * decision silently and in the wrong direction half the time. `bytes` is
+ * worse on an increase. `frames_per_second` is better on an increase.
  *
  * **The throw is not the guard, though, and it was being counted as one.** It
  * fires inside `withinTolerance`, which `--compare` reaches only for a subject
@@ -76,6 +77,8 @@ export const INCREASE_MEANS = {
   fraction_of_one_vcpu: WORSE,
   changed_frames_per_second: BETTER,
   pixels_per_second: BETTER,
+  frames_per_second: BETTER,
+  bytes: WORSE,
 };
 
 /** An empty baseline, in the shape the tracked file uses. */
@@ -271,7 +274,7 @@ export function compareRecord(record, baseline) {
  * replaced by a newer number for no recorded reason.
  */
 export function acceptRecord(baseline, record, { subjectId = null, story,
-  why, tolerance = null, toleranceWhy = null, today }) {
+  why, tolerance = null, tolerances = {}, toleranceWhy = null, today }) {
   if (!story || !why) {
     throw new Error(
       "--accept needs both a story and a reason. A re-baseline with no " +
@@ -279,7 +282,8 @@ export function acceptRecord(baseline, record, { subjectId = null, story,
         "why it moved.",
     );
   }
-  if (tolerance !== null && !toleranceWhy) {
+  if ((tolerance !== null || Object.keys(tolerances).length > 0) &&
+      !toleranceWhy) {
     throw new Error(
       "a new tolerance needs its own reason. ci/tier-thresholds.json states " +
         "the provenance of each figure separately, saying which is measured, " +
@@ -316,16 +320,23 @@ export function acceptRecord(baseline, record, { subjectId = null, story,
     );
   }
   for (const entry of chosen) {
+    if (String(entry.id).startsWith("viewer.") && entry.detail?.profile === "debug") {
+      throw new Error("refusing to record a release subject from a debug binary");
+    }
     const previous = forHost.subjects?.[entry.id] ?? null;
+    // A per-subject tolerance wins, and the bare one covers the rest.
+    const given = Object.hasOwn(tolerances, entry.id)
+      ? tolerances[entry.id]
+      : tolerance;
     next.host_classes[key].subjects[entry.id] = {
       value: entry.value,
       unit: entry.unit,
-      tolerance: tolerance ?? previous?.tolerance ?? null,
+      tolerance: given ?? previous?.tolerance ?? null,
       // A new tolerance is a decision and it carries its own reason. Carrying
       // the old one over carries its old reason with it, so a tolerance can
       // never end up in the file with nothing beside it saying where the
       // number came from.
-      tolerance_provenance: tolerance === null
+      tolerance_provenance: given === null
         ? previous?.tolerance_provenance ?? null
         : toleranceWhy,
       provenance: "measured",

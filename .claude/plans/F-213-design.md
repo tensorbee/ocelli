@@ -321,3 +321,16 @@ Given by the operator on 2026-11-05 in the S46 consolidated design round and rel
 6. Answered: the flag stays, and AC15 makes the reviewer check the C.11.2 rows against dicom.nema.org, current edition, before implementation of that code.
 
 Derived from the build order and F-216: `/region` and the per-frame `/inspect` use F-216's file id protocol, so this story never posts a file after the first upload. No question is left open.
+
+## Lead amendments before implementation, against F-209's tree
+
+Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-209-xai` at 3c206f67. Where these differ from the text above, these win. F-213 starts after F-212 lands and re-checks every path and line named here.
+
+1. **Selection lives in `render_held`.** There is no `lut_chain`. The window chosen today is the first pair, passed as index `0`, in `render_held` in `examples/folder-viewer/src/preview.rs`. AC14's mutation target is that index.
+2. **The file window index is part of every viewport's state and cache key.** It joins the override and preset in F-209's `cacheKey` and `copyWindow`, per viewport and not page-wide. A test renders index 0 then index 1 on the same frame and shows different grey, red if the index is left out of the key. A linked window copy carries the index.
+3. **The region window reuses F-211's region walk.** No `region_extent`. The minimum and maximum come from the same walk F-211's region statistics use, with its pixel-centre rule, padding exclusion and size cap, factored if needed so the walk exists once, and not through `measure_json`, which refuses on spacing. `HeldFrame::value` is a field.
+4. **A malformed region header is the `header` error,** as AC10 says. The protocol table is corrected to match. If a new error variant is needed it is added with its own test.
+5. **Modality reaches the preset check.** `Recipe` gains Modality. Both `a_preset_refuses_a_voi_lut_sequence` and `a_voi_lut_preset_still_holds_the_frame` use builders without Modality and are updated. A VOI LUT refusal is reported before the modality refusal, and a test pins that order.
+6. **Explanations keep their slots.** A new reader returns every Window Center, Window Width and Window Center & Width Explanation slot, empty ones included, so the labels pair with the windows by position per PS3.3 C.11.2.1.2.2. AC4 uses it, with a fixture whose first explanation is empty.
+7. **Citations.** The LINEAR function is PS3.3 C.11.2.1.2.1 and the alternative views text is C.11.2.1.2.2. VOI LUT Sequence is VM 1 with one or more items. Output units are given in the C.11.1 attribute table.
+8. **README** step numbers, including F-209's window-link sentence, are measured from the tree at implementation. `lib.rs`'s statement that the crate reads no path of its own is corrected if F-213 touches `/lib/`.

@@ -180,7 +180,7 @@
   <h1>Use the library</h1>
   <p class="lede">A guide to Ocelli as it exists in this repository today. Every name on this page is a real export, read from the source. Where a piece is not built yet, the page says so.</p>
   <div class="note">
-    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws one image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
+    <p><strong>This folder viewer is not the wasm path.</strong> It is a native Rust process that reads a file you choose and draws each viewport's image through the same <code>ocelli-pixel</code> code. The browser path is a wasm core in a worker, described below. <strong>Nothing is published.</strong> There is no package on npm and no crate on crates.io. You build from this workspace and depend on it by path.</p>
   </div>
   <p>The window arithmetic lives once, in <code>LutChain</code>, and this page does not copy it. Where a formula matters, the page cites its DICOM section and points at the type that implements it.</p>
 
@@ -266,7 +266,8 @@ bin/ocelli.sh wasm --release
 npm run build                  # each workspace's build script, tsc for the packages and vite for viewer-react
 npm run dev                    # the example viewer on http://localhost:5173</code></pre>
     <p>The example viewer in <code>examples/viewer-react</code> is the showcase, and its header reads <code>core ready</code> only after its worker has loaded the built module. This folder viewer is separate.</p>
-<pre><code>cargo run -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
+<pre><code>cargo run --release -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
+    <p>The folder viewer keeps at most four request bodies at once, which is the coefficient of <code>S_max</code> in the resident set bound, and decodes on two threads, which is <code>P</code> in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term <code>P * N_max</code>, with <code>N_max</code> the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. <code>GET /held</code> reports <code>grey</code>, every grey byte under the cap, and <code>grey_replies</code>, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.</p>
     <p>Two other gate profiles exist. <code>bin/ocelli.sh gate --sprint</code> runs every gate with no exception, and <code>bin/ocelli.sh gate --all</code> adds the GPU and corpus tiers. <code>bin/ocelli.sh gate --list</code> prints what each gate covers.</p>
   </section>
 
@@ -529,7 +530,7 @@ fn open(bytes: &amp;[u8]) -&gt; Result&lt;(), ParseError&gt; {
     Ok(())
 }</code></pre>
     <p><code>ParseError</code> is <code>#[non_exhaustive]</code> and carries no input bytes, values, UIDs or paths. Its variants name the failure class, from <code>TruncatedPart10</code> and <code>MissingDicmPrefix</code> to <code>UnknownTransferSyntax</code> and <code>InvalidDataSet</code>. A caller can log it without logging patient data.</p>
-    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9.</p>
+    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9. <code>read_padding(&amp;metadata, photometric, signed)</code> reads the Pixel Padding Value range alone, without the window and flags that <code>open_frame</code> can refuse.</p>
     <p>DICOMweb bodies parse through the same types. <code>DicomwebSource</code> implements <code>SeriesSource::consume</code>.</p>
 <pre><code>use ocelli_dicom::{DicomwebSource, SeriesSource, SourceBatch, SourceResponse, SourceResponseKind};
 
@@ -668,7 +669,7 @@ match StackGeometry::derive(&amp;multi)?.shear() {
 }</code></pre>
     <p>A <code>Pt&lt;World&gt;</code> and a <code>Pt&lt;Index&gt;</code> are different types, so a transform cannot be handed a point from the wrong space. <code>World</code> is the LPS patient system in millimetres.</p>
     <p>Stack shear is measured from the geometry, never read from Gantry/Detector Tilt <code>(0018,1120)</code>, which is Type 3 and nominal. Non uniform frame spacing, non parallel frames and coincident frames are refused rather than averaged, because rendering them as uniform distorts geometry in a way no measurement tool flags.</p>
-    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 C.7.6.1.1.5. On a projection radiograph they differ by the magnification factor, so one is never substituted for the other. <code>ocelli_geom::select_calibration</code> names the source it used.</p>
+    <p>Pixel Spacing and Imager Pixel Spacing stay distinct, PS3.3 10.7.1.1. They are the same when the image has not been corrected for geometric magnification, and differ when it has been corrected or calibrated. <code>ocelli_geom::select_calibration</code> names the source it used, so a measurement never reports one as the other.</p>
 <pre><code>use ocelli_geom::{select_calibration, CalibrationRequest, SpacingMm};
 
 let calibration = select_calibration(CalibrationRequest {
@@ -681,6 +682,20 @@ let calibration = select_calibration(CalibrationRequest {
 let source = calibration.source.name();     // "imager-spacing"
 let mm = calibration.spacing;               // patient spacing</code></pre>
     <p>The order is pixel spacing, then imager spacing with the magnification factor, then ultrasound deltas, then a manual pair. A present but invalid source is an error and does not fall through.</p>
+    <p><code>ocelli_viewport::link</code> links two viewports from their planes. <code>same_frame_of_reference</code> is true only when both Frame of Reference UIDs are present and equal, so a missing UID links nothing. <code>closest_coplanar</code> answers the index in a target stack whose Image Position (Patient) is nearest the source's, keeping the lower index on a tie, and is <code>LinkError::NotCoplanar</code> when the absolute dot product of the source normal and the shown target normal is not above <code>COPLANAR_DOT</code>, 0.9. <code>reference_segment</code> answers where the source plane cuts the target, as two points in the target's index space with the first pixel centre at 0, and is <code>LinkError::Parallel</code> when the absolute dot product is above <code>1 - PLANE_EPSILON</code>. <code>closest_coplanar</code> is <code>LinkError::Degenerate</code> when no distance is finite, which includes an empty stack. <code>reference_segment</code> is <code>LinkError::Degenerate</code> for a point that is not finite and for a target with a zero spacing on its single row or column. The two constants are cornerstone3D 5.8.2's. <code>SyncScene</code> uses the same UID rule.</p>
+<pre><code>use ocelli_viewport::link::{
+    closest_coplanar, reference_segment, same_frame_of_reference, FrameOfReferenceUid, LinkError,
+};
+
+if same_frame_of_reference(Some(&amp;source_uid), Some(&amp;target_uid)) {
+    let next = closest_coplanar(&amp;source_plane, &amp;shown_plane, &amp;target_planes)?;
+    match reference_segment(&amp;source_plane, &amp;target_planes[next]) {
+        Ok((start, end)) =&gt; { /* column x and row y in the target's index space */ }
+        Err(LinkError::Parallel) =&gt; {}
+        Err(_) =&gt; {}
+    }
+}</code></pre>
+    <p>PS3.3 10.7.1.1 says a Pixel Spacing that has not been calibrated for geometric magnification has the same values as the Imager Pixel Spacing, so an equal pair takes the imager path. The pair is equal when both halves agree within <code>ocelli_core::SPACING_EQUALITY_MM</code>, the same rule <code>ImagerAgrees</code> uses. With a magnification factor the source is <code>"imager-spacing"</code>. With none it is <code>"detector"</code>, the imager spacing at the detector plane and not a patient spacing. A factor that is present but not finite, or not strictly positive, is refused, as it is without Pixel Spacing. A Pixel Spacing that differs decides on its own.</p>
   </section>
 
   <section class="chapter" id="measure">
@@ -695,6 +710,7 @@ let mm = distance(a, b)?;
 
 let stats = roi_statistics(&amp;samples, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
     <p>The full set is <code>distance</code>, <code>length</code>, <code>polyline_length</code>, <code>height</code>, <code>angle_at</code>, <code>cobb</code>, <code>bidirectional</code>, <code>rectangle</code>, <code>circle</code>, <code>ellipse</code>, <code>polygon_area</code>, <code>spline_point</code>, <code>hit_segment</code>, <code>project_onto_segment</code> and <code>project_onto_plane</code>. Statistics are <code>roi_statistics</code> and <code>histogram</code>. PET SUV is <code>suv_bw</code>, <code>suv_lbm</code> and <code>suv_bsa</code>. Refusals are <code>GeomError</code> and <code>SuvError</code>.</p>
+    <p>Which samples a region holds is <code>region_contains</code> and <code>region_bounds</code>, over a <code>RegionShape</code> of a rectangle, an axis-aligned ellipse or a polygon in index space. A sample belongs to a region when its pixel centre, the index point <code>(c, r)</code>, is inside the shape or on its boundary, and the polygon rule is the same even-odd and on-edge rule <code>ocelli-seg</code> paints a contour with. <code>polygon_crosses_itself</code> says whether a ring crosses or touches itself anywhere but at the shared vertex of two neighbouring edges.</p>
     <p><code>livewire_path</code>, <code>livewire_mask</code> and <code>redact_rect</code> live here too.</p>
   </section>
 
@@ -712,6 +728,20 @@ let mut cache: Lru&lt;u64, Frame&gt; = Lru::new(CacheTier::Decoded, 64 * 1024 * 
 let Admission { evicted, displaced, refused } = cache.insert(7, Frame(bytes));
 let band = cache.pressure().band();     // Low, Elevated or Critical</code></pre>
     <p>An eviction, a replacement and a refusal are three different outcomes, and <code>Admission</code> is the only thing that tells them apart, so it is <code>#[must_use]</code>. The bands sit at one half and nine tenths of the budget. The value types in the library are <code>DecodedFrame</code> and <code>Brick</code> in <code>ocelli-cache</code> and <code>Volume</code> in <code>ocelli-volume</code>.</p>
+    <p>Leaving a series releases all of its frames in one call, and leaving a volume releases every brick of every level. Neither is an eviction. <code>release_series</code> returns one <code>Released</code> event for the series, which the ring carries as <code>cache.released</code>, and nothing when the series held nothing. <code>release_volume</code> returns a <code>ReleaseSummary</code>, because volumes and bricks have no ring event.</p>
+<pre><code>use ocelli_cache::{BrickCache, CacheEvent, ImageCache, SeriesId, VolumeId};
+use ocelli_volume::{VolumeCache, VolumeKey};
+
+let events = images.release_series(SeriesId(5));       // images: ImageCache
+for event in events.events() {
+    if let CacheEvent::Released { series, frames, bytes } = event {
+        // one event for the whole series, `bytes` left the budget
+    }
+}
+let gone = bricks.release_volume(VolumeId(2));          // bricks: BrickCache
+let _ = (gone.entries, gone.bytes);                     // every level of volume 2
+let _ = volumes.remove(&amp;VolumeKey { series: SeriesId(5) }); // volumes: VolumeCache</code></pre>
+    <p>The cache has no study. A study is released by whoever owns it calling <code>release_series</code> for each of its series, <code>VolumeCache::remove</code> for each of its volumes and <code>release_volume</code> for each of its bricked volumes. This folder viewer releases by file instead: opening another folder or the synthetic study sends the left folder's ids to <code>POST /forget</code>, which drops each file and every frame of it from the local process.</p>
     <p><code>ocelli_volume::group_volumes</code> splits decoded frames by frame of reference and orientation together, so a localiser mixed with axials is two candidates. <code>Volume::assemble</code> then refuses a candidate that is not one volume.</p>
 <pre><code>use ocelli_volume::{group_volumes, FrameOfReferenceUid, Volume};
 

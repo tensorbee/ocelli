@@ -222,3 +222,49 @@ fn the_presenter_colours_an_inside_sample_and_clears_an_outer_one() {
     assert_eq!(out.get(4..8), Some([10, 20, 30, 40].as_slice()));
     assert_eq!(out.get(0..4), Some([0, 0, 0, 0].as_slice()));
 }
+
+#[test]
+fn region_matches_the_f085_rule() {
+    // F-211 AC4. The triangle (0, 0), (4, 0), (0, 4) painted on a 5 by 5
+    // grid covers the samples with c + r <= 4, 15 of them, and
+    // `ocelli_geom::region_contains` must accept exactly those samples, so a
+    // freeform measured and the same ring painted cover the same pixels.
+    // The second ring has a vertex off the grid and a non-integer edge.
+    use ocelli_core::{Index, Pt};
+    use ocelli_geom::{RegionShape, region_contains};
+    let rings: [&[(f64, f64)]; 2] = [
+        &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)],
+        &[(0.5, -1.0), (4.0, 1.5), (3.0, 4.0), (-0.5, 2.5)],
+    ];
+    for ring in rings {
+        let painted: Vec<IndexPoint> = ring.iter().map(|&(x, y)| point(x, y)).collect();
+        let measured: Vec<Pt<Index>> = ring.iter().map(|&(x, y)| Pt::new(x, y, 0.0)).collect();
+        let mut labels = grid(5, 5, vec![0; 25]);
+        let coverage = must_edit(&mut labels, &painted, 1);
+        let shape = RegionShape::Polygon { points: &measured };
+        let mut accepted = 0_u32;
+        for row in 0..5_u32 {
+            for column in 0..5_u32 {
+                let painted_here = labels
+                    .indices
+                    .get(usize::try_from(row * 5 + column).unwrap_or(usize::MAX))
+                    .copied()
+                    == Some(1);
+                let measured_here = matches!(region_contains(&shape, column, row), Ok(true));
+                assert_eq!(
+                    painted_here, measured_here,
+                    "sample ({column}, {row}) of {ring:?}"
+                );
+                accepted += u32::from(measured_here);
+            }
+        }
+        assert_eq!(coverage.covered, accepted);
+    }
+    let mut triangle = grid(5, 5, vec![0; 25]);
+    let coverage = must_edit(
+        &mut triangle,
+        &[point(0.0, 0.0), point(4.0, 0.0), point(0.0, 4.0)],
+        1,
+    );
+    assert_eq!(coverage.covered, 15);
+}

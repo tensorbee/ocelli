@@ -141,6 +141,9 @@ bytemuck = { version = "1", features = ["derive"] }
 # warning when the workspace entry does not set it, so the fix has to be
 # here. Activated by F-005, and already used by `ocelli-compute`.
 thiserror = { version = "2", default-features = false }
+# F-216. Global allocator for the folder viewer binary only. Default features.
+# The pin is exact. MIT is already on the allowlist. No other crate names it.
+mimalloc = "=0.1.52"
 
 # Dev-dependencies, not part of HLD section 15.2's list, which covers what
 # ships. `proptest` is the harness section 25's round-trip listing is written

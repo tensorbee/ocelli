@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-224
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224
+**Last updated:** 2026-11-07
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.
@@ -156,6 +156,144 @@ the transient tier HLD section 8 drops when a frame decodes. F-031 left
 `CacheTier::Encoded` as a discriminant and no production cache uses it.
 GPU textures are F-040 and F-043. There is no `wgpu`
 dependency here: this crate never sees a texture, only its size.
+
+## The folder viewer, an external consumer
+
+The folder viewer (`examples/folder-viewer`) is a consumer of `Lru` outside
+this crate. One cache holds two kinds of value in an enum. One kind is the
+posted Part 10 bytes. The other is one decoded frame. `ImageCache` was not
+used, because a radiograph does not carry Image Position (Patient), Image
+Orientation (Patient) or Pixel Spacing, and `DecodedFrame` requires an image
+plane. The viewer uses `CacheTier::Decoded`, because the frames are what the
+budget limits. The posted bytes share that budget until the viewer removes
+them with `Lru::remove`. They are not a second cache and they are not
+`CacheTier::Encoded`. No production cache in this crate uses that tier.
+
+An upload is held only while it is read and decoded. The folder viewer keeps
+at most four request bodies at once. That four is the coefficient of `S_max`
+in the resident set formula. Decode runs on two threads. That two is `P` in
+the same formula. Both limits are those constants on every host. Every
+preview decodes there, a preview that carries the file's bytes included, and
+a decode permit ends with its decode, so a client that stops reading holds
+no permit. A request body is freed on the thread that allocated it. A
+decoded frame's sample buffer that leaves the cache is parked on a free list
+keyed by its exact byte length when cached bytes plus free bytes still fit
+the budget, and is freed otherwise. The free list is inside the 256 MiB
+budget, with the cached files and frames, and the cache evicts to make room
+for either. A decode takes a parked buffer of its length when there is one.
+When no free buffer has the length and a held file's frame does not fit
+beside the cached and free bytes, its decode takes the samples of the least
+recently used cached frame of that length only when no reply is still
+reading that frame, and allocates otherwise, so the free list is often empty
+under a steady scroll. A preview that carries the file's bytes never evicts
+and never takes a cached frame's samples, because its frame is not stored. A
+buffer handed out is owned by that decode. Its old bytes are overwritten
+before they are read. `GET /held` reports `free`, the bytes of sample buffers
+on the free list, beside `used`.
+
+Every grey byte the folder viewer holds counts against one fixed cap of
+17,400,000 bytes, which is the resident bound's grey term `P * N_max`, with
+`N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts,
+by capacity, from the moment its render is admitted until it is written. Each
+decode thread keeps at most one written grey to render into next, and that
+grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and
+before it renders a grey less than half that size. A written reply's grey is
+freed rather than kept while a preview waits. A frame of more than 17,400,000
+pixels, whose grey alone is over the cap, draws alone. Its grey is admitted
+only when the gate holds no other grey, and while it is held no other grey is
+admitted, so grey bytes stay within the larger of the cap and that one frame.
+Its decode thread frees that grey after the write and never keeps it, and a
+refused render of that size leaves no buffer behind. Previews that wait for
+room are served in the order they first waited. A preview takes its place in
+one queue when its render is first refused for room. A waiting preview is
+admitted only at the head of that queue and only when its grey fits. A preview
+that fits is admitted at once only when the queue is empty, so it cannot pass
+one that waited first. A preview that already holds room still renders and is
+never queued. Every way out of the wait, admission, the deadline and a client
+gone, leaves the queue and wakes the next waiter. No frame is refused for its
+size below the preview library's `MAX_PIXELS` of 67,108,864. The resident
+bound is stated for frames within the design size. A frame over the design
+size can raise resident memory above that bound. Measured on the release
+binary with a synthetic 4740 by 5928 frame, the preview answered 200 with
+28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview
+waited while that grey was held and was served 3.8 ms after it was released.
+Two such previews read together peaked at 28,098,720 grey bytes, one frame.
+With two clients previewing two such frames in a loop and reading every reply,
+twenty 512 by 512 previews sent among them all answered 200, the slowest in
+42.0 ms. A preview whose grey does not fit waits for room for up to the 60
+second write timeout, and answers 503 busy if none comes. A waiting preview
+holds no decode permit. A held frame it decoded is in the cache before it
+waits. A whole reply must be written within the write timeout, and each send
+is given at most 16 KiB and only the time left, because a send that keeps
+moving bytes keeps its own socket timeout alive. `GET /held` reports `grey`,
+every grey byte under the cap, and `grey_replies`, the part held by replies
+not yet written.
+
+A page that abandons a request closes its connection, which releases its grey
+at once, within a millisecond when measured. A client that keeps a connection
+open without reading holds its grey until the write timeout, measured at 60.0
+seconds. When such clients fill the cap, other previews wait up to the write
+timeout and then answer 503 busy. Measured with twenty such clients, five of
+six later previews answered 503 busy at 60.0 seconds and one was served at
+58.95 seconds, when a stalled write timed out. While body-form previews wait,
+a file post can wait as long, because each of up to four waiting previews
+keeps its request body slot. Measured with four waiting, a file post waited
+58.99 seconds.
+
+The folder viewer forgets a folder the page has left. `POST /forget` takes
+held ids, one `<generation>.<serial>` per line, LF separated, at most 65,536
+lines and 4 MiB. Every line is parsed with `FileId::parse` before anything is
+removed, so one line that is not an id forgets nothing and answers `400` with
+`X-Ocelli-Error: forget`, and an `X-Ocelli-File` header answers `400 header`.
+For each id `Viewer::forget` removes `HeldKey::File(id)` with `Lru::remove`
+and every `HeldKey::Frame(id, n)` with one `Lru::remove_range`, which is
+contiguous because `HeldKey` orders by id before frame. Each frame leaves
+through `forget_frame` and `reclaim_held`, the bookkeeping eviction uses, so
+the frame order, the counts and the free list are as if the id had never been
+held. The reply counts `files`, `frames`, the admitted `bytes` and `unknown`,
+the ids that held nothing, which include another generation's ids and a
+repeat. This is the only forget path. The test-only `forget_file` it replaced
+is gone.
+
+A forget wins against a decode already in flight. `preview_source` counts
+each decode it hands posted bytes to in `in_flight`, and a forget of an id
+with a non-zero count adds it to `doomed`. `store_frame_with` stores nothing
+for a doomed id and returns the frame to its own request. That request is
+answered with the frame, except on the decode workers when its render had
+to wait for grey room. Then nothing was stored, so the round after the wait
+finds the id gone and answers 410 Gone, as F-216 does for any file forgotten
+during that wait, or 503 if the wait itself runs out. Each decode's place in the count is a `Flight` that the
+route keeps until after its store, on the direct path, the decode workers
+and `/value` and `/measure`, and the last one out for an id takes it out of
+both sets. A flight lasts from the lookup that hands out the posted bytes until
+after the store, and on the decode workers through the grey wait that
+follows it, so both sets are bounded by the requests in flight, which F-216 caps
+at 32 connections.
+
+The page forgets. Every open, a folder or the synthetic study, sends the
+previous open's ids with `fetch` and replaces the set of files the page may
+post, so `ensureFile` refuses a file of an open the page has left and a late
+`410` for it does not post it again. An id that arrives after another open
+began is forgotten at once.
+
+Leaving the page forgets by page rather than by id. Each page load makes a
+random token of 32 lowercase hex digits and sends it as `X-Ocelli-Page` with
+every `/file` post, and `CacheState` records it beside the id. On `pagehide`
+the page sends one beacon whose body is `page <token>`, and
+`Viewer::forget_page` forgets every id recorded under that token through the
+same `forget_ids` as `/forget` by id, so a doomed decode and the counts are
+kept one way and another page's files are untouched. A malformed token is
+`400 forget` and an unknown one forgets nothing. A list of ids would not do:
+Chromium allows 64 KiB of beacons in flight at once, over all of them rather
+than each, and measured two beacons of 1,700 ids, 35,699 bytes each, returned
+true and then false. Eviction does not touch the token record, so
+`sweep_pages` drops the ids that hold nothing once the record passes 4,096
+and twice the entries held. A forget that fails is not retried, and the
+budget still bounds what the process holds.
+
+The folder viewer binary uses mimalloc as its global allocator. The pin is
+exact in the workspace manifest and the crate keeps its default features.
+No other crate names it.
 
 ## The decoded tier and its events, F-032
 
