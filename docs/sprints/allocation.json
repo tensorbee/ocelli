@@ -3199,6 +3199,25 @@
       "sprint": "S46"
     },
     {
+      "fid": "F-244",
+      "eid": "E3.10",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "Encapsulated Pixel Data with an empty Basic Offset Table opens per PS3.5 A.4: dicom-object 0.10.0 vendored with its collector patched so the zero-length first Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence, for every encapsulated syntax the registry decodes, single-frame and multi-frame, with frames that span Fragments delimited by their codestream start and end markers where A.4 lets a frame span Fragments, a present Extended Offset Table applied through EncapsulatedFrameIndex::from_extended, and an empty-table corpus row per decodable syntax",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E3.4"
+      ],
+      "depends_fids": [
+        "F-019"
+      ],
+      "notes": "Approved by the operator on 2026-11-08 to be fixed in S46. dicom-object 0.10.0 collector.rs build_encapsulated_data clears its first-item flag only when an Item value is read, so a zero-length Basic Offset Table leaves the flag set and the first Fragment is read as the table. 0.10.1 and upstream master carry the same code. Every encapsulated syntax fails this way, not RLE only, and ocelli-codec's decoders are not at fault. Found while F-213 was reviewed, AS_BUILT F-213 notes. The lead confirmed route (b) on 2026-11-08: the published 0.10.0 package vendored with the one-line patch in the ItemEnd arm, a PATCH-PROVENANCE file and a pins-gate section, as ritk-codecs is, and D-18 amended in the implementing change with the publication caveat. An upgrade replaces the vendored copy once a published release carries the fix.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
       "fid": "F-208",
       "eid": "E38.18",
       "phase": "P1",

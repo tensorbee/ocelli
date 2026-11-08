@@ -38,6 +38,7 @@
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
 | F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | pending |
+| F-244 | E3.10 | Encapsulated Pixel Data with an empty Basic Offset Table opens per PS3.5 A.4: dicom-object 0.10.0 vendored with its collector patched so the zero-length first Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence, for every encapsulated syntax the registry decodes, single-frame and multi-frame, with frames that span Fragments delimited by their codestream start and end markers where A.4 lets a frame span Fragments, a present Extended Offset Table applied through EncapsulatedFrameIndex::from_extended, and an empty-table corpus row per decodable syntax | Rust | 2w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -270,6 +271,20 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
   CharLS-encoded trigger fixtures and banded corpus rows. F-243 implements it,
   E4.13 at 3w, approved with no new deviation. It lands before F-239's codec
   part, whose `ritk-codecs` patch merges onto it, so F-239 now depends on it.
+- **Encapsulated Pixel Data with an empty Basic Offset Table does not open.**
+  PS3.5 A.4 lets the table Item have length zero under every encapsulated
+  syntax. dicom-object 0.10.0 `build_encapsulated_data` clears its first-item
+  flag only when an Item value is read, so after an empty table the first
+  Fragment is read as the table. All 70 empty-table probe files across the 14
+  decodable encapsulated syntaxes were refused, by the frame index or by
+  `parse_part10`, and no decoder was reached. A compressed icon with an empty
+  table can refuse the whole file. 0.10.1 and upstream master carry the same
+  code. No corpus row has an empty table, which is why nothing caught it.
+  **Added by the operator on 2026-11-08:** fix it in S46 now. F-244 implements
+  it, E3.10 at 2w. The lead confirmed the route: dicom-object 0.10.0 is
+  vendored with a one-line patch and recorded provenance, as `ritk-codecs` is,
+  and D-18 is amended in the implementing change. An upgrade replaces the
+  vendored copy once a published release carries the fix. No new deviation.
 
 ## What is carried in
 
