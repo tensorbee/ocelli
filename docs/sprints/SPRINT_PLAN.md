@@ -112,11 +112,11 @@ streaming and other scheduled stories must include their viewer workflow,
 feature-matrix row and browser evidence as part of their own completion.
 
 F-202 to F-205 retain their identities with explicit narrower ownership.
-F-245 to F-264 carry the remaining bounded slices. The current S46 story
+F-245 to F-265 carry the remaining bounded slices. The current S46 story
 closure is unchanged. F-235, F-237, F-238 and F-241 remain S47 and F-242
 remains S48. Other stories previously scheduled S47 onward move four sprints,
 without changing their estimates or dependency order. The pending close
-backlog drafts were never filed and must start at F-265 instead.
+backlog drafts were never filed and must start at F-266 instead.
 
 The wave estimates below are sums of provisional lead engineering estimates.
 They are not a team-size claim, observed velocity or calendar duration. The
@@ -125,7 +125,7 @@ canonical plans remain drafts for the normal pre-implementation design round.
 | Wave | Concrete deliverable | Stories | Estimated engineer-weeks |
 |------|----------------------|---------|--------------------------|
 | S47 | One viewer, worker decode, one to one and shared preferences, with the existing video and VOI work | 8 | 32 |
-| S48 | Metadata, histogram, overlays, interpolation and remaining stack tools, with MPEG-2 | 7 | 30 |
+| S48 | Metadata, histogram, overlays, interpolation, remaining stack tools and ECG, with MPEG-2 | 8 | 36 |
 | S49 | MPR, cursor, slab, fusion and segmentation workflows | 7 | 31 |
 | S50 | Volume controls, priors, documents/GSPS read/apply, safe JPEG XL recompression, browser conformance and the complete feature gate | 7 | 30 |
 
@@ -746,7 +746,7 @@ _S46 to S53, 7 stories, 50 engineer-weeks._
 
 One viewer exposes every developed user-facing library feature through real workflows, with explicit tier limits and measured or source-qualified cornerstone3D parity. S47 to S50 are the next four implementation waves, not a measured calendar forecast.
 
-_S47 to S50, 24 stories, 98 engineer-weeks._
+_S47 to S50, 25 stories, 104 engineer-weeks._
 
 #### Sprint S47
 
@@ -765,7 +765,7 @@ _S47 to S50, 24 stories, 98 engineer-weeks._
 
 #### Sprint S48
 
-**Goal**: MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name, Nearest and linear display interpolation controls in the showcase, DICOM overlay planes and display shutters drawn in the showcase, Image and region histograms in the showcase, Searchable recursive metadata browser in the showcase, Metadata comparison and copy in the showcase, Remaining annotation and manipulation tools in the showcase.
+**Goal**: MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name, Nearest and linear display interpolation controls in the showcase, DICOM overlay planes and display shutters drawn in the showcase, Image and region histograms in the showcase, Searchable recursive metadata browser in the showcase, Metadata comparison and copy in the showcase, Remaining annotation and manipulation tools in the showcase, Bounded ECG waveform reading and display in the single showcase viewer.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
@@ -776,6 +776,7 @@ _S47 to S50, 24 stories, 98 engineer-weeks._
 | F-249 | E38.44 | Searchable recursive metadata browser in the showcase | All | 4w |
 | F-250 | E38.45 | Metadata comparison and copy in the showcase | All | 2w |
 | F-263 | E38.58 | Remaining annotation and manipulation tools in the showcase | All | 6w |
+| F-265 | E38.60 | Bounded ECG waveform reading and display in the single showcase viewer | All | 6w |
 
 #### Sprint S49
 

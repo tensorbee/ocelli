@@ -422,9 +422,10 @@ their actual viewer workflow and matrix evidence before completion.
 | F-259 | E38.54 | S50 | Safe JPEG XL JPEG Recompression decoding and showcase workflow | All | 5w | F-229, F-239, F-244, F-245 | pending |
 | F-260 | E38.55 | S50 | Browser-owned DICOM conformance checks in the showcase | All | 4w | F-202, F-225, F-234 | pending |
 | F-261 | E38.56 | S49 | Fractional between-slice stack sampling in the showcase | All | 3w | F-203, F-246, F-051 | pending |
-| F-262 | E38.57 | S50 | One-viewer feature inventory, parity matrix and standing workflow gate | All | 3w | F-202, F-203, F-204, F-205, F-245, F-246, F-247, F-248, F-249, F-250, F-251, F-252, F-253, F-254, F-255, F-256, F-257, F-258, F-259, F-260, F-261, F-263, F-264, F-241, F-242 | pending |
+| F-262 | E38.57 | S50 | One-viewer feature inventory, parity matrix and standing workflow gate | All | 3w | F-202, F-203, F-204, F-205, F-245, F-246, F-247, F-248, F-249, F-250, F-251, F-252, F-253, F-254, F-255, F-256, F-257, F-258, F-259, F-260, F-261, F-263, F-264, F-241, F-242, F-265 | pending |
 | F-263 | E38.58 | S48 | Remaining annotation and manipulation tools in the showcase | All | 6w | F-245, F-202, F-211, F-215 | pending |
 | F-264 | E38.59 | S49 | Segmentation editing and DICOM interchange in the showcase | All | 5w | F-251, F-263, F-080, F-095, F-096 | pending |
+| F-265 | E38.60 | S48 | Bounded ECG waveform reading and display in the single showcase viewer | All | 6w | F-245, F-202, F-017 | pending |
 
 ### M14, Out-of-core volume streaming
 
@@ -507,7 +508,7 @@ Tracked, unscheduled. No sprint is assigned and no milestone claims
 them. They exist here so a Phase 1 design that would make one of them
 expensive is visible at design time, which is the whole point of HLD
 section 13. F-202 to F-205 are now scheduled under M21 above, with their remaining
-viewer work split into F-245 to F-264. Phase 2 and Phase 3 rows below retain
+viewer work split into F-245 to F-265. Phase 2 and Phase 3 rows below retain
 their existing later scope and acquire a real workflow in the single viewer
 when their implementation is delivered.
 

@@ -110,7 +110,7 @@ Tests must inject failure after staging and before publication and then retry.
 Reuse `canonical viewer feature inventory, browser suites, oracle and benchmark subjects`. First write the independent synthetic fixture and
 browser action/refusal controls, then connect the smallest real consumer,
 then challenge a lifecycle combination the initial test did not cover.
-Dependencies: F-202, F-203, F-204, F-205, F-245, F-246, F-247, F-248, F-249, F-250, F-251, F-252, F-253, F-254, F-255, F-256, F-257, F-258, F-259, F-260, F-261, F-263, F-264, F-241, F-242. Same-sprint dependencies must be done before the consumer starts, as
+Dependencies: F-202, F-203, F-204, F-205, F-245, F-246, F-247, F-248, F-249, F-250, F-251, F-252, F-253, F-254, F-255, F-256, F-257, F-258, F-259, F-260, F-261, F-263, F-264, F-241, F-242, F-265. Same-sprint dependencies must be done before the consumer starts, as
 `/start-feature` requires. A source review or partial checkpoint does not
 satisfy that precondition. No shared page, renderer,
 provider or ledger file has concurrent writers. Browser and GPU observations
