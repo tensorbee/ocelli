@@ -60,7 +60,7 @@ wasm session's frame cache, F-231, `crates/ocelli-wasm/src/session.rs`, and
 each is pushed through `EventRing::push_with_seq`, which assigns the next
 sequence number as `push_presented` does, so every kind shares one sequence
 space. The cache is off until the caller sets a budget, and with no budget
-the ring holds only kind 6.
+a commit pushes only kind 6.
 
 - **A cached commit** pushes the insert's events in `ImageCache`'s order,
   `cache.displaced`, then each `cache.evicted` least recently used first,

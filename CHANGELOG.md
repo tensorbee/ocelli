@@ -655,6 +655,26 @@ Repository bootstrap. Nothing is published.
   `DecodedFrame` as the default, `ImageCache::set_budget` moves the budget
   and returns the evictions, and `Lru::peek` reads a value without marking
   it used.
+- The local folder viewer lists its windows from the local process. On a CT
+  the list starts with the Soft tissue, Lung and Bone presets, and on every
+  image it lists each Window Center and Width pair of the file in file
+  order, named by its Window Center & Width Explanation or `Window n`, with
+  each VOI LUT Sequence item listed as a row that cannot be chosen. The keys
+  `1` to `9` choose rows 1 to 9 and `0` stays Fit. A file window is sent as
+  `X-Ocelli-Window-Index` and selected once by `VoiTransform::new`, and a
+  file opens at its first pair holding both a centre and a width. A preset
+  on an image whose Modality is not CT is refused with
+  `X-Ocelli-Error: modality`, whatever the page sends. A multiframe whose windows change per
+  frame lists the shown frame's own, and the process keeps those replies up
+  to 16 MiB across every file, reported as `kept` in `GET /held`. Region
+  window `Y` drags a rectangle, `POST /region` returns the least and
+  greatest modality value whose pixel centre is inside it with padding left
+  out, and `windowRegion` from `@ocelli/core` makes the window, which
+  centres on the middle of the span where cornerstone3D 5.8.2's
+  `WindowLevelRegionTool` centres on the mean. The process serves the built
+  `@ocelli/core` under `/lib/` from an allowlist, so the region window needs
+  `npm run build -w @ocelli/core` and reads unavailable without it. The
+  bottom right corner names the window shown.
 
 ### Changed
 
@@ -689,3 +709,11 @@ Repository bootstrap. Nothing is published.
   mode, so a browser applied `"default"` and could serve a re-processed
   object from its HTTP cache by heuristic freshness without asking the
   server. A server with validators answers an unchanged object with 304.
+
+### Fixed
+
+- The example viewer builds again from a clean clone with no
+  `crates/ocelli-wasm/pkg`. Under Vite 7 `npm run build` failed with ENOENT on
+  `ocelli_wasm.js`. Without the pkg the worker now keeps a runtime import and
+  reports the core as not built, and with it the wasm is still bundled as its
+  own files. A checkout under a path with a space builds too.

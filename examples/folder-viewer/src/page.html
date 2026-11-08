@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ocelli</title>
+<script type="importmap">{"imports":{"@ocelli/core":"/lib/ocelli-core/index.js","dcmjs":"/lib/dcmjs.js"}}</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%22-6 -6 112 112%22 fill=%22%23e6e6e6%22%3E %3Cg transform=%22translate(50 50)%22%3E%3Cpath d=%22M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z%22/%3E%3Cpath d=%22M-46.64762 -18 A50 50 0 0 1 46.64762 -18 L20.12461 -18 A27 27 0 0 0 -20.12461 -18 Z%22 transform=%22scale(1 -1)%22/%3E%3Cpath d=%22M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z%22/%3E%3Cpath d=%22M48.28043 -13 A50 50 0 0 1 48.28043 13 L23.66432 13 A27 27 0 0 0 23.66432 -13 Z%22 transform=%22scale(-1 1)%22/%3E%3C/g%3E %3C/svg%3E">
 <style>
   :root {
@@ -446,6 +447,24 @@
   #inspector .segment button:first-child { border-radius: 6px 0 0 6px; }
   #inspector .segment button { min-width: 36px; }
   .row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  #window-list button {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 6px 4px;
+  }
+  #window-list button:hover { background: var(--hover); }
+  #window-list button.active, #window-list button.active:hover { background: var(--on); color: var(--on-ink); }
+  #window-list button:disabled, #window-list button:disabled:hover { background: transparent; color: var(--faint); }
+  #window-list kbd { min-width: 14px; text-align: center; }
+  #window-list .window-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #window-list .window-numbers { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  #window-list button.active .window-numbers { color: var(--on-ink); }
   .note-text { color: var(--muted); margin: 6px 0; font-size: 12px; }
   .swatch {
     width: 22px;
@@ -644,6 +663,7 @@
   <symbol id="i-pan" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
   <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></symbol>
   <symbol id="i-wl" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor"/></symbol>
+  <symbol id="i-wl-region" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke-dasharray="3 2"/><circle cx="12" cy="12" r="4.5"/><path d="M12 7.5a4.5 4.5 0 0 1 0 9z" fill="currentColor"/></symbol>
   <symbol id="i-length" viewBox="0 0 24 24"><path d="M5 19L19 5"/><path d="M3 17l4 4M17 3l4 4"/></symbol>
   <symbol id="i-angle" viewBox="0 0 24 24"><path d="M19 5L5 19h15"/><path d="M10 14a6 6 0 0 1 1.5 5"/></symbol>
   <symbol id="i-cobb" viewBox="0 0 24 24"><path d="M4 6l16 3M4 18l16-3"/></symbol>
@@ -701,6 +721,7 @@
   <button type="button" class="icon" id="tool-pan" aria-label="Pan" data-key="P"><svg class="i"><use href="#i-pan"/></svg><span class="sr">Pan</span></button>
   <button type="button" class="icon" id="tool-zoom" aria-label="Zoom" data-key="Z"><svg class="i"><use href="#i-zoom"/></svg><span class="sr">Zoom</span></button>
   <button type="button" class="icon" id="tool-wl" aria-label="Window level" data-key="W"><svg class="i"><use href="#i-wl"/></svg><span class="sr">W/L</span></button>
+  <button type="button" class="icon" id="tool-wlregion" aria-label="Region window" data-key="Y"><svg class="i"><use href="#i-wl-region"/></svg><span class="sr">Region window</span></button>
   <span class="sep"></span>
   <button type="button" class="icon" id="tool-length" aria-label="Length" data-key="L"><svg class="i"><use href="#i-length"/></svg><span class="sr">Length</span></button>
   <button type="button" class="icon" id="tool-angle" aria-label="Angle" data-key="Q"><svg class="i"><use href="#i-angle"/></svg><span class="sr">Angle</span></button>
@@ -806,12 +827,8 @@
 <aside id="inspector">
   <section>
     <h2>WINDOW</h2>
-    <div class="row">
-      <button type="button" id="preset-soft" data-preset="soft_tissue">Soft tissue</button>
-      <button type="button" id="preset-lung" data-preset="lung">Lung</button>
-      <button type="button" id="preset-bone" data-preset="bone">Bone</button>
-    </div>
-    <p class="note-text" id="preset-note">Drag with the W/L tool to set your own window. Reset returns to the window in the file.</p>
+    <div id="window-list"></div>
+    <p class="note-text" id="window-note">Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.</p>
   </section>
   <section>
     <h2>MARKS</h2>
@@ -849,6 +866,7 @@
       <kbd>↑ ↓</kbd><span>Previous or next image</span>
       <kbd>Space</kbd><span>Play or pause</span>
       <kbd>= −</kbd><span>Zoom in or out</span>
+      <kbd>1 to 9</kbd><span>Window row</span>
       <kbd>0</kbd><span>Fit</span>
       <kbd>Del</kbd><span>Remove the selected mark</span>
       <kbd>Esc</kbd><span>Clear the selection</span>
@@ -903,13 +921,14 @@ const TOO_LARGE = "This region is larger than the local process measures.";
 // refuses a longer one with code `points`.
 const OUTLINE_CAP = 4000;
 const OUTLINE_LONG = "This outline has more than 4000 points, so it is not measured.";
-const NAV = ["scroll", "pan", "zoom", "wl"];
+const NAV = ["scroll", "pan", "zoom", "wl", "wlregion"];
 const TOOLS = NAV.concat(DRAW);
 const SENTENCE = {
   "tool-scroll": "Drag up or down to move through the images.",
   "tool-pan": "Drag to move the image.",
   "tool-zoom": "Drag up or down to zoom. A pinch zooms at the pointer.",
   "tool-wl": "Drag to change the window. Centre follows up and down. Width follows left and right.",
+  "tool-wlregion": "Drag a rectangle. The window runs from the least to the greatest modality value whose pixel centre is inside it, padding left out, with the function already shown. The local process finds the two values and windowRegion in the library makes the window.",
   "tool-contour": "A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. It is not saved.",
   "tool-rect": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.",
   "tool-ellipse": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.",
@@ -921,7 +940,7 @@ const SENTENCE = {
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
-  reset: "Put the image back to the file window and the fitted view.",
+  reset: "Put the image back to the first usable window in the file and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
   invert: "Reverse the grey. The pixels in the file are not changed.",
   rotate: "The displayed picture turns. The pixels are not changed and the marks turn with them.",
@@ -934,21 +953,27 @@ const SENTENCE = {
   "key-image": "Marks this image in the series list for this session. It is not saved and it does not write a Key Object Selection.",
   headers: "Show the DICOM headers for this image.",
   play: "Play through the images in this series.",
-  "preset-soft": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
-  "preset-lung": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
-  "preset-bone": "The same LUT chain is run again with this preset's centre and width, in modality units. On a CT that is Hounsfield units.",
   layout: "Choose 1 by 1 up to 3 by 3 viewports. Drag a series onto a viewport, or click a series to open it in the outlined one.",
   "tile-mode": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
   link: "Link every visible viewport to the outlined one. Scroll, Window and Zoom each start off.",
   "link-scroll": "The other viewports show their image nearest the outlined one's position, when both series share a Frame of Reference UID and lie in nearly the same plane. The local process chooses the image.",
-  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a preset or Reset. A preset is not sent to an image that is not CT, and no window is sent to an image that is not monochrome.",
+  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a window row, a region window or Reset. A preset is not sent to an image the local process does not offer it on, a file window past an image's own list shows that image's first usable window, and no window is sent to an image that is not monochrome.",
   "link-zoom": "The other viewports take the outlined one's zoom over their own fit. Pan is not copied.",
   "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
   "source-folder": "Open a folder of DICOM files. The files stay where they are.",
   "toggle-series": "Hide or show the series list.",
-  "toggle-inspector": "Hide or show the window presets, marks and key list."
+  "toggle-inspector": "Hide or show the window list, marks and key list."
 };
+// The window list. Every name and number in it comes from the local
+// process's inspect reply. The page keeps no preset and no window number.
+const PRESET_ROW = "A preset from the library, in Hounsfield units. The local process offers the presets on CT only.";
+const FILE_ROW = "A window stored in the file, named by its Window Center & Width Explanation, or by its place in the file when it has none.";
+const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
+const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.";
+const LIBRARY_MISSING = "The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.";
+const DCMJS_MISSING = "The region window needs dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.";
+const ONE_VALUE = "This region holds one value, so it gives no window.";
 const RELEASE_COMMAND = "cargo run --release -p ocelli-folder-viewer";
 const GONE = "the viewer process at this address is not answering. Run " + RELEASE_COMMAND + " again and open the address it prints";
 const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run " + RELEASE_COMMAND + " again.";
@@ -988,8 +1013,8 @@ const seriesEl = document.getElementById("series-list");
 const seriesEmpty = document.getElementById("series-empty");
 const emptyEl = document.getElementById("empty");
 const tip = document.getElementById("tip");
-const presetNote = document.getElementById("preset-note");
-const PRESET_HINT = presetNote.textContent;
+const windowList = document.getElementById("window-list");
+const windowNote = document.getElementById("window-note");
 const wrap = document.getElementById("wrap");
 const cellTemplate = document.getElementById("cell-template");
 const layoutButton = document.getElementById("layout");
@@ -1018,7 +1043,7 @@ const selectedKind = document.getElementById("selected-kind");
 const mag = document.getElementById("mag");
 const SERIES_TYPE = "application/x-ocelli-series";
 // The file window, for a thumbnail that ignores every viewport's window.
-const PLAIN_VIEW = { overrideWindow: null, activePreset: null, invert: false };
+const PLAIN_VIEW = { overrideWindow: null, activePreset: null, windowIndex: 0, invert: false };
 
 let currentGeneration = 0;
 let seriesList = [];
@@ -1086,7 +1111,13 @@ let lastPointer = null;
 let pendingDelta = 0;
 let marksSig = "";
 let keyButtonOn = false;
-let presetModality = null;
+let windowListSig = "";
+// A refusal of the last window change, shown in the sentence line until the
+// next change or tool.
+let windowNotice = "";
+// The built `@ocelli/core`, imported once through the import map when the
+// region window is first used. `null` when the build is not served.
+let libraryLoad = null;
 let tipTimer = 0;
 let thumbGeneration = 0;
 
@@ -1138,7 +1169,7 @@ function blankViewport(cell) {
     viewIndex: 0,
     fitMode: true, scale: 1, panX: 0, panY: 0,
     rotation: 0, flipH: false, flipV: false,
-    overrideWindow: null, draftWindow: null, activePreset: null, invert: false,
+    overrideWindow: null, draftWindow: null, activePreset: null, windowIndex: 0, invert: false,
     tileMode: false,
     imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
@@ -1292,9 +1323,6 @@ document.addEventListener("pointerdown", (event) => {
 }, true);
 referenceButton.addEventListener("click", () => setReference(!showReference));
 document.getElementById("key-image").addEventListener("click", toggleKey);
-for (const button of document.querySelectorAll("[data-preset]")) {
-  button.addEventListener("click", () => applyPreset(activeViewport(), button.dataset.preset));
-}
 for (const button of sizeRow.querySelectorAll("[data-size]")) {
   button.addEventListener("click", () => chooseSize(Number(button.dataset.size)));
 }
@@ -1392,7 +1420,7 @@ if (!document.fullscreenEnabled) {
 setLayout(1, 1);
 syncSwatches();
 syncSizes();
-syncPresetAvailability(null);
+syncWindowList();
 showSentence();
 noteBuild();
 
@@ -1586,7 +1614,13 @@ function showTip(node) {
 }
 
 function showSentence() {
-  sentence.textContent = hoverSentence || SENTENCE[toolId(tool)] || "";
+  sentence.textContent = hoverSentence || windowNotice || SENTENCE[toolId(tool)] || "";
+}
+
+function setWindowNotice(text) {
+  const words = String(text || "");
+  windowNotice = words && !/[.!?]$/.test(words) ? words.charAt(0).toUpperCase() + words.slice(1) + "." : words;
+  showSentence();
 }
 
 function toolId(name) {
@@ -1601,6 +1635,8 @@ function setTool(next) {
   const vp = activeViewport();
   const leavingTiles = vp.tileMode && isDraw(next);
   tool = next;
+  windowNotice = "";
+  if (next === "wlregion") loadLibrary();
   cancelDraft();
   if (leavingTiles) setTileMode(vp, false);
   syncToolButtons();
@@ -1615,7 +1651,7 @@ function syncToolButtons() {
   for (const name of TOOLS) {
     const button = document.getElementById("tool-" + name);
     button.classList.toggle("active", name === tool);
-    button.classList.toggle("dim", vp.tileMode && isDraw(name));
+    button.classList.toggle("dim", (vp.tileMode && isDraw(name)) || button.getAttribute("aria-disabled") === "true");
   }
   tileButton.classList.toggle("active", vp.tileMode);
   const allowed = gridAllowed(vp) && (vp.tileMode || !isDraw(tool));
@@ -1975,7 +2011,11 @@ function loadSeries(vp, key) {
   vp.overrideWindow = null;
   vp.draftWindow = null;
   vp.activePreset = null;
-  if (vp.cell === activeCell) syncPresets();
+  vp.windowIndex = 0;
+  if (vp.cell === activeCell) {
+    windowNotice = "";
+    syncWindowList();
+  }
   syncStage(vp);
   syncSeriesRows();
   clearLine(vp);
@@ -2093,10 +2133,12 @@ async function showIndex(vp, next) {
   vp.viewIndex = wrapped;
   positions.set(series.key, vp.viewIndex);
   const image = series.images[vp.viewIndex];
-  // The presets are in Hounsfield units, so a preset leaves a viewport that
-  // moves to an image that is not CT.
-  if (vp.activePreset && String(image.info.modality || "") !== "CT") vp.activePreset = null;
-  if (active) syncPresetAvailability(image);
+  // A preset leaves a viewport that moves to an image the local process does
+  // not offer it on. A file window index stays, and `effectiveIndex` reads
+  // it against this image's own list.
+  if (vp.activePreset && !presetOffered(image, vp.activePreset)) vp.activePreset = null;
+  refreshFrameWindows(image);
+  if (active) syncWindowList();
   if (noteKey(image) !== previousKey) {
     if (active) {
       selected = null;
@@ -2206,7 +2248,7 @@ function applyGrey(vp, grey, image) {
 function cacheKey(image, view) {
   const win = view.overrideWindow
     ? view.overrideWindow.center + "/" + view.overrideWindow.width + "/" + view.overrideWindow.fn
-    : (view.activePreset || "file");
+    : (view.activePreset || "file" + fileKeyIndex(image, view));
   return fileSerial(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
 }
 
@@ -2450,6 +2492,11 @@ async function requestGrey(image, options) {
     headers["X-Ocelli-Window-Function"] = chosen.fn;
   } else if (view.activePreset) {
     headers["X-Ocelli-Window-Preset"] = view.activePreset;
+  } else {
+    // Index 0 is the file window with no header, which a file storing no
+    // window also takes.
+    const index = effectiveIndex(image, view);
+    if (index != null && index > 0) headers["X-Ocelli-Window-Index"] = String(index);
   }
   const wantedView = view.viewIndex;
   const wantedToken = view.loadToken;
@@ -2696,6 +2743,13 @@ async function paintTiles(vp) {
       if (lastPointer && lastPointer.tile === node) refreshMag(vp);
       continue;
     }
+    // Each tile follows the single view's rule: until its frame's own window
+    // list is known it is drawn at that frame's first usable window, the list
+    // is asked for, and the tiles are drawn again when it arrives. The label
+    // names the window this tile is drawn at, read with the same state as
+    // its key.
+    refreshFrameWindows(image);
+    const word = windowWord(vp, image);
     try {
       const key = cacheKey(image, vp);
       let grey = takeGrey(key);
@@ -2707,6 +2761,11 @@ async function paintTiles(vp) {
       const context = node.getContext("2d");
       if (!context) continue;
       paintGrey(context, node, grey);
+      // A tile with no window name, because its frame's list is not known
+      // yet or the file stores no window, is named by the numbers it is
+      // drawn at, and by "full range" as the corner says.
+      const drawnAt = "WW " + grey.widthText + "  WL " + grey.center + (grey.fullRange ? "  full range" : "");
+      labels[index].textContent = "Image " + (vp.viewIndex + index + 1) + "  " + (word || drawnAt);
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
       sizeTile(node);
@@ -2725,6 +2784,11 @@ async function paintTiles(vp) {
       if (lastPointer && lastPointer.tile === node) refreshMag(vp);
     }
   }
+}
+
+function tileImages(vp) {
+  const series = seriesOf(vp);
+  return series ? series.images.slice(vp.viewIndex, vp.viewIndex + 4) : [];
 }
 
 function sizeTile(node) {
@@ -2862,6 +2926,8 @@ function paintOverlays(vp) {
   const center = win ? win.center : (info.windowCenter || "");
   const width = win ? (win.width == null ? win.widthText : win.width) : (info.windowWidth || "");
   let windowLine = "WW " + width + "  WL " + center;
+  const word = windowWord(vp, image);
+  if (word) windowLine += "  " + word;
   if (vp.shownWindow && vp.shownWindow.fullRange && !vp.overrideWindow && !vp.draftWindow && !vp.activePreset) windowLine += "  full range";
   // The file window describes a picture this page does not show.
   if (!info.monochrome) windowLine = "Window not applicable";
@@ -3014,6 +3080,7 @@ function resetView(vp) {
   vp.overrideWindow = null;
   vp.draftWindow = null;
   vp.activePreset = null;
+  vp.windowIndex = 0;
   vp.invert = false;
   vp.rotation = 0;
   vp.flipH = false;
@@ -3027,40 +3094,329 @@ function resetView(vp) {
   copyZoom(vp);
 }
 
-function applyPreset(vp, name) {
-  vp.activePreset = name;
-  vp.overrideWindow = null;
+// The lists the local process gave for one image. A per-frame list it
+// answered for this frame replaces the scan's, which is frame 0's.
+function windowInfo(image) {
+  const info = (image && image.info) || {};
+  const own = image ? image.frameWindows : null;
+  return {
+    presets: Array.isArray(info.presets) ? info.presets : [],
+    windows: own ? own.windows : (Array.isArray(info.windows) ? info.windows : []),
+    voiLuts: own ? own.voiLuts : (Array.isArray(info.voiLuts) ? info.voiLuts : [])
+  };
+}
+
+// The file window index a request for this image sends. An index at or past
+// this image's own list, or on a slot with no centre or width, is this
+// image's first usable window, the one the local process opens with, so a
+// shorter list or an empty slot shows that window and no fault.
+//
+// On a multiframe whose windows are per frame, a frame other than 0 has no
+// confirmed list until its own `/inspect` answers. Until then this is
+// `null`: no index is sent, the local process opens that frame at its own
+// first usable window, and the frame is drawn again at the chosen index
+// once its list arrives. So no request names an index the frame's own list
+// has not confirmed.
+function effectiveIndex(image, view) {
+  if (!windowsKnown(image)) return null;
+  const windows = windowInfo(image).windows;
+  const usable = (win) => Boolean(win) && win.center != null && win.width != null;
+  const index = view.windowIndex || 0;
+  if (usable(windows[index])) return index;
+  const first = windows.findIndex(usable);
+  return first < 0 ? 0 : first;
+}
+
+function windowsKnown(image) {
+  if (!image || !image.info || !image.info.windowsPerFrame || image.frame === 0) return true;
+  return Boolean(image.frameWindows);
+}
+
+// The file window part of a cache key. A frame drawn before its list is
+// known is the process's default, which has its own key.
+function fileKeyIndex(image, view) {
+  const index = effectiveIndex(image, view);
+  return index == null ? "default" : String(index);
+}
+
+function presetOffered(image, token) {
+  return windowInfo(image).presets.some((preset) => preset.token === token);
+}
+
+// One row per preset, then per file window, then per VOI LUT item, in the
+// order the number keys reach them. With a VOI LUT Sequence every row is
+// disabled, because the local process refuses a preset and an index there.
+function windowRows(image) {
+  const listed = windowInfo(image);
+  const blocked = listed.voiLuts.length > 0 || !(image && image.info && image.info.monochrome);
+  const rows = [];
+  for (const preset of listed.presets) {
+    rows.push({ kind: "preset", token: preset.token, label: preset.name, center: preset.center, width: preset.width, disabled: blocked });
+  }
+  listed.windows.forEach((win, index) => {
+    const empty = win.center == null || win.width == null;
+    rows.push({ kind: "file", index, label: win.label, center: win.center, width: win.width, disabled: blocked || empty || Boolean(image.frameWindowsFailed) });
+  });
+  for (const item of listed.voiLuts) rows.push({ kind: "lut", label: item.label, disabled: true });
+  return rows;
+}
+
+// The row the viewport's window state names, or -1 for a numeric window.
+function activeRow(vp, image, rows) {
+  if (vp.draftWindow || vp.overrideWindow) return -1;
+  if (vp.activePreset) return rows.findIndex((row) => row.kind === "preset" && row.token === vp.activePreset);
+  const index = effectiveIndex(image, vp);
+  return rows.findIndex((row) => row.kind === "file" && row.index === index);
+}
+
+// The word the bottom right corner adds to the window line.
+function windowWord(vp, image) {
+  if (vp.draftWindow) return "manual";
+  if (vp.overrideWindow) return vp.overrideWindow.from === "region" ? "region" : "manual";
+  const listed = windowInfo(image);
+  if (vp.activePreset) {
+    const preset = listed.presets.find((row) => row.token === vp.activePreset);
+    return preset ? preset.name : "";
+  }
+  const win = listed.windows[effectiveIndex(image, vp)];
+  return win ? win.label : "";
+}
+
+function syncWindowList() {
+  const vp = activeViewport();
+  const image = vp ? currentImage(vp) : null;
+  const rows = windowRows(image);
+  const on = vp && image ? activeRow(vp, image, rows) : -1;
+  const sig = JSON.stringify([rows, on]);
+  if (sig === windowListSig) return;
+  windowListSig = sig;
+  windowList.replaceChildren();
+  rows.forEach((row, at) => {
+    const number = at + 1;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = row.disabled;
+    button.className = at === on ? "active" : "";
+    button.dataset.row = String(number);
+    button.dataset.sentence = row.kind === "lut" ? VOI_LUT_ROW : row.kind === "preset" ? PRESET_ROW : FILE_ROW;
+    const key = document.createElement("kbd");
+    key.textContent = number <= 9 ? String(number) : "";
+    const label = document.createElement("span");
+    label.className = "window-label";
+    label.textContent = row.label;
+    const numbers = document.createElement("span");
+    numbers.className = "window-numbers";
+    numbers.textContent = row.kind === "lut" ? "LUT" : row.center == null ? "empty" : "WW " + row.width + "  WL " + row.center;
+    button.append(key, label, numbers);
+    button.addEventListener("click", () => chooseRow(activeViewport(), number));
+    windowList.append(button);
+  });
+  const listed = windowInfo(image);
+  windowNote.textContent = image && !image.info.monochrome
+    ? "This image is not monochrome, so it has no window to set."
+    : listed.voiLuts.length
+      ? "This file has a VOI LUT Sequence, which this preview does not apply, so its rows cannot be chosen. Drag with the W/L tool to set your own window."
+      : image && !rows.length
+        ? "This file stores no window, so the full range of its values is shown. " + WINDOW_HINT
+        : WINDOW_HINT;
+}
+
+// Number key `n`, or a click, chooses row `n`. A disabled row does nothing.
+function chooseRow(vp, number) {
+  const image = vp ? currentImage(vp) : null;
+  const row = windowRows(image)[number - 1];
+  if (!row || row.disabled) return;
+  if (row.kind === "preset") chooseWindow(vp, { preset: row.token });
+  else if (row.kind === "file") chooseWindow(vp, { index: row.index });
+}
+
+// The commit point of a window change is a successful preview reply. The
+// change is asked for under its own cache key and the viewport takes it only
+// when its image arrives, so a refusal leaves the state and the shown image
+// alone and puts the refusal in the sentence line.
+async function chooseWindow(vp, next) {
+  const image = currentImage(vp);
+  if (!image || !image.info.monochrome) return false;
+  const token = vp.loadToken;
+  const index = vp.viewIndex;
+  const trial = {
+    overrideWindow: next.override || null,
+    activePreset: next.preset || null,
+    windowIndex: next.index || 0,
+    invert: vp.invert,
+    loadToken: token,
+    viewIndex: index
+  };
+  const still = () => token === vp.loadToken && index === vp.viewIndex && currentImage(vp) === image;
+  try {
+    await fetchGrey(image, trial);
+  } catch (error) {
+    if (still() && !(error && error.name === "AbortError")) {
+      setWindowNotice(error instanceof Error ? error.message : "the window could not be applied");
+    }
+    return false;
+  }
+  if (!still()) return false;
+  vp.overrideWindow = trial.overrideWindow;
+  vp.activePreset = trial.activePreset;
+  vp.windowIndex = trial.windowIndex;
   vp.draftWindow = null;
-  if (vp.cell === activeCell) syncPresets();
+  if (vp.cell === activeCell) {
+    windowNotice = "";
+    showSentence();
+  }
   showIndex(vp, vp.viewIndex);
   copyWindow(vp);
+  return true;
 }
 
-function syncPresets() {
-  const vp = activeViewport();
-  for (const button of document.querySelectorAll("[data-preset]")) {
-    button.classList.toggle("active", button.dataset.preset === vp.activePreset && !vp.overrideWindow);
+// A multiframe whose windows come from per-frame functional groups lists a
+// frame's own windows. The local process is asked once per frame, by file
+// id with no body, so the file is not posted again. A refused answer keeps
+// the scan's list and disables its file rows.
+async function refreshFrameWindows(image) {
+  if (!image || !image.info.windowsPerFrame || image.frame === 0 || image.frameWindowsAsked) return;
+  image.frameWindowsAsked = true;
+  try {
+    let id = await ensureFile(image.file);
+    if (!id) return;
+    let response = await postInspect(id, image.frame);
+    if (response.status === 410) {
+      filePosts.delete(image.file);
+      id = await ensureFile(image.file);
+      if (!id) return;
+      response = await postInspect(id, image.frame);
+    }
+    if (!response.ok) throw new Error("the frame's windows could not be read");
+    const info = await response.json();
+    image.frameWindows = {
+      windows: Array.isArray(info.windows) ? info.windows : [],
+      voiLuts: Array.isArray(info.voiLuts) ? info.voiLuts : []
+    };
+  } catch (error) {
+    if (error && error.name === "AbortError") {
+      image.frameWindowsAsked = false;
+      return;
+    }
+    image.frameWindowsFailed = true;
   }
+  // The frame's own list can move a viewport's file window back to the
+  // first, so each viewport showing it, in its single view or in a tile,
+  // asks again under its new key.
+  for (const vp of shownViewports()) {
+    if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
+    else if (vp.tileMode && tileImages(vp).includes(image)) paintTiles(vp);
+  }
+  syncWindowList();
 }
 
-function syncPresetAvailability(image) {
-  const modality = image && image.info ? String(image.info.modality || "") : "";
-  const monochrome = !image || Boolean(image.info && image.info.monochrome);
-  const availability = modality + "\0" + (monochrome ? "1" : "0");
-  if (availability === presetModality) return;
-  presetModality = availability;
-  const ct = modality === "CT";
-  for (const button of document.querySelectorAll("[data-preset]")) button.disabled = !ct || !monochrome;
-  presetNote.textContent = !monochrome
-    ? "This image is not monochrome, so it has no window to set."
-    : !image || ct
-      ? PRESET_HINT
-      : "These presets are in Hounsfield units, so they apply to CT only. Drag with the W/L tool to set a window for " + (modality || "this image") + ".";
-  const vp = activeViewport();
-  if (!ct && vp && vp.activePreset) {
-    vp.activePreset = null;
-    syncPresets();
+function postInspect(id, frame) {
+  return fetch("/inspect", {
+    method: "POST",
+    headers: { "X-Ocelli-File": id, "X-Ocelli-Frame": String(frame) }
+  });
+}
+
+function loadLibrary() {
+  if (!libraryLoad) {
+    libraryLoad = import("@ocelli/core").then((core) => (core && typeof core.windowRegion === "function" ? core : null), () => null);
+    libraryLoad.then((core) => { if (!core) libraryMissing(); });
   }
+  return libraryLoad;
+}
+
+// The region window reads unavailable. Nothing takes its place.
+async function libraryMissing() {
+  const button = document.getElementById("tool-wlregion");
+  // The local process answers `library` for whichever listed file is not on
+  // disk. When the built modules are there, the missing part is dcmjs.
+  let built = false;
+  try {
+    built = (await fetch("/lib/ocelli-core/index.js", { method: "GET" })).ok;
+  } catch {}
+  SENTENCE["tool-wlregion"] = built ? DCMJS_MISSING : LIBRARY_MISSING;
+  button.setAttribute("aria-disabled", "true");
+  button.classList.add("dim");
+  showSentence();
+}
+
+function postRegion(id, image, rect) {
+  return fetch("/region", {
+    method: "POST",
+    headers: {
+      "X-Ocelli-File": id,
+      "X-Ocelli-Frame": String(image.frame),
+      "X-Ocelli-Region": rect.join(",")
+    }
+  });
+}
+
+async function fetchRegion(image, rect) {
+  let id = await ensureFile(image.file);
+  if (!id) throw new Error("this file is not held by the local process, so it has no region window");
+  let response = await postRegion(id, image, rect);
+  if (response.status === 410) {
+    filePosts.delete(image.file);
+    id = await ensureFile(image.file);
+    if (!id) throw new Error(FILE_GONE);
+    response = await postRegion(id, image, rect);
+  }
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "the region could not be read");
+  }
+  return response.json();
+}
+
+// The local process returns the least and greatest modality value in the
+// rectangle. `windowRegion` depends on those two alone, so the two-sample
+// list gives the window every sample would. The result is the numeric
+// override a W/L drag sends, with the function already shown.
+async function applyRegion(vp, a, b) {
+  const image = currentImage(vp);
+  if (!image || !image.info.monochrome) return;
+  const core = await loadLibrary();
+  if (!core) {
+    setWindowNotice(SENTENCE["tool-wlregion"]);
+    return;
+  }
+  const token = vp.loadToken;
+  const index = vp.viewIndex;
+  const still = () => token === vp.loadToken && index === vp.viewIndex && currentImage(vp) === image;
+  let extent;
+  try {
+    extent = await fetchRegion(image, [a.x, a.y, b.x, b.y]);
+  } catch (error) {
+    if (still()) setWindowNotice(error instanceof Error ? error.message : "the region could not be read");
+    return;
+  }
+  if (!still()) return;
+  const win = core.windowRegion([extent.min, extent.max]);
+  if (!win) {
+    setWindowNotice(ONE_VALUE);
+    return;
+  }
+  const fn = knownFunction(dragWindow(vp).fn);
+  await chooseWindow(vp, { override: { center: win.centre, width: win.width, fn, from: "region" } });
+}
+
+function paintRegionBox(vp, region) {
+  let node = document.getElementById("region-box");
+  if (!node || node.parentNode !== vp.dom.ink) {
+    if (node) node.remove();
+    node = document.createElementNS(SVGNS, "rect");
+    node.id = "region-box";
+    vp.dom.ink.append(node);
+  }
+  stroke(node, "#ffffff", 1.5);
+  node.setAttribute("stroke-dasharray", "4 3");
+  node.setAttribute("pointer-events", "none");
+  setBox(node, region.a, region.b);
+}
+
+function clearRegionBox() {
+  const node = document.getElementById("region-box");
+  if (node) node.remove();
 }
 
 function clamp(value, low, high) {
@@ -3241,6 +3597,7 @@ function onPointerDown(event) {
     if (point) draft = { kind: mode, cell: vp.cell, points: [point], key: noteKey(currentImage(vp)), image: currentImage(vp), waiting: false };
   }
   if (!onMark && (mode === "text" || mode === "probe") && event.button === 0) drag.textClick = true;
+  if (mode === "wlregion" && event.button === 0 && !event.ctrlKey) drag.region = { a: clampedImagePoint(vp, event), b: null };
   if (!onMark && NAV.includes(mode) && event.button === 0 && !event.ctrlKey) {
     selected = null;
     paintMarks();
@@ -3320,6 +3677,12 @@ function onPointerMove(event) {
     };
     paintOverlays(vp);
     scheduleLive(vp);
+  } else if (mode === "wlregion" && drag.region && drag.region.a) {
+    const point = clampedImagePoint(vp, event);
+    if (point) {
+      drag.region.b = point;
+      paintRegionBox(vp, drag.region);
+    }
   } else if (draft && !draft.waiting && SHAPES.includes(mode)) {
     const point = mode === "contour" ? imagePoint(vp, event) : clampedImagePoint(vp, event);
     if (!point) return;
@@ -3374,13 +3737,20 @@ function onPointerUp(event) {
     vp.overrideWindow = {
       center: vp.draftWindow.center,
       width: vp.draftWindow.width,
-      fn: vp.draftWindow.fn
+      fn: vp.draftWindow.fn,
+      from: "manual"
     };
     vp.draftWindow = null;
     vp.activePreset = null;
-    syncPresets();
+    vp.windowIndex = 0;
+    windowNotice = "";
+    syncWindowList();
     showIndex(vp, vp.viewIndex);
     copyWindow(vp);
+  }
+  if (mode === "wlregion" && drag.region) {
+    clearRegionBox();
+    if (drag.region.a && drag.region.b) applyRegion(vp, drag.region.a, drag.region.b);
   }
   if (draft && !draft.waiting && SHAPES.includes(mode)) {
     finishDraft(travel);
@@ -4580,6 +4950,9 @@ function onKey(event) {
   } else if (event.key === "-" || event.key === "_") {
     event.preventDefault();
     zoomCentre(vp, Math.exp(-0.1));
+  } else if (event.key.length === 1 && event.key >= "1" && event.key <= "9") {
+    event.preventDefault();
+    chooseRow(vp, Number(event.key));
   } else if (event.key === "0") {
     event.preventDefault();
     fitView(vp);
@@ -4603,7 +4976,7 @@ function onKey(event) {
       if (!button.disabled) button.click();
       return;
     }
-    const map = { s: "scroll", p: "pan", z: "zoom", w: "wl", f: "contour", r: "rect", e: "ellipse", t: "text", l: "length", q: "angle", j: "cobb", b: "bidirectional", u: "arrow", x: "probe" };
+    const map = { s: "scroll", p: "pan", z: "zoom", w: "wl", y: "wlregion", f: "contour", r: "rect", e: "ellipse", t: "text", l: "length", q: "angle", j: "cobb", b: "bidirectional", u: "arrow", x: "probe" };
     const next = map[event.key.toLowerCase()];
     if (next && event.key.length === 1) setTool(next);
   }
@@ -4988,9 +5361,8 @@ function syncControls() {
   document.getElementById("invert").classList.toggle("active", vp.invert);
   document.getElementById("flip-h").classList.toggle("active", vp.flipH);
   document.getElementById("flip-v").classList.toggle("active", vp.flipV);
-  presetModality = null;
-  syncPresetAvailability(currentImage(vp));
-  syncPresets();
+  windowNotice = "";
+  syncWindowList();
   syncToolButtons();
   if (currentImage(vp)) commitLabels(vp);
   else {
@@ -5208,14 +5580,18 @@ function copyWindow(source) {
   if (!image || !image.info.monochrome) return;
   const win = source.overrideWindow;
   const preset = win ? null : source.activePreset;
+  // The file window index travels too. A target reads it against its own
+  // list, and one past it shows that target's first window.
+  const index = win || preset ? 0 : (source.windowIndex || 0);
   for (const vp of shownViewports()) {
     if (vp === source) continue;
     const target = currentImage(vp);
     if (!target || !target.info.monochrome) continue;
-    // The presets are in Hounsfield units.
-    if (preset && String(target.info.modality || "") !== "CT") continue;
-    vp.overrideWindow = win ? { center: win.center, width: win.width, fn: win.fn } : null;
+    // A preset goes only where the local process offers it.
+    if (preset && !presetOffered(target, preset)) continue;
+    vp.overrideWindow = win ? { center: win.center, width: win.width, fn: win.fn, from: win.from } : null;
     vp.activePreset = preset;
+    vp.windowIndex = index;
     vp.draftWindow = null;
     showIndex(vp, vp.viewIndex);
   }

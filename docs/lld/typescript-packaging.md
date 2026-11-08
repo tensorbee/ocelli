@@ -169,14 +169,44 @@ and `@vitejs/plugin-react` at `^5.2.0`. The viewer worker is already
 constructed as a module, and `worker.format` is `es`, because Vite 7 will
 not emit an iife bundle for a worker that imports the wasm package.
 
+**The viewer's build output depends on whether `crates/ocelli-wasm/pkg`
+exists when `vite build` runs.** `vite.config.ts` defines the worker's wasm
+URL as a constant `/@fs` path, and Vite 7's Rollup worker sub-build resolves
+a constant dynamic import and loads the file. With the pkg present the wasm
+glue and its `.wasm` are emitted as their own files. With it absent, which is
+every clean clone and the CI frontend job, the config marks that URL external
+for the worker build, so the import is left to runtime, and the core reads as
+not built because that import fails. That is the behaviour the viewer had
+under Vite 8 on `main`. Without it a clean clone fails `npm run build` with
+ENOENT on `ocelli_wasm.js`. The URL carries the decoded path, because Rollup
+loads it as a literal path when the pkg is present and a `%20` there is ENOENT
+for a checkout under a path with a space. The config counts the pkg as built
+only when the glue and the `.wasm` both exist. It reads the filesystem once
+when it loads, so the pkg must exist before `vite build` starts for the
+bundled form.
+
+`scripts/viewer_build_check.py` builds both states, because CI only ever has
+the first and a developer with a built pkg only ever has the second. It copies
+the viewer into a temporary tree shaped like the repository, under a directory
+name with a space so the decoded URL is exercised on every run, builds it once
+with no pkg and once with a stand-in pkg, and refuses a failed build, a
+pkg-absent build that emits a wasm file or drops the runtime `import()` or the
+`fetch()` probe of the pkg URL, and a pkg-present build that emits no
+`ocelli_wasm` chunk or no `ocelli_wasm_bg` `.wasm` asset, or still imports the
+URL at runtime. The stand-in is a glue module that references its `.wasm`
+through `new URL(..., import.meta.url)`, as `wasm-pack --target web` output
+does, and a valid module padded past Vite's 4096-byte inline limit. It proves
+what Vite emits for a pkg that exists, not that the real pkg instantiates.
+
 ## The `packages` gate
 
 ```bash
 bin/ocelli.sh gate packages
 ```
 
-Two things, in order. `vitest run` over `packages/*/src/**/*.test.ts` and
-`packages/*/src/**/*.test.tsx`, then `scripts/package_check.py`. The component
+In order, `vitest run` over `packages/*/src/**/*.test.ts` and
+`packages/*/src/**/*.test.tsx`, then `scripts/package_check.py`, then
+`scripts/viewer_build_check.py`, then the unreachable-injection table. The component
 test opts into jsdom with a vitest environment comment, so the rest of the
 suite keeps the default environment. `npm run dev` starts with no session and
 shows the absent state.

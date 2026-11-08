@@ -14,15 +14,15 @@ use ocelli_pixel::VoiFunction;
 
 use crate::held::{
     BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
-    PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey, retire_bytes,
-    with_decode_workspace,
+    KEPT_INSPECT_CAP, PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey,
+    retire_bytes, with_decode_workspace,
 };
 use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
-use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json};
+use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json, region_extent, region_json};
 use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    decode_held, decode_ticks, merge_worker_phases, note_lookup, note_write, phases, profiling,
-    render_held, reset_phases, validate_frame_request,
+    decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup, note_write, phases,
+    profiling, render_held, reset_phases, validate_frame_request,
 };
 use crate::value::value_json;
 use crate::{
@@ -58,6 +58,8 @@ struct Request {
     points: PointsHeader,
     /// `X-Ocelli-Shape` as it arrived, read only by `/measure`.
     shape: Option<String>,
+    /// `X-Ocelli-Region` as it arrived, read only by `/region`.
+    region: Option<String>,
     close: bool,
     /// Capacity charged to inflight for this body.
     body_charge: usize,
@@ -120,6 +122,8 @@ struct Grey {
     edge_source: &'static str,
     calibration_source: &'static str,
     calibration_mm: Option<(f64, f64)>,
+    window_index: Option<u32>,
+    window_count: u32,
 }
 
 struct Reply {
@@ -401,7 +405,12 @@ fn route(
             (reply, None)
         }
         ("POST", "/inspect") => {
-            let reply = json_or_error(inspect_json(&request.body, request.frame.frame));
+            let reply = inspect_route(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/region") => {
+            let reply = region_route(viewer, &request, stream);
             retire_request_body(charge, request.body);
             (reply, None)
         }
@@ -451,6 +460,9 @@ fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
         let body = format!("{{\"slices\":{SLICES}}}");
         return bare(200, "application/json", body.into_bytes());
     }
+    if request.path.starts_with("/lib/") {
+        return library_reply(&library_root(), &request.path);
+    }
     if let Some(rest) = request.path.strip_prefix("/synthetic/")
         && let Ok(index) = rest.parse::<u32>()
         && let Some(bytes) = slice(index)
@@ -458,6 +470,101 @@ fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
         return bare(200, "application/octet-stream", bytes);
     }
     text_reply(404, None, "not found")
+}
+
+/// The built `@ocelli/core` modules the page may load, by name.
+///
+/// This is the relative runtime import closure of `packages/core/src/index.ts`
+/// without its tests, which `library_files_match_the_index_closure` reads
+/// from the tracked sources. `import type` and `export type` edges emit no
+/// import the browser follows, so they are not counted.
+const LIBRARY_FILES: &[&str] = &[
+    "alongside",
+    "annotation",
+    "annotation-state",
+    "bulk",
+    "capabilities",
+    "commands",
+    "crop",
+    "crosshair",
+    "cursor",
+    "dicomweb",
+    "errors",
+    "events",
+    "fatal",
+    "flag",
+    "frame-cache",
+    "generated",
+    "index",
+    "instance-bytes",
+    "intersection",
+    "keys",
+    "load",
+    "magnify",
+    "manipulation",
+    "marks",
+    "matrix",
+    "measurement-persist",
+    "migrate",
+    "ocelli-error",
+    "options",
+    "orientation",
+    "panic",
+    "playbook",
+    "pointer",
+    "pool",
+    "provenance",
+    "release",
+    "ring",
+    "sculpt",
+    "seam",
+    "secondary-capture",
+    "shadow",
+    "snapshot",
+    "sr",
+    "startup",
+    "tid1500",
+    "tid2010",
+    "tools",
+    "viewport",
+];
+
+/// The repository root this crate was built in. `/lib/` reads under it at
+/// request time, so the crate builds and its tests run without the library build.
+fn library_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// `GET /lib/ocelli-core/<name>.js` and `GET /lib/dcmjs.js`.
+///
+/// The first serves `packages/core/dist/<name>.js` only when `<name>` is in
+/// [`LIBRARY_FILES`], and the file read is named by the listed constant, not
+/// by the request. The second serves dcmjs's ES build, which the SR modules
+/// of `@ocelli/core` import. Any other path under `/lib/` is 404. A listed
+/// file that is not on disk is 404 with `X-Ocelli-Error: library`, which is
+/// how the page knows the library build is missing.
+fn library_reply(root: &std::path::Path, path: &str) -> Reply {
+    let (file, missing) = if path == "/lib/dcmjs.js" {
+        (
+            Some(root.join("node_modules/dcmjs/build/dcmjs.es.js")),
+            "dcmjs is not installed. Run npm ci in the repository",
+        )
+    } else {
+        (
+            path.strip_prefix("/lib/ocelli-core/")
+                .and_then(|rest| rest.strip_suffix(".js"))
+                .and_then(|asked| LIBRARY_FILES.iter().find(|name| **name == asked))
+                .map(|name| root.join("packages/core/dist").join(format!("{name}.js"))),
+            "the library build is not on disk. Run npm run build -w @ocelli/core in the repository",
+        )
+    };
+    let Some(file) = file else {
+        return text_reply(404, None, "not found");
+    };
+    match std::fs::read(file) {
+        Ok(bytes) => bare(200, "text/javascript; charset=utf-8", bytes),
+        Err(_) => text_reply(404, Some("library"), missing),
+    }
 }
 
 fn held_reply(viewer: &Viewer) -> Reply {
@@ -468,7 +575,7 @@ fn held_reply(viewer: &Viewer) -> Reply {
         "release"
     };
     let body = format!(
-        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free},\"grey\":{grey},\"grey_replies\":{grey_replies}}}",
+        "{{\"build\":\"{build}\",\"budget\":{budget},\"used\":{used},\"files\":{files},\"frames\":{frames},\"inflight\":{inflight},\"workspace\":{workspace},\"free\":{free},\"grey\":{grey},\"grey_replies\":{grey_replies},\"kept\":{kept}}}",
         budget = memory.pressure.budget,
         used = memory.pressure.used,
         files = memory.files,
@@ -478,6 +585,7 @@ fn held_reply(viewer: &Viewer) -> Reply {
         free = memory.free,
         grey = memory.grey,
         grey_replies = memory.grey_replies,
+        kept = memory.kept,
     );
     bare(200, "application/json", body.into_bytes())
 }
@@ -1546,18 +1654,24 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
     let frame = request.frame.frame;
     let page = request.page;
     let body = request.body;
+    // The one inspection of the post, run by a decode worker for the process
+    // server and in place otherwise, so both paths run the same code.
+    let inspect = move |body: Vec<u8>| {
+        let (result, replies) = inspect_post(&body, frame, KEPT_INSPECT_CAP);
+        (result, replies, body)
+    };
     let inspected = if let Some(slot) = charge.slot.as_ref() {
         let worker = slot.worker();
         let retire = slot.retire();
         slot.call(move || {
-            let result = inspect_json(&body, frame);
-            (result, body, Some(worker), Some(retire))
+            let (result, replies, body) = inspect(body);
+            (result, replies, body, Some(worker), Some(retire))
         })
     } else {
-        let result = inspect_json(&body, frame);
-        Some((result, body, None, None))
+        let (result, replies, body) = inspect(body);
+        Some((result, replies, body, None, None))
     };
-    let Some((result, body, worker, retire)) = inspected else {
+    let Some((result, replies, body, worker, retire)) = inspected else {
         return busy_reply();
     };
     match result {
@@ -1567,6 +1681,12 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
             match viewer.insert_posted(body, worker, retire, page) {
                 Some(id) => {
+                    // A per-frame multiframe's replies outlive the posted
+                    // bytes, so a frame's windows are asked for by id after
+                    // every frame is held.
+                    if let Some(replies) = replies {
+                        viewer.keep_inspect(id, replies);
+                    }
                     reply.file_id = Some(id.header_value());
                     reply.held_flag = Some(1);
                 }
@@ -1585,6 +1705,96 @@ fn file_route(viewer: &Viewer, request: Request, charge: &mut BodyCharge<'_>) ->
             error_reply(error)
         }
     }
+}
+
+/// `POST /inspect` by body, or by a held file's id with no body.
+///
+/// The id form lets the page ask again for another frame's windows without
+/// posting the file again. It has `/headers`' shape: an id with a body is
+/// refused and an id the process no longer holds is 410.
+fn inspect_route(viewer: &Viewer, request: &Request) -> Reply {
+    if request.file_id.is_some() && !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    if let Some(id) = request.file_id {
+        if let Some(reply) = viewer.kept_reply(id, request.frame.frame) {
+            return bare(200, "application/json; charset=utf-8", reply.into_bytes());
+        }
+        return match viewer.file_bytes(id) {
+            Some(bytes) => json_or_error(inspect_json(bytes.as_slice(), request.frame.frame)),
+            None => gone(),
+        };
+    }
+    json_or_error(inspect_json(&request.body, request.frame.frame))
+}
+
+/// `POST /region`: the least and greatest modality value inside a
+/// rectangle of one held frame, and how many pixel centres it holds.
+///
+/// By id only, with no body, through the held-frame path `/value` uses. The
+/// page turns the two numbers into a window with `windowRegion` from
+/// `@ocelli/core`, so this process does not compute a window.
+fn region_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+    let Some(id) = request.file_id else {
+        return text_reply(400, Some("header"), "a region request names a file id");
+    };
+    if !request.body.is_empty() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a file id and a body cannot be sent together",
+        );
+    }
+    let Some(rect) = request.region.as_deref().and_then(parse_region) else {
+        return text_reply(400, Some("header"), "the region rectangle is not usable");
+    };
+    let frame = request.frame.frame;
+    let (result, source) = match viewer.preview_source(id, frame) {
+        PreviewSource::Gone => return gone(),
+        PreviewSource::Hit(held) => (region_extent(&held, rect), "held"),
+        PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
+            Ok(Some(held)) => (region_extent(&held, rect), "decoded"),
+            Ok(None) => return busy_reply(),
+            Err(error) => return error_reply(error),
+        },
+    };
+    match result {
+        Ok(extent) => {
+            let mut reply = bare(
+                200,
+                "application/json; charset=utf-8",
+                region_json(extent).into_bytes(),
+            );
+            reply.source = Some(source);
+            reply
+        }
+        Err(error) => error_reply(error),
+    }
+}
+
+/// `x0,y0,x1,y1`, four finite ASCII decimals in page image pixels, or `None`.
+fn parse_region(text: &str) -> Option<[f64; 4]> {
+    let mut rect = [0.0_f64; 4];
+    let mut parts = text.split(',');
+    for slot in &mut rect {
+        let part = parts.next()?;
+        if part.is_empty() || !part.is_ascii() {
+            return None;
+        }
+        let value = part.parse::<f64>().ok()?;
+        if !value.is_finite() {
+            return None;
+        }
+        *slot = value;
+    }
+    if parts.next().is_some() {
+        return None;
+    }
+    Some(rect)
 }
 
 fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
@@ -1683,6 +1893,8 @@ fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
                 edge_source: preview.facts.edge_source,
                 calibration_source: preview.calibration_source,
                 calibration_mm: preview.calibration_mm,
+                window_index: preview.window_index,
+                window_count: preview.window_count,
             })),
             body: preview.grey,
             source: None,
@@ -1893,6 +2105,15 @@ fn write_reply_by(
         head.push_str("\r\nX-Ocelli-Calibration-Source: ");
         head.push_str(grey.calibration_source);
         head.push_str("\r\n");
+        // Empty for a preset, a numeric window or the full range.
+        head.push_str("X-Ocelli-Window-Index: ");
+        if let Some(index) = grey.window_index {
+            head.push_str(&index.to_string());
+        }
+        head.push_str(&format!(
+            "\r\nX-Ocelli-Window-Count: {}\r\n",
+            grey.window_count
+        ));
         // `Display` for `f64` never uses an exponent, as `/measure` writes it.
         if let Some((row, column)) = grey.calibration_mm {
             head.push_str(&format!(
@@ -2058,6 +2279,7 @@ fn read_request(
         page: parsed.page,
         points: parsed.points,
         shape: parsed.shape,
+        region: parsed.region,
         close: parsed.close,
         body_charge: final_charge,
         body_counted: counted,
@@ -2295,6 +2517,7 @@ struct HeaderParts {
     page: Option<PageToken>,
     points: PointsHeader,
     shape: Option<String>,
+    region: Option<String>,
     close: bool,
 }
 
@@ -2412,9 +2635,12 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_preset = false;
     let mut seen_file = false;
     let mut seen_shape = false;
+    let mut seen_region = false;
+    let mut seen_index = false;
     let mut seen_page = false;
     let mut page = None;
     let mut shape = None;
+    let mut region = None;
     let mut frame = FrameRequest::default();
     let mut file_id = None;
     let mut points = PointsHeader::Absent;
@@ -2484,6 +2710,12 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         } else if name.eq_ignore_ascii_case("x-ocelli-shape") {
             once(&mut seen_shape)?;
             shape = Some(text.to_owned());
+        } else if name.eq_ignore_ascii_case("x-ocelli-region") {
+            once(&mut seen_region)?;
+            region = Some(text.to_owned());
+        } else if name.eq_ignore_ascii_case("x-ocelli-window-index") {
+            once(&mut seen_index)?;
+            frame.window_index = Some(text.parse::<u32>().map_err(|_| window_unusable())?);
         } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
             once(&mut seen_preset)?;
             frame.window_preset =
@@ -2499,6 +2731,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         page,
         points,
         shape,
+        region,
         close,
     })
 }
@@ -2555,6 +2788,257 @@ fn header_end_at(buf: &[u8]) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::held::{GREY_CAP, N_MAX_PIXELS};
+
+    /// A root holding `packages/core/dist/index.js` and dcmjs's ES build.
+    fn library_root(name: &str) -> Result<std::path::PathBuf, String> {
+        let root = std::env::temp_dir().join(format!("ocelli-f213-{name}-{}", std::process::id()));
+        let dist = root.join("packages/core/dist");
+        let dcmjs = root.join("node_modules/dcmjs/build");
+        std::fs::create_dir_all(&dist).map_err(|error| error.to_string())?;
+        std::fs::create_dir_all(&dcmjs).map_err(|error| error.to_string())?;
+        std::fs::write(dist.join("index.js"), b"export const index = 1;\n")
+            .map_err(|error| error.to_string())?;
+        std::fs::write(dist.join("index.test.js"), b"export const test = 1;\n")
+            .map_err(|error| error.to_string())?;
+        std::fs::write(dist.join("other.js"), b"export const other = 1;\n")
+            .map_err(|error| error.to_string())?;
+        std::fs::write(root.join("packages/core/x.js"), b"export const x = 1;\n")
+            .map_err(|error| error.to_string())?;
+        std::fs::write(dcmjs.join("dcmjs.es.js"), b"export default {};\n")
+            .map_err(|error| error.to_string())?;
+        Ok(root)
+    }
+
+    #[test]
+    fn one_file_post_parses_and_builds_its_planes_once() -> Result<(), String> {
+        // Review pass 4, D1. The scan reply and the kept replies come from
+        // one parse, so a whole `POST /file` of a per-frame multiframe
+        // projects the metadata once and builds the plane list once.
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+        let uid = "2.25.213101";
+        let body = crate::preview::tests::per_frame_file_as(12, uid);
+        let capacity = body.capacity();
+        let mut charge = BodyCharge {
+            viewer: &viewer,
+            bytes: capacity,
+            counted: false,
+            slot: None,
+        };
+        let reply = file_route(
+            &viewer,
+            Request {
+                method: "POST".to_owned(),
+                path: "/file".to_owned(),
+                body,
+                frame: FrameRequest::default(),
+                file_id: None,
+                page: None,
+                points: PointsHeader::Absent,
+                shape: None,
+                region: None,
+                close: true,
+                body_charge: capacity,
+                body_counted: false,
+                body_slot: None,
+            },
+            &mut charge,
+        );
+        let work = crate::preview::inspect_work(uid);
+        if reply.status != 200 || viewer.kept_bytes() == 0 {
+            return Err(format!(
+                "the post answered {} and kept nothing",
+                reply.status
+            ));
+        }
+        if work != (1, 1) {
+            return Err(format!(
+                "one post projected and built planes {work:?} times"
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_pooled_file_post_parses_and_builds_its_planes_once() -> Result<(), String> {
+        // Review pass 5, S1. The process server runs every bodied post on a
+        // decode worker. The counter is read across threads, so this sees the
+        // worker's work, through the shipping `Viewer::server` and a socket.
+        let uid = "2.25.213102";
+        let body = crate::preview::tests::per_frame_file_as(12, uid);
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        }));
+        let served = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, served);
+        });
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let mut request = format!(
+            "POST /file HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(&body);
+        stream
+            .write_all(&request)
+            .map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        if !reply.starts_with(b"HTTP/1.1 200 ") || viewer.kept_bytes() == 0 {
+            return Err("the pooled post was refused or kept nothing".to_owned());
+        }
+        let work = crate::preview::inspect_work(uid);
+        if work != (1, 1) {
+            return Err(format!(
+                "one pooled post projected and built planes {work:?} times"
+            ));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn library_routes_serve_only_listed_modules() -> Result<(), String> {
+        // AC16. Only a name in `LIBRARY_FILES`, and dcmjs's one ES build,
+        // are read, from fixed directories under the root. The request
+        // never supplies a directory.
+        let root = library_root("routes")?;
+        let checked = (|| {
+            for (path, body) in [
+                ("/lib/ocelli-core/index.js", "export const index = 1;\n"),
+                ("/lib/dcmjs.js", "export default {};\n"),
+            ] {
+                let reply = library_reply(&root, path);
+                if reply.status != 200
+                    || reply.content_type != "text/javascript; charset=utf-8"
+                    || reply.body != body.as_bytes()
+                {
+                    return Err(format!("{path} answered {}", reply.status));
+                }
+            }
+            for path in [
+                "/lib/ocelli-core/../x.js",
+                "/lib/ocelli-core/index.test.js",
+                "/lib/ocelli-core/other.js",
+                "/lib/ocelli-core/index",
+                "/lib/ocelli-core/",
+                "/lib/other.js",
+                "/lib/dcmjs.es.js",
+            ] {
+                let reply = library_reply(&root, path);
+                if reply.status != 404 || reply.error.is_some() {
+                    return Err(format!(
+                        "{path} answered {} {:?}",
+                        reply.status, reply.error
+                    ));
+                }
+            }
+            // A listed name the build did not write is the library error,
+            // so the page can say the build is missing.
+            let absent = LIBRARY_FILES
+                .iter()
+                .find(|name| **name != "index")
+                .ok_or_else(|| "the list has one name".to_owned())?;
+            let reply = library_reply(&root, &format!("/lib/ocelli-core/{absent}.js"));
+            if reply.status != 404 || reply.error != Some("library") {
+                return Err(format!("a missing {absent} answered {}", reply.status));
+            }
+            std::fs::remove_file(root.join("node_modules/dcmjs/build/dcmjs.es.js"))
+                .map_err(|error| error.to_string())?;
+            if reply.body
+                != b"the library build is not on disk. Run npm run build -w @ocelli/core in the repository"
+            {
+                return Err("a missing module did not name the library build".to_owned());
+            }
+            let reply = library_reply(&root, "/lib/dcmjs.js");
+            if reply.status != 404
+                || reply.error != Some("library")
+                || reply.body != b"dcmjs is not installed. Run npm ci in the repository"
+            {
+                return Err(format!("a missing dcmjs answered {}", reply.status));
+            }
+            Ok(())
+        })();
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        checked
+    }
+
+    /// The runtime relative imports of one module: `import` and `export`
+    /// statements naming `./<name>.js`, without `import type` and `export
+    /// type`, which emit nothing the browser loads.
+    fn runtime_imports(source: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut statement = String::new();
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("import") || trimmed.starts_with("export") {
+                statement = trimmed.to_owned();
+            } else if !statement.is_empty() {
+                statement.push(' ');
+                statement.push_str(trimmed);
+            }
+            if statement.is_empty() || !trimmed.ends_with(';') {
+                continue;
+            }
+            let typed =
+                statement.starts_with("import type") || statement.starts_with("export type");
+            if !typed
+                && let Some((_, rest)) = statement.split_once("\"./")
+                && let Some((name, _)) = rest.split_once(".js\"")
+            {
+                found.push(name.to_owned());
+            }
+            statement.clear();
+        }
+        found
+    }
+
+    #[test]
+    fn library_files_match_the_index_closure() -> Result<(), String> {
+        // AC16. The allowlist is the relative runtime import closure of
+        // `packages/core/src/index.ts`, read from the tracked sources, so a
+        // module added to the package without a name here is caught here.
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/core/src");
+        let mut seen: Vec<String> = Vec::new();
+        let mut pending = vec!["index".to_owned()];
+        while let Some(name) = pending.pop() {
+            if seen.contains(&name) {
+                continue;
+            }
+            let text = std::fs::read_to_string(src.join(format!("{name}.ts")))
+                .map_err(|error| format!("{name}.ts: {error}"))?;
+            pending.extend(runtime_imports(&text));
+            seen.push(name);
+        }
+        seen.sort();
+        let mut listed: Vec<String> = LIBRARY_FILES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        listed.sort();
+        if listed != seen {
+            return Err(format!(
+                "LIBRARY_FILES is {listed:?}, the closure is {seen:?}"
+            ));
+        }
+        if seen.iter().any(|name| name.ends_with(".test")) {
+            return Err("the closure reached a test module".to_owned());
+        }
+        // The parser sees a type-only edge and a multi-line statement.
+        let sample = "export type { A } from \"./kinds.js\";\nexport {\n  b,\n} from \"./bulk.js\";\nimport type { C } from \"./types.js\";\n";
+        if runtime_imports(sample) != ["bulk"] {
+            return Err(format!(
+                "the import reader read {:?}",
+                runtime_imports(sample)
+            ));
+        }
+        Ok(())
+    }
 
     #[test]
     fn a_request_body_is_held_at_its_declared_length() -> Result<(), &'static str> {
@@ -2640,6 +3124,7 @@ mod tests {
                 page: None,
                 points: PointsHeader::Absent,
                 shape: None,
+                region: None,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,

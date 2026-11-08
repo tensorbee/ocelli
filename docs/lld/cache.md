@@ -1,6 +1,6 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224, F-231
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224, F-231, F-213
 **Last updated:** 2026-11-07
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
@@ -193,6 +193,27 @@ buffer handed out is owned by that decode. Its old bytes are overwritten
 before they are read. `GET /held` reports `free`, the bytes of sample buffers
 on the free list, beside `used`.
 
+One more pool sits outside the budget. A multiframe in which any frame's
+window comes from a per-frame functional group keeps every frame's inspect
+reply in `CacheState::kept`, so `POST /inspect` by id answers a frame's window
+list after `take_encoded_if_ready` drops the posted bytes. `inspect_post`
+parses the file once per `POST /file`, on a decode worker for the process
+server and in place otherwise, and takes both the scan reply and the kept set
+from one `InspectParts`. That projects the metadata and builds the
+frame-independent fields and the plane list once, from the parsed data set, so
+every transfer syntax keeps the replies the same way. `kept_replies` then
+builds only each frame's spacing, edge and window fields per frame, so a post
+is linear in the frame count. `KeptReplies` keeps the shared parts once beside
+those per-frame fields, and the pool is charged at `KeptReplies::bytes`, the
+heap bytes its strings and frame list own. No other file keeps anything.
+The pool is not in the LRU and stays under `KEPT_INSPECT_CAP`, 16 MiB across
+every id. A set that would pass the cap after `sweep_kept` drops the ids
+holding nothing is not kept, and that id's `/inspect` by id is then 410 once
+its bytes are gone. `forget_ids` drops an id's replies, and `kept_reply`
+drops those of an id the cache has evicted when it is asked for, so
+`/inspect` by id and `/preview` by id agree that it is gone. `GET /held`
+reports the pool as `kept`.
+
 Every grey byte the folder viewer holds counts against one fixed cap of
 17,400,000 bytes, which is the resident bound's grey term `P * N_max`, with
 `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts,
@@ -291,7 +312,7 @@ than each, and measured two beacons of 1,700 ids, 35,699 bytes each, returned
 true and then false. Eviction does not touch the token record, so
 `sweep_pages` drops the ids that hold nothing once the record passes 4,096
 and twice the entries held. A forget that fails is not retried, and the
-budget still bounds what the process holds.
+budget and the 16 MiB reply pool still bound what the process holds.
 
 The folder viewer binary uses mimalloc as its global allocator. The pin is
 exact in the workspace manifest and the crate keeps its default features.
@@ -410,8 +431,8 @@ why this crate depends on `ocelli-core`, which `ocelli-pixel` already did.
 `crates/ocelli-wasm/src/session.rs` holds one `ImageCache<CommittedFrame>`
 in the session of the render worker's instance, decision D5 unchanged.
 **The budget is the caller's and the default is 0, which is off.** With a
-budget of 0 nothing is inserted and no cache event is pushed, so a caller
-that never sets one sees the earlier behaviour. Only `commit_cached_frame`
+budget of 0 a commit inserts nothing and pushes no cache event, so a caller
+that never sets one commits as before. Only `commit_cached_frame`
 fills it, which is `commit_selected_frame` plus a content id, keyed by the
 stack's `FrameKey` at the committed index. A commit with no content id, or
 one whose length is not a multiple of 4 and so holds no samples, is

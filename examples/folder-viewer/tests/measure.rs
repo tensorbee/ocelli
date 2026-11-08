@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ocelli_folder_viewer::{
-    ImagePoint, MeasureShape, PreviewError, Viewer, ViewerConfig, measure_frame, serve_on, slice,
+    ImagePoint, MeasureShape, PreviewError, RegionExtent, Viewer, ViewerConfig, measure_frame,
+    region_extent_frame, serve_on, slice,
 };
 
 // ---------------------------------------------------------------------------
@@ -1140,4 +1141,165 @@ fn measure_route_takes_only_a_held_id() -> Result<(), String> {
         return Err(format!("an evicted id was served: {}", reply.0));
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// F-213, the region window. The minimum, maximum and count come from the
+// same walk the rectangle statistics use, so its pixel-centre rule, its
+// padding exclusion and its size cap are the ones tested above.
+
+/// The 4 by 4 grid of stored `row * 4 + column`, slope 1, intercept -1024,
+/// with an optional Pixel Padding Value in stored space.
+fn region_grid(padding: Option<u16>) -> Result<Vec<u8>, String> {
+    let mut pixels = Vec::new();
+    for row in 0..4_u16 {
+        for column in 0..4_u16 {
+            pixels.push(row * 4 + column);
+        }
+    }
+    let mut spec = Spec::grid(4, 4, &pixels);
+    spec.modality = "CT";
+    spec.rescale = Some(("1", "-1024"));
+    if let Some(value) = padding {
+        spec.extra.push((
+            (0x0028, 0x0120),
+            short_le((0x0028, 0x0120), *b"US", &value.to_le_bytes())?,
+        ));
+    }
+    build(spec)
+}
+
+fn extent(file: &[u8], rect: [f64; 4], name: &str) -> Result<RegionExtent, String> {
+    region_extent_frame(file, 0, rect)
+        .map_err(|error| format!("{name}: refused with {}", error.code()))
+}
+
+fn region_refused(file: &[u8], rect: [f64; 4], name: &str) -> Result<(), String> {
+    match region_extent_frame(file, 0, rect) {
+        Err(PreviewError::Region) => Ok(()),
+        Err(error) => Err(format!("{name}: refused with {}", error.code())),
+        Ok(found) => Err(format!("{name}: answered {found:?}")),
+    }
+}
+
+#[test]
+fn region_extent_counts_pixel_centres_in_modality_units() -> Result<(), String> {
+    // AC9. Page `0.5,0.5,2.5,1.5` is index (0, 0) to (2, 1), so the centres
+    // of columns 0, 1 and 2 on rows 0 and 1 are inside the closed rectangle.
+    // Stored 0, 1, 2, 4, 5, 6. PS3.3 C.11.1, Table C.11-1, the Rescale
+    // Intercept row: output units = m * SV + b = SV - 1024. The extremes are
+    // -1024 and -1018 over 6 samples. Reading stored values would give 0
+    // and 6.
+    let file = region_grid(None)?;
+    let want = RegionExtent {
+        min: -1024.0,
+        max: -1018.0,
+        count: 6,
+    };
+    let found = extent(&file, [0.5, 0.5, 2.5, 1.5], "forward")?;
+    if found != want {
+        return Err(format!("forward: {found:?}, wanted {want:?}"));
+    }
+    // The corners are sorted, so the reversed drag is the same rectangle.
+    let reversed = extent(&file, [2.5, 1.5, 0.5, 0.5], "reversed")?;
+    if reversed != want {
+        return Err(format!("reversed: {reversed:?}, wanted {want:?}"));
+    }
+    // Off the image, and inside one pixel without reaching its centre at
+    // page (0.5, 0.5): no sample, so the region error.
+    region_refused(&file, [-5.0, -5.0, -1.0, -1.0], "off the image")?;
+    region_refused(&file, [0.6, 0.6, 0.9, 0.9], "no centre")?;
+    // PS3.3 C.7.5.1.1.2. With Pixel Padding Value 0 the stored 0 is padding
+    // and has no modality value. Five samples remain and the least is
+    // 1 - 1024 = -1023.
+    let padded = region_grid(Some(0))?;
+    let found = extent(&padded, [0.5, 0.5, 2.5, 1.5], "padded")?;
+    let want = RegionExtent {
+        min: -1023.0,
+        max: -1018.0,
+        count: 5,
+    };
+    if found != want {
+        return Err(format!("padded: {found:?}, wanted {want:?}"));
+    }
+    // Only the padding sample is inside, so nothing is left to window.
+    region_refused(&padded, [0.5, 0.5, 0.5, 0.5], "only padding")?;
+    // The walk is the rectangle statistic's: the same rectangle measured
+    // reports the same count, minimum and maximum.
+    let json = measured(
+        &file,
+        MeasureShape::Rectangle,
+        &[at(0.5, 0.5), at(2.5, 1.5)],
+        "statistics",
+    )?;
+    contains(&json, "\"count\":6,", "statistics")?;
+    contains(&json, "\"min\":-1024,\"max\":-1018,", "statistics")
+}
+
+fn region_request(head: &str, body: &[u8]) -> Vec<u8> {
+    let mut request = format!(
+        "POST /region HTTP/1.1\r\nHost: 127.0.0.1\r\n{head}Content-Length: {len}\r\n\r\n",
+        len = body.len()
+    )
+    .into_bytes();
+    request.extend_from_slice(body);
+    request
+}
+
+#[test]
+fn the_region_route_returns_the_extent() -> Result<(), String> {
+    // AC10. The AC9 object posted once, then the rectangle by id.
+    let file = region_grid(None)?;
+    for (name, addr) in both_viewers()? {
+        let id = post_file(addr, &file)?;
+        let head = format!(
+            "X-Ocelli-File: {id}\r\nX-Ocelli-Frame: 0\r\nX-Ocelli-Region: 0.5,0.5,2.5,1.5\r\n"
+        );
+        let reply = split_http(&exchange(addr, &region_request(&head, b""))?)?;
+        if !reply.0.starts_with("HTTP/1.1 200 ")
+            || reply.1 != "{\"min\":-1024,\"max\":-1018,\"count\":6}"
+        {
+            return Err(format!("{name}: {} {}", reply.0, reply.1));
+        }
+        for (case, region) in [
+            ("three numbers", "0.5,0.5,2.5"),
+            ("five numbers", "0.5,0.5,2.5,1.5,1"),
+            ("a word", "a,0.5,2.5,1.5"),
+            ("not finite", "inf,0.5,2.5,1.5"),
+            ("empty", ""),
+        ] {
+            let head = format!("X-Ocelli-File: {id}\r\nX-Ocelli-Region: {region}\r\n");
+            let reply = split_http(&exchange(addr, &region_request(&head, b""))?)?;
+            if !refused_with(&reply, "400", "header") {
+                return Err(format!("{name} {case}: {}", reply.0));
+            }
+        }
+        let missing = format!("X-Ocelli-File: {id}\r\n");
+        let reply = split_http(&exchange(addr, &region_request(&missing, b""))?)?;
+        if !refused_with(&reply, "400", "header") {
+            return Err(format!("{name} no region: {}", reply.0));
+        }
+        let reply = split_http(&exchange(
+            addr,
+            &region_request("X-Ocelli-Region: 0.5,0.5,2.5,1.5\r\n", b""),
+        )?)?;
+        if !refused_with(&reply, "400", "header") {
+            return Err(format!("{name} no id: {}", reply.0));
+        }
+        // The route takes no file, so a body beside the id is refused.
+        let reply = split_http(&exchange(addr, &region_request(&head_with(&id), &file))?)?;
+        if !refused_with(&reply, "400", "header") {
+            return Err(format!("{name} with a body: {}", reply.0));
+        }
+        let head = format!("X-Ocelli-File: {id}\r\nX-Ocelli-Region: 0.6,0.6,0.9,0.9\r\n");
+        let reply = split_http(&exchange(addr, &region_request(&head, b""))?)?;
+        if !refused_with(&reply, "400", "region") {
+            return Err(format!("{name} no centre: {}", reply.0));
+        }
+    }
+    Ok(())
+}
+
+fn head_with(id: &str) -> String {
+    format!("X-Ocelli-File: {id}\r\nX-Ocelli-Region: 0.5,0.5,2.5,1.5\r\n")
 }

@@ -65,7 +65,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs and changed.mjs (F-208, F-209, F-226, F-224)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs and changed.mjs (F-208, F-209, F-226, F-213, F-224)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -79,7 +79,7 @@ GATES=(
   "wasm|no|wasm-pack build, the decode split and the size budget (E1.2, F-110)"
   "native|no|the cross-target build proof and per-target features (E1.7, HLD 4)"
   "device|no|only ocelli-render creates a GPU device (E1.8, HLD 31)"
-  "packages|no|npm tarball contents, exports and a consumer install (E1.3)"
+  "packages|no|npm tarball contents, exports, a consumer install (E1.3), and the viewer build with the wasm pkg absent and with a stand-in pkg"
   "advisories|no|high and critical advisories in the published npm runtime closure"
   "ci|no|every floor gate is actually invoked by .github/workflows/ci.yml"
   "guards|no|every declared guard still refuses what it is for (F-X009)"
@@ -178,6 +178,7 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/readout.mjs &&
                  node examples/folder-viewer/tests/browser/link.mjs &&
                  node examples/folder-viewer/tests/browser/forget.mjs &&
+                 node examples/folder-viewer/tests/browser/window.mjs &&
                  node examples/folder-viewer/tests/browser/changed.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
@@ -323,10 +324,15 @@ run_gate() {
     quirk-mutations) python3 scripts/quirk_mutations.py ;;
     # F-218. The injection table runs after package_check.py. It replays a
     # string-built load through the real consumer, which the static scan
-    # cannot see.
+    # cannot see. viewer_build_check.py builds the example viewer with the
+    # wasm pkg absent and with a stand-in pkg present, because Vite 7's
+    # output differs between the two and CI only ever has the first.
     packages)    [ -d node_modules ] || { skip "node_modules is absent, run npm ci"; return 3; }
                  npm run test &&
                  python3 scripts/package_check.py &&
+                 python3 scripts/viewer_build_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_viewer_build_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_unreachable_injections.py ;;
     # F-218. The audit asks the registry. A new high advisory turns this red

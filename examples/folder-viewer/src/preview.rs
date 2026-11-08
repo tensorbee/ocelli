@@ -29,9 +29,9 @@ use ocelli_codec::{
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    DispatchPath, EncapsulatedFrameIndex, FrameGeometry, MetadataElement, MetadataSet,
-    MetadataValue, MultiframeMetadata, ParseError, TopLevelFallback, parse_decimal_string,
-    parse_part10,
+    DispatchPath, EncapsulatedFrameIndex, FrameGeometry, FunctionalGroupSource, MetadataElement,
+    MetadataSet, MetadataValue, MultiframeMetadata, ParseError, TopLevelFallback,
+    parse_decimal_string, parse_part10,
 };
 use ocelli_pixel::{
     ByteOrder, ImageDimensions, ImagePlane, LutChain, ModalityTransform, PhotometricInterpretation,
@@ -63,6 +63,8 @@ const RESCALE_INTERCEPT: Tag = Tag(0x0028, 0x1052);
 const WINDOW_CENTER: Tag = Tag(0x0028, 0x1050);
 const WINDOW_WIDTH: Tag = Tag(0x0028, 0x1051);
 const VOI_FUNCTION: Tag = Tag(0x0028, 0x1056);
+const WINDOW_EXPLANATION: Tag = Tag(0x0028, 0x1055);
+const LUT_EXPLANATION: Tag = Tag(0x0028, 0x3003);
 const MODALITY_LUT_SEQUENCE: Tag = Tag(0x0028, 0x3000);
 const VOI_LUT_SEQUENCE: Tag = Tag(0x0028, 0x3010);
 const FRAME_VOI_LUT_SEQUENCE: Tag = Tag(0x0028, 0x9132);
@@ -152,6 +154,12 @@ pub struct Preview {
     /// Millimetres per row and per column of that choice, row first. Absent
     /// when uncalibrated or refused.
     pub calibration_mm: Option<(f64, f64)>,
+    /// The file window pair that was drawn, or `None` for a preset, a
+    /// numeric window or the full range.
+    pub window_index: Option<u32>,
+    /// Number of Window Center and Window Width pairs the file gives this
+    /// frame, 0 when it gives none or they cannot be paired.
+    pub window_count: u32,
 }
 
 /// Spacing and patient-direction letters for one frame.
@@ -202,6 +210,10 @@ pub struct FrameRequest {
     /// Named window from `WindowPreset`. It refuses a VOI LUT Sequence
     /// and it is not combined with a numeric window.
     pub window_preset: Option<WindowPreset>,
+    /// Zero-based index into the file's Window Center and Window Width
+    /// pairs. Absent is index 0. It is not combined with a preset or a
+    /// numeric window, and it refuses a VOI LUT Sequence.
+    pub window_index: Option<u32>,
 }
 
 impl PreviewError {
@@ -220,6 +232,8 @@ impl PreviewError {
             Self::Calibration => "calibration",
             Self::SelfIntersecting => "self-intersecting",
             Self::Degenerate => "degenerate",
+            Self::Modality => "modality",
+            Self::Region => "region",
         }
     }
 }
@@ -263,6 +277,12 @@ pub enum PreviewError {
     /// The shape has no length, no angle arm or no sample to measure.
     #[error("the shape has nothing to measure")]
     Degenerate,
+    /// A window preset on an image whose Modality is not `CT`.
+    #[error("these presets are in Hounsfield units and apply to CT only")]
+    Modality,
+    /// A region window rectangle holds no pixel centre, or only padding.
+    #[error("the region holds no pixel with a value to window")]
+    Region,
 }
 
 /// Decode frame 0 with the file window.
@@ -303,10 +323,18 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
 /// # Errors
 ///
 /// Returns [`PreviewError::Window`] when center and width are not paired,
-/// a preset is combined with a numeric window or a function, or a number
-/// is not finite.
+/// a preset is combined with a numeric window or a function, a file window
+/// index is combined with a preset or a numeric window, or a number is not
+/// finite.
 pub(crate) fn validate_frame_request(request: FrameRequest) -> Result<(), PreviewError> {
     if request.window_center.is_some() != request.window_width.is_some() {
+        return Err(PreviewError::Window);
+    }
+    if request.window_index.is_some()
+        && (request.window_preset.is_some()
+            || request.window_center.is_some()
+            || request.window_width.is_some())
+    {
         return Err(PreviewError::Window);
     }
     if request.window_preset.is_some()
@@ -563,6 +591,10 @@ pub(crate) struct Recipe {
     pub(crate) voi_lut: Result<bool, PreviewError>,
     /// The file window, or the refusal that applies only when the file window is used.
     pub(crate) file_window: Result<FileWindow, PreviewError>,
+    /// Modality (0008,0060) is `CT`. The presets are Hounsfield numbers, so
+    /// they are refused on any other image. A Modality that is absent or not
+    /// text is not `CT`.
+    pub(crate) ct: bool,
 }
 
 /// The file window, computed once.
@@ -570,11 +602,14 @@ pub(crate) enum FileWindow {
     /// No Window Center or Window Width. LINEAR_EXACT over the modality range.
     Full,
     /// The file's centers, widths, and function.
+    ///
+    /// PS3.3 C.11.2.1.2.2 pairs the values by position, so an empty value
+    /// keeps its slot as `None` rather than moving the pairs after it.
     Explicit {
-        /// Window Center values.
-        centers: Vec<f32>,
-        /// Window Width values.
-        widths: Vec<f32>,
+        /// Window Center values, one slot per stored value.
+        centers: Vec<Option<f32>>,
+        /// Window Width values, one slot per stored value.
+        widths: Vec<Option<f32>>,
         /// VOI LUT Function from the file, or LINEAR when it is absent.
         function: VoiFunction,
     },
@@ -881,6 +916,7 @@ fn prepare_held(
     let evidence = presentation(object);
     let (file_window, full_range) =
         file_window_of(&multi, &modality, description, samples, frame_index);
+    let ct = optional_text(object, MODALITY).ok().flatten().as_deref() == Some("CT");
     Prepared {
         recipe: Ok(Recipe {
             modality,
@@ -888,6 +924,7 @@ fn prepare_held(
             evidence,
             voi_lut,
             file_window,
+            ct,
         }),
         facts,
         full_range,
@@ -922,16 +959,16 @@ fn file_window_of(
     Result<FileWindow, PreviewError>,
     Result<(f32, f32), PreviewError>,
 ) {
-    let centers = match resolved_decimals(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER)
-    {
+    let centers = match decimal_slots(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER) {
         Ok(centers) => centers,
         Err(error) => return (Err(error), Err(error)),
     };
-    let widths = match resolved_decimals(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_WIDTH) {
+    let widths = match decimal_slots(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_WIDTH) {
         Ok(widths) => widths,
         Err(error) => return (Err(error), Err(error)),
     };
-    if centers.is_empty() && widths.is_empty() {
+    // Every slot empty carries no number, the same as an absent attribute.
+    if centers.iter().all(Option::is_none) && widths.iter().all(Option::is_none) {
         let count = match description.sample_count() {
             Ok(count) => count,
             Err(_) => return (Err(PreviewError::Attribute), Err(PreviewError::Attribute)),
@@ -981,13 +1018,23 @@ pub(crate) fn render_held(
         Ok(recipe) => recipe,
         Err(error) => return Err(*error),
     };
-    let (centers, widths, function, is_full_range) = select_window(held, recipe, request)?;
-    let center = centers.first().copied().ok_or(PreviewError::Window)?;
-    let width = widths.first().copied().ok_or(PreviewError::Window)?;
+    let window = select_window(held, recipe, request)?;
     let evidence = recipe.evidence?;
     let chain_started = profiling().then(Instant::now);
-    let voi = VoiTransform::new(None, &centers, &widths, 0, function, 0.0, 255.0)
-        .map_err(|_| PreviewError::Window)?;
+    // PS3.3 C.11.2.1.2.2. The whole list goes in and `VoiTransform::new`
+    // selects the pair. The pair reported is the one it selected, read back
+    // through `window`, so the folder viewer never re-selects.
+    let voi = VoiTransform::new(
+        None,
+        &window.centers,
+        &window.widths,
+        window.selected,
+        window.function,
+        0.0,
+        255.0,
+    )
+    .map_err(|_| PreviewError::Window)?;
+    let (center, width, function) = voi.window().ok_or(PreviewError::Window)?;
     let chain = LutChain::new(recipe.modality.clone(), voi, recipe.photometric, evidence)
         .map_err(|_| PreviewError::Window)?;
     let chain_us = chain_started.map(|started| started.elapsed().as_micros());
@@ -1019,7 +1066,7 @@ pub(crate) fn render_held(
         width: held.width,
         height: held.height,
         frames: held.frames,
-        full_range: is_full_range,
+        full_range: window.full_range,
         grey,
         frame: request.frame,
         window_center: center,
@@ -1029,7 +1076,20 @@ pub(crate) fn render_held(
         facts,
         calibration_source,
         calibration_mm,
+        window_index: window.index,
+        window_count: window_count(recipe),
     })
+}
+
+/// The pairs the file gives this frame, or 0 when it gives none or its
+/// window cannot be used.
+fn window_count(recipe: &Recipe) -> u32 {
+    match &recipe.file_window {
+        Ok(FileWindow::Explicit { centers, .. }) => {
+            u32::try_from(centers.len()).unwrap_or(u32::MAX)
+        }
+        Ok(FileWindow::Full) | Err(_) => 0,
+    }
 }
 
 /// Quantise the stored-sample table once, then select a byte per sample.
@@ -1138,18 +1198,51 @@ fn display_byte(display: f32) -> Result<u8, PreviewError> {
     u8::try_from(display_index(display, 255)).map_err(|_| PreviewError::Window)
 }
 
+/// The window lists one request draws, and which pair of them.
+struct ChosenWindow {
+    /// Every Window Center the request offers `VoiTransform::new`.
+    centers: Vec<f32>,
+    /// Every Window Width, paired with [`Self::centers`] by position.
+    widths: Vec<f32>,
+    /// The pair `VoiTransform::new` selects.
+    selected: usize,
+    function: VoiFunction,
+    full_range: bool,
+    /// The file window pair drawn, or `None` for a preset, a numeric window
+    /// or the full range.
+    index: Option<u32>,
+}
+
+impl ChosenWindow {
+    fn one(center: f32, width: f32, function: VoiFunction, full_range: bool) -> Self {
+        Self {
+            centers: vec![center],
+            widths: vec![width],
+            selected: 0,
+            function,
+            full_range,
+            index: None,
+        }
+    }
+}
+
 fn select_window(
     held: &HeldFrame,
     recipe: &Recipe,
     request: FrameRequest,
-) -> Result<(Vec<f32>, Vec<f32>, VoiFunction, bool), PreviewError> {
+) -> Result<ChosenWindow, PreviewError> {
     if let Some(preset) = request.window_preset {
+        // The LUT refusal comes first, so a preset on a file with a VOI LUT
+        // Sequence is the window error whatever its Modality.
         if voi_present(recipe)? {
             return Err(PreviewError::Window);
         }
-        return Ok((
-            vec![preset.center()],
-            vec![preset.width()],
+        if !recipe.ct {
+            return Err(PreviewError::Modality);
+        }
+        return Ok(ChosenWindow::one(
+            preset.center(),
+            preset.width(),
             VoiFunction::Linear,
             false,
         ));
@@ -1161,18 +1254,22 @@ fn select_window(
             return Err(PreviewError::Window);
         }
         let function = request.window_function.unwrap_or(VoiFunction::Linear);
-        return Ok((vec![center], vec![width], function, false));
+        return Ok(ChosenWindow::one(center, width, function, false));
     }
     if voi_present(recipe)? {
         return Err(PreviewError::Window);
     }
     match recipe.file_window.as_ref().map_err(|error| *error)? {
         FileWindow::Full => {
+            // An index names a stored pair, and this file stores none.
+            if request.window_index.is_some() {
+                return Err(PreviewError::Window);
+            }
             let (center, width) = held.full_range?;
             // A function sent alone replaces the full-range default. The
             // default is LINEAR_EXACT only when the request names none.
             let function = request.window_function.unwrap_or(VoiFunction::LinearExact);
-            Ok((vec![center], vec![width], function, true))
+            Ok(ChosenWindow::one(center, width, function, true))
         }
         FileWindow::Explicit {
             centers,
@@ -1183,7 +1280,38 @@ fn select_window(
             if let Some(choice) = request.window_function {
                 function = choice;
             }
-            Ok((centers.clone(), widths.clone(), function, false))
+            // With no index the default is the first slot holding both a
+            // centre and a width, so a file whose first value is empty still
+            // opens drawn. An explicit index is taken as sent.
+            let usable = |at: usize| {
+                matches!(
+                    (centers.get(at), widths.get(at)),
+                    (Some(Some(_)), Some(Some(_)))
+                )
+            };
+            let selected = match request.window_index {
+                Some(index) => usize::try_from(index).map_err(|_| PreviewError::Window)?,
+                None => (0..centers.len()).find(|at| usable(*at)).unwrap_or(0),
+            };
+            let index = u32::try_from(selected).map_err(|_| PreviewError::Window)?;
+            // An empty slot has no number to draw. It is refused here rather
+            // than skipped, so the pairs after it keep their positions.
+            if !usable(selected) {
+                return Err(PreviewError::Window);
+            }
+            // An empty slot that is not the selected one is never read by
+            // `VoiTransform::new`, which validates only the selected pair.
+            let fill = |slots: &[Option<f32>]| -> Vec<f32> {
+                slots.iter().map(|slot| slot.unwrap_or(f32::NAN)).collect()
+            };
+            Ok(ChosenWindow {
+                centers: fill(centers),
+                widths: fill(widths),
+                selected,
+                function,
+                full_range: false,
+                index: Some(index),
+            })
         }
     }
 }
@@ -1495,7 +1623,45 @@ fn codecs() -> Result<Registry, PreviewError> {
 }
 
 fn project_metadata(object: &DefaultDicomObject) -> Result<MetadataSet, PreviewError> {
+    #[cfg(test)]
+    note_inspect_work(optional_text(object, SOP_INSTANCE).ok().flatten(), true);
     project_elements(object.iter())
+}
+
+/// Whole-object metadata projections and plane-list builds, by the SOP
+/// Instance UID of the object they were made for, on every thread. A test
+/// gives its file a UID of its own, so tests running at once and a decode
+/// worker's thread do not hide or add work.
+#[cfg(test)]
+static INSPECT_WORK: LazyLock<Mutex<std::collections::HashMap<String, (u64, u64)>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+fn note_inspect_work(uid: Option<String>, projection: bool) {
+    let Some(uid) = uid else {
+        return;
+    };
+    let mut work = INSPECT_WORK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let entry = work.entry(uid).or_insert((0, 0));
+    if projection {
+        entry.0 = entry.0.saturating_add(1);
+    } else {
+        entry.1 = entry.1.saturating_add(1);
+    }
+}
+
+/// The projections and plane-list builds made for the object whose SOP
+/// Instance UID is `uid`, from any thread.
+#[cfg(test)]
+pub(crate) fn inspect_work(uid: &str) -> (u64, u64) {
+    INSPECT_WORK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(uid)
+        .copied()
+        .unwrap_or((0, 0))
 }
 
 fn project_item(
@@ -1576,6 +1742,57 @@ fn resolved_decimals(
         values.push(narrow);
     }
     Ok(values)
+}
+
+/// Every stored value of a multi-valued attribute, empty ones included.
+///
+/// PS3.3 C.11.2.1.2.2 pairs Window Center, Window Width and Window Center &
+/// Width Explanation by position, so a reader that dropped an empty value
+/// would move every later pair onto the wrong label. Absent and zero-length
+/// give no slot. A value that is not text is refused.
+fn resolved_slots(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    group: Tag,
+    attribute: Tag,
+) -> Result<Vec<String>, PreviewError> {
+    let found = multi
+        .resolve(frame, group, attribute, TopLevelFallback::Allowed)
+        .map_err(|_| PreviewError::Attribute)?;
+    let Some(found) = found else {
+        return Ok(Vec::new());
+    };
+    if matches!(found.element().value(), MetadataValue::Empty) {
+        return Ok(Vec::new());
+    }
+    let Some(parts) = found.element().semantic_text() else {
+        return Err(PreviewError::Attribute);
+    };
+    Ok(parts.into_iter().map(str::to_owned).collect())
+}
+
+/// [`resolved_slots`] read as decimals. An empty value is `None` in its
+/// slot. Any other value that is not a finite decimal is refused.
+fn decimal_slots(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    group: Tag,
+    attribute: Tag,
+) -> Result<Vec<Option<f32>>, PreviewError> {
+    let mut slots = Vec::new();
+    for part in resolved_slots(multi, frame, group, attribute)? {
+        if part.is_empty() {
+            slots.push(None);
+            continue;
+        }
+        let parsed = parse_decimal_string(&part).ok_or(PreviewError::Attribute)?;
+        let narrow = f32_from_f64(parsed);
+        if !narrow.is_finite() {
+            return Err(PreviewError::Attribute);
+        }
+        slots.push(Some(narrow));
+    }
+    Ok(slots)
 }
 
 pub(crate) fn resolved_text(
@@ -2125,16 +2342,6 @@ fn json_number_token(text: &str) -> bool {
     index == bytes.len()
 }
 
-fn inspect_facts(object: &DefaultDicomObject, frame: usize) -> FrameFacts {
-    let Ok(metadata) = project_metadata(object) else {
-        return FrameFacts::empty();
-    };
-    let Ok(multi) = MultiframeMetadata::new(&metadata) else {
-        return FrameFacts::empty();
-    };
-    frame_facts(&metadata, &multi, frame).unwrap_or_else(|_| FrameFacts::empty())
-}
-
 fn push_json_token(out: &mut String, name: &str, token: Option<&str>) {
     out.push_str(",\"");
     out.push_str(name);
@@ -2441,144 +2648,538 @@ pub fn inspect_json(bytes: &[u8], frame: u32) -> Result<String, PreviewError> {
     let stripped = bytes_without_pixel_payload(bytes);
     let bytes = stripped.as_deref().unwrap_or(bytes);
     let parsed = parse_part10(bytes).map_err(part10_error)?;
-    let object = parsed.object();
-    let mut sop = text_or_empty(object, SOP_INSTANCE)?;
-    if sop.is_empty() {
-        sop = object
-            .meta()
-            .media_storage_sop_instance_uid()
-            .trim_end_matches('\0')
-            .to_owned();
+    InspectParts::new(parsed.object())?.reply(frame)
+}
+
+/// Every frame's inspect reply for a multiframe whose windows come from a
+/// per-frame functional group.
+///
+/// The page asks again only for those files, and only by id, so this is what
+/// the process keeps once the posted bytes are dropped. It is computed from
+/// the parsed data set, which every transfer syntax reaches the same way.
+/// The frame-independent parts are kept once and only each frame's spacing,
+/// edge and window fields per frame.
+pub(crate) struct KeptReplies {
+    parts: Shared,
+    frames: Vec<(String, String)>,
+}
+
+/// The parts of an inspect reply no frame changes.
+struct Shared {
+    /// Up to and including `monochrome`.
+    head: String,
+    /// `frameOfReferenceUid`, the corner fields and `presets`.
+    middle: String,
+    /// `windowsPerFrame` and `planes`, to the closing brace.
+    tail: String,
+}
+
+impl Shared {
+    fn reply(&self, facts: &str, windows: &str) -> String {
+        let mut out = String::with_capacity(
+            self.head.len() + facts.len() + self.middle.len() + windows.len() + self.tail.len(),
+        );
+        out.push_str(&self.head);
+        out.push_str(facts);
+        out.push_str(&self.middle);
+        out.push_str(windows);
+        out.push_str(&self.tail);
+        out
     }
-    let photometric_text = text_or_empty(object, PHOTOMETRIC)?;
-    let samples = optional_u32(object, SAMPLES_PER_PIXEL)?;
-    let rows = optional_u32(object, ROWS)?;
-    let columns = optional_u32(object, COLUMNS)?;
-    let frames = frame_count(object).unwrap_or(0);
-    let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
-    if frames > 0 && frame_index >= usize::try_from(frames).unwrap_or(usize::MAX) {
-        return Err(PreviewError::Frame);
+
+    fn bytes(&self) -> usize {
+        self.head
+            .capacity()
+            .saturating_add(self.middle.capacity())
+            .saturating_add(self.tail.capacity())
     }
-    let facts = inspect_facts(object, frame_index);
-    let monochrome = (photometric_text == "MONOCHROME1" || photometric_text == "MONOCHROME2")
-        && samples == 1
-        && rows > 0
-        && columns > 0
-        && frames >= 1;
-    let mut out = String::from("{");
-    push_field(
-        &mut out,
-        "seriesUid",
-        &text_or_empty(object, SERIES_UID)?,
-        true,
-    );
-    push_field(
-        &mut out,
-        "seriesNumber",
-        &text_or_empty(object, SERIES_NUMBER)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "modality",
-        &text_or_empty(object, MODALITY)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "seriesDescription",
-        &text_or_empty(object, SERIES_DESCRIPTION)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "instanceNumber",
-        &text_or_empty(object, INSTANCE_NUMBER)?,
-        false,
-    );
-    push_field(&mut out, "sopInstanceUid", &sop, false);
-    push_field(
-        &mut out,
-        "patientName",
-        &text_or_empty(object, PATIENT_NAME)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "patientId",
-        &text_or_empty(object, PATIENT_ID)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "studyDate",
-        &text_or_empty(object, STUDY_DATE)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "studyDescription",
-        &text_or_empty(object, STUDY_DESCRIPTION)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "accession",
-        &text_or_empty(object, ACCESSION)?,
-        false,
-    );
-    push_number(&mut out, "rows", rows);
-    push_number(&mut out, "columns", columns);
-    push_number(&mut out, "samples", samples);
-    push_field(&mut out, "photometric", &photometric_text, false);
-    push_number(&mut out, "frames", frames);
-    push_field(
-        &mut out,
-        "windowCenter",
-        &text_or_empty(object, WINDOW_CENTER)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "windowWidth",
-        &text_or_empty(object, WINDOW_WIDTH)?,
-        false,
-    );
-    push_field(
-        &mut out,
-        "windowFunction",
-        &text_or_empty(object, VOI_FUNCTION)?,
-        false,
-    );
-    out.push_str(",\"monochrome\":");
-    out.push_str(if monochrome { "true" } else { "false" });
-    push_json_token(&mut out, "rowSpacing", facts.row_spacing.as_deref());
-    push_json_token(&mut out, "columnSpacing", facts.column_spacing.as_deref());
-    push_field(&mut out, "spacingSource", facts.spacing_source, false);
-    push_field(&mut out, "edgeLeft", &facts.edge_left, false);
-    push_field(&mut out, "edgeRight", &facts.edge_right, false);
-    push_field(&mut out, "edgeTop", &facts.edge_top, false);
-    push_field(&mut out, "edgeBottom", &facts.edge_bottom, false);
-    push_field(&mut out, "edgeSource", facts.edge_source, false);
-    push_field(
-        &mut out,
-        "frameOfReferenceUid",
-        &sendable_uid(optional_text(object, FRAME_OF_REFERENCE).ok().flatten()),
-        false,
-    );
-    push_corner_fields(&mut out, object);
-    out.push_str(",\"planes\":[");
-    for (index, token) in plane_tokens(object, frames).iter().enumerate() {
-        if index > 0 {
+}
+
+impl KeptReplies {
+    /// The reply for `frame`, byte for byte what `inspect_json` writes.
+    pub(crate) fn reply(&self, frame: u32) -> Option<String> {
+        let (facts, windows) = self.frames.get(usize::try_from(frame).ok()?)?;
+        Some(self.parts.reply(facts, windows))
+    }
+
+    /// One frame's reply of `len` bytes, for the pool's own tests.
+    #[cfg(test)]
+    pub(crate) fn filler(len: usize) -> Self {
+        Self {
+            parts: Shared {
+                head: "x".repeat(len),
+                middle: String::new(),
+                tail: String::new(),
+            },
+            frames: vec![(String::new(), String::new())],
+        }
+    }
+
+    /// The bytes these replies own on the heap: every string's capacity and
+    /// the frame list's slots.
+    pub(crate) fn bytes(&self) -> usize {
+        self.frames
+            .iter()
+            .map(|(facts, windows)| facts.capacity().saturating_add(windows.capacity()))
+            .fold(self.parts.bytes(), usize::saturating_add)
+            .saturating_add(
+                self.frames
+                    .capacity()
+                    .saturating_mul(size_of::<(String, String)>()),
+            )
+    }
+}
+
+/// One `POST /file`'s inspect reply for `frame` and its [`KeptReplies`].
+///
+/// The bytes are parsed, the metadata projected and the plane list built
+/// once, and both the reply and the kept set are taken from that one
+/// [`InspectParts`]. The kept set is `None` for a file that is not a
+/// per-frame multiframe, or when it would pass `cap` bytes.
+pub(crate) fn inspect_post(
+    bytes: &[u8],
+    frame: u32,
+    cap: usize,
+) -> (Result<String, PreviewError>, Option<KeptReplies>) {
+    let stripped = bytes_without_pixel_payload(bytes);
+    let bytes = stripped.as_deref().unwrap_or(bytes);
+    let parsed = match parse_part10(bytes) {
+        Ok(parsed) => parsed,
+        Err(error) => return (Err(part10_error(error)), None),
+    };
+    let parts = match InspectParts::new(parsed.object()) {
+        Ok(parts) => parts,
+        Err(error) => return (Err(error), None),
+    };
+    let reply = parts.reply(frame);
+    let kept = if reply.is_ok() {
+        kept_replies(parts, cap)
+    } else {
+        None
+    };
+    (reply, kept)
+}
+
+/// [`inspect_post`]'s kept set alone, for the pool's own tests.
+#[cfg(test)]
+pub(crate) fn per_frame_replies(bytes: &[u8], cap: usize) -> Option<KeptReplies> {
+    inspect_post(bytes, 0, cap).1
+}
+
+/// [`KeptReplies`] from one post's parts, or `None` for a file that is not a
+/// per-frame multiframe or when they would pass `cap` bytes.
+fn kept_replies(parts: InspectParts, cap: usize) -> Option<KeptReplies> {
+    if parts.frames < 2 || !parts.per_frame {
+        return None;
+    }
+    let mut total = parts.shared.bytes();
+    let mut frames = Vec::new();
+    for frame in 0..parts.frames {
+        let (mut facts, mut windows) = parts.frame_fields(frame).ok()?;
+        facts.shrink_to_fit();
+        windows.shrink_to_fit();
+        total = total
+            .saturating_add(facts.capacity())
+            .saturating_add(windows.capacity())
+            .saturating_add(size_of::<(String, String)>());
+        if total > cap {
+            return None;
+        }
+        frames.push((facts, windows));
+    }
+    frames.shrink_to_fit();
+    let mut shared = parts.shared;
+    shared.head.shrink_to_fit();
+    shared.middle.shrink_to_fit();
+    shared.tail.shrink_to_fit();
+    Some(KeptReplies {
+        parts: shared,
+        frames,
+    })
+}
+
+/// One parsed object's inspect reply, built so the frame-independent parts
+/// and the metadata projection are made once however many frames are asked.
+struct InspectParts {
+    shared: Shared,
+    /// Number of Frames, or 0 when it could not be read.
+    frames: u32,
+    /// Whether any frame's Window Center comes from a per-frame group.
+    per_frame: bool,
+    /// The projection the per-frame fields read, or `None` when the data set
+    /// or its functional groups cannot be read, which empties those fields.
+    metadata: Option<MetadataSet>,
+}
+
+impl InspectParts {
+    fn reply(&self, frame: u32) -> Result<String, PreviewError> {
+        let (facts, windows) = self.frame_fields(frame)?;
+        Ok(self.shared.reply(&facts, &windows))
+    }
+
+    /// The spacing and edge fields, then the window list fields, of `frame`.
+    fn frame_fields(&self, frame: u32) -> Result<(String, String), PreviewError> {
+        let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
+        if self.frames > 0 && frame_index >= usize::try_from(self.frames).unwrap_or(usize::MAX) {
+            return Err(PreviewError::Frame);
+        }
+        let multi = self.metadata.as_ref().and_then(|metadata| {
+            MultiframeMetadata::new(metadata)
+                .ok()
+                .map(|multi| (metadata, multi))
+        });
+        let facts = multi
+            .as_ref()
+            .and_then(|(metadata, multi)| frame_facts(metadata, multi, frame_index).ok())
+            .unwrap_or_else(FrameFacts::empty);
+        let mut fields = String::new();
+        push_json_token(&mut fields, "rowSpacing", facts.row_spacing.as_deref());
+        push_json_token(
+            &mut fields,
+            "columnSpacing",
+            facts.column_spacing.as_deref(),
+        );
+        push_field(&mut fields, "spacingSource", facts.spacing_source, false);
+        push_field(&mut fields, "edgeLeft", &facts.edge_left, false);
+        push_field(&mut fields, "edgeRight", &facts.edge_right, false);
+        push_field(&mut fields, "edgeTop", &facts.edge_top, false);
+        push_field(&mut fields, "edgeBottom", &facts.edge_bottom, false);
+        push_field(&mut fields, "edgeSource", facts.edge_source, false);
+        let mut windows = String::new();
+        let listed = multi
+            .as_ref()
+            .and_then(|(_, multi)| window_rows(multi, frame_index));
+        push_window_rows(&mut windows, listed.unwrap_or_default());
+        Ok((fields, windows))
+    }
+
+    fn new(object: &DefaultDicomObject) -> Result<Self, PreviewError> {
+        let mut sop = text_or_empty(object, SOP_INSTANCE)?;
+        if sop.is_empty() {
+            sop = object
+                .meta()
+                .media_storage_sop_instance_uid()
+                .trim_end_matches('\0')
+                .to_owned();
+        }
+        let photometric_text = text_or_empty(object, PHOTOMETRIC)?;
+        let samples = optional_u32(object, SAMPLES_PER_PIXEL)?;
+        let rows = optional_u32(object, ROWS)?;
+        let columns = optional_u32(object, COLUMNS)?;
+        let frames = frame_count(object).unwrap_or(0);
+        let monochrome = (photometric_text == "MONOCHROME1" || photometric_text == "MONOCHROME2")
+            && samples == 1
+            && rows > 0
+            && columns > 0
+            && frames >= 1;
+        let mut out = String::from("{");
+        push_field(
+            &mut out,
+            "seriesUid",
+            &text_or_empty(object, SERIES_UID)?,
+            true,
+        );
+        push_field(
+            &mut out,
+            "seriesNumber",
+            &text_or_empty(object, SERIES_NUMBER)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "modality",
+            &text_or_empty(object, MODALITY)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "seriesDescription",
+            &text_or_empty(object, SERIES_DESCRIPTION)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "instanceNumber",
+            &text_or_empty(object, INSTANCE_NUMBER)?,
+            false,
+        );
+        push_field(&mut out, "sopInstanceUid", &sop, false);
+        push_field(
+            &mut out,
+            "patientName",
+            &text_or_empty(object, PATIENT_NAME)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "patientId",
+            &text_or_empty(object, PATIENT_ID)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "studyDate",
+            &text_or_empty(object, STUDY_DATE)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "studyDescription",
+            &text_or_empty(object, STUDY_DESCRIPTION)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "accession",
+            &text_or_empty(object, ACCESSION)?,
+            false,
+        );
+        push_number(&mut out, "rows", rows);
+        push_number(&mut out, "columns", columns);
+        push_number(&mut out, "samples", samples);
+        push_field(&mut out, "photometric", &photometric_text, false);
+        push_number(&mut out, "frames", frames);
+        push_field(
+            &mut out,
+            "windowCenter",
+            &text_or_empty(object, WINDOW_CENTER)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "windowWidth",
+            &text_or_empty(object, WINDOW_WIDTH)?,
+            false,
+        );
+        push_field(
+            &mut out,
+            "windowFunction",
+            &text_or_empty(object, VOI_FUNCTION)?,
+            false,
+        );
+        out.push_str(",\"monochrome\":");
+        out.push_str(if monochrome { "true" } else { "false" });
+        let mut middle = String::new();
+        push_field(
+            &mut middle,
+            "frameOfReferenceUid",
+            &sendable_uid(optional_text(object, FRAME_OF_REFERENCE).ok().flatten()),
+            false,
+        );
+        push_corner_fields(&mut middle, object);
+        push_presets(&mut middle, object);
+        let metadata = project_metadata(object).ok();
+        let per_frame = metadata
+            .as_ref()
+            .and_then(|metadata| MultiframeMetadata::new(metadata).ok())
+            .is_some_and(|multi| windows_per_frame(&multi, frames));
+        let mut tail = String::from(",\"windowsPerFrame\":");
+        tail.push_str(if per_frame { "true" } else { "false" });
+        tail.push_str(",\"planes\":[");
+        let planes = metadata
+            .as_ref()
+            .map(|metadata| plane_tokens(metadata, frames))
+            .unwrap_or_else(|| vec![None; frame_list_len(frames)]);
+        for (index, token) in planes.iter().enumerate() {
+            if index > 0 {
+                tail.push(',');
+            }
+            match token {
+                Some(text) => json_string(&mut tail, text),
+                None => tail.push_str("null"),
+            }
+        }
+        tail.push_str("]}");
+        Ok(Self {
+            shared: Shared {
+                head: out,
+                middle,
+                tail,
+            },
+            frames,
+            per_frame,
+            metadata,
+        })
+    }
+}
+
+/// The presets offered on a CT, in the order the number keys reach them.
+const CT_PRESETS: [WindowPreset; 3] = [
+    WindowPreset::SoftTissue,
+    WindowPreset::Lung,
+    WindowPreset::Bone,
+];
+
+/// The `X-Ocelli-Window-Preset` token of a preset, the inverse of
+/// [`window_preset_from_token`].
+const fn preset_token(preset: WindowPreset) -> &'static str {
+    match preset {
+        WindowPreset::SoftTissue => "soft_tissue",
+        WindowPreset::Lung => "lung",
+        WindowPreset::Bone => "bone",
+    }
+}
+
+const fn preset_name(preset: WindowPreset) -> &'static str {
+    match preset {
+        WindowPreset::SoftTissue => "Soft tissue",
+        WindowPreset::Lung => "Lung",
+        WindowPreset::Bone => "Bone",
+    }
+}
+
+/// The window list the page numbers, for one frame.
+///
+/// `presets` is [`CT_PRESETS`] on a CT and empty otherwise. `windows` is one
+/// row per Window Center and Window Width pair in file order, PS3.3
+/// C.11.2.1.2.2, with the Window Center & Width Explanation at the same
+/// position, or `Window n` counted from 1 when that slot is absent or empty.
+/// `voiLuts` is one row per VOI LUT Sequence item, by its LUT Explanation or
+/// `Lookup table n`. `windowsPerFrame` is whether this frame's Window Center
+/// came from a per-frame functional group, so the page asks again when the
+/// frame changes. A window attribute that cannot be read lists nothing and
+/// never refuses the scan.
+fn push_presets(out: &mut String, object: &DefaultDicomObject) {
+    let ct = optional_text(object, MODALITY).ok().flatten().as_deref() == Some("CT");
+    out.push_str(",\"presets\":[");
+    if ct {
+        for (at, preset) in CT_PRESETS.into_iter().enumerate() {
+            if at > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            push_field(out, "token", preset_token(preset), true);
+            push_field(out, "name", preset_name(preset), false);
+            // `Display` for `f32` never uses an exponent.
+            out.push_str(&format!(
+                ",\"center\":{},\"width\":{}}}",
+                preset.center(),
+                preset.width()
+            ));
+        }
+    }
+    out.push(']');
+}
+
+/// `windows` and `voiLuts` for one frame's listed rows.
+fn push_window_rows(out: &mut String, (rows, luts): (Vec<WindowRow>, Vec<String>)) {
+    out.push_str(",\"windows\":[");
+    for (at, row) in rows.iter().enumerate() {
+        if at > 0 {
             out.push(',');
         }
-        match token {
-            Some(text) => json_string(&mut out, text),
-            None => out.push_str("null"),
+        out.push_str("{\"center\":");
+        out.push_str(row.center.as_deref().unwrap_or("null"));
+        out.push_str(",\"width\":");
+        out.push_str(row.width.as_deref().unwrap_or("null"));
+        push_field(out, "explanation", &row.explanation, false);
+        push_field(out, "label", &row.label, false);
+        out.push('}');
+    }
+    out.push_str("],\"voiLuts\":[");
+    for (at, explanation) in luts.iter().enumerate() {
+        if at > 0 {
+            out.push(',');
+        }
+        let label = if explanation.is_empty() {
+            format!("Lookup table {}", at + 1)
+        } else {
+            explanation.clone()
+        };
+        out.push('{');
+        push_field(out, "explanation", explanation, true);
+        push_field(out, "label", &label, false);
+        out.push('}');
+    }
+    out.push(']');
+}
+
+/// Whether any frame's Window Center resolves from a per-frame functional
+/// group. The page then asks every frame other than 0 for its own list, so
+/// a file whose later frames alone carry their own VOI is not read as
+/// frame 0's.
+fn windows_per_frame(multi: &MultiframeMetadata<'_>, frames: u32) -> bool {
+    (0..frame_list_len(frames)).any(|frame| {
+        matches!(
+            multi
+                .resolve(
+                    frame,
+                    FRAME_VOI_LUT_SEQUENCE,
+                    WINDOW_CENTER,
+                    TopLevelFallback::Allowed
+                )
+                .ok()
+                .flatten()
+                .map(|found| found.source()),
+            Some(FunctionalGroupSource::PerFrame(_))
+        )
+    })
+}
+
+fn frame_list_len(frames: u32) -> usize {
+    usize::try_from(frames).map_or(FRAME_LIST_CAP, |count| count.min(FRAME_LIST_CAP))
+}
+
+/// One listed file window.
+struct WindowRow {
+    /// The stored Window Center as a JSON number, or `None` for an empty slot.
+    center: Option<String>,
+    width: Option<String>,
+    explanation: String,
+    label: String,
+}
+
+/// The rows and the VOI LUT explanations of one frame, or `None` when an
+/// attribute cannot be read.
+fn window_rows(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> Option<(Vec<WindowRow>, Vec<String>)> {
+    let centers = resolved_slots(multi, frame, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER).ok()?;
+    let widths = resolved_slots(multi, frame, FRAME_VOI_LUT_SEQUENCE, WINDOW_WIDTH).ok()?;
+    let explanations =
+        resolved_slots(multi, frame, FRAME_VOI_LUT_SEQUENCE, WINDOW_EXPLANATION).ok()?;
+    let blank = |slots: &[String]| slots.iter().all(String::is_empty);
+    let mut rows = Vec::new();
+    // Pairs that cannot be paired, or that carry no number at all, are not
+    // a list of windows. The preview refuses or full-ranges those files.
+    if centers.len() == widths.len() && !(blank(&centers) && blank(&widths)) {
+        for (at, (center, width)) in centers.iter().zip(&widths).enumerate() {
+            let explanation = explanations.get(at).cloned().unwrap_or_default();
+            let label = if explanation.is_empty() {
+                format!("Window {}", at + 1)
+            } else {
+                explanation.clone()
+            };
+            rows.push(WindowRow {
+                center: clean_decimal(center),
+                width: clean_decimal(width),
+                explanation,
+                label,
+            });
         }
     }
-    out.push_str("]}");
-    Ok(out)
+    let mut luts = Vec::new();
+    if let Some(found) = multi
+        .resolve(
+            frame,
+            FRAME_VOI_LUT_SEQUENCE,
+            VOI_LUT_SEQUENCE,
+            TopLevelFallback::Allowed,
+        )
+        .ok()?
+        && let MetadataValue::Sequence(items) = found.element().value()
+    {
+        for item in items {
+            let explanation = item
+                .get(LUT_EXPLANATION)
+                .and_then(MetadataElement::semantic_text)
+                .and_then(|parts| parts.first().map(|part| (*part).to_owned()))
+                .unwrap_or_default();
+            luts.push(explanation);
+        }
+    }
+    Some((rows, luts))
 }
 
 /// One top-level attribute read for a corner line.
@@ -2721,12 +3322,17 @@ fn sendable_uid(text: Option<String>) -> String {
 
 /// One plane token per frame, up to [`FRAME_LIST_CAP`], or `None` where
 /// `FrameGeometry::derive` refused the frame.
-fn plane_tokens(object: &DefaultDicomObject, frames: u32) -> Vec<Option<String>> {
-    let count = usize::try_from(frames).map_or(FRAME_LIST_CAP, |count| count.min(FRAME_LIST_CAP));
-    let Ok(metadata) = project_metadata(object) else {
-        return vec![None; count];
-    };
-    let Ok(multi) = MultiframeMetadata::new(&metadata) else {
+fn plane_tokens(metadata: &MetadataSet, frames: u32) -> Vec<Option<String>> {
+    #[cfg(test)]
+    note_inspect_work(
+        metadata
+            .get(SOP_INSTANCE)
+            .and_then(MetadataElement::semantic_text)
+            .and_then(|parts| parts.first().map(|part| (*part).to_owned())),
+        false,
+    );
+    let count = frame_list_len(frames);
+    let Ok(multi) = MultiframeMetadata::new(metadata) else {
         return vec![None; count];
     };
     (0..count)
@@ -3110,11 +3716,162 @@ fn file_order_pixels(object: &DefaultDicomObject, little: bool) -> Result<Vec<u8
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
-        borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, preview_frame,
-        split_pixel_payload,
+        borrowed_decode_ticks, borrowed_pixels_fit, file_order_pixels, inspect_post, inspect_work,
+        per_frame_replies, preview_frame, split_pixel_payload,
     };
+
+    fn element(group: u16, element: u16, vr: &[u8; 2], value: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&group.to_le_bytes());
+        out.extend_from_slice(&element.to_le_bytes());
+        out.extend_from_slice(vr);
+        if matches!(vr, b"SQ" | b"OW" | b"OB") {
+            out.extend_from_slice(&[0, 0]);
+            out.extend_from_slice(&u32::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        } else {
+            out.extend_from_slice(&u16::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        }
+        out.extend_from_slice(value);
+        out
+    }
+
+    fn padded(text: &str) -> Vec<u8> {
+        let mut bytes = text.as_bytes().to_vec();
+        if bytes.len() % 2 == 1 {
+            bytes.push(b' ');
+        }
+        bytes
+    }
+
+    fn item(content: &[u8]) -> Vec<u8> {
+        let mut out = vec![0xFE, 0xFF, 0x00, 0xE0];
+        out.extend_from_slice(&u32::try_from(content.len()).unwrap_or(0).to_le_bytes());
+        out.extend_from_slice(content);
+        out
+    }
+
+    /// An N-frame 1 by 1 enhanced CT whose every frame carries its own
+    /// Frame VOI LUT item, centre 40 and width 400.
+    pub(crate) fn per_frame_file(frames: usize) -> Vec<u8> {
+        per_frame_file_as(frames, "2.25.213000")
+    }
+
+    /// [`per_frame_file`] with SOP Instance UID `uid`, which
+    /// [`inspect_work`] counts by.
+    pub(crate) fn per_frame_file_as(frames: usize, uid: &str) -> Vec<u8> {
+        let mut meta = Vec::new();
+        meta.extend(element(0x0002, 0x0001, b"OB", &[0, 1]));
+        meta.extend(element(0x0002, 0x0010, b"UI", b"1.2.840.10008.1.2.1\0"));
+        let mut bytes = vec![0_u8; 128];
+        bytes.extend_from_slice(b"DICM");
+        bytes.extend(element(
+            0x0002,
+            0x0000,
+            b"UL",
+            &u32::try_from(meta.len()).unwrap_or(0).to_le_bytes(),
+        ));
+        bytes.extend(meta);
+        let voi = item(&element(
+            0x0028,
+            0x9132,
+            b"SQ",
+            &item(
+                &[
+                    element(0x0028, 0x1050, b"DS", &padded("40")),
+                    element(0x0028, 0x1051, b"DS", &padded("400")),
+                ]
+                .concat(),
+            ),
+        ));
+        let mut sop = uid.as_bytes().to_vec();
+        if sop.len() % 2 == 1 {
+            sop.push(0);
+        }
+        bytes.extend(element(0x0008, 0x0018, b"UI", &sop));
+        bytes.extend(element(0x0008, 0x0060, b"CS", b"CT"));
+        bytes.extend(element(0x0028, 0x0002, b"US", &1_u16.to_le_bytes()));
+        bytes.extend(element(0x0028, 0x0004, b"CS", &padded("MONOCHROME2")));
+        bytes.extend(element(0x0028, 0x0008, b"IS", &padded(&frames.to_string())));
+        for (tag, value) in [
+            (0x0010, 1_u16),
+            (0x0011, 1),
+            (0x0100, 16),
+            (0x0101, 16),
+            (0x0102, 15),
+            (0x0103, 0),
+        ] {
+            bytes.extend(element(0x0028, tag, b"US", &value.to_le_bytes()));
+        }
+        bytes.extend(element(0x5200, 0x9230, b"SQ", &voi.repeat(frames)));
+        bytes.extend(element(
+            0x7FE0,
+            0x0010,
+            b"OW",
+            &50_u16.to_le_bytes().repeat(frames),
+        ));
+        bytes
+    }
+
+    #[test]
+    fn kept_replies_are_charged_at_their_heap_bytes() -> Result<(), String> {
+        // Review pass 2, S1, and pass 3. The charge is every string's
+        // capacity plus the frame list's slots, nothing guessed. The kept
+        // replies also equal what `inspect_json` writes for each frame.
+        let file = per_frame_file(3);
+        let kept = per_frame_replies(&file, usize::MAX).ok_or("nothing was kept")?;
+        let mut want =
+            kept.parts.head.capacity() + kept.parts.middle.capacity() + kept.parts.tail.capacity();
+        for (facts, windows) in &kept.frames {
+            want += facts.capacity() + windows.capacity();
+        }
+        want += kept.frames.capacity() * std::mem::size_of::<(String, String)>();
+        if kept.bytes() != want {
+            return Err(format!("charged {} for {want} heap bytes", kept.bytes()));
+        }
+        for frame in 0..3 {
+            let body = inspect_json(&file, frame).map_err(|_| "inspect refused".to_owned())?;
+            if kept.reply(frame).as_deref() != Some(body.as_str()) {
+                return Err(format!(
+                    "frame {frame}'s kept reply differs from the body form"
+                ));
+            }
+        }
+        // N4. A one-frame file never asks by id, so it keeps nothing even
+        // when its one frame's window is per frame.
+        if per_frame_replies(&per_frame_file(1), usize::MAX).is_some() {
+            return Err("a one-frame file kept replies".to_owned());
+        }
+        // N4, the cap inside the builder is what bounds a huge file's work.
+        if per_frame_replies(&file, kept.bytes() - 1).is_some() {
+            return Err("replies past the cap were built".to_owned());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn per_frame_replies_build_the_shared_parts_once() -> Result<(), String> {
+        // Review pass 3, D1, and pass 4, D1. One post, the reply and the kept
+        // set together, projects the metadata once and builds the plane list
+        // once, so the work does not grow with the frame count beyond the
+        // per-frame window and spacing fields.
+        let mut work = Vec::new();
+        for frames in [4_usize, 12] {
+            let uid = format!("2.25.21300{frames}");
+            let (reply, kept) = inspect_post(&per_frame_file_as(frames, &uid), 0, usize::MAX);
+            if reply.is_err() || kept.is_none() {
+                return Err(format!("{frames} frames gave no reply or kept nothing"));
+            }
+            work.push(inspect_work(&uid));
+        }
+        if !matches!(work[..], [(1, 1), (1, 1)]) {
+            return Err(format!(
+                "projections and plane builds by frame count: {work:?}"
+            ));
+        }
+        Ok(())
+    }
     use crate::{FrameRequest, inspect_json, slice};
     use ocelli_viewport::presentation::WindowPreset;
 

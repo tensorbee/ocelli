@@ -345,6 +345,91 @@ pub(crate) fn measure_json(
     Ok(out)
 }
 
+/// The minimum, maximum and count of a region window's modality values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RegionExtent {
+    /// Least non-padding modality value inside the rectangle.
+    pub min: f32,
+    /// Greatest non-padding modality value inside the rectangle.
+    pub max: f32,
+    /// How many pixel centres inside the rectangle are not padding.
+    pub count: u32,
+}
+
+/// Decode one frame and walk a region window rectangle on it.
+///
+/// # Errors
+///
+/// The refusals of [`decode_held`], then those of [`region_extent`].
+pub fn region_extent_frame(
+    bytes: &[u8],
+    frame: u32,
+    rect: [f64; 4],
+) -> Result<RegionExtent, PreviewError> {
+    let mut native = Vec::new();
+    let mut samples = Vec::new();
+    let held = decode_held(
+        bytes,
+        frame,
+        &mut native,
+        &mut samples,
+        &mut |_| {},
+        &mut |_| Vec::new(),
+    )?;
+    region_extent(&held, rect)
+}
+
+/// The region window's extent on one held frame.
+///
+/// `rect` is two opposite corners `x0, y0, x1, y1` in page image pixels.
+/// The walk is the one [`measure_json`] uses for a rectangle: a sample is
+/// inside when its centre is in the closed rectangle after the corners are
+/// sorted, padding is left out, and the size cap applies. No spacing is
+/// read, so an image the length tool refuses still has a region window.
+///
+/// # Errors
+///
+/// [`PreviewError::Region`] when no pixel centre is inside, or every one
+/// inside is padding. Otherwise the walk's own refusals: [`PreviewError::TooLarge`]
+/// past the cap, the held value refusal, and [`PreviewError::Point`] when a
+/// coordinate is too large.
+pub(crate) fn region_extent(
+    held: &HeldFrame,
+    rect: [f64; 4],
+) -> Result<RegionExtent, PreviewError> {
+    let [x0, y0, x1, y1] = rect;
+    let region = RegionShape::Rectangle {
+        corner: ImagePoint { x: x0, y: y0 }.to_index(),
+        opposite: ImagePoint { x: x1, y: y1 }.to_index(),
+    };
+    let nothing = |error: PreviewError| match error {
+        PreviewError::Degenerate => PreviewError::Region,
+        other => other,
+    };
+    let walked = region_samples(held, &region).map_err(nothing)?;
+    // `roi_statistics` owns the extremes for both callers. A window has no
+    // area, and 0 is a finite one the statistic carries without reading.
+    let stats = roi_statistics(&walked.samples, 0.0).map_err(|error| match error {
+        GeomError::Degenerate => PreviewError::Region,
+        GeomError::Frame => PreviewError::Attribute,
+    })?;
+    Ok(RegionExtent {
+        // Each extreme is one sample widened from `f32`, so narrowing is exact.
+        min: f32_from_f64(stats.min),
+        max: f32_from_f64(stats.max),
+        count: stats.count,
+    })
+}
+
+/// `{"min":..,"max":..,"count":..}`. `Display` for `f32` is the shortest
+/// text that reads back as the same value, and it never uses an exponent.
+pub(crate) fn region_json(extent: RegionExtent) -> String {
+    format!(
+        "{{\"min\":{},\"max\":{},\"count\":{}}}",
+        extent.min, extent.max, extent.count
+    )
+}
+
 /// Plane-local millimetre points, `(c * column_mm, r * row_mm, 0)`.
 ///
 /// This is not LPS. By PS3.3 C.7.6.2.1.1, for orthonormal row and column
@@ -462,17 +547,24 @@ struct RegionStats {
     max: f32,
 }
 
+/// The contained non-padding modality values of one region, and how many
+/// padding samples were left out.
+struct RegionSamples {
+    samples: Vec<f64>,
+    padding_excluded: u32,
+}
+
 /// Walk the clipped bounds once, keep each contained non-padding sample.
 ///
 /// PS3.3 C.7.5.1.1.2: a padding sample is compared in stored space and is
 /// not a modality value, so it is excluded and counted. PS3.3 C.11.1: each
 /// kept sample is `ModalityTransform::apply` of the stored value, the held
-/// frame's stage 1, widened from `f32` to `f64` without loss.
-fn region_statistics(
+/// frame's stage 1, widened from `f32` to `f64` without loss. Both the
+/// region statistics and the region window read their samples here.
+fn region_samples(
     held: &HeldFrame,
     region: &RegionShape<'_>,
-    area: f64,
-) -> Result<RegionStats, PreviewError> {
+) -> Result<RegionSamples, PreviewError> {
     let Some(bounds) = region_bounds(region, held.width, held.height).map_err(geom)? else {
         return Err(PreviewError::Degenerate);
     };
@@ -516,13 +608,27 @@ fn region_statistics(
             samples.push(f64::from(value));
         }
     }
-    let stats = roi_statistics(&samples, area).map_err(|error| match error {
+    Ok(RegionSamples {
+        samples,
+        padding_excluded,
+    })
+}
+
+/// The F-075 statistics of [`region_samples`].
+fn region_statistics(
+    held: &HeldFrame,
+    region: &RegionShape<'_>,
+    area: f64,
+) -> Result<RegionStats, PreviewError> {
+    let walked = region_samples(held, region)?;
+    let facts = held.value.as_ref().map_err(|error| *error)?;
+    let stats = roi_statistics(&walked.samples, area).map_err(|error| match error {
         GeomError::Degenerate => PreviewError::Degenerate,
         GeomError::Frame => PreviewError::Attribute,
     })?;
     Ok(RegionStats {
         count: stats.count,
-        padding_excluded,
+        padding_excluded: walked.padding_excluded,
         unit: facts.unit().to_owned(),
         mean: stats.mean,
         sd: stats.sd,

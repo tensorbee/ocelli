@@ -832,6 +832,14 @@ def _forget_check_accepts_a_late_post(box: Sandbox) -> None:
     )
 
 
+def _window_check_accepts_a_stale_grey(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/window.mjs",
+        "    if (want.soft !== undefined && (got.soft !== want.soft || got.lung !== want.lung)) {",
+        "    if (false) {",
+    )
+
+
 def _changed_check_accepts_the_old_image(box: Sandbox) -> None:
     box.substitute(
         "examples/folder-viewer/tests/browser/changed.mjs",
@@ -7489,6 +7497,54 @@ print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 
+# The viewer build check's two states, as emitted names and worker text. The
+# inputs come from the refusal sentences, a clean-clone build that keeps the
+# runtime import and its probe and a pkg build that emits its own wasm files,
+# and not from the regular expressions the check uses to read them.
+_VIEWER_URL = "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js"
+_VIEWER_ABSENT_BUNDLED = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
+         'ocelli_wasm_bg-d4.wasm']
+worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
+bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_ABSENT_HEALTHY = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js']
+worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
+bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_EXTERNAL = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js']
+worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
+bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_HEALTHY = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
+         'ocelli_wasm_bg-d4.wasm']
+worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
+bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
 
 def _advisory_unknown_proof(box: Sandbox) -> None:
     """A proof name the packages gate does not run."""
@@ -11702,6 +11758,60 @@ GUARDS: tuple[Guard, ...] = (
               "that list with both notice files.",
     ),
     Guard(
+        id="viewer-build",
+        file="scripts/viewer_build_check.py",
+        gate="packages",
+        spec="F-217 AC18 in `.claude/plans/F-217-design.md`, the viewer's "
+             "`vite build` passing in CI, and the lead decision that a build "
+             "without `crates/ocelli-wasm/pkg` passes and leaves the import "
+             "to runtime, where it fails and the core reads as not built",
+        refuses="A viewer build that fails with the wasm pkg absent, or that "
+                "then emits a wasm file or drops the runtime import of the "
+                "pkg URL or the fetch probe in front of it. A viewer build "
+                "that fails with a pkg present, or that then emits no wasm "
+                "glue chunk or no `.wasm` asset, or still imports the pkg URL "
+                "at runtime.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "viewer-build.absent-bundled", None,
+                python_snippet("viewer_build_check.absent_problems",
+                               _VIEWER_ABSENT_BUNDLED),
+                "does not keep a runtime import()",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.absent_problems, healthy",
+                    _VIEWER_ABSENT_HEALTHY),
+                note="Level 1. A pkg-absent build whose worker imports a "
+                     "bundled chunk and which emitted wasm files, which is "
+                     "what a build that found a pkg it should not have "
+                     "looks like. The control keeps the runtime import and "
+                     "the probe and emits no wasm file."),
+            Probe(
+                "viewer-build.present-external", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_EXTERNAL),
+                "no ocelli_wasm chunk",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1. A pkg-present build that left the URL "
+                     "external, which is what a config that always marks it "
+                     "external produces. The control emits the glue chunk and "
+                     "the `.wasm` and imports the chunk."),
+        ),
+        limit="The two builds need an npm install, and `node_modules` is "
+              "ignored and therefore absent from the `git ls-files` sandbox, "
+              "so the build steps and the missing-library refusal have no "
+              "level-3 probe. The `packages` gate runs both builds against "
+              "the real install on every push. The present state uses a "
+              "stand-in pkg, because the frontend job has no Rust toolchain, "
+              "so it proves what Vite emits for a pkg that exists and not "
+              "that the real pkg instantiates. The worker-count refusals have "
+              "no probe.",
+    ),
+    Guard(
         id="advisories",
         file="scripts/advisory_check.py",
         gate="advisories",
@@ -12397,7 +12507,7 @@ GUARDS: tuple[Guard, ...] = (
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
                        "The tree follows two `#[path]` modules, `produce` "
-                       "and `held.rs` (F-210), so the planted module is the "
+                       "and `held.rs`, so the planted module is the "
                        "third. The count is the one measured on the F-232 "
                        "tree.",
                   needs="cargo", profile="deep"),
@@ -12442,7 +12552,7 @@ GUARDS: tuple[Guard, ...] = (
                        "refuse a crate that moves a module behind a feature. "
                        "The count in the expect is what proves the file was "
                        "read. The tree follows two `#[path]` modules, "
-                       "`produce` and `held.rs` (F-210), so the planted "
+                       "`produce` and `held.rs`, so the planted "
                        "module is the third. The count is the one measured "
                        "on the F-232 tree.",
                   needs="cargo", profile="deep"),
@@ -13976,6 +14086,71 @@ GUARDS: tuple[Guard, ...] = (
               "watched by the `viewer-browser` gate and its CI job. The 410, "
               "beacon count, beacon size, held-after and not-observed "
               "branches have no probe.",
+    ),
+    Guard(
+        id="viewer-browser.window",
+        file="examples/folder-viewer/tests/browser/window.mjs",
+        gate="viewer-browser",
+        spec="F-213 design AC13 and lead amendment 2, the window rows on "
+             "the number keys draw what they name and the file window "
+             "index is part of every viewport's cache key",
+        refuses="A number key whose corner word or grey is not its row's, "
+                "key 5 on the CT drawing key 4's grey, a shorter next list "
+                "that shows a fault or another window than its first, an MR "
+                "that lists a preset row or a key that reaches past its one "
+                "window, a region window that does not read WW 840 WL -380 "
+                "region, a missing library build that does not say so, a "
+                "per-frame multiframe frame that shows a fault before its "
+                "own window list arrives or is not drawn at its own first "
+                "window, a frame change on a fully held multiframe that "
+                "posts the file again, a Four images tile that is not drawn "
+                "at the chosen file window once its frame's list is known or "
+                "whose label does not name that window, a later frame of a "
+                "file whose frame 0 takes the top-level window that is named "
+                "with frame 0's label or shows a fault, a tile whose frame "
+                "list is held back and whose label does not give the WW and "
+                "WL it is drawn at, a multiframe step "
+                "whose process never holds every frame without the posted "
+                "bytes, and a run in which a step was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `windowProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its grey branch.",
+        probes=(
+            Probe(
+                "viewer-browser.window-stale-grey",
+                _window_check_accepts_a_stale_grey,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { EXPECTED, windowProblems } from "
+                    "'./examples/folder-viewer/tests/browser/window.mjs';\n"
+                    "const steps = EXPECTED.map((want) => ({ name: want.name, "
+                    "corner: 'WW 1  WL 1  ' + want.word, soft: want.soft, "
+                    "lung: want.lung, fault: '' }));\n"
+                    "steps[4].soft = 128; steps[4].lung = 0;\n"
+                    "const problems = windowProblems({ steps, mrRows: 1, "
+                    "region: { served: true, corner: 'WW 840  WL -380  "
+                    "region' } });\n"
+                    "if (problems.length === 1 && problems[0].includes('grey "
+                    "128 and 0, wanted 236 and 94')) process.exit(0);\n"
+                    "console.error('window check accepted a stale grey'); "
+                    "process.exit(1);",
+                ),
+                "window check accepted a stale grey",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the grey branch with key 5 showing key 4's "
+              "grey, which is what a cache key without the file window "
+              "index serves. The observation itself needs Chromium and a "
+              "release build of the viewer, which a disposable sandbox does "
+              "not have, so it is watched by the `viewer-browser` gate and "
+              "its CI job. Which region leg runs depends on whether "
+              "`packages/core/dist` is built, and CI does not build it, so "
+              "CI observes the library sentence. The corner, fault, MR row, "
+              "region, `multiframeProblems` and `tileProblems` branches have "
+              "no probe.",
     ),
     Guard(
         id="viewer-browser.changed",

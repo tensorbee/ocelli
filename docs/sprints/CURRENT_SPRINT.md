@@ -13,7 +13,7 @@
 | F-210 | E38.20 | Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process | Rust | 3w | done |
 | F-211 | E38.21 | Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list | All | 6w | done |
 | F-212 | E38.22 | Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images | All | 4w | done |
-| F-213 | E38.23 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | pending |
+| F-213 | E38.23 | Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library | All | 3w | done |
 | F-214 | E38.24 | Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063) | TS | 2w | pending |
 | F-215 | E38.25 | Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder | TS | 4w | pending |
 | F-216 | E38.26 | Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build | All | 4w | done |
@@ -37,6 +37,7 @@
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | pending |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | pending |
+| F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | pending |
 
 **The Status column above is hand-typed and nothing derives it, so it goes
 stale.** `docs/sprints/BACKLOG.md` is the authority.
@@ -70,6 +71,17 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   acceptance row: the single view and the first tile of the synthetic study
   measure 64 to 67.2 within 1e-3, and the assignment swap must turn that row
   red. F-208 does not complete while that row is open.
+- **F-217 fresh-clone build, fixed as a follow-up on 2026-11-07.** F-217's
+  Vite 8 to Vite 7 move made `npm run build` fail with ENOENT on a clone with
+  no `crates/ocelli-wasm/pkg`, so CI's frontend job would have failed on push.
+  The follow-up integrated from `work/f-217-fresh-build` marks the wasm URL
+  external for the worker build when the pkg is absent, decodes the URL path,
+  and adds `scripts/viewer_build_check.py` to `gate packages`. F-217 stays
+  done, and its follow-up AS_BUILT entry records the three open items for a
+  separate story: the built `dist` hard-codes the build machine's `/@fs` path,
+  the viewer stays `core not built` in Chromium even with the pkg, and dev mode
+  answers 403 because `server.fs.allow` is percent-encoded. No story is filed
+  for them yet.
 
 ## Pulled forward from S47
 
@@ -244,6 +256,20 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
   checker, real time natively at both sizes and in Chrome at 720 by 576, and
   synthetic clips with a recorded assessment of the conformance streams.
   F-242 is approved at 8w with no deviation.
+- **A monochrome JPEG-LS frame can draw wrong pixels with no error.** A
+  reviewer saw an Enhanced CT frame under `.80` drawn as flat grey. The vendored
+  `ritk-codecs` run-mode loop raises RUNindex when a run reaches the end of a
+  line on a partial segment, so every later run reads the wrong length, and
+  the scan decoder returns `Ok` from a desynchronised or truncated scan. 916 of
+  1,024 samples were wrong in each frame of the reported file. No corpus row
+  reaches the trigger, which is why every test passed.
+  **Decided by the operator on 2026-11-07:** a new S46 story, done next,
+  patches the vendored scan decoder to T.87 A.7.1, refuses a scan that runs out
+  of data or leaves unread bytes before EOI, refuses by name an LSE preset the
+  decoder does not apply, records the patch and amends D-20, and adds
+  CharLS-encoded trigger fixtures and banded corpus rows. F-243 implements it,
+  E4.13 at 3w, approved with no new deviation. It lands before F-239's codec
+  part, whose `ritk-codecs` patch merges onto it, so F-239 now depends on it.
 
 ## What is carried in
 
