@@ -3209,8 +3209,9 @@ mod tests {
     }
 
     /// The candidate and reference frames of one row, or `None` when the
-    /// reference run or the corpus is absent. Absent, the producer must say
-    /// so, as the neighbouring tests require, rather than the test panic.
+    /// reference run or the corpus is absent. Before returning `None` it
+    /// checks that the producer refuses a missing reference run, as the
+    /// neighbouring tests do, so the test returns instead of panicking.
     fn rendered_pair(id: &str) -> Option<(Vec<u8>, Vec<u8>)> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let reference = root.join("tools/oracle/out");
