@@ -3189,7 +3189,9 @@ mod tests {
             super::jpeg_extended_12_level_residual().to_bits(),
             15.0_f32.to_bits()
         );
-        let (rgba, raw) = rendered_pair("syntax__jpeg_extended_12");
+        let Some((rgba, raw)) = rendered_pair("syntax__jpeg_extended_12") else {
+            return;
+        };
         assert_class_one_bounds("syntax__jpeg_extended_12", &rgba, &raw);
     }
 
@@ -3200,14 +3202,30 @@ mod tests {
     /// full-frame bound rejects that frame.
     #[test]
     fn dx_window_snap_matches_the_reference_bound() {
-        let (rgba, raw) = rendered_pair("real__dx_varepop__00000001");
+        let Some((rgba, raw)) = rendered_pair("real__dx_varepop__00000001") else {
+            return;
+        };
         assert_class_one_bounds("real__dx_varepop__00000001", &rgba, &raw);
     }
 
-    fn rendered_pair(id: &str) -> (Vec<u8>, Vec<u8>) {
+    /// The candidate and reference frames of one row, or `None` when the
+    /// reference run or the corpus is absent. Absent, the producer must say
+    /// so, as the neighbouring tests require, rather than the test panic.
+    fn rendered_pair(id: &str) -> Option<(Vec<u8>, Vec<u8>)> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
+        if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: root.join("tools/oracle/missing-run"),
+                corpus_root: corpus,
+                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
+                candidate_run: root.join("tools/oracle/compare-out/candidate"),
+                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+            });
+            assert_eq!(summary.resources, "reference-run-absent");
+            return None;
+        }
         let run = match crate::sidecar::Run::load(&reference) {
             Ok(run) => run,
             Err(error) => unreachable!("the reference run loads, {error}"),
@@ -3224,7 +3242,7 @@ mod tests {
             Ok(bytes) => bytes,
             Err(error) => unreachable!("{id} reference raw is present, {error}"),
         };
-        (rgba, raw)
+        Some((rgba, raw))
     }
 
     fn assert_class_one_bounds(id: &str, rgba: &[u8], raw: &[u8]) {
