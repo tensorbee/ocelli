@@ -12,16 +12,25 @@
 
 extern crate alloc;
 
+pub mod auto_window;
 pub mod color;
 pub mod error;
+pub mod icc;
 pub mod image_plane;
 pub mod lut;
 pub mod stored_pixel;
 
+pub use auto_window::{
+    AUTO_WINDOW_SAMPLE_CAP, AUTO_WINDOW_SERIES_FRAMES, AutoWindow, AutoWindowBasis,
+    AutoWindowError, AutoWindowPool, StoredRange, auto_window, series_sample,
+};
+
 pub use color::{
-    ColorTransform, DecodedLayout, DecodedPhotometric, PaletteColorLut, PixelDataEncoding, Rgb,
+    ColorTransform, ColourWindow, DecodedLayout, DecodedPhotometric, DisplayScale, PaletteColorLut,
+    PixelDataEncoding, Rgb,
 };
 pub use error::PixelError;
+pub use icc::{IccError, IccProfile, IccTransform, RenderingIntent};
 pub use image_plane::{
     DIRECTION_COSINE_TOLERANCE, ImageDimensions, ImageOrientationPatient, ImagePlane,
     ImagePositionPatient, PixelSpacing,

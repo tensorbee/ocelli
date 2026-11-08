@@ -874,6 +874,11 @@ class Command:
     text: str
     conditions: tuple[str, ...]
     tolerated: str = ""
+    # The job the statement was read from. `run_commands` walks
+    # `jobs.<id>.steps[n]`, so the id is at hand and the provisioning check
+    # below needs it: whether a job that runs the packages gate also
+    # provisions what that gate's pack builds with is a per-job question.
+    job: str = ""
 
     def runs_on(self, events: set[str]) -> bool:
         if self.tolerated:
@@ -1066,7 +1071,7 @@ def run_commands(workflow: str) -> list[Command]:
                     reason = f"on {where}, {tolerated[position]}"
                 else:
                     reason = ""
-                commands.append(Command(text, conditions, reason))
+                commands.append(Command(text, conditions, reason, job_id))
     return commands
 
 
@@ -2516,6 +2521,77 @@ def unseen_commands(runner: str) -> dict[str, list[str]]:
     return unseen
 
 
+# F-237 review pass 2, N3. `gate packages` packs @ocelli/wasm, and the
+# package's prepack script builds both wasm modules through bin/ocelli.sh,
+# which needs the pinned toolchain, the wasm32 target and wasm-pack. The
+# frontend job gained exactly that provisioning with the same review's D1,
+# and deleting its wasm-pack step left this check at exit 0: the floor's
+# claim above is about a step RUNNING the gate, and a job that fails closed
+# at the first pack still runs it. So a job that runs the gate must
+# provision what the gate's pack builds with, the way the `wasm` job does.
+WASM_PACK_ACTION = "jetli/wasm-pack-action"
+TOOLCHAIN_ACTION = "dtolnay/rust-toolchain"
+WASM_TARGET = "wasm32-unknown-unknown"
+
+
+def provisioning_problems(commands: list[Command],
+                          workflow: str) -> list[str]:
+    """Every job that runs the packages gate provisions the wasm toolchain.
+
+    `commands` is `run_commands`' output, so the gate is matched the way the
+    floor's own claim is matched: by name at a statement head through
+    `invoked_gates`, or by the arm's own `package_check.py` command through
+    `runs_command`, which is the per-command form `ci_floor_check.py`
+    accepts for a multi-command arm elsewhere. A substring in a `run:` body
+    matches neither. The actions are named rather than inferred: they are
+    what the `wasm` job installs, and a different provisioning mechanism is
+    a refusal here until this file is taught to read it.
+    """
+    problems: list[str] = []
+    tree = workflow_tree(workflow)
+    jobs = _shaped(tree.get("jobs") or {}, dict, "`jobs:`")
+    for job_id, raw_job in jobs.items():
+        job_commands = [c for c in commands if c.job == job_id]
+        runs_packages = (
+            "packages" in invoked_gates(job_commands)
+            or runs_command("python3 scripts/package_check.py",
+                            job_commands))
+        if not runs_packages:
+            continue
+        job = _shaped(raw_job, dict, f"the job `{job_id}`")
+        steps = _shaped(job.get("steps") or [], list,
+                        f"a `steps:` on the job `{job_id}`")
+        uses: list[tuple[str, dict]] = []
+        for index, raw_step in enumerate(steps):
+            where = f"step {index + 1} of the job `{job_id}`"
+            step = _shaped(raw_step, dict, where)
+            if "uses" not in step:
+                continue
+            action = str(_shaped(step["uses"], str, f"a `uses:` on {where}"))
+            with_block = _shaped(step.get("with") or {}, dict,
+                                 f"a `with:` on {where}")
+            uses.append((action, with_block))
+        packs = [action for action, _ in uses
+                 if action.split("@", 1)[0] == WASM_PACK_ACTION]
+        targeted = any(WASM_TARGET in str(with_block.get("targets", ""))
+                       for action, with_block in uses
+                       if action.split("@", 1)[0] == TOOLCHAIN_ACTION)
+        if not packs:
+            problems.append(
+                f"the `{job_id}` job runs the packages gate and no "
+                f"{WASM_PACK_ACTION} step provisions wasm-pack. The gate "
+                f"packs @ocelli/wasm, whose prepack script builds both wasm "
+                f"modules through bin/ocelli.sh, so the job fails closed at "
+                f"the first pack with \"wasm-pack is not installed\" and "
+                f"the step above still reads as running the gate.")
+        if not targeted:
+            problems.append(
+                f"the `{job_id}` job runs the packages gate and no "
+                f"{TOOLCHAIN_ACTION} step installs the {WASM_TARGET} target "
+                f"that the gate's wasm build compiles for.")
+    return problems
+
+
 def main() -> int:
     runner = RUNNER.read_text()
     workflow = WORKFLOW.read_text()
@@ -2540,6 +2616,7 @@ def main() -> int:
         entry_problems = gate_row_problems(runner)
         commands = run_commands(workflow)
         every_event = workflow_events(workflow)
+        provisioning = provisioning_problems(commands, workflow)
     except RuntimeError as error:
         print("FAIL: CI does not run the whole floor")
         print(f"  {error}")
@@ -2583,6 +2660,8 @@ def main() -> int:
             f"alone demands a CI step for a gate the floor still runs. The "
             f"two lists are one decision written twice and they have to be "
             f"kept equal.")
+
+    problems += provisioning
 
     for gate in [g for g in declared if g not in NOT_IN_FLOOR]:
         touching = steps_running(gate, arms, commands)

@@ -60,6 +60,15 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+      # F-239, D-31. The two vendored decoders are excluded from the
+      # workspace, so the step above never reaches their unit tests, and
+      # AC25's coefficient contract was held by tests no gate ran (review
+      # pass 4, S1). The gate supplies the two crates' dev-dependencies
+      # itself, because the workspace lock does not carry them all, and
+      # runs their library tests offline and locked.
+      - name: Vendored decoders' library tests, offline and locked
+        run: bin/ocelli.sh gate vendor-tests
+
       # Story E1.7, the cross-target build proof. This is what keeps decision
       # D2 honest over time: if the core stopped being WebAssembly-agnostic,
       # it shows up here first.
@@ -262,6 +271,19 @@ jobs:
       - name: DCMTK, for the four JPEG syntaxes pydicom cannot encode
         run: sudo apt-get update && sudo apt-get install -y dcmtk
 
+      # The two JPEG 2000 colour syntaxes are encoded by the OpenJPEG CLI
+      # that `corpus_synth.py` shells out to, from the distribution for the
+      # same reason DCMTK is unpinned above: this job checks determinism
+      # within one toolchain and never compares a digest against the
+      # manifest, so the version on the runner is enough. TIFF support is
+      # not a concern here, because the generator feeds opj_compress a P6
+      # PPM and the package's tools read no TIFF in that flow.
+      - name: OpenJPEG CLI, for the two JPEG 2000 colour syntaxes
+        run: sudo apt-get install -y openjpeg-tools
+      # The suite refuses to run when a required tool is absent, so prove
+      # the install landed under the name the refusal reports.
+      - run: command -v opj_compress
+
       # TIFF support is explicitly off: OJPH_ENABLE_TIFF_SUPPORT defaults ON
       # in this tag and would need a libtiff development package that nothing
       # here installs. Nothing in this corpus reads or writes TIFF, the
@@ -309,6 +331,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # F-237 review D1. `gate packages` packs @ocelli/wasm, and its prepack
+      # script runs `bin/ocelli.sh wasm` and `bin/ocelli.sh wasm-decode`, so
+      # this job also needs what the `wasm` job below installs: the pinned
+      # toolchain, the wasm32 target and wasm-pack. Without them the gate
+      # fails closed: bin/ocelli.sh prints "wasm-pack is not installed. See
+      # docs/DEVELOPER_SETUP.md" and exits 1 rather than skipping the gate.
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
       - run: npm ci
       # F-218. High and critical advisories in the published npm runtime.
       # The audit asks the registry, so a new advisory can turn this red

@@ -388,3 +388,53 @@ Measured for the approving change, lead: PS3.5 8.2.5 and 8.2.6 name the MPEG-2 c
 ## Open questions
 
 None. Questions 1 to 9 are answered above. AC20's reviewer check of the cited standards and the HEVC rows left open where no browser decodes them are evidence rows with an owner and a stage, not open decisions.
+
+### Lead rulings after the demux slice's review pass 1
+
+- **D1.** Every se(v) and ue(v) the parsers read is checked against the range its clause gives before it is used in arithmetic, and a value outside it is refused by name. `delta_scale` is -128 to 127, H.264 7.4.2.1.1.1. The crafted SPS from the review becomes a test, and the no-panic sweep's comment claims only the inputs it covers.
+- **D2.** Every MP4 box body is read from its own range, so no table reads past its box end. The review's raised `stss` count becomes a test that refuses by name, and each of `hdlr`, `mdhd`, `colr`, `stss` and `stsc` gets a truncated-body case.
+- **D3.** The precedence is per field, and the stream controls (PS3.5 8.2.8). `video_full_range_flag` comes from the VUI whenever `video_signal_type_present_flag` is set. The colour code points come from the VUI's colour description when present, and otherwise from `colr`. The review's HEVC clip becomes a test that reports the same range from MP4 and from Annex B.
+- **S1.** Each branch the review lists gets a test with hand-computed expected values that cite its clause. Use unit tests on `PocState::next` and the HEVC POC step, or small crafted byte streams. A branch that cannot be reached by any constructible stream is replaced by a named refusal rather than left untested. The POC type 2 test's citation follows the clip it uses.
+- **Nitpicks taken.** `MAX_DELTA_POCS` follows its derivation, `modification_of_pic_nums_idc` values 4 and 5 are refused by name and the unreachable arm goes, and PAT and PMT with `current_next_indicator` 0 are ignored, per H.222.0 2.4.4.5. The MP4 edit-list offset stays, and the docs say pts is composition time without the edit list.
+
+### Lead rulings after the demux slice's review pass 2
+
+- **D1.** `parse_pps` does no SPS lookup. It reads `pic_init_qp_minus26` against the widest range, -62 to 25, and stores it. `parse_slice` checks `-(26 + 6 * bit_depth_luma_minus8)` against the SPS that slice activates, H.264 7.4.1.2.1. Both of the review's streams become tests: a PPS ahead of its SPS, and a -38 PPS ahead of its 10-bit SPS. Both are accepted.
+- **D2.** At level 8.5 the DPB cap is lifted, matching the existing picture-size exemption, A.4.2. Both comments say what A-2 says and when it applies. A test covers a level 8.5 SPS with a DPB of 17, accepted.
+- **S1.** One table-driven test per parser checks every new range bound at the bound, accepted, and one past it, refused by name, built with `Writer`. Pass 2's 146 rows are the starting list. The visual sample entry length check gets its own case. The generator gains one x264 10-bit low-QP clip.
+- **Nitpicks taken.** N1 adds a test for the HEVC 8-1 `>=` boundary. N3's unreachable bounds go or carry a comment saying the reader refuses first. N2 and N4 are not taken, because ignoring a non-current table is H.222.0's rule.
+- **Outside this range, carried to the bridge part.** N5: MP4 marks an open-GOP non-IDR I picture as random access from `stss`, while TS and Annex B mark only IDR or IRAP. The bridge decides what WebCodecs may start from, so it is recorded there. The MPEG-2 range taken from `colr` when there is no sequence display extension stays, because H.262 carries no range flag.
+
+### Lead rulings after the demux slice's review pass 3
+
+- **S1.** `Craft` writes a B slice per H.264 7.3.3: slice_type 6, direct_spatial_mv_pred_flag, the list 1 override and the second list modification. The bound table gains `num_ref_idx_l1_active_minus1` at 15, accepted, and 16, refused, red under the review's `O3-l1-14`.
+- **S2.** The accepted area row sits exactly at 139 264, 1 024 by 136 macroblocks, red under the `>=` mutant.
+- **Nitpicks taken.** N1, the HEVC VUI builder writes E.2.1's six flags, and the H.264 filler no longer reads as a QP change, so ffmpeg's `trace_headers` reads every row stream clean. N2, the builder writes separate_colour_plane_flag for 4:4:4 and omits the chroma weight denominator for monochrome. Every row stream is checked with `trace_headers` once more.
+
+### Lead rulings after the demux slice's review pass 4
+
+- **S1.** `Craft` writes a list 1 modification and a reference B slice, nal_ref_idc above 0 with dec_ref_pic_marking after it, per 7.3.3, and the l1 loop of 7.3.3.2 under weighted_bipred_idc 1. The bound table gains:
+  - "l1 abs_diff 15", accepted
+  - "l1 abs_diff 16", refused
+  - a reference B slice whose memory_management_control_operation 5 must be read, so a misaligned read changes the POC
+  - an l1 weight one past its 7.4.3.2 bound
+
+  Each row is red under the review's two surviving mutants. The generator also gains one committed x264 b-pyramid clip, which carries reference B slices, matched against its own MP4 table.
+- **N1 taken.** `dump_row` fails loudly, naming the path, when its write fails.
+
+### Lead rulings after the demux slice's review pass 5
+
+- **S1.** The two rows pass 5 tested in scratch go in as written, "reference B l1 count 2", accepted, and "reference B l1 count 2, weight 128", refused, both red under `P5-l1-count-from-l0`.
+- **Convergence.** Passes 3, 4 and 5 each found one more untested count or condition in the H.264 slice header. Before the next review the implementer sweeps it systematically: every count, loop bound and presence condition `parse_slice` and its helpers read, 7.3.3 to 7.3.3.3, gets a one-change mutant, run against the suite. Rows are added for every survivor that is not equivalent, and the sweep's list, with each mutant's verdict, goes in the report. The same sweep covers the HEVC slice header fields the demuxer reads, 7.3.6.1 up to slice_pic_order_cnt_lsb.
+- **N1 taken.** The builder writes no delta_pic_order_cnt_bottom that makes an IDR's Min(Top, Bottom) nonzero, per 8.2.1, and the rows keep their verdicts.
+
+### Lead ruling on the implementer's question after the pass 5 sweep
+
+`h265::access_units` ignores NAL units whose nal_unit_type is reserved, per H.265 7.4.2.2, so a reserved VCL type such as 22 or 23 does not start or join a picture. A test covers a stream with a reserved VCL unit between two pictures and requires the same sample table as without it, red on today's code. The sweep's equivalent survivor `E-no-output-to-cra` stays equivalent under this rule.
+
+### Lead rulings after the demux slice's review pass 6
+
+- **S1.** `Craft` gains `always_zero`, and `every_presence_condition_reaches_the_marking` gains pass 6's two rows, "delta_pic_order_cnt 3, no bottom" and "delta_pic_order_always_zero_flag 1", red under `R-type1-delta-when-always-zero` and `R-type1-delta1-always`.
+- **The other direction of the sweep.** The implementer runs the reverse-direction mutants, each field read where its condition says absent, over the same clauses as the pass 5 sweep, pass 6's 33 included. Rows are added for every survivor that is not equivalent, and the list with verdicts goes in the report.
+- **Taken from outside the range, because they are cheap and the parser is under review.** A test for the 41 to 44 access unit starter rule of 7.4.2.4.4 at layer 0 and above, red under pass 6's two surviving mutants, and a `pps_seq_parameter_set_id` row at 15 accepted and 16 refused.
+- **Nitpicks taken.** N1, the `!reserved_vcl(kind)` that cannot change anything goes. N2, both segments of the TRAIL_R picture carry the same slice_pic_order_cnt_lsb, per 7.4.7.1.

@@ -51,6 +51,7 @@ import argparse
 import hashlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -266,8 +267,21 @@ SYNTAX_CASES = {
     # as owed and F-030 added it. See case_jpegls_rgb8.
     "jpegls_lossless_rgb8.dcm": "1.2.840.10008.1.2.4.80",
     "jpegls_near_lossless.dcm": "1.2.840.10008.1.2.4.81",
+    # F-243. A flat two-band frame whose runs reach the end of a line part
+    # way through a run segment, which the ramp above never does. See
+    # case_jpegls_banded.
+    "jpegls_banded_lossless.dcm": "1.2.840.10008.1.2.4.80",
+    "jpegls_banded_near_lossless.dcm": "1.2.840.10008.1.2.4.81",
     "j2k_lossless.dcm": "1.2.840.10008.1.2.4.90",
     "j2k_lossy.dcm": "1.2.840.10008.1.2.4.91",
+    # The four F-239 colour rows. YBR_RCT and YBR_ICT name the codestream's
+    # own multiple component transform (PS3.5 8.2.4), so each row is encoded
+    # with that transform on: the two lossless rows reversible with the RCT,
+    # the two lossy rows irreversible with the ICT.
+    "j2k_lossless_ybr_rct.dcm": "1.2.840.10008.1.2.4.90",
+    "j2k_lossy_ybr_ict.dcm": "1.2.840.10008.1.2.4.91",
+    "htj2k_lossless_ybr_rct.dcm": "1.2.840.10008.1.2.4.201",
+    "htj2k_lossy_ybr_ict.dcm": "1.2.840.10008.1.2.4.203",
     "htj2k_lossless.dcm": "1.2.840.10008.1.2.4.201",
     "htj2k_lossless_rpcl.dcm": "1.2.840.10008.1.2.4.202",
     "htj2k_lossy.dcm": "1.2.840.10008.1.2.4.203",
@@ -281,10 +295,19 @@ SYNTAX_CASES = {
 
 # The uncompressed case each compressed one must decode back to. Three bit
 # depths are needed because JPEG Baseline is 8-bit only and JPEG Extended is
-# 12-bit only, so a single base cannot serve every syntax.
+# 12-bit only, so a single base cannot serve every syntax. The colour
+# codestream rows are built from the saturated reference, whose marker pixels
+# put the component transform's edge cases in the decoded bytes.
 REFERENCE_MONO16 = "explicit_vr_le.dcm"
 REFERENCE_MONO12 = "reference_mono12.dcm"
 REFERENCE_RGB8 = "reference_rgb8.dcm"
+REFERENCE_RGB8_SATURATED = "reference_rgb8_saturated.dcm"
+REFERENCE_BANDED16 = "reference_banded16.dcm"
+
+# F-243. The two-band formula, s(r, c) = BANDED_LOW if c < cols // 2 else
+# BANDED_HIGH, at the reported file's size and values.
+BANDED_ROWS, BANDED_COLS = 32, 32
+BANDED_LOW, BANDED_HIGH = 224, 1064
 
 SYNTAX_REFERENCE = {name: REFERENCE_MONO16 for name in SYNTAX_CASES}
 SYNTAX_REFERENCE["jpeg_extended_12.dcm"] = REFERENCE_MONO12
@@ -294,6 +317,77 @@ SYNTAX_REFERENCE["jpegxl_lossy.dcm"] = REFERENCE_MONO12
 SYNTAX_REFERENCE["jpegxl_lossless_rgb8.dcm"] = REFERENCE_RGB8
 SYNTAX_REFERENCE["jpegxl_recompression_rgb8.dcm"] = REFERENCE_RGB8
 SYNTAX_REFERENCE["jpegxl_xyb_rgb8.dcm"] = REFERENCE_RGB8
+SYNTAX_REFERENCE["jpegls_banded_lossless.dcm"] = REFERENCE_BANDED16
+SYNTAX_REFERENCE["jpegls_banded_near_lossless.dcm"] = REFERENCE_BANDED16
+SYNTAX_REFERENCE["j2k_lossless_ybr_rct.dcm"] = REFERENCE_RGB8_SATURATED
+SYNTAX_REFERENCE["j2k_lossy_ybr_ict.dcm"] = REFERENCE_RGB8_SATURATED
+SYNTAX_REFERENCE["htj2k_lossless_ybr_rct.dcm"] = REFERENCE_RGB8_SATURATED
+SYNTAX_REFERENCE["htj2k_lossy_ybr_ict.dcm"] = REFERENCE_RGB8_SATURATED
+
+# The photometric each colour codestream row declares. PS3.5 8.2.4: the
+# reversible transform is named YBR_RCT and the irreversible one YBR_ICT,
+# and no other value is permitted when the transform is on.
+COLOUR_ROW_PHOTOMETRIC = {
+    "j2k_lossless_ybr_rct.dcm": "YBR_RCT",
+    "j2k_lossy_ybr_ict.dcm": "YBR_ICT",
+    "htj2k_lossless_ybr_rct.dcm": "YBR_RCT",
+    "htj2k_lossy_ybr_ict.dcm": "YBR_ICT",
+}
+
+# F-244. PS3.5 A.4: "Decoders of encapsulated Pixel Data, whether
+# Single-frame or Multi-frame, need to accept both an empty Basic Offset Table
+# (zero length) and a Basic Offset Table filled with 32 bit offset values."
+# Every row above carries a populated table, so these rows carry an empty one.
+#
+# Each single-frame row is its source row re-encapsulated by hand with a
+# zero-length table Item and the source's Fragment byte for byte, so its
+# decode digest is its source's.
+EMPTY_BOT_SOURCES = {
+    "rle_lossless_empty_bot.dcm": "rle_lossless.dcm",
+    "jpeg_baseline_rgb8_empty_bot.dcm": "jpeg_baseline_rgb8.dcm",
+    "jpeg_extended_12_empty_bot.dcm": "jpeg_extended_12.dcm",
+    "jpeg_lossless_p14_empty_bot.dcm": "jpeg_lossless_p14.dcm",
+    "jpeg_lossless_p14_sv1_empty_bot.dcm": "jpeg_lossless_p14_sv1.dcm",
+    "jpegls_lossless_empty_bot.dcm": "jpegls_lossless.dcm",
+    "jpegls_near_lossless_empty_bot.dcm": "jpegls_near_lossless.dcm",
+    "j2k_lossless_empty_bot.dcm": "j2k_lossless.dcm",
+    "j2k_lossy_empty_bot.dcm": "j2k_lossy.dcm",
+    "htj2k_lossless_empty_bot.dcm": "htj2k_lossless.dcm",
+    "htj2k_lossless_rpcl_empty_bot.dcm": "htj2k_lossless_rpcl.dcm",
+    "htj2k_lossy_empty_bot.dcm": "htj2k_lossy.dcm",
+    "jpegxl_lossless_empty_bot.dcm": "jpegxl_lossless.dcm",
+    "jpegxl_lossy_empty_bot.dcm": "jpegxl_lossy.dcm",
+}
+
+# The shape rows. Each names the syntax row whose producer encodes it and the
+# shape PS3.5 A.4 and 8.2 allow: one frame in three Fragments, three frames in
+# one Fragment each, three frames in two Fragments each, and three frames with
+# an Extended Offset Table, PS3.3 C.7.6.3.1.8. A multi-frame row encodes three
+# distinct frames, so a swapped or misplaced boundary changes the decode.
+EMPTY_BOT_SHAPES = {
+    "rle_multiframe_empty_bot.dcm": ("rle_lossless.dcm", "multiframe"),
+    "jpegls_lossless_fragmented_empty_bot.dcm":
+        ("jpegls_lossless.dcm", "fragmented"),
+    "jpeg_lossless_p14_sv1_multiframe_fragmented_empty_bot.dcm":
+        ("jpeg_lossless_p14_sv1.dcm", "multiframe-fragmented"),
+    "j2k_lossless_multiframe_fragmented_empty_bot.dcm":
+        ("j2k_lossless.dcm", "multiframe-fragmented"),
+    "j2k_lossless_multiframe_eot.dcm":
+        ("j2k_lossless.dcm", "multiframe-extended-offset-table"),
+}
+
+EMPTY_BOT_CASES = {
+    **EMPTY_BOT_SOURCES,
+    **{name: source for name, (source, _) in EMPTY_BOT_SHAPES.items()},
+}
+MULTIFRAME_EMPTY_BOT = frozenset(
+    name for name, (_, shape) in EMPTY_BOT_SHAPES.items()
+    if shape.startswith("multiframe"))
+MULTIFRAME_FRAMES = 3
+
+for _name, _source in EMPTY_BOT_CASES.items():
+    SYNTAX_CASES[_name] = SYNTAX_CASES[_source]
+    SYNTAX_REFERENCE[_name] = SYNTAX_REFERENCE[_source]
 
 # What every generated row records. These files are the output of a script in
 # this repository, so they carry this repository's own terms (see LICENSE). The
@@ -336,6 +430,24 @@ def rgb_ramp(rows: int, cols: int) -> np.ndarray:
     green = np.broadcast_to(green[:, None], (rows, cols))
     blue = (red + green) // 2
     return np.stack([red, green, blue], axis=-1).astype(np.uint8)
+
+
+def saturated_rgb_ramp(rows: int, cols: int) -> np.ndarray:
+    """The RGB reference the colour codestream rows are encoded from.
+
+    The smooth rgb_ramp underneath keeps lossy ringing small. Four marker
+    pixels at the start of the first row put the component transform's edge
+    cases where a fixture can name them by index: pure red is the reversible
+    transform case whose chroma spans one bit more than the depth, pure
+    green and pure blue pin the other two corners, and 200 100 50 is the
+    F-239 plan's worked inverse RCT example.
+    """
+    pixels = rgb_ramp(rows, cols).copy()
+    pixels[0, 0] = (255, 0, 0)
+    pixels[0, 1] = (0, 255, 0)
+    pixels[0, 2] = (0, 0, 255)
+    pixels[0, 3] = (200, 100, 50)
+    return pixels
 
 
 # ---------------------------------------------------------------------------
@@ -645,6 +757,46 @@ def case_jpegls_rgb8(out: Path) -> None:
                         directory / "jpegls_lossless_rgb8.dcm")
 
 
+def two_band(rows: int, cols: int, low: int, high: int) -> np.ndarray:
+    """``s(r, c) = low if c < cols // 2 else high``, unsigned 16-bit."""
+    image = np.empty((rows, cols), dtype=np.uint16)
+    image[:, : cols // 2] = low
+    image[:, cols // 2 :] = high
+    return image
+
+
+def case_jpegls_banded(out: Path) -> None:
+    """A flat banded frame under `.80` and `.81`, F-243.
+
+    ITU-T T.87 A.7.1 raises the run index only for a full run segment. In a
+    flat region several runs build the index up, and a run that then reaches
+    the end of a line part way through a segment is the case a decoder that
+    raised the index anyway gets wrong, with no error. The ramp the other
+    JPEG-LS rows carry never reaches it, so the corpus could not see that
+    defect. This frame is the reported file's shape and values, two bands of
+    224 and 1064 across 32 by 32, and its reference is written uncompressed
+    here from the formula rather than by any codec.
+    """
+    directory = out / "syntax"
+    ds = new_dataset("syntax_banded16", CT_STORAGE, "CT", study="syntax")
+    ds.PixelSpacing = list(NON_SQUARE_SPACING)
+    ct_common(ds)
+    ds.RescaleIntercept = "0"
+    set_monochrome_pixels(
+        ds, two_band(BANDED_ROWS, BANDED_COLS, BANDED_LOW, BANDED_HIGH),
+        16, 16, 15, 0)
+    normalise(ds, REFERENCE_BANDED16)
+    write(ds, directory / REFERENCE_BANDED16)
+    reference = directory / REFERENCE_BANDED16
+    encode_with_pydicom(reference, "jpegls_banded_lossless.dcm",
+                        "1.2.840.10008.1.2.4.80",
+                        directory / "jpegls_banded_lossless.dcm")
+    encode_with_pydicom(reference, "jpegls_banded_near_lossless.dcm",
+                        "1.2.840.10008.1.2.4.81",
+                        directory / "jpegls_banded_near_lossless.dcm",
+                        jls_error=JPEG_LS_NEAR)
+
+
 def case_rgb(out: Path, planar: int, name: str) -> None:
     """The same colour image in both PlanarConfiguration layouts.
 
@@ -666,6 +818,136 @@ def case_rgb(out: Path, planar: int, name: str) -> None:
     if planar == 1:
         pixels = np.transpose(pixels, (2, 0, 1))
     ds.PixelData = np.ascontiguousarray(pixels).tobytes()
+    write(ds, out / "synthetic" / f"{name}.dcm")
+
+
+def case_rgb_icc(out: Path) -> None:
+    """An 8-bit RGB frame carrying a synthetic ICC Profile (0028,2000).
+
+    F-239's AC26 names a file with the element as drawn with the profile not
+    applied. The bytes here are written by this script and are deliberately
+    not an ICC profile: no third-party profile is copied. F-240 names this
+    marker malformed and retains the device RGB values. It remains the
+    presence-only case F-239 introduced.
+    """
+    name = "sc_rgb_icc"
+    ds = new_dataset(name, SC_STORAGE, "OT")
+    ds.ConversionType = "WSD"
+    ds.PixelSpacing = list(NON_SQUARE_SPACING)
+    ds.SamplesPerPixel = 3
+    ds.PhotometricInterpretation = "RGB"
+    ds.PlanarConfiguration = 0
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.Rows, ds.Columns = TRAP_ROWS, TRAP_COLS
+    ds.PixelData = rgb_ramp(TRAP_ROWS, TRAP_COLS).tobytes()
+    ds.ICCProfile = b"OCELLI synthetic corpus, not an ICC profile"
+    write(ds, out / "synthetic" / f"{name}.dcm")
+
+
+def synthetic_icc_profile(kind: str) -> bytes:
+    """F-240 profiles, ICC.1:2022 7.2, 7.3, 8.2, 10.6, 10.18 and 10.31.
+
+    https://www.color.org/specification/ICC.1-2022-05.pdf
+    Colourants are the same published D50 words the independent AC fixtures
+    derive. The synthetic device is defined at D50, so no adaptation is needed.
+    No profile or implementation from a third-party colour library is copied.
+    """
+    from hashlib import md5
+    from itertools import product
+    from struct import pack
+
+    kinds = {"gamma1", "gamma22", "srgb_para", "swap", "lut"}
+    if kind not in kinds:
+        raise ValueError("unknown synthetic ICC case")
+    colourants = [(0x6FA0, 0x38F2, 0x038F),
+                  (0x6296, 0xB78A, 0x18DA),
+                  (0x24A0, 0x0F85, 0xB6C4)]
+    if kind == "swap":
+        colourants[0], colourants[1] = colourants[1], colourants[0]
+    xyz = lambda words: b"XYZ \0\0\0\0" + pack(">3I", *words)
+    if kind == "srgb_para":
+        # Type 3: g,a,b,c,d as signed 15.16 numbers, rounded once.
+        params = [2.4, 1 / 1.055, 0.055 / 1.055, 1 / 12.92, 0.04045]
+        curve = b"para\0\0\0\0" + pack(">HH5i", 3, 0,
+                       *(round(value * 65536) for value in params))
+    else:
+        gamma = 0x0233 if kind == "gamma22" else 0x0100
+        curve = b"curv\0\0\0\0" + pack(">IH", 1, gamma)
+
+    def mluc(text: str) -> bytes:
+        data = text.encode("utf-16-be")
+        return (b"mluc\0\0\0\0" + pack(">II", 1, 12) +
+                b"enUS" + pack(">II", len(data), 28) + data)
+
+    tags = [(code, xyz(words)) for code, words in
+            zip((b"rXYZ", b"gXYZ", b"bXYZ"), colourants)]
+    tags += [(code, curve) for code in (b"rTRC", b"gTRC", b"bTRC")]
+    tags += [(b"wtpt", xyz((0xF6D6, 0x10000, 0xD32D))),
+             (b"desc", mluc("Ocelli synthetic " + kind)),
+             (b"cprt", mluc("Ocelli synthetic profile, MIT OR Apache-2.0"))]
+    if kind == "lut":
+        # A valid three-channel lut16Type, 10.10, with two-point tables.
+        # Its presence must take precedence over the matrix, 8.10. The
+        # viewer deliberately does not apply it, so no inverse LUT is needed
+        # for this input-class profile, 8.3.2.
+        matrix = [65536 if row == col else 0
+                  for row in range(3) for col in range(3)]
+        table = pack(">2H", 0, 65535) * 3
+        grid = b"".join(pack(">3H", *(value * 32768 for value in rgb))
+                        for rgb in product(range(2), repeat=3))
+        lut = (b"mft2\0\0\0\0" + bytes((3, 3, 2, 0)) +
+               pack(">9i2H", *matrix, 2, 2) + table + grid + table)
+        tags.append((b"A2B0", lut))
+
+    header = bytearray(128)
+    header[8:12] = bytes((4, 0x40, 0, 0))  # ICC v4.4.
+    header[12:16] = b"scnr" if kind == "lut" else b"mntr"
+    header[16:24] = b"RGB XYZ "
+    header[24:36] = pack(">6H", 2026, 11, 8, 0, 0, 0)
+    header[36:40] = b"acsp"
+    header[44:48] = pack(">I", 1)  # Embedded in the DICOM object.
+    header[64:68] = pack(">I", 1)  # Media-relative colorimetric.
+    header[68:80] = pack(">3I", 0xF6D6, 0x10000, 0xD32D)
+    entries = bytearray(pack(">I", len(tags)))
+    body = bytearray()
+    start = 132 + 12 * len(tags)
+    for signature, payload in tags:
+        entries.extend(signature + pack(">II", start + len(body), len(payload)))
+        body.extend(payload)
+        body.extend(bytes((-len(body)) % 4))
+    profile = header + entries + body
+    profile[0:4] = pack(">I", len(profile))
+    # 7.2.18, profile ID hashes the profile with flags, intent and ID zero.
+    hashed = bytearray(profile)
+    hashed[44:48] = bytes(4)
+    hashed[64:68] = bytes(4)
+    profile[84:100] = md5(hashed, usedforsecurity=False).digest()
+    return bytes(profile)
+
+
+def case_rgb_icc_matrix(out: Path, kind: str) -> None:
+    """F-240, native RGB with our reproducible matrix/TRC or lookup profile."""
+    name = "sc_rgb_icc_" + kind
+    ds = new_dataset(name, SC_STORAGE, "OT")
+    ds.ConversionType = "WSD"
+    ds.SamplesPerPixel = 3
+    ds.PhotometricInterpretation = "RGB"
+    ds.PlanarConfiguration = 0
+    ds.BitsAllocated = ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    if kind == "swap":
+        values = [[255, 0, 0], [0, 255, 0]]
+    elif kind == "lut":
+        values = [[10, 20, 30], [200, 100, 50]]
+    else:
+        values = [[value] * 3 for value in (64, 128, 192, 255)]
+    ds.Rows, ds.Columns = 1, len(values)
+    ds.PixelData = np.asarray(values, dtype=np.uint8).tobytes()
+    ds.ICCProfile = synthetic_icc_profile(kind)
     write(ds, out / "synthetic" / f"{name}.dcm")
 
 
@@ -793,8 +1075,9 @@ def case_multiframe(out: Path) -> None:
 
 def syntax_base(label: str, kind: str) -> FileDataset:
     """The uncompressed content every transfer-syntax case is built from."""
-    ds = new_dataset(label, CT_STORAGE if kind != "rgb8" else SC_STORAGE,
-                     "CT" if kind != "rgb8" else "OT",
+    ds = new_dataset(label, CT_STORAGE if kind != "rgb8" and kind != "rgb8_saturated"
+                     else SC_STORAGE,
+                     "CT" if kind != "rgb8" and kind != "rgb8_saturated" else "OT",
                      study="syntax")
     ds.PixelSpacing = list(NON_SQUARE_SPACING)
     if kind == "mono16":
@@ -807,7 +1090,7 @@ def syntax_base(label: str, kind: str) -> FileDataset:
         ds.RescaleIntercept = "0"
         set_monochrome_pixels(
             ds, ramp(SYNTAX_ROWS, SYNTAX_COLS, 4095, np.uint16), 16, 12, 11, 0)
-    elif kind == "rgb8":
+    elif kind in ("rgb8", "rgb8_saturated"):
         ds.ConversionType = "WSD"
         ds.SamplesPerPixel = 3
         ds.PhotometricInterpretation = "RGB"
@@ -817,7 +1100,10 @@ def syntax_base(label: str, kind: str) -> FileDataset:
         ds.HighBit = 7
         ds.PixelRepresentation = 0
         ds.Rows, ds.Columns = SYNTAX_ROWS, SYNTAX_COLS
-        ds.PixelData = rgb_ramp(SYNTAX_ROWS, SYNTAX_COLS).tobytes()
+        if kind == "rgb8":
+            ds.PixelData = rgb_ramp(SYNTAX_ROWS, SYNTAX_COLS).tobytes()
+        else:
+            ds.PixelData = saturated_rgb_ramp(SYNTAX_ROWS, SYNTAX_COLS).tobytes()
     else:
         raise ValueError(f"unknown syntax base: {kind}")
     return ds
@@ -884,8 +1170,62 @@ def encode_with_dcmcjpeg(base: Path, label: str, target: Path,
     ds.save_as(str(target), enforce_file_format=True)
 
 
+def encapsulate_codestream(ds: FileDataset, syntax: str, codestream: bytes) -> None:
+    """Wrap one codestream as this file's Pixel Data, PS3.5 A.4.
+
+    What goes inside the pixel-data item is the codestream, not a JP2 file.
+    The uncompressed base carries OW because its 16-bit samples are words,
+    and inheriting that here produces a file DCMTK warns about and a strict
+    reader may refuse, with nothing about the pixels looking wrong.
+    """
+    ds.file_meta.TransferSyntaxUID = UID(syntax)
+    ds.PixelData = encapsulate([codestream])
+    ds["PixelData"].VR = "OB"
+    ds["PixelData"].is_undefined_length = True
+
+
+def ppm_bytes(pixels: np.ndarray) -> bytes:
+    """One P6 PPM frame, the colour input opj_compress and ojph_compress take."""
+    rows, cols = pixels.shape[0], pixels.shape[1]
+    return f"P6\n{cols} {rows}\n255\n".encode("ascii") + np.ascontiguousarray(
+        pixels).tobytes()
+
+
+def encode_with_opj(base: Path, label: str, syntax: str, target: Path,
+                    arguments: list[str]) -> None:
+    """The OpenJPEG CLI supplies the colour JPEG 2000 Part 1 codestreams.
+
+    pydicom's pylibjpeg-openjpeg encoder leaves the multiple component
+    transform off even for a three-sample frame (measured: its use_mct flag
+    changes no byte), and PS3.5 8.2.4 makes YBR_RCT and YBR_ICT name that
+    transform. opj_compress applies RGB to YCC for three components by
+    default, so these two rows are its output, encapsulated here. The
+    encoder version it writes into a COM marker is the one BUILT_WITH and
+    --tool-versions record.
+    """
+    ds = pydicom.dcmread(str(base))
+    pixels = ds.pixel_array
+
+    with tempfile.TemporaryDirectory(prefix="ocelli-opj-") as scratch:
+        source = Path(scratch) / "frame.ppm"
+        produced = Path(scratch) / "frame.j2k"
+        with source.open("wb") as handle:
+            handle.write(ppm_bytes(pixels))
+        run(["opj_compress", "-i", str(source), "-o", str(produced), *arguments])
+        codestream = produced.read_bytes()
+
+    ds.PhotometricInterpretation = COLOUR_ROW_PHOTOMETRIC[
+        target.name]
+    encapsulate_codestream(ds, syntax, codestream)
+    normalise(ds, label)
+    if syntax == "1.2.840.10008.1.2.4.91":
+        mark_lossy(ds, "ISO_15444_1")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ds.save_as(str(target), enforce_file_format=True)
+
+
 def encode_with_ojph(base: Path, label: str, syntax: str, target: Path,
-                     arguments: list[str]) -> None:
+                     arguments: list[str], colour_transform: bool = False) -> None:
     """OpenJPH supplies the HTJ2K codestream, which is then encapsulated here.
 
     PS3.5 A.4.10 and A.4.11: what goes inside the pixel-data item is the
@@ -894,29 +1234,32 @@ def encode_with_ojph(base: Path, label: str, syntax: str, target: Path,
 
     The samples come out of the reference file whose header this case copies,
     so the pixels encoded and the pixels claimed have one source. Recomputing
-    them alongside would be two, and the two would be free to drift.
+    them alongside would be two, and the two would be free to drift. A colour
+    row is written as PPM with the codestream's own component transform on,
+    because PS3.5 8.2.4 makes YBR_RCT and YBR_ICT name it.
     """
     ds = pydicom.dcmread(str(base))
     pixels = ds.pixel_array
 
     with tempfile.TemporaryDirectory(prefix="ocelli-ojph-") as scratch:
-        source = Path(scratch) / "frame.pgm"
+        if colour_transform:
+            source = Path(scratch) / "frame.ppm"
+            with source.open("wb") as handle:
+                handle.write(ppm_bytes(pixels))
+        else:
+            source = Path(scratch) / "frame.pgm"
+            rows, cols = pixels.shape
+            with source.open("wb") as handle:
+                handle.write(f"P5\n{cols} {rows}\n65535\n".encode("ascii"))
+                handle.write(pixels.astype(">u2").tobytes())
         produced = Path(scratch) / "frame.j2c"
-        rows, cols = pixels.shape
-        with source.open("wb") as handle:
-            handle.write(f"P5\n{cols} {rows}\n65535\n".encode("ascii"))
-            handle.write(pixels.astype(">u2").tobytes())
         run(["ojph_compress", "-i", str(source), "-o", str(produced), *arguments])
         codestream = produced.read_bytes()
 
-    ds.file_meta.TransferSyntaxUID = UID(syntax)
-    ds.PixelData = encapsulate([codestream])
-    # PS3.5 Table 7.1-1 and A.4: encapsulated PixelData is OB with an undefined
-    # length. The uncompressed base carries OW because its 16-bit samples are
-    # words, and inheriting that here produces a file DCMTK warns about and a
-    # strict reader may refuse, with nothing about the pixels looking wrong.
-    ds["PixelData"].VR = "OB"
-    ds["PixelData"].is_undefined_length = True
+    if colour_transform:
+        ds.PhotometricInterpretation = COLOUR_ROW_PHOTOMETRIC[
+            target.name]
+    encapsulate_codestream(ds, syntax, codestream)
     normalise(ds, label)
     if syntax == "1.2.840.10008.1.2.4.203":
         # PS3.3 C.7.6.1.1.5.1 lists ISO_15444_15 as a Defined Term for
@@ -1055,12 +1398,16 @@ def encode_jpegxl_cases(directory: Path) -> None:
 # The toolchain corpus/manifest.tsv was generated with, and the only record of
 # it. Every entry can move a digest, and the ones that leave no version in the
 # file cannot be recovered from the corpus at all, which is why they are here.
-# `--tool-versions` asks each tool rather than reading this table.
+# `--tool-versions` asks each tool rather than reading this table. The
+# opj_compress entry is the OpenJPEG CLI that encodes the F-239 colour rows,
+# a different binary from the library inside pylibjpeg-openjpeg, and its
+# version is the COM marker's.
 BUILT_WITH = {
     "pydicom": "3.0.2",
     "numpy": "2.5.2",
     "pylibjpeg-openjpeg": "2.5.0",
     "OpenJPEG (the library inside it)": "2.5.2",
+    "OpenJPEG (opj_compress CLI)": "2.5.4",
     "pyjpegls": "1.5.1",
     "DCMTK": "3.7.0",
     "OpenJPH": "0.31.0",
@@ -1130,6 +1477,17 @@ def tool_versions() -> dict[str, str]:
                                 text=True).stdout
         dcmtk = re.search(r"v([0-9]+\.[0-9]+\.[0-9]+)", banner)
         found["DCMTK"] = dcmtk.group(1) if dcmtk else "unknown"
+    if shutil.which("opj_compress") is None:
+        found["OpenJPEG (opj_compress CLI)"] = "absent"
+    else:
+        # opj_compress has no version flag. Its usage banner names the
+        # openjp2 it was compiled against, which is the version that writes
+        # the COM marker and moves the digest.
+        banner_run = subprocess.run(["opj_compress", "-h"],
+                                    capture_output=True, text=True)
+        banner = banner_run.stdout + banner_run.stderr
+        opj = re.search(r"openjp2 library v([0-9]+\.[0-9]+\.[0-9]+)", banner)
+        found["OpenJPEG (opj_compress CLI)"] = opj.group(1) if opj else "unknown"
     found["OpenJPH"] = openjph_version()
     return found
 
@@ -1183,7 +1541,10 @@ def generate_syntax_layer(out: Path) -> None:
 
     # The three uncompressed references. explicit_vr_le.dcm is both the
     # 1.2.840.10008.1.2.1 case and the reference every mono16 case is compared
-    # against, which is deliberate: one file, one digest, one meaning.
+    # against, which is deliberate: one file, one digest, one meaning. The
+    # saturated reference is written by `generate_colour_syntax_layer` below:
+    # the F-239 colour codestream rows are built from it, so their component
+    # transform's edge cases are in the decoded bytes.
     write(mono16, directory / REFERENCE_MONO16)
     write(mono12, directory / REFERENCE_MONO12)
     write(rgb8, directory / REFERENCE_RGB8)
@@ -1252,6 +1613,273 @@ def generate_syntax_layer(out: Path) -> None:
                       "-prog_order", "RPCL"])
     encode_jpegxl_cases(directory)
 
+    # The four F-239 colour rows, from the saturated RGB reference. The two
+    # lossless rows carry the reversible transform (YBR_RCT) and the two
+    # lossy rows the irreversible one (YBR_ICT), PS3.5 8.2.4. The .201 row is
+    # LRCP like its monochrome sibling and the .203 row RPCL like its own.
+    generate_colour_syntax_layer(out)
+
+
+def generate_colour_syntax_layer(out: Path) -> None:
+    """Write the saturated RGB reference and the four colour codestream rows.
+
+    Its own `--case` selector, so adding the F-239 rows does not re-encode
+    the rows an earlier toolchain produced: a full `syntax` run would move
+    every externally encoded digest beside this story's diff.
+    """
+    directory = out / "syntax"
+    directory.mkdir(parents=True, exist_ok=True)
+    rgb8_saturated = syntax_base("syntax_rgb8_saturated", "rgb8_saturated")
+    write(rgb8_saturated, directory / REFERENCE_RGB8_SATURATED)
+    saturated_reference = directory / REFERENCE_RGB8_SATURATED
+
+    encode_with_opj(saturated_reference, "j2k_lossless_ybr_rct.dcm",
+                    "1.2.840.10008.1.2.4.90",
+                    directory / "j2k_lossless_ybr_rct.dcm", [])
+    encode_with_opj(saturated_reference, "j2k_lossy_ybr_ict.dcm",
+                    "1.2.840.10008.1.2.4.91",
+                    directory / "j2k_lossy_ybr_ict.dcm",
+                    ["-I", "-r", str(int(J2K_COMPRESSION_RATIO))])
+    encode_with_ojph(saturated_reference, "htj2k_lossless_ybr_rct.dcm",
+                     "1.2.840.10008.1.2.4.201",
+                     directory / "htj2k_lossless_ybr_rct.dcm",
+                     ["-reversible", "true", "-prog_order", "LRCP",
+                      "-colour_trans", "true"], colour_transform=True)
+    encode_with_ojph(saturated_reference, "htj2k_lossy_ybr_ict.dcm",
+                     "1.2.840.10008.1.2.4.203",
+                     directory / "htj2k_lossy_ybr_ict.dcm",
+                     ["-reversible", "false", "-qstep", str(HTJ2K_QSTEP),
+                      "-prog_order", "RPCL", "-colour_trans", "true"],
+                     colour_transform=True)
+
+
+# ---------------------------------------------------------------------------
+# Layer 1c: F-244, encapsulated Pixel Data with an empty Basic Offset Table
+# ---------------------------------------------------------------------------
+
+# PS3.3 A.38, Enhanced CT Image Storage. Its Multi-frame Functional Groups
+# Module, C.7.6.16, carries Number of Frames (0028,0008) as Type 1, which the
+# CT Image Storage IOD of the source rows has no module for.
+MULTIFRAME_SOP_CLASS = ENHANCED_CT_STORAGE
+
+
+def pixel_items(value: bytes) -> list[bytes]:
+    """The Item values of encapsulated Pixel Data, PS3.5 A.4, table first.
+
+    pydicom keeps the value from the first Item Tag up to the Sequence
+    Delimitation Item, which it drops. Every Item is Tag (FFFE,E000) and a
+    4-byte little-endian length, then that many bytes.
+    """
+    items, at = [], 0
+    while at < len(value):
+        group, element, length = struct.unpack_from("<HHI", value, at)
+        if (group, element) == (0xFFFE, 0xE0DD):
+            break
+        if (group, element) != (0xFFFE, 0xE000):
+            raise RuntimeError("encapsulated Pixel Data holds a non-Item tag")
+        at += 8
+        items.append(bytes(value[at:at + length]))
+        at += length
+    return items
+
+
+def item(value: bytes) -> bytes:
+    """One Item. PS3.5 A.4: a Fragment is an even number of bytes."""
+    if len(value) % 2:
+        raise RuntimeError("an Item value must have even length")
+    return struct.pack("<HHI", 0xFFFE, 0xE000, len(value)) + value
+
+
+def even(codestream: bytes) -> bytes:
+    """Pad an odd frame with one zero byte, as A.4 allows for its last Fragment."""
+    return codestream + b"\x00" if len(codestream) % 2 else codestream
+
+
+def empty_table(fragments: list[bytes]) -> bytes:
+    """Table A.4-1's layout: a zero-length table Item, then the Fragments."""
+    return item(b"") + b"".join(item(fragment) for fragment in fragments)
+
+
+# The end-of-frame marker PS3.5 A.4's frame-boundary readers look for:
+# ISO/IEC 10918-1 EOI and ISO/IEC 15444-1 EOC are both FF D9. pydicom 3.0.2
+# searches the last ten bytes of a Fragment for it.
+END_MARKER = b"\xff\xd9"
+MARKER_WINDOW = 10
+
+
+def split_offset(frame: bytes) -> int:
+    """Where a frame is cut into two Fragments.
+
+    The first Fragment's length is 2 mod 4, the lengths dicom-object 0.10.0
+    refused, and it is the first such length at or after the middle whose last
+    ten bytes hold no end marker, so no reader can take it for a whole frame.
+    """
+    for offset in range(len(frame) // 2, len(frame) - 2):
+        if offset % 4 == 2 and END_MARKER not in frame[offset - MARKER_WINDOW:offset]:
+            return offset
+    raise RuntimeError("no Fragment split avoids an end marker")
+
+
+def fragment_split(frame: bytes, parts: int) -> list[bytes]:
+    """Cut one frame into `parts` Fragments, the first of each 2 mod 4."""
+    if parts == 2:
+        cut = split_offset(frame)
+        return [frame[:cut], even(frame[cut:])]
+    if parts == 3:
+        first = split_offset(frame[:len(frame) // 2 + 2])
+        second = split_offset(frame[first:]) + first
+        return [frame[:first], frame[first:second], even(frame[second:])]
+    raise ValueError(f"unsupported Fragment count {parts}")
+
+
+def write_encapsulated(ds: Dataset, label: str, value: bytes,
+                       target: Path) -> None:
+    """Write `value` as OB undefined-length Pixel Data under a new identity."""
+    ds.PixelData = value
+    ds["PixelData"].VR = "OB"
+    ds["PixelData"].is_undefined_length = True
+    normalise(ds, label)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    ds.save_as(str(target), enforce_file_format=True)
+
+
+def multiframe_reference(reference: np.ndarray) -> np.ndarray:
+    """Three distinct frames: the reference, columns reversed, rows reversed."""
+    return np.stack([reference, reference[:, ::-1], reference[::-1, :]])
+
+
+def multiframe_base(directory: Path, label: str) -> FileDataset:
+    """The uncompressed three-frame Enhanced CT every multi-frame row encodes.
+
+    The mono16 syntax reference supplies the pixel module and the samples.
+    Geometry and the pixel value transformation move into functional groups,
+    PS3.3 C.7.6.16, because the Enhanced CT IOD places them there.
+    """
+    reference = pydicom.dcmread(str(directory / REFERENCE_MONO16))
+    ds = new_dataset(label, MULTIFRAME_SOP_CLASS, "CT", study="syntax")
+    ds.NumberOfFrames = str(MULTIFRAME_FRAMES)
+    ds.ImageType = ["DERIVED", "PRIMARY", "VOLUME", "NONE"]
+    ds.ContentQualification = "RESEARCH"
+    set_monochrome_pixels(
+        ds, reference.pixel_array, 16, 16, 15, 0)
+    ds.PixelData = multiframe_reference(reference.pixel_array) \
+        .astype("<u2").tobytes()
+
+    dimension = Dataset()
+    dimension.DimensionOrganizationUID = UID(fixed_uid("dimorg:" + label))
+    ds.DimensionOrganizationSequence = [dimension]
+    index_item = Dataset()
+    index_item.DimensionOrganizationUID = dimension.DimensionOrganizationUID
+    index_item.DimensionIndexPointer = pydicom.tag.Tag(0x0020, 0x9057)
+    index_item.FunctionalGroupPointer = pydicom.tag.Tag(0x0020, 0x9111)
+    ds.DimensionIndexSequence = [index_item]
+
+    measures = Dataset()
+    measures.PixelSpacing = list(NON_SQUARE_SPACING)
+    measures.SliceThickness = "1.0"
+    orientation = Dataset()
+    orientation.ImageOrientationPatient = [
+        "1.0", "0.0", "0.0", "0.0", "1.0", "0.0"]
+    transformation = Dataset()
+    transformation.RescaleSlope = "1"
+    transformation.RescaleIntercept = "0"
+    transformation.RescaleType = "HU"
+    voi = Dataset()
+    voi.WindowCenter = "40"
+    voi.WindowWidth = "400"
+    voi.VOILUTFunction = "LINEAR"
+    shared = Dataset()
+    shared.PixelMeasuresSequence = [measures]
+    shared.PlaneOrientationSequence = [orientation]
+    shared.PixelValueTransformationSequence = [transformation]
+    shared.FrameVOILUTSequence = [voi]
+    ds.SharedFunctionalGroupsSequence = [shared]
+
+    per_frame = []
+    for index in range(MULTIFRAME_FRAMES):
+        position = Dataset()
+        position.ImagePositionPatient = ["0.0", "0.0", f"{index:.1f}"]
+        content = Dataset()
+        content.StackID = "1"
+        content.InStackPositionNumber = index + 1
+        content.DimensionIndexValues = [index + 1]
+        frame = Dataset()
+        frame.PlanePositionSequence = [position]
+        frame.FrameContentSequence = [content]
+        per_frame.append(frame)
+    ds.PerFrameFunctionalGroupsSequence = per_frame
+    return ds
+
+
+def encode_multiframe(directory: Path, source: str, label: str) -> tuple[
+        FileDataset, list[bytes]]:
+    """Encode the three-frame base with `source`'s producer, frame by frame.
+
+    Returns the encoded dataset and its three frame codestreams, each
+    unpadded where the producer left an odd length.
+    """
+    from pydicom.encaps import generate_frames
+
+    syntax = SYNTAX_CASES[source]
+    base = multiframe_base(directory, label)
+    with tempfile.TemporaryDirectory(prefix="ocelli-f244-") as scratch:
+        plain = Path(scratch) / "base.dcm"
+        write(base, plain)
+        if syntax == "1.2.840.10008.1.2.4.70":
+            produced = Path(scratch) / "out.dcm"
+            run(["dcmcjpeg", "--encode-lossless-sv1", "--uid-never",
+                 str(plain), str(produced)])
+            ds = pydicom.dcmread(str(produced))
+        else:
+            ds = pydicom.dcmread(str(plain))
+            ds.compress(UID(syntax))
+    frames = [bytes(frame) for frame in generate_frames(
+        ds.PixelData, number_of_frames=MULTIFRAME_FRAMES)]
+    if len(frames) != MULTIFRAME_FRAMES:
+        raise RuntimeError(f"{label}: the producer wrote {len(frames)} frames")
+    return ds, frames
+
+
+def encode_empty_bot_cases(directory: Path) -> None:
+    """The F-244 rows. Reads the syntax rows already in `directory`.
+
+    `--case empty_bot` therefore leaves every other file untouched, as
+    `jpegxl` does. Only the multi-frame rows run a producer, the one their
+    source row names in EXTERNAL_ENCODERS or pydicom's own RLE encoder.
+    """
+    from pydicom.encaps import encapsulate_extended
+
+    directory = Path(directory)
+    for name, source in EMPTY_BOT_SOURCES.items():
+        ds = pydicom.dcmread(str(directory / source))
+        fragments = pixel_items(ds.PixelData)[1:]
+        if len(fragments) != 1:
+            raise RuntimeError(f"{source} does not hold one Fragment")
+        write_encapsulated(ds, name, empty_table(fragments), directory / name)
+
+    for name, (source, shape) in EMPTY_BOT_SHAPES.items():
+        if shape == "fragmented":
+            ds = pydicom.dcmread(str(directory / source))
+            [fragment] = pixel_items(ds.PixelData)[1:]
+            write_encapsulated(ds, name, empty_table(
+                fragment_split(fragment, 3)), directory / name)
+            continue
+        ds, frames = encode_multiframe(directory, source, name)
+        if shape == "multiframe":
+            value = empty_table([even(frame) for frame in frames])
+        elif shape == "multiframe-fragmented":
+            value = empty_table([part for frame in frames
+                                 for part in fragment_split(even(frame), 2)])
+        elif shape == "multiframe-extended-offset-table":
+            value, offsets, lengths = encapsulate_extended(frames)
+            if pixel_items(value)[0]:
+                raise RuntimeError("encapsulate_extended wrote a populated table")
+            ds.ExtendedOffsetTable = offsets
+            ds.ExtendedOffsetTableLengths = lengths
+        else:
+            raise RuntimeError(f"unknown shape {shape}")
+        write_encapsulated(ds, name, value, directory / name)
+
 
 def case_callables(out: Path) -> dict[str, Callable[[], None]]:
     """Every individually generatable case, in generation order.
@@ -1280,6 +1908,12 @@ def case_callables(out: Path) -> dict[str, Callable[[], None]]:
             lambda: case_series(out, "ct_series_nonuniform", nonuniform=True),
         "sc_rgb_interleaved": lambda: case_rgb(out, 0, "sc_rgb_interleaved"),
         "sc_rgb_planar": lambda: case_rgb(out, 1, "sc_rgb_planar"),
+        "sc_rgb_icc": lambda: case_rgb_icc(out),
+        "sc_rgb_icc_gamma1": lambda: case_rgb_icc_matrix(out, "gamma1"),
+        "sc_rgb_icc_gamma22": lambda: case_rgb_icc_matrix(out, "gamma22"),
+        "sc_rgb_icc_srgb_para": lambda: case_rgb_icc_matrix(out, "srgb_para"),
+        "sc_rgb_icc_swap": lambda: case_rgb_icc_matrix(out, "swap"),
+        "sc_rgb_icc_lut": lambda: case_rgb_icc_matrix(out, "lut"),
         "us_ybr_full_422": lambda: case_ybr_full_422(out),
         "ct_multiframe_perframe": lambda: case_multiframe(out),
         "sc_palette_color":
@@ -1288,17 +1922,21 @@ def case_callables(out: Path) -> dict[str, Callable[[], None]]:
             lambda: case_palette_color(out, "sc_palette_color_16", 65_536, 0,
                                        16),
         "syntax": lambda: generate_syntax_layer(out),
+        "colour_syntax": lambda: generate_colour_syntax_layer(out),
         "jpegls_rgb8": lambda: case_jpegls_rgb8(out),
+        "jpegls_banded": lambda: case_jpegls_banded(out),
         "jpegxl": lambda: encode_jpegxl_cases(out / "syntax"),
+        "empty_bot": lambda: encode_empty_bot_cases(out / "syntax"),
     }
 
 
-def require_encoders() -> None:
-    for tool in ("dcmcjpeg", "ojph_compress"):
+def require_encoders(tools: tuple[str, ...] =
+                     ("dcmcjpeg", "ojph_compress", "opj_compress")) -> None:
+    for tool in tools:
         if shutil.which(tool) is None:
             raise RuntimeError(
-                f"{tool} is not on PATH. The synthetic layer needs DCMTK and "
-                f"OpenJPH, see corpus/README.md.")
+                f"{tool} is not on PATH. The synthetic layer needs DCMTK, "
+                f"OpenJPH and the OpenJPEG CLI, see corpus/README.md.")
 
 
 def generate(out: Path) -> Path:
@@ -1329,11 +1967,15 @@ def generate_one(out: Path, case: str) -> Path:
     if case not in cases:
         raise RuntimeError(
             f"unknown case {case!r}. Known: {', '.join(sorted(cases))}")
-    # Only the `syntax` entry shells out to DCMTK and OpenJPH. `jpegls_rgb8`
+    # The `syntax` entry shells out to DCMTK and OpenJPH and the
+    # `colour_syntax` entry to the OpenJPEG CLI and OpenJPH. `jpegls_rgb8`
     # encodes through pydicom's pyjpegls plugin, and every other case is
-    # written by pydicom directly.
-    if case == "syntax":
+    # written by pydicom directly. Each entry demands only the encoders it
+    # shells out to.
+    if case in ("syntax", "empty_bot"):
         require_encoders()
+    elif case == "colour_syntax":
+        require_encoders(("ojph_compress", "opj_compress"))
     cases[case]()
     return out
 
@@ -1361,6 +2003,18 @@ CATEGORIES = {
     "synthetic/sc_rgb_interleaved.dcm":
         ("OT", "synthetic, colour, planar-config-0"),
     "synthetic/sc_rgb_planar.dcm": ("OT", "synthetic, colour, planar-config-1"),
+    "synthetic/sc_rgb_icc.dcm":
+        ("OT", "synthetic, colour, icc-profile-present-named-not-applied"),
+    "synthetic/sc_rgb_icc_gamma1.dcm":
+        ("OT", "synthetic, colour, icc-gamma1"),
+    "synthetic/sc_rgb_icc_gamma22.dcm":
+        ("OT", "synthetic, colour, icc-gamma22"),
+    "synthetic/sc_rgb_icc_srgb_para.dcm":
+        ("OT", "synthetic, colour, icc-srgb_para"),
+    "synthetic/sc_rgb_icc_swap.dcm":
+        ("OT", "synthetic, colour, icc-swap"),
+    "synthetic/sc_rgb_icc_lut.dcm":
+        ("OT", "synthetic, colour, icc-lut"),
     "synthetic/us_ybr_full_422.dcm":
         ("US", "synthetic, us, colour, ybr-full-422"),
     "synthetic/sc_palette_color.dcm":
@@ -1395,21 +2049,31 @@ def manifest_rows(out: Path) -> list[str]:
     syntax_category = {
         REFERENCE_MONO12: "synthetic, mono16, syntax-reference",
         REFERENCE_RGB8: "synthetic, colour, syntax-reference",
+        REFERENCE_RGB8_SATURATED: "synthetic, colour, syntax-reference",
+        REFERENCE_BANDED16: "synthetic, mono16, syntax-reference",
     }
     for name in sorted(set(SYNTAX_CASES) | set(syntax_category)):
         syntax = SYNTAX_CASES.get(name, "1.2.840.10008.1.2.1")
         # The tolerance class and the modality are both decided by whether the
-        # case is built on the RGB reference, so they read the same fact rather
+        # case is built on an RGB reference, so they read the same fact rather
         # than two rules that happen to agree. Before F-030 the class was keyed
         # on one exact filename and the modality on the substring, which agreed
-        # by coincidence while there was exactly one colour case.
-        colour = "rgb8" in name
+        # by coincidence while there was exactly one colour case. A reference
+        # row reads its own declared category, which already names the class.
         if name in syntax_category:
             category = syntax_category[name]
-        elif colour:
-            category = "synthetic, colour, transfer-syntax"
+            colour = "colour" in (token.strip()
+                                  for token in category.split(","))
         else:
-            category = "synthetic, mono16, transfer-syntax"
+            colour = SYNTAX_REFERENCE[name] in (
+                REFERENCE_RGB8, REFERENCE_RGB8_SATURATED)
+            category = ("synthetic, colour, transfer-syntax" if colour
+                        else "synthetic, mono16, transfer-syntax")
+        if name in EMPTY_BOT_CASES:
+            # F-244. The trap these rows exist for, and their shape.
+            category += ", empty-basic-offset-table"
+            if name in EMPTY_BOT_SHAPES:
+                category += f", {EMPTY_BOT_SHAPES[name][1]}"
         modality = "OT" if colour else "CT"
         rows.append({"path": f"syntax/{name}", "modality": modality,
                      "transfer_syntax": syntax, "category": category})
@@ -1440,6 +2104,198 @@ def write_manifest(rows: list[str]) -> None:
     print(f"wrote {len(rows)} generated rows, kept {len(kept)} others")
 
 
+# Controlled comparison inputs are an explicit opt-in, not corpus rows.
+COMPARISON_COLOUR_CASES = {
+    "rgb8": (512, 200, "RGB", 3, 8),
+    "ybr422": (512, 200, "YBR_FULL_422", 3, 8),
+    "palette16": (512, 200, "PALETTE COLOR", 1, 16),
+    "icc8-gamma22": (8192, 1, "RGB", 3, 8),
+    "icc16-table": (8192, 1, "RGB", 3, 16),
+}
+COMPARISON_INPUT_MANIFEST = "colour-comparison-input.json"
+
+
+def comparison_icc_profile(case: str) -> bytes | None:
+    """Own F240 profiles, ICC.1:2022 7.2.18 and 10.6.
+
+    The two-entry curve occupies the existing 16-byte padded slot. Its tag
+    length becomes 16, and the profile ID is recomputed after every edit.
+    """
+    if case == "icc8-gamma22":
+        return synthetic_icc_profile("gamma22")
+    if case != "icc16-table":
+        return None
+    profile = bytearray(synthetic_icc_profile("gamma1"))
+    count = struct.unpack_from(">I", profile, 128)[0]
+    for index in range(count):
+        start = 132 + index * 12
+        signature, offset, length = struct.unpack_from(">4sII", profile, start)
+        if signature not in (b"rTRC", b"gTRC", b"bTRC"):
+            continue
+        assert length == 14 and offset + 16 <= len(profile)
+        struct.pack_into(">I", profile, start + 8, 16)
+        profile[offset:offset + 16] = b"curv\0\0\0\0" + struct.pack(">I2H", 2, 0, 65535)
+    hashed = bytearray(profile)
+    hashed[44:48] = bytes(4)
+    hashed[64:68] = bytes(4)
+    hashed[84:100] = bytes(16)
+    profile[84:100] = hashlib.md5(hashed, usedforsecurity=False).digest()
+    return bytes(profile)
+
+
+def comparison_colour_row(case: str, edge: int, row: int, frame: int) -> bytes:
+    """Stored samples, no colour conversion or display arithmetic here.
+
+    PS3.3 C.7.6.3.1.2 native422 stores Y1,Y2,Cb,Cr per horizontal pair.
+    RGB patterns distinguish channels, rows, columns and frame identity.
+    The first row also has neutral marker samples, defined independently
+    of the ICC converter. At 16 bits they retain low device-code bits.
+    """
+    columns = np.arange(edge, dtype=np.uint32)
+    if case == "ybr422":
+        first = np.arange(0, edge, 2, dtype=np.uint32)
+        pairs = np.stack(((first + frame) % 256,
+                          (first + frame + 1) % 256,
+                          np.full(first.shape, (row + 64) % 256),
+                          np.full(first.shape, (row + 128 + 3 * frame) % 256)), axis=1)
+        if row == 0:
+            pairs[0] = (64, 128, 128, 128)
+            if len(pairs) > 1:
+                pairs[1] = (100, 101, 150, 90)
+        return pairs.astype(np.uint8).tobytes()
+    if case == "palette16":
+        return ((row * edge + columns + 257 * frame) % 65536).astype("<u2").tobytes()
+    if case == "icc16-table":
+        maximum, factor, dtype = 65536, 257, "<u2"
+        markers = (15, 16384, 32768, 49152, 65535)
+    else:
+        maximum, factor, dtype = 256, 1, np.uint8
+        markers = (64, 128, 192, 255)
+    values = np.stack(((columns * factor + 31 * frame) % maximum,
+                       np.full(columns.shape, (row * factor + 47 * frame) % maximum),
+                       ((columns + row) * factor + 71 * frame) % maximum), axis=1)
+    if row == 0:
+        for at, value in enumerate(markers[:edge]):
+            values[at] = (value, value, value)
+    return values.astype(dtype).tobytes()
+
+
+def _comparison_colour_dataset(case: str, edge: int, frame: int,
+                                profile: bytes | None) -> FileDataset:
+    _, _, photo, samples, bits = COMPARISON_COLOUR_CASES[case]
+    label = f"comparison-colour-v1:{case}:{edge}:{frame}"
+    ds = new_dataset(label, SC_STORAGE, "OT", study="comparison-colour-v1",
+                     series=f"comparison-colour-v1:{case}:{edge}",
+                     frame_of_reference="comparison-colour-v1")
+    ds.ConversionType = "WSD"
+    ds.InstanceNumber = frame + 1
+    ds.SeriesNumber = 2
+    ds.ImagePositionPatient = ["0", "0", str(frame)]
+    ds.ImageOrientationPatient = ["1", "0", "0", "0", "1", "0"]
+    ds.PixelSpacing = ["1", "1"]
+    ds.Rows = ds.Columns = edge
+    ds.SamplesPerPixel = samples
+    ds.PhotometricInterpretation = photo
+    if samples == 3:
+        ds.PlanarConfiguration = 0
+    ds.BitsAllocated = ds.BitsStored = bits
+    ds.HighBit = bits - 1
+    ds.PixelRepresentation = 0
+    if case == "palette16":
+        indices = np.arange(65536, dtype=np.uint32)
+        for colour, values in [("Red", indices), ("Green", 65535 - indices),
+                               ("Blue", (257 * indices) % 65536)]:
+            setattr(ds, colour + "PaletteColorLookupTableDescriptor", [0, 0, 16])
+            setattr(ds, colour + "PaletteColorLookupTableData", values.astype("<u2").tobytes())
+    if profile is not None:
+        ds.ICCProfile = profile
+    return ds
+
+
+def write_colour_comparison(out: Path, case: str, *, edge: int | None = None,
+                            frames: int | None = None) -> Path:
+    """Write one controlled target and the unchanged CT calibration class.
+
+    Defaults are the approved measurement sizes. Explicit small dimensions
+    exist for unit fixtures and are marked unsuitable for measurements.
+    Pixel Data is streamed row-wise, including the 384 MiB RGB16 case. No
+    corpus manifest or tracked DICOM is written. Existing nonempty output
+    is refused, because replacing another run's evidence is not a generator.
+    """
+    import json
+    if case not in COMPARISON_COLOUR_CASES:
+        raise ValueError("unknown controlled colour comparison case")
+    standard_edge, standard_frames, photo, samples, bits = COMPARISON_COLOUR_CASES[case]
+    edge = standard_edge if edge is None else edge
+    frames = standard_frames if frames is None else frames
+    if (type(edge) is not int or not 2 <= edge <= 8192 or edge % 2 or
+            type(frames) is not int or not 1 <= frames <= 200):
+        raise ValueError("invalid controlled colour comparison dimensions")
+    out = Path(out)
+    if out.exists() and any(out.iterdir()):
+        raise ValueError("controlled colour comparison output must be empty")
+    out.mkdir(parents=True, exist_ok=True)
+    calibration = new_dataset("comparison-colour-v1:calibration", CT_STORAGE, "CT",
+                              study="comparison-colour-v1", series="comparison-colour-v1:ct")
+    calibration.InstanceNumber = calibration.SeriesNumber = 1
+    calibration.Rows = calibration.Columns = 512
+    calibration.SamplesPerPixel = 1
+    calibration.PhotometricInterpretation = "MONOCHROME2"
+    calibration.BitsAllocated = calibration.BitsStored = 16
+    calibration.HighBit = 15
+    calibration.PixelRepresentation = 0
+    calibration.RescaleSlope, calibration.RescaleIntercept = "1", "0"
+    calibration.WindowCenter, calibration.WindowWidth = "40", "400"
+    calibration.VOILUTFunction = "LINEAR"
+    calibration.PixelSpacing = ["1", "1"]
+    calibration.ImagePositionPatient = ["0", "0", "0"]
+    calibration.ImageOrientationPatient = ["1", "0", "0", "0", "1", "0"]
+    calibration.PixelData = np.broadcast_to(np.arange(512, dtype="<u2"), (512, 512)).tobytes()
+    calibration_path = out / "calibration-ct" / "000000.dcm"
+    write(calibration, calibration_path)
+    profile = comparison_icc_profile(case)
+    target = out / "colour"
+    target.mkdir()
+    files = []
+    series_uid = None
+    for frame in range(frames):
+        ds = _comparison_colour_dataset(case, edge, frame, profile)
+        series_uid = str(ds.SeriesInstanceUID)
+        path = target / f"{frame:06d}.dcm"
+        # PS3.5 7.1.2. Long-form explicit VR native Pixel Data, even length.
+        stored_samples = 2 if case == "ybr422" else samples
+        length = edge * edge * stored_samples * (bits // 8)
+        with path.open("wb") as handle:
+            pydicom.dcmwrite(handle, ds, implicit_vr=False, little_endian=True,
+                            enforce_file_format=True)
+            handle.write(struct.pack("<HH2sHI", 0x7FE0, 0x0010,
+                                     b"OW" if bits == 16 else b"OB", 0, length))
+            for row in range(edge):
+                handle.write(comparison_colour_row(case, edge, row, frame))
+        files.append({"path": path.relative_to(out).as_posix(),
+                      "bytes": path.stat().st_size, "sha256": digest(path)})
+    def entry(path: Path) -> dict:
+        return {"path": path.relative_to(out).as_posix(),
+                "bytes": path.stat().st_size, "sha256": digest(path)}
+    manifest = {
+        "schemaVersion": 1, "generator": "scripts/corpus_synth.py:comparison-colour-v1",
+        "caseId": case, "rows": edge, "columns": edge, "frames": frames,
+        "measurementSize": edge == standard_edge and frames == standard_frames,
+        "photometric": photo, "samplesPerPixel": samples,
+        "bitsAllocated": bits, "bitsStored": bits,
+        "seriesUid": series_uid, "pixelPattern": "position-frame-v1",
+        "serverCacheMiB": 512 if case == "icc16-table" else 256,
+        "profile": None if profile is None else {
+            "kind": "gamma22" if case == "icc8-gamma22" else "curv-two-entry-linear",
+            "sha256": hashlib.sha256(profile).hexdigest(), "bytes": len(profile)},
+        "calibrationDirectory": "calibration-ct", "calibrationFiles": [entry(calibration_path)],
+        "targetDirectory": "colour", "targetFiles": files,
+    }
+    path = out / COMPARISON_INPUT_MANIFEST
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return path
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", metavar="DIR",
@@ -1458,7 +2314,17 @@ def main() -> int:
                              "moved since the manifest was built")
     parser.add_argument("--list-cases", action="store_true",
                         help="print the names --case accepts")
+    parser.add_argument("--comparison-colour", choices=tuple(COMPARISON_COLOUR_CASES),
+                        help="write one controlled colour comparison dataset, requires --out")
     args = parser.parse_args()
+    if args.comparison_colour:
+        if (not args.out or args.case or args.manifest_rows or args.write_manifest or
+                args.tool_versions or args.list_cases):
+            parser.error("--comparison-colour needs explicit --out and no corpus mode")
+        path = write_colour_comparison(Path(args.out).expanduser(), args.comparison_colour)
+        print(f"wrote controlled comparison manifest {path}")
+        return 0
+
 
     if args.tool_versions:
         return report_tool_versions()

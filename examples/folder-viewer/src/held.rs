@@ -44,6 +44,12 @@ pub(crate) const KEPT_INSPECT_CAP: usize = 16 * 1024 * 1024;
 const CONNECTION_CAP: usize = 32;
 const PERMITS: usize = 2;
 
+/// Series window rounds that may run at once, F-227 review pass 19. One per
+/// decode permit, so the pools' reservations, at most 4 MiB each, are the
+/// named `P * 4 MiB` term of F-216's resident bound. A round beyond them
+/// waits for one to end.
+pub(crate) const SERIES_ROUNDS: usize = PERMITS;
+
 /// Bytes the viewer may hold.
 pub struct ViewerConfig {
     /// Budget in bytes. Zero admits nothing.
@@ -403,10 +409,11 @@ pub(crate) struct CacheHandle {
 /// stay with the permit and grow to the largest frame that permit has served.
 #[derive(Default)]
 pub(crate) struct Workspace {
+    pub(crate) colour: crate::colour::ColourScratch,
     pub(crate) scratch: Vec<Stored>,
     /// Little-endian or big-endian bytes copied from a `U16` pixel value.
     pub(crate) native: Vec<u8>,
-    /// One display byte per sample. Moved into the reply, then returned.
+    /// One grey or three RGB bytes per pixel. Moved into the reply, then returned.
     pub(crate) grey: Vec<u8>,
 }
 
@@ -459,6 +466,7 @@ fn workspace_bytes(workspace: &Workspace) -> usize {
         .saturating_mul(size_of::<Stored>())
         .saturating_add(workspace.native.capacity())
         .saturating_add(workspace.grey.capacity())
+        .saturating_add(workspace.colour.heap_bytes())
 }
 
 fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -469,8 +477,9 @@ fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// plan's bound of 528,194,192 bytes is computed for.
 pub(crate) const N_MAX_PIXELS: usize = 3000 * 2900;
 
-/// The grey cap in bytes, the resident bound's grey term `P * N_max` at one
-/// grey byte per pixel. A reply's grey counts from admission until it is
+/// The display cap retains the resident bound's grey term `P * N_max`.
+/// Colour charges three bytes per pixel against this same byte cap.
+/// A reply's bytes count from admission until it is
 /// written, and a worker's kept grey counts for as long as it is kept.
 pub(crate) const GREY_CAP: usize = PERMITS * N_MAX_PIXELS;
 
@@ -489,7 +498,7 @@ pub(crate) const GREY_CAP: usize = PERMITS * N_MAX_PIXELS;
 /// once only when it fits and the queue is empty. A request that already
 /// holds room is never queued behind anything.
 ///
-/// A grey larger than the whole cap, a frame of more than [`GREY_CAP`] pixels,
+/// A grey larger than the whole cap, a reply of more than [`GREY_CAP`] bytes,
 /// draws alone. It is admitted only when the gate holds no other grey, and
 /// while it is held nothing else fits, so grey bytes stay within the larger
 /// of the cap and that one grey. Its buffer is never kept by a worker after
@@ -981,6 +990,23 @@ pub struct Viewer {
     steps: Mutex<Vec<InflightStep>>,
     #[cfg(test)]
     preview_calls: AtomicU64,
+    /// Series window rounds running now, at most [`SERIES_ROUNDS`].
+    rounds: Mutex<usize>,
+    rounds_free: Condvar,
+}
+
+/// One series window round's place among [`SERIES_ROUNDS`]. Drop frees it.
+pub(crate) struct RoundPermit<'a> {
+    viewer: &'a Viewer,
+}
+
+impl Drop for RoundPermit<'_> {
+    fn drop(&mut self) {
+        let mut rounds = lock_mutex(&self.viewer.rounds);
+        *rounds = rounds.saturating_sub(1);
+        drop(rounds);
+        self.viewer.rounds_free.notify_one();
+    }
 }
 
 impl Viewer {
@@ -1065,6 +1091,8 @@ impl Viewer {
             steps: Mutex::new(Vec::new()),
             #[cfg(test)]
             preview_calls: AtomicU64::new(0),
+            rounds: Mutex::new(0),
+            rounds_free: Condvar::new(),
         }
     }
 
@@ -1221,6 +1249,28 @@ impl Viewer {
 
     pub(crate) fn leave_inflight(&self, bytes: usize) {
         Self::release_counter(&self.inflight, bytes);
+    }
+
+    /// A place for one series window round, waiting while [`SERIES_ROUNDS`]
+    /// run. `None` only when `live` says the client has gone, so a round is
+    /// never refused for being one too many.
+    pub(crate) fn acquire_round(&self, live: &mut dyn FnMut() -> bool) -> Option<RoundPermit<'_>> {
+        let mut rounds = lock_mutex(&self.rounds);
+        while *rounds >= SERIES_ROUNDS {
+            if !live() {
+                return None;
+            }
+            rounds = match self
+                .rounds_free
+                .wait_timeout(rounds, std::time::Duration::from_millis(50))
+            {
+                Ok((guard, _)) => guard,
+                Err(poisoned) => poisoned.into_inner().0,
+            };
+        }
+        *rounds = rounds.saturating_add(1);
+        drop(rounds);
+        Some(RoundPermit { viewer: self })
     }
 
     #[cfg(test)]
@@ -1651,9 +1701,11 @@ impl CacheHandle {
     /// A sample buffer of `len` bytes, from the free list or from an evicted frame.
     ///
     /// An empty buffer means the caller allocates. A returned buffer is owned
-    /// by this decode and is not shared with the cache.
-    pub(crate) fn claim_sample_buffer(&self, len: usize) -> Vec<u8> {
-        lock_mutex(&self.inner).claim_buffer(len)
+    /// by this decode and is not shared with the cache. `overhead` is the
+    /// complete held frame cost excluding sample bytes, prepared before the
+    /// claim. A reused buffer is charged by its actual capacity.
+    pub(crate) fn claim_sample_buffer(&self, len: usize, overhead: usize) -> Vec<u8> {
+        lock_mutex(&self.inner).claim_buffer(len, overhead)
     }
 
     /// A parked free buffer of `len` bytes, for a decode that stores no frame.
@@ -1681,12 +1733,12 @@ impl CacheHandle {
 /// The charge a claim makes room for before the frame is decoded.
 ///
 /// The sample bytes, the struct, the boxed value facts a grey frame carries
-/// and the longest unit text a file can name, so the charge when the frame
+/// and the longest unit text a file can name. Colour passes its actual box
+/// and palette capacities instead. The charge when the frame
 /// is stored never exceeds this claim.
+#[cfg(test)]
 fn frame_sample_cost(len: usize) -> usize {
-    len.saturating_add(size_of::<HeldFrame>())
-        .saturating_add(size_of::<crate::value::ValueFacts>())
-        .saturating_add(crate::value::UNIT_MAX_BYTES)
+    len.saturating_add(crate::preview::monochrome_held_overhead())
 }
 
 impl CacheState {
@@ -1819,17 +1871,17 @@ impl CacheState {
 
     /// Claim a sample buffer of `len` bytes for a decode.
     ///
-    /// Every route makes room for the whole `frame_sample_cost` of the buffer
+    /// Every route makes room for the samples and the supplied held overhead of the buffer
     /// it returns: a parked buffer, a buffer stolen from the oldest frame of
     /// the same length when no reply reads it, and a fresh one. A stolen
     /// frame may have charged less than the new frame will, so its freed
     /// bytes alone are not the room.
-    fn claim_buffer(&mut self, len: usize) -> Vec<u8> {
+    fn claim_buffer(&mut self, len: usize, overhead: usize) -> Vec<u8> {
         self.drain_recycled();
         if let Some(buffer) = self.pop_free(len) {
-            return self.reuse_claimed(buffer);
+            return self.reuse_claimed(buffer, overhead);
         }
-        let cost = frame_sample_cost(len);
+        let cost = len.saturating_add(overhead);
         if self.charged().saturating_add(cost) <= self.limit {
             self.note_fresh();
             return Vec::new();
@@ -1837,7 +1889,7 @@ impl CacheState {
         if let Some(buffer) = self.take_oldest_frame_buffer(len) {
             self.park_if_fits(buffer);
             if let Some(buffer) = self.pop_free(len) {
-                return self.reuse_claimed(buffer);
+                return self.reuse_claimed(buffer, overhead);
             }
         }
         self.make_room_dropping(cost);
@@ -1845,9 +1897,9 @@ impl CacheState {
         Vec::new()
     }
 
-    fn reuse_claimed(&mut self, buffer: Vec<u8>) -> Vec<u8> {
+    fn reuse_claimed(&mut self, buffer: Vec<u8>, overhead: usize) -> Vec<u8> {
         self.note_reused();
-        self.make_room_dropping(frame_sample_cost(buffer.capacity()));
+        self.make_room_dropping(buffer.capacity().saturating_add(overhead));
         buffer
     }
 
@@ -2302,7 +2354,7 @@ mod tests {
             byte_order: ocelli_pixel::ByteOrder::LittleEndian,
             recipe: Err(PreviewError::Window),
             facts: Err(PreviewError::Window),
-            full_range: Err(PreviewError::Window),
+            auto: Err(PreviewError::Window),
             value: Err(PreviewError::Window),
             calibration: Err(PreviewError::Window),
             frames: 1,
@@ -2376,7 +2428,7 @@ mod tests {
             &mut native,
             &mut samples,
             &mut |_| {},
-            &mut |_| Vec::new(),
+            &mut |_, _| Vec::new(),
         )
         .map_err(|error| format!("slice 0 was refused: {}", error.code()))?;
         let facts = frame
@@ -2519,7 +2571,7 @@ mod tests {
                         &mut workspace.native,
                         &mut samples,
                         &mut |_| {},
-                        &mut |_| Vec::new(),
+                        &mut |_, _| Vec::new(),
                     )
                 })
                 .map_err(|error| format!("slice 0 was refused: {}", error.code()))?;
@@ -2860,7 +2912,9 @@ mod tests {
         let first = viewer.store_frame(id(1), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
         let second = viewer.store_frame(id(2), 0, minimal_frame(vec![0_u8; 64], 1, 32)?);
         drop(viewer.store_frame(id(3), 0, minimal_frame(vec![0_u8; 64], 1, 32)?));
-        let mut samples = viewer.cache_handle().claim_sample_buffer(4);
+        let mut samples = viewer
+            .cache_handle()
+            .claim_sample_buffer(4, crate::preview::monochrome_held_overhead());
         samples.clear();
         samples.resize(4, 0);
         drop(viewer.store_frame(id(4), 0, minimal_frame(samples, 1, 2)?));
@@ -2901,7 +2955,8 @@ mod tests {
         let mut held = Vec::new();
         for step in 0_u64..200 {
             let len = if step % 3 == 0 { 64 } else { 32 };
-            let mut samples = cache.claim_sample_buffer(len);
+            let mut samples =
+                cache.claim_sample_buffer(len, crate::preview::monochrome_held_overhead());
             if samples.capacity() < len {
                 samples = Vec::with_capacity(len);
             }
@@ -3192,6 +3247,34 @@ mod tests {
             .ok_or("the next was not admitted")?;
         drop(claim);
         drop(held);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod f239_palette_claim {
+    #[test]
+    fn palette_admission_claim_covers_the_actual_owned_recipe() -> Result<(), String> {
+        let bytes = crate::colour::palette_admission_fixture(true)?;
+        let mut claim = 0;
+        let held = crate::preview::decode_held(
+            &bytes,
+            0,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut |_| {},
+            &mut |len, overhead| {
+                let buffer = Vec::with_capacity(len);
+                claim = buffer.capacity() + overhead;
+                buffer
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        assert_eq!(
+            held.charged_bytes(),
+            claim,
+            "predecode admission must include exact colour box and palette capacities"
+        );
         Ok(())
     }
 }

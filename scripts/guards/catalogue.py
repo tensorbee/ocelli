@@ -379,6 +379,27 @@ def _drop_wgpu_entry(box: Sandbox) -> None:
         "")
 
 
+def _plant_objc2_build_dependency(box: Sandbox) -> None:
+    """The F-238 review's S1, as a rejected state.
+
+    objc2 under `[build-dependencies]` of `ocelli-native` is compiled when
+    the archive is built, so the shipped graph walk must refuse it the way
+    the licence closure already does. The plant adds an edge the lock file
+    does not carry, and the check runs `--locked`, so the probe resolves the
+    sandbox lock offline first. Without that the refusal would be the resolve
+    failure and would say nothing about which edges the walk reads.
+    """
+    box.append(
+        "crates/ocelli-native/Cargo.toml",
+        '\n[build-dependencies]\nobjc2 = "=0.6.4"\n')
+    updated = box.run(["cargo", "update", "--offline", "-p", "objc2"])
+    if updated.returncode != 0:
+        raise SandboxError(
+            "the probe's offline lock update failed, so the walk would "
+            f"refuse an unresolvable graph and prove nothing: "
+            f"{(updated.stderr or updated.stdout).strip()}")
+
+
 def _remove_openjph_published_source(box: Sandbox) -> None:
     box.delete("vendor/openjph-core-0.1.0/src/lib.rs")
 
@@ -654,10 +675,82 @@ def _append_ritk_patch_provenance(box: Sandbox) -> None:
                "\nThe Rust source was changed locally.\n")
 
 
+def _drift_ritk_patched_source(box: Sandbox) -> None:
+    # A patched file whose bytes move must fail on its own record, not on the
+    # archive inventory the patch exempts it from.
+    box.append("vendor/ritk-codecs-0.6.0/src/jpeg_2000/image.rs",
+               "\n// beyond the reviewed D-31 record\n")
+
+
+def _drift_ritk_jpegls_patch(box: Sandbox) -> None:
+    # F-243. A patched source file is exempt from the archive inventory, so a
+    # byte beyond its record must fail on that record instead.
+    box.append("vendor/ritk-codecs-0.6.0/src/jpeg_ls/scan.rs",
+               "\n// beyond the recorded F-243 patch\n")
+
+
+def _drift_openjph_patched_source(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/src/codestream/tile.rs",
+               "\n// beyond the reviewed D-31 record\n")
+
+
+def _shift_openjph_ict_coefficient(box: Sandbox) -> None:
+    # One 1e-2 step on the blue-to-green inverse ICT coefficient, G-6's
+    # 0.34413 literal, in the sandbox's copy of the vendored decoder. S1 of
+    # review pass 4 measured this exact mutation: every workspace test stays
+    # green and only the vendored suite goes red, so the vendored Annex G
+    # test is the thing the new gate has to be watched driving red.
+    box.substitute("vendor/openjph-core-0.1.0/src/transform/colour.rs",
+                   "pub const GAMMA_CB2G: f32 = 0.34413;",
+                   "pub const GAMMA_CB2G: f32 = 0.35413;")
+
+
+def _run_vendor_tests_gate(box: Sandbox) -> "subprocess.CompletedProcess[str]":
+    # The reset before every probe wipes the sandbox's target directory, so
+    # this invoke pays a cold compile of both vendored test targets on every
+    # run, and a timeout there would surface as a broken harness rather
+    # than as a probe result. `Sandbox.run`'s default of 300 seconds is the
+    # only bound such a run would otherwise have, so this invoke carries a
+    # wider one.
+    return box.run(["bin/ocelli.sh", "gate", "vendor-tests"], timeout=1200)
+
+
+def _rewrite_openjph_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/PATCH-PROVENANCE.md",
+               "\nThe Rust source was changed locally.\n")
+
+
 def _restore_ritk_rayon_default(box: Sandbox) -> None:
     box.substitute("vendor/ritk-codecs-0.6.0/Cargo.toml",
                    'version = "0.3"\ndefault-features = false',
                    'version = "0.3"\ndefault-features = true')
+
+
+def _plant_dicom_object_source_byte(box: Sandbox) -> None:
+    box.append("vendor/dicom-object-0.10.0/src/mem.rs", "\n")
+
+
+def _second_dicom_object_patch(box: Sandbox) -> None:
+    box.substitute("vendor/dicom-object-0.10.0/src/collector.rs",
+                   "LazyDataToken::ItemStart { len: _ } => { /* no-op */ }",
+                   "LazyDataToken::ItemStart { len: _ } => { first = true; }")
+
+
+def _rewrite_dicom_object_source_and_inventory(box: Sandbox) -> None:
+    source_name = "vendor/dicom-object-0.10.0/src/mem.rs"
+    inventory_name = "vendor/dicom-object-0.10.0/PACKAGE-INVENTORY.sha256"
+    box.append(source_name, "// coordinated source and inventory change\n")
+    digest = hashlib.sha256((box.path / source_name).read_bytes()).hexdigest()
+    rows = box.read(inventory_name).splitlines()
+    box.write(inventory_name, "\n".join(
+        f"{digest}  ./src/mem.rs" if row.endswith("  ./src/mem.rs") else row
+        for row in rows
+    ) + "\n")
+
+
+def _append_dicom_object_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/dicom-object-0.10.0/PATCH-PROVENANCE.md",
+               "\nA second source file was changed locally.\n")
 
 
 def _remove_done_benchmark_runner(box: Sandbox) -> None:
@@ -864,6 +957,14 @@ def _changed_check_accepts_a_whole_file_read(box: Sandbox) -> None:
     )
 
 
+def _auto_check_accepts_a_per_slice_window(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/auto.mjs",
+        "    else if (got.line !== line) problems.push(",
+        "    else if (false) problems.push(",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -972,6 +1073,19 @@ def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     replacement = (f"      # the `bin/ocelli.sh gate {gate}` step was here"
                    if leave_comment else "")
     box.substitute(".github/workflows/ci.yml", line, replacement)
+
+
+def _drop_the_frontend_wasm_pack_step(box: Sandbox) -> None:
+    """Delete the frontend job's wasm-pack step, the state N3 measured.
+
+    The same step sits in the `wasm` job, so the edit is anchored on the
+    `npm ci` line that follows it in the frontend job and nowhere else.
+    """
+    box.substitute(
+        ".github/workflows/ci.yml",
+        "      - uses: jetli/wasm-pack-action@v0.4.0\n"
+        "      - run: npm ci",
+        "      - run: npm ci")
 
 
 def _put_gate_step_behind(box: Sandbox, gate: str, condition: str) -> None:
@@ -3224,6 +3338,19 @@ def _write_close_state(
                   if s.get("sprint") == name)
     if not fids:
         raise AssertionError(f"allocation.json puts no story in {name}")
+    # This fixture describes a completed integration. Inherited handoffs are
+    # copied source state, not handoffs planted after this preparation.
+    handoffs = sorted(box.path.glob(".claude/handoffs/*-ready.md"))
+    if handoffs:
+        relative = [path.relative_to(box.path).as_posix() for path in handoffs]
+        tracked = box.git("ls-files", "--", *relative).stdout.splitlines()
+        for handoff_name in relative:
+            box.delete(handoff_name)
+        if tracked:
+            # Do not force an existing ignored run state into the index.
+            box.git("add", "-u", "--", *tracked)
+            box.git("commit", "-q", "-m", "probe inherited handoffs cleared",
+                    "--", *tracked)
     _mark_allocated_backlog_done(box, fids)
     tree = box.git("write-tree").stdout.strip()
     data: dict[str, object] = {
@@ -5194,12 +5321,20 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
     for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', runner, re.M):
         if gate in excluded or gate not in unseen or not visible.get(gate):
             continue
+        # The bypass is built by substituting a visible command out of the
+        # runner text, so one has to appear verbatim. A visible command
+        # wrapped over continuation lines is extracted joined and would
+        # substitute nothing: F-239's vendor-tests arm joined this class
+        # with every command wrapped, and picking it turned this builder
+        # into a StopIteration the probe reported as its own error.
+        if not any(command in runner for command in visible[gate]):
+            continue
         if f"bin/ocelli.sh gate {gate}" in workflow:
             return gate
     raise AssertionError(
-        "no floor gate CI names by gate has both an extractable arm command "
-        "and one the extractor cannot see, so the state this probe is about "
-        "cannot be built.")
+        "no floor gate CI names by gate has a verbatim extractable arm "
+        "command and one the extractor cannot see, so the state this probe "
+        "is about cannot be built.")
 
 
 def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
@@ -7546,6 +7681,493 @@ sys.exit(1 if bad else 0)
 """
 
 
+# F-237. The identity is what docs/RELEASE.md item 6 compares to the release
+# HEAD, so each way it can lie is its own probe: absent, unparseable,
+# valid JSON that is not an object, another version, a build over an
+# uncommitted tree, another git SHA, a digest the bytes do not hash to, and a
+# module the digest names that is not in the tarball. The unparseable and
+# not-an-object inputs share one refusal sentence and get one probe each,
+# because deleting either branch leaves the other input crashing instead of
+# refusing. The stale-sha input is the cited wrong state, "not a stale
+# artefact from a previous build", with correct digests so the SHA is the
+# only refusal. Every input that parses records a clean tree, so the dirty
+# refusal fires only for the probe that drives it. The control for all of
+# them is the matching identity and returns none.
+_WASM_IDENTITY_FILES = """\
+files = {'dist/ocelli_wasm_bg.wasm': b'\\x00' * 8,
+         'dist/decode/ocelli_wasm_bg.wasm': b'\\x00' * 8}
+"""
+
+_WASM_IDENTITY_HEALTHY = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_ABSENT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(None, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_PARSE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(b'not json', files, '1' * 40,
+                               '2' * 40, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_NON_OBJECT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(b'[1]', files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_VERSION = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.2.0', 'git_sha': '1' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_STALE = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_DIGEST = """\
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': 'a' * 64,
+                                   'dist/decode/ocelli_wasm_bg.wasm': 'a' * 64}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_MODULE_ABSENT = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+files = {'dist/ocelli_wasm_bg.wasm': b'\\x00' * 8}
+bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_DIRTY = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+modules = {'dist/ocelli_wasm_bg.wasm': digest,
+           'dist/decode/ocelli_wasm_bg.wasm': digest}
+explicit = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': True,
+                       'modules': modules}).encode()
+absent = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                     'tree': '2' * 40, 'modules': modules}).encode()
+""" + _WASM_IDENTITY_FILES + """explicit_bad = p.wasm_identity_problems(explicit, files, '1' * 40,
+                                        '2' * 40, '0.1.0')
+absent_bad = p.wasm_identity_problems(absent, files, '1' * 40, '2' * 40,
+                                      '0.1.0')
+print('\\n'.join(explicit_bad + absent_bad))
+if not explicit_bad:
+    print('a build id with dirty true was accepted')
+    sys.exit(0)
+if not absent_bad:
+    print('a build id with no dirty field was accepted, which fails open')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+_WASM_IDENTITY_TREE = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+modules = {'dist/ocelli_wasm_bg.wasm': digest,
+           'dist/decode/ocelli_wasm_bg.wasm': digest}
+foreign = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                      'tree': '3' * 40, 'dirty': False,
+                      'modules': modules}).encode()
+absent = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                     'dirty': False, 'modules': modules}).encode()
+""" + _WASM_IDENTITY_FILES + """foreign_bad = p.wasm_identity_problems(foreign, files, '1' * 40,
+                                      '2' * 40, '0.1.0')
+absent_bad = p.wasm_identity_problems(absent, files, '1' * 40, '2' * 40,
+                                      '0.1.0')
+print('\\n'.join(foreign_bad + absent_bad))
+if not foreign_bad:
+    print('a build id recording another tree was accepted')
+    sys.exit(0)
+if not absent_bad:
+    print('a build id with no tree field was accepted, which fails open')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+# S2. The whole build id refusal is wired through one call in main(). This
+# drives `wasm_identity_from_tarball` over a real tarball against the
+# sandbox's own git HEAD and index, so the stale refusal is seen at the end
+# of the path a pack takes and not only on the pure inputs above.
+_PACKED_IDENTITY_STALE = """\
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+module = b'\\x00' * 8
+digest = hashlib.sha256(module).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+buffer = io.BytesIO()
+with tarfile.open(fileobj=buffer, mode='w') as archive:
+    for name, data in (('dist/build-id.json', build_id),
+                       ('dist/ocelli_wasm_bg.wasm', module),
+                       ('dist/decode/ocelli_wasm_bg.wasm', module)):
+        info = tarfile.TarInfo('package/' + name)
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+tarball = pathlib.Path('probe-identity.tgz')
+tarball.write_bytes(buffer.getvalue())
+bad = p.wasm_identity_from_tarball(tarball, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_PACKED_IDENTITY_CURRENT = """\
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+module = b'\\x00' * 8
+digest = hashlib.sha256(module).hexdigest()
+head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True,
+                      text=True).stdout.strip()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': head, 'tree': tree,
+                       'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+buffer = io.BytesIO()
+with tarfile.open(fileobj=buffer, mode='w') as archive:
+    for name, data in (('dist/build-id.json', build_id),
+                       ('dist/ocelli_wasm_bg.wasm', module),
+                       ('dist/decode/ocelli_wasm_bg.wasm', module)):
+        info = tarfile.TarInfo('package/' + name)
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+tarball = pathlib.Path('probe-identity.tgz')
+tarball.write_bytes(buffer.getvalue())
+bad = p.wasm_identity_from_tarball(tarball, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+# S2's behavioural half. The npm steps are stubbed so `main()` runs its
+# packaging loop on synthetic tarballs, the `wasm` one carrying a stale build
+# id, and the read refuses unless `main()` itself refuses that tarball. A
+# structural read passed under three unwirings the deletion probe never
+# planted: the two lines commented out, the call kept with its result
+# discarded, and the branch keyed on something other than MODULE_PACKAGE.
+# Each of those leaves this read at exit 0, because none of them puts the
+# stale refusal in `main()`'s output.
+_MAIN_REFUSES_STALE_ID = """\
+import contextlib
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+MODULE = b'\\x00' * 8
+digest = hashlib.sha256(MODULE).hexdigest()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+
+def names_for(name):
+    manifest = json.loads(
+        pathlib.Path('packages', name, 'package.json').read_text())
+    wanted = ['package.json', 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE',
+              'NOTICE']
+    for field in ('main', 'types', 'module'):
+        if field in manifest:
+            wanted.append(manifest[field].removeprefix('./'))
+    def walk(node):
+        if isinstance(node, str):
+            wanted.append(node.removeprefix('./'))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+    walk(manifest.get('exports', {}))
+    if name == 'wasm':
+        wanted += ['dist/ocelli_wasm.js', 'dist/ocelli_wasm_bg.wasm',
+                   'dist/decode/ocelli_wasm.js',
+                   'dist/decode/ocelli_wasm_bg.wasm',
+                   'dist/build-id.json', 'THIRD_PARTY_LICENSES',
+                   'THIRD_PARTY_NOTICES']
+    return wanted
+
+def fake_tarball_paths(directory):
+    if directory.name != 'wasm':
+        return pathlib.Path(directory.name + '.tgz'), names_for(directory.name)
+    build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                           'tree': tree, 'dirty': False,
+                           'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                       'dist/decode/ocelli_wasm_bg.wasm':
+                                           digest}}
+                          ).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        for name, data in (('dist/build-id.json', build_id),
+                           ('dist/ocelli_wasm_bg.wasm', MODULE),
+                           ('dist/decode/ocelli_wasm_bg.wasm', MODULE)):
+            info = tarfile.TarInfo('package/' + name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    tarball = pathlib.Path('probe-main-stale.tgz')
+    tarball.write_bytes(buffer.getvalue())
+    return tarball, names_for('wasm')
+
+real_run = p.run
+def fake_run(cmd, cwd):
+    if cmd and cmd[0] == 'npm':
+        return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+    return real_run(cmd, cwd)
+
+p.run = fake_run
+p.tarball_paths = fake_tarball_paths
+p.check_consumer = lambda work, tarballs: []
+pathlib.Path('node_modules').mkdir(exist_ok=True)
+
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    code = p.main()
+out = buffer.getvalue()
+print(out)
+if 'stale artefact' not in out:
+    print('main() did not refuse the stale build id, so the whole build id '
+          'refusal is unwired and the gate is green without it')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+# The control: the same stubs over an HONEST build id, so a pass of the probe
+# above names the stale id and not the stubbing.
+_MAIN_ACCEPTS_HONEST_ID = """\
+import contextlib
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+MODULE = b'\\x00' * 8
+digest = hashlib.sha256(MODULE).hexdigest()
+head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True,
+                      text=True).stdout.strip()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+
+def names_for(name):
+    manifest = json.loads(
+        pathlib.Path('packages', name, 'package.json').read_text())
+    wanted = ['package.json', 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE',
+              'NOTICE']
+    for field in ('main', 'types', 'module'):
+        if field in manifest:
+            wanted.append(manifest[field].removeprefix('./'))
+    def walk(node):
+        if isinstance(node, str):
+            wanted.append(node.removeprefix('./'))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+    walk(manifest.get('exports', {}))
+    if name == 'wasm':
+        wanted += ['dist/ocelli_wasm.js', 'dist/ocelli_wasm_bg.wasm',
+                   'dist/decode/ocelli_wasm.js',
+                   'dist/decode/ocelli_wasm_bg.wasm',
+                   'dist/build-id.json', 'THIRD_PARTY_LICENSES',
+                   'THIRD_PARTY_NOTICES']
+    return wanted
+
+def fake_tarball_paths(directory):
+    if directory.name != 'wasm':
+        return pathlib.Path(directory.name + '.tgz'), names_for(directory.name)
+    build_id = json.dumps({'version': '0.1.0', 'git_sha': head,
+                           'tree': tree, 'dirty': False,
+                           'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                       'dist/decode/ocelli_wasm_bg.wasm':
+                                           digest}}
+                          ).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        for name, data in (('dist/build-id.json', build_id),
+                           ('dist/ocelli_wasm_bg.wasm', MODULE),
+                           ('dist/decode/ocelli_wasm_bg.wasm', MODULE)):
+            info = tarfile.TarInfo('package/' + name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    tarball = pathlib.Path('probe-main-honest.tgz')
+    tarball.write_bytes(buffer.getvalue())
+    return tarball, names_for('wasm')
+
+real_run = p.run
+def fake_run(cmd, cwd):
+    if cmd and cmd[0] == 'npm':
+        return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+    return real_run(cmd, cwd)
+
+p.run = fake_run
+p.tarball_paths = fake_tarball_paths
+p.check_consumer = lambda work, tarballs: []
+pathlib.Path('node_modules').mkdir(exist_ok=True)
+
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    code = p.main()
+out = buffer.getvalue()
+print(out)
+if code != 0 or 'stale artefact' in out:
+    print('main() refused an honest build id, so this probe proves nothing '
+          'about the stale one')
+    sys.exit(1)
+sys.exit(0)
+"""
+
+# S3. The two modules share init, ocelli_version and the panic surface, so
+# the proof tells them apart only by the render-only export. Deleting that
+# assertion from the real smoke text is the state where it cannot.
+_SMOKE_WITHOUT_RENDER_PIN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+marker = ('if (typeof wasm.apply_commands !== "function") '
+          '{ throw new Error("render module: apply_commands"); }\\n')
+smoke = p.SMOKE_SCRIPT.replace(marker, '')
+if smoke == p.SMOKE_SCRIPT:
+    print('the render-only assertion is not in SMOKE_SCRIPT')
+    sys.exit(1)
+bad = p.module_surface_problems(smoke, p.CHECK_TS)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_CHECK_TS_WITHOUT_RENDER_PIN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+marker = 'export const renderSurface: unknown = wasmSurface.apply_commands;\\n'
+check = p.CHECK_TS.replace(marker, '')
+if check == p.CHECK_TS:
+    print('the render-only pin is not in CHECK_TS')
+    sys.exit(1)
+bad = p.module_surface_problems(p.SMOKE_SCRIPT, check)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_MODULE_SURFACE_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.module_surface_problems(p.SMOKE_SCRIPT, p.CHECK_TS)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
 def _advisory_unknown_proof(box: Sandbox) -> None:
     """A proof name the packages gate does not run."""
     box.substitute(
@@ -7586,6 +8208,309 @@ def _advisory_nested_override(box: Sandbox) -> None:
         '"overrides": {\n    "react": "19.2.8",',
         '"overrides": {\n    "dcmjs": {"adm-zip": "0.6.1"},\n'
         '    "react": "19.2.8",')
+
+
+# ---------------------------------------------------------------------------
+# Step 6 of the native arm
+# ---------------------------------------------------------------------------
+# A sandbox carries no release build of `ocelli-native`, which is what step 6
+# of `bin/ocelli.sh native` links and runs, so the step's refusals are driven
+# through the step's own lines, extracted from the sandbox copy of the
+# runner, against a stub `cargo` and a stub desktop binary. The stub build
+# honours an exported `CARGO_BUILD_TARGET` the way cargo does and prints the
+# `compiler-artifact` JSON the step reads. The extraction refuses to match
+# nothing, so a reshaped step reaches the harness as an error rather than as
+# a green.
+
+# The report an Apple shipped build prints, in `tier_report`'s format
+# (`crates/ocelli-native/src/lib.rs`) with the guard's flag set.
+_HONEST_APPLE_REPORT = (
+    "Tier Cpu, decided by NoAdapter. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  backends  none compiled for this target\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# The same shape without the cause line, which is what the step must refuse.
+_APPLE_REPORT_WITHOUT_CAUSE = (
+    "Tier Cpu, decided by NoAdapter. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# What the same binary prints with `OCELLI_TIER=cpu` exported: the override
+# returns from `detect` before the no-backend guard, so no cause line.
+_OVERRIDDEN_APPLE_REPORT = (
+    "Tier Cpu, decided by Override. OCELLI_TIER override: Applied(Cpu).\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier None\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# A development-style report, what the stub prints when the step must refuse
+# an Apple host's report that is not the shipped one. Only the tier line is
+# load bearing for the refusal.
+_DEV_APPLE_REPORT = (
+    "Tier A, decided by Benchmark. OCELLI_TIER override: NotRequested.\n"
+    "  adapters  1 seen, device created true, measured tier Some(A)\n")
+
+# A tier line that is not the shipped one over the shipped build's cause
+# line. This is the state that triggers the Apple match refusal and no other
+# one, so that refusal's own exit is the only non-zero the step can produce
+# here.
+_WRONG_TIER_APPLE_REPORT = (
+    "Tier Cpu, decided by NoDevice. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  backends  none compiled for this target\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+_STEP6_SCRIPT = "probe-f238-step6.sh"
+
+# The target triple the ruling's probe exports as `CARGO_BUILD_TARGET`. The
+# stub build honours it the way cargo does, writing the artifact under the
+# triple directory, and inside the sandbox the string is only ever a
+# directory name component, so the host's own triple is not load bearing.
+_STEP6_TRIPLE = "aarch64-apple-darwin"
+
+# What the stub desktop binary touches when it runs, under the stub target
+# directory. On a silent exit 0 it is the only thing that tells a step that
+# ran the binary its build named from one that finished without running
+# anything, so the target-triple probe's runner reads it.
+_STEP6_MARKER = "named-binary-ran"
+
+
+def _step6_fragment(box: Sandbox) -> str:
+    """Step 6's own lines, from the sandbox copy of `bin/ocelli.sh`.
+
+    From the line after the step's banner through the `esac` that closes its
+    host case, so a green run prints nothing and the banner is not counted
+    as the step's own output.
+    """
+    text = box.read("bin/ocelli.sh")
+    banner = ('    echo "  6/15 the shipped native build links and its '
+              'desktop binary reports"\n')
+    try:
+        begin = text.index(banner) + len(banner)
+        case_line = text.index('    case "$(uname -s)" in', begin)
+        end = text.index("\n    esac\n", case_line) + len("\n    esac\n")
+    except ValueError as error:
+        raise SandboxError(
+            "bin/ocelli.sh's native step 6 no longer matches the anchors the "
+            "runner probes extract it with. Re-read the step and re-anchor "
+            "the probes instead of leaving them running against a fragment "
+            "that is not the step.") from error
+    return text[begin:end]
+
+
+def _write_step6_probe(box: Sandbox, *, report: str, exit_code: int,
+                       override_report: str | None = None,
+                       without_env_u: bool = False,
+                       host: str = "Darwin",
+                       stale_report: str | None = None,
+                       named_desktops: int = 1) -> None:
+    """Write the step 6 fragment under its stubs, as one runnable script.
+
+    The stub `cargo` answers `cargo metadata` with a fixed target directory,
+    which a step that still derives its path from `target_directory` reads,
+    and answers `cargo build` by writing the stub desktop binary, whose
+    report and exit code are the probe's input, and, when the build is asked
+    for a message format, by printing the `compiler-artifact` JSON lines the
+    step reads, naming the path it wrote to. The build honours an exported
+    `CARGO_BUILD_TARGET` the way cargo does, writing the artifact under the
+    triple directory. The stub desktop binary touches a marker file when it
+    runs, which `runner.step6-target-triple-over-a-stale-binary`'s runner
+    reads. `override_report` makes the binary answer an exported
+    `OCELLI_TIER` the way the real one does, and `without_env_u` drops the
+    step's shield so that export reaches it. `stale_report` pre-seeds an
+    earlier build's desktop binary at the target directory's
+    `release/ocelli-desktop`, printing that report, which is only meaningful
+    alongside an exported `CARGO_BUILD_TARGET`, without which a build that
+    writes the desktop binary would overwrite it. `named_desktops` is how
+    many ocelli-desktop artifacts the build writes and its
+    `--message-format` JSON names under the one destination directory:
+    0 names no ocelli-desktop executable at all, and 2 names a second
+    `ocelli-desktop.wasm` that is not host-runnable, the shape the real
+    second target's artifact takes, which is the state
+    `runner.step6-two-named-executables` refuses.
+    """
+    fragment = _step6_fragment(box)
+    if without_env_u:
+        dropped = fragment.replace("env -u OCELLI_TIER ", "", 1)
+        if dropped == fragment:
+            raise SandboxError(
+                "the step 6 fragment carries no `env -u OCELLI_TIER` to "
+                "drop, so the override probe's rejected state cannot be "
+                "built.")
+        fragment = dropped
+    reactive = override_report is not None
+    stub = (
+        "#!/bin/sh\n"
+        "touch \"$F238_STUB_TARGET/" + _STEP6_MARKER + "\"\n"
+        + ("if [ -n \"${OCELLI_TIER:-}\" ]; then\n"
+           "  printf '%s' \"$F238_STUB_OVERRIDE_REPORT\"\n"
+           "else\n"
+           "  printf '%s' \"$F238_STUB_REPORT\"\n"
+           "fi\n"
+           "exit \"$F238_STUB_EXIT\"\n"
+           if reactive else
+           "printf '%s' \"$F238_STUB_REPORT\"\n"
+           "exit \"$F238_STUB_EXIT\"\n")
+    )
+    artifacts = (
+        "{\"reason\":\"compiler-artifact\","
+        "\"target\":{\"name\":\"ocelli-server\"},"
+        "\"executable\":\"$dest/ocelli-server\"}\n"
+        + ("{\"reason\":\"compiler-artifact\","
+           "\"target\":{\"name\":\"ocelli-desktop\"},"
+           "\"executable\":\"$dest/ocelli-desktop\"}\n"
+           if named_desktops >= 1 else "")
+        + ("{\"reason\":\"compiler-artifact\","
+           "\"target\":{\"name\":\"ocelli-desktop\"},"
+           "\"executable\":\"$dest/ocelli-desktop.wasm\"}\n"
+           if named_desktops >= 2 else ""))
+    script = (
+        "# Generated by the guard catalogue's runner probes. The stubs end\n"
+        "# at the marker line, and the step's own lines follow, verbatim.\n"
+        "set -euo pipefail\n"
+        "ROOT=$PWD\n"
+        f"uname() {{ echo {host}; }}\n"
+        # exported because the stub desktop binary runs as a child process
+        # and touches its marker under this directory
+        "export F238_STUB_TARGET=\"$PWD/target/f238-step6-stub\"\n"
+        f"export F238_STUB_EXIT={exit_code}\n"
+        f"export F238_STUB_REPORT='{report}'\n"
+        + (f"export F238_STUB_OVERRIDE_REPORT='{override_report}'\n"
+           if reactive else "")
+        + (f"export F238_STALE_REPORT='{stale_report}'\n"
+           "mkdir -p \"$F238_STUB_TARGET/release\"\n"
+           "cat > \"$F238_STUB_TARGET/release/ocelli-desktop\" "
+           "<<'F238_STALE'\n"
+           "#!/bin/sh\n"
+           "printf '%s' \"$F238_STALE_REPORT\"\n"
+           "exit 0\n"
+           "F238_STALE\n"
+           "chmod +x \"$F238_STUB_TARGET/release/ocelli-desktop\"\n"
+           if stale_report is not None else "")
+        + "cargo() {\n"
+        "  case \"${1:-}\" in\n"
+        "    metadata)\n"
+        "      printf '{\"target_directory\":\"%s\"}' \"$F238_STUB_TARGET\" ;;\n"
+        "    build)\n"
+        "      dest=\"$F238_STUB_TARGET/release\"\n"
+        "      if [ -n \"${CARGO_BUILD_TARGET:-}\" ]; then\n"
+        "        dest=\"$F238_STUB_TARGET/$CARGO_BUILD_TARGET/release\"\n"
+        "      fi\n"
+        "      mkdir -p \"$dest\"\n"
+        + ("      cat > \"$dest/ocelli-desktop\" <<'F238_STUB'\n"
+           f"{stub}"
+           "F238_STUB\n"
+           "      chmod +x \"$dest/ocelli-desktop\"\n"
+           if named_desktops >= 1 else "")
+        + ("      printf 'wasm artifact stub, not host-runnable' "
+           "> \"$dest/ocelli-desktop.wasm\"\n"
+           if named_desktops >= 2 else "")
+        + "      case \"$*\" in\n"
+        "        *--message-format*)\n"
+        "          cat <<F238_JSON\n"
+        f"{artifacts}"
+        "F238_JSON\n"
+        "          ;;\n"
+        "      esac ;;\n"
+        "    *)\n"
+        "      echo \"stub cargo: unexpected subcommand ${1:-}\" >&2\n"
+        "      return 1 ;;\n"
+        "  esac\n"
+        "}\n"
+        + fragment)
+    box.write(_STEP6_SCRIPT, script)
+
+
+def _run_step6_probe(box: Sandbox,
+                     env: dict[str, str] | None = None,
+                     ) -> subprocess.CompletedProcess[str]:
+    """Run the generated fragment, with the sandbox as the working directory."""
+    return box.run(["bash", _STEP6_SCRIPT], env=env)
+
+
+def _run_step6_probe_naming_its_binary(
+        box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """Run the target-triple probe, and observe which binary answered.
+
+    The stub desktop binary touches the marker file when it runs, and the
+    step's own lines print nothing on a green run, so on a silent exit 0 the
+    marker is the only thing that tells a step that ran the binary its
+    build named from one that finished without running anything. A green
+    run is annotated with what was observed, which is what the probe's
+    `expect` matches, and an exit 0 without the marker is reported as the
+    refusal it is.
+    """
+    done = _run_step6_probe(box, env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})
+    stub_target = box.path / "target" / "f238-step6-stub"
+    ran = stub_target / _STEP6_MARKER
+    stale = stub_target / "release" / "ocelli-desktop"
+    fresh = stub_target / _STEP6_TRIPLE / "release" / "ocelli-desktop"
+    if done.returncode == 0:
+        # The fixture's own faithfulness, checked on the acceptance path. A
+        # stub build that stopped honouring the exported target would
+        # overwrite the plant at `release/` and leave this probe green while
+        # exercising nothing, which is the quietest way to lose it.
+        if not fresh.is_file() or "F238_STALE_REPORT" not in (
+                stale.read_text() if stale.is_file() else ""):
+            return subprocess.CompletedProcess(
+                done.args, 1, done.stdout,
+                "FAIL: the stub build did not honour CARGO_BUILD_TARGET, so "
+                "the probe's rejected state was never built\n")
+    if done.returncode == 0 and not ran.exists():
+        return subprocess.CompletedProcess(
+            done.args, 1, done.stdout,
+            "FAIL: the step exited 0 and the binary its build named never "
+            "ran\n")
+    if done.returncode == 0:
+        return subprocess.CompletedProcess(
+            done.args, 0, "the step ran the binary its build named\n",
+            done.stderr)
+    return done
+
+
+def _step6_reports_and_exits(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The shared control: the step against a binary that reports and exits 0."""
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0)
+    return _run_step6_probe(box)
+
+
+def _step6_override_stays_out(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The override control: the intact step under the same exported override.
+
+    `env -u` is intact here, so the stub sees no override, prints the
+    shipped report and the step exits 0. This is the override probe's
+    rejected state with the shield back in place, which is what proves the
+    two differ only in the shield.
+    """
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       override_report=_OVERRIDDEN_APPLE_REPORT)
+    return _run_step6_probe(box, env={"OCELLI_TIER": "cpu"})
+
+
+def _step6_off_apple_report(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The off-Apple control: the same step against a binary that reports."""
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       host="Linux")
+    return _run_step6_probe(box)
+
+
+def _step6_triple_build_names_the_binary(
+        box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The no-named-executable probe's control.
+
+    The same exported `CARGO_BUILD_TARGET` and the same earlier build's
+    binary at the target directory's `release/ocelli-desktop`, with the
+    build writing the desktop binary into the triple directory and its JSON
+    naming it. The step must run that one and pass, which is the state the
+    probe refuses to let the stale path substitute for.
+    """
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       stale_report=_HONEST_APPLE_REPORT)
+    return _run_step6_probe(box, env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})
 
 
 # ---------------------------------------------------------------------------
@@ -8567,19 +9492,28 @@ GUARDS: tuple[Guard, ...] = (
                 "byte-identical dual-licence grant, a changed or incomplete "
                 "ritk-codecs archive inventory or its immutable digest, an "
                 "undeclared change outside either exact manifest patch or "
-                "the exact patch provenance record, "
+                "the exact patch provenance record, a patched source file "
+                "whose bytes differ from its reviewed record, "
                 "incorrect provenance, or Rayon in either target graph, "
                 "a decode module over its recorded ceiling, a decode size "
                 "record whose tolerance is not the shared 5 percent, and a "
                 "decode binding file that drops a panic export or names the "
                 "canvas. "
-                "For openjph-core under D-22, where there is NO patch: a "
-                "changed, absent or unrecorded published file, a changed "
-                "inventory or its immutable digest, a wrong packaged VCS "
-                "revision, workspace wiring that is not the exact path and "
-                "version, and, at `--require-redistribution` only, a vendored "
-                "package carrying no licence notice or a notice whose bytes "
-                "differ from the recorded hash.",
+                "For openjph-core under D-22 and D-31: a changed, absent or "
+                "unrecorded published file outside the two recorded patch "
+                "files, a changed inventory or its immutable digest, a wrong "
+                "packaged VCS revision, a patch record that is absent or not "
+                "the reviewed bytes, workspace wiring that is not the exact "
+                "path and version, and, at `--require-redistribution` only, a "
+                "vendored package carrying no licence notice or a notice "
+                "whose bytes differ from the recorded hash."
+                "For dicom-object under F-244 and D-18, where there is ONE "
+                "source patch: a changed, absent or unrecorded published "
+                "file, a second change in the patched collector.rs or the "
+                "patch removed, a changed inventory or its immutable digest, "
+                "a provenance record with undeclared changes, a wrong "
+                "packaged VCS revision, and workspace wiring that is not the "
+                "exact path and version.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -8648,8 +9582,9 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/pin_and_size_check.py"),
                   "openjph-core published file is absent: src/lib.rs",
                   note="D-22. The published package inventory is the source "
-                       "boundary. This vendor carries NO patch, so every "
-                       "recorded file must match the archive byte for byte."),
+                       "boundary. Unpatched files must still match the "
+                       "archive byte for byte. The recorded D-31 patch covers "
+                       "the files its refusal names."),
             Probe("pins.openjph-inventory-root",
                   _rewrite_openjph_source_and_inventory,
                   script("python3", "scripts/pin_and_size_check.py"),
@@ -8678,6 +9613,32 @@ GUARDS: tuple[Guard, ...] = (
                   "LICENSE sha256",
                   note="D-22. One extra byte in the vendor LICENSE must "
                        "refuse on the recorded hash."),
+            Probe("pins.dicom-object-planted-byte",
+                  _plant_dicom_object_source_byte,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object published file changed: src/mem.rs",
+                  note="F-244 and D-18. One planted byte in an unpatched "
+                       "published file must fail with the file named."),
+            Probe("pins.dicom-object-second-patch",
+                  _second_dicom_object_patch,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "src/collector.rs has undeclared changes",
+                  note="F-244. The patched file is pinned by its whole "
+                       "digest, so a second change beside the recorded "
+                       "`first = false;` line must fail."),
+            Probe("pins.dicom-object-inventory-root",
+                  _rewrite_dicom_object_source_and_inventory,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object published-package inventory digest",
+                  note="F-244. The inventory digest is rooted outside the "
+                       "vendor tree, so changing a source file and its "
+                       "inventory row together must still fail."),
+            Probe("pins.dicom-object-provenance-extra",
+                  _append_dicom_object_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object PATCH-PROVENANCE.md has undeclared changes",
+                  note="F-244. A false claim appended to an otherwise true "
+                       "patch record must fail."),
             Probe("pins.ritk-inventory", _remove_ritk_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "published file is absent: src/lib.rs",
@@ -8710,6 +9671,34 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-20. The complete patch record is rooted outside "
                        "the vendor tree, so a false source-change claim "
                        "appended to otherwise true provenance must fail."),
+            Probe("pins.ritk-patched-source-drift",
+                  _drift_ritk_patched_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "undeclared changes beyond its recorded patch",
+                  note="F-239, D-31. A patched source file is exempt from "
+                       "the archive inventory and therefore held to its own "
+                       "recorded bytes. Drift that the exemption would "
+                       "otherwise hide has to fail here."),
+            Probe("pins.ritk-jpegls-patch-drift", _drift_ritk_jpegls_patch,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "src/jpeg_ls/scan.rs has undeclared changes beyond its "
+                  "recorded patch",
+                  note="F-243, D-20. A patched source file is held to its own "
+                       "recorded bytes, because the archive inventory no "
+                       "longer covers it."),
+            Probe("pins.openjph-patched-source-drift",
+                  _drift_openjph_patched_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "undeclared changes beyond the exact D-31",
+                  note="F-239, D-31. Same ratchet as the ritk side, for the "
+                       "decode-path files the openjph patch records."),
+            Probe("pins.openjph-patch-provenance",
+                  _rewrite_openjph_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "does not match the exact reviewed patch record",
+                  note="F-239, D-31. The openjph patch record is new with "
+                       "this story and is rooted outside the vendor tree "
+                       "like the ritk one."),
             Probe("pins.ritk-rayon", _restore_ritk_rayon_default,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "Rayon is present",
@@ -8759,16 +9748,51 @@ GUARDS: tuple[Guard, ...] = (
                        "measured module."),
         ),
     ),
+
+    # -- the vendored coefficient contract, F-239 D-31 ----------------------
+    Guard(
+        id="vendor-tests",
+        file="bin/ocelli.sh",
+        gate="vendor-tests",
+        spec="F-239 D-31, the lead ruling after the codec part's review "
+             "pass 4 in `.claude/plans/F-239-design.md`",
+        refuses="A vendored decoder whose library tests no longer hold the "
+                "recorded G-6 inverse ICT coefficients, now that a floor "
+                "gate runs them instead of a command somebody remembers to "
+                "run by hand.",
+        claims=(),
+        silent="The refusal is cargo's own failing test output from a "
+               "vendored crate, which is no shape scripts/guards/discover.py "
+               "scans and carries no words of this repository's own. The one "
+               "shell refusal in bin/ocelli.sh belongs to the runner entry.",
+        probes=(
+            Probe("vendor-tests.openjph-ict-coefficient",
+                  _shift_openjph_ict_coefficient,
+                  Invoke("bin/ocelli.sh gate vendor-tests",
+                         _run_vendor_tests_gate),
+                  "ict_backward_is_the_annex_g_transform",
+                  needs="cargo", profile="deep",
+                  note="S1 of review pass 4. The fragment is the vendored "
+                       "test's own name rather than a refusal sentence of "
+                       "this repository's, because the guard is cargo's red "
+                       "and the contract is the vendored suite's. The "
+                       "control is the same gate over the unmutated "
+                       "sandbox, which must build both crates and exit 0."),
+        ),
+    ),
     Guard(
         id="decode-graph",
         file="scripts/decode_graph_check.py",
         gate="wasm",
-        spec="HLD 15.2, deviation D-27, story F-110",
+        spec="HLD 15.2, deviation D-27, deviation D-33, story F-110",
         refuses="A decode build that links wgpu, Naga or the renderer, a "
                 "wasm32 wgpu feature set other than the D-27 set, a native "
-                "table that drops a default backend, wasm-opt turned off, "
-                "and a workspace resolve that enables a native backend on "
-                "wasm32 or drops one on the host.",
+                "table that drops a default backend, a shipped native table "
+                "on ocelli-render or ocelli-compute that drops a backend the "
+                "shipped set keeps, a manifest whose `metal` forwarding to "
+                "wgpu is missing from the crates D-33 ships, wasm-opt turned "
+                "off, and a workspace resolve that enables a native backend "
+                "on wasm32 or drops one on the host.",
         claims=("*",),
         probes=(
             Probe(
@@ -8904,6 +9928,88 @@ GUARDS: tuple[Guard, ...] = (
                     "sys.exit(1 if bad else 0)\n"),
                 note="F-110. The workspace resolve is not the ocelli-wasm "
                      "package graph. A native backend on wasm32 fails here."),
+            Probe(
+                "decode-graph.shipped-table-drops", None,
+                python_snippet(
+                    "decode_graph_check.check_trimmed, shipped gles",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "shipped = sorted(d.SHIPPED_NATIVE_FEATURES - {'gles'})\n"
+                    "shipped.append('webgl')\n"
+                    "manifest = {'target': {\n"
+                    "    'cfg(target_arch = \"wasm32\")': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': list(d.WASM_FEATURES)}}},\n"
+                    "    'cfg(not(target_arch = \"wasm32\"))': "
+                    "{'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': shipped}}},\n"
+                    "}}\n"
+                    "manifest['features'] = {'metal': ['wgpu/metal']}\n"
+                    "bad = d.check_trimmed('probe', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "drops a default backend",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_trimmed, shipped healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.check_trimmed(\n"
+                    "    'ocelli-render', d.load(d.RENDER_CRATE), True,\n"
+                    "    shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="D-33. The shipped native table of the render crate is "
+                     "missing `gles`, which the shipped set keeps. The "
+                     "control is the manifest in the tree, judged against the "
+                     "same shipped rule."),
+            Probe(
+                "decode-graph.shipped-forwarding-absent", None,
+                python_snippet(
+                    "decode_graph_check.check_trimmed, forwarding missing",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "native = sorted(d.SHIPPED_NATIVE_FEATURES)\n"
+                    "native.append('webgl')\n"
+                    "manifest = {'target': {\n"
+                    "    'cfg(target_arch = \"wasm32\")': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': list(d.WASM_FEATURES)}}},\n"
+                    "    'cfg(not(target_arch = \"wasm32\"))': "
+                    "{'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': native}}},\n"
+                    "}}\n"
+                    "bad = d.check_trimmed('probe', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "does not forward metal to wgpu",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_trimmed, forwarding healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "manifest = d.load(d.RENDER_CRATE)\n"
+                    "bad = d.check_trimmed('ocelli-render', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="D-33. A shipped table without the `metal` forwarding "
+                     "feature on the render crate would leave development "
+                     "unable to restore the D-27 native set, and `gate gpu` "
+                     "would quietly resolve tier C on the macOS host. The "
+                     "control is the render manifest in the tree, which "
+                     "forwards `metal` and must return nothing. "
+                     "`ocelli-compute` is judged against the same shipped "
+                     "table but is exempt from this half, because it is not "
+                     "in the shipped graph and names no forwarding feature."),
         ),
         limit="The cargo-tree process itself is the wasm gate. A probe that "
               "makes cargo fail to resolve needs a broken toolchain, so the "
@@ -9005,6 +10111,21 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in"),
+            Probe("ci-floor.packages-job-without-wasm-pack",
+                  _drop_the_frontend_wasm_pack_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "provisions wasm-pack",
+                  note="F-237 review pass 2, N3. The frontend job gained "
+                       "wasm-pack and the wasm32 target with D1 of the same "
+                       "review, because `gate packages` packs @ocelli/wasm "
+                       "through a prepack script that builds both modules. "
+                       "Deleting the step left this check at exit 0: the "
+                       "floor's claim is about a step running the gate, and "
+                       "a job that fails closed at the first pack still "
+                       "runs it. The provisioning rule beside the floor "
+                       "loop refuses now. Its target half is refused by the "
+                       "same rule and is watched by the recorded count "
+                       "rather than by a second probe here."),
             Probe("ci-floor.multi-command-split-steps",
                   _split_a_multi_command_gate_across_steps,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -11353,7 +12474,22 @@ GUARDS: tuple[Guard, ...] = (
               "encode or a recompression that returns no bytes and a "
               "recompression that does not restore the `.50` fragment. Each "
               "is covered by `JpegXlEncoderRefusals` with a stubbed "
-              "imagecodecs entry point, for the same import reason.",
+              "imagecodecs entry point, for the same import reason. "
+              "The tenth to seventeenth are F-244's empty Basic Offset Table "
+              "generator refusals: a non-Item tag, an odd Item value, a frame "
+              "with no marker-free split, an unsupported Fragment count, a "
+              "source row with more than one Fragment, a producer writing the "
+              "wrong frame count, a populated table beside an Extended Offset "
+              "Table, and an unknown shape. Each is covered by "
+              "`EmptyBotGeneratorRefusals`, for the same import reason. "
+              "F-240 adds the closed synthetic ICC kind refusal, covered by "
+              "`IccProfileFixtures.test_unknown_icc_kind_is_refused_by_fixed_name` "
+              "without requiring any corpus file. Controlled colour "
+              "comparison inputs add closed-case, dimension, nonempty-output "
+              "and incompatible-CLI-mode refusals, covered by "
+              "`ControlledColourComparisonFixtures`. The ICC slot assertion "
+              "is an internal invariant of the own gamma1 profile and is "
+              "checked by the independent tag/curve fixture test.",
     ),
 
     # -- the cross-target proof and the packages ---------------------------
@@ -11384,7 +12520,7 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/simd_variant_check.py",
         gate="native",
         spec="F-233's lead rulings after review pass 1, `bin/ocelli.sh "
-             "native` steps 8 and 12, and D-22's evidence clause",
+             "native` steps 10 and 14, and D-22's evidence clause",
         refuses="A SIMD verification module holding no SIMD instruction the "
                 "plain module lacks, a plain module holding any SIMD "
                 "instruction, and a module that is missing or that the "
@@ -11496,6 +12632,58 @@ GUARDS: tuple[Guard, ...] = (
                      "same function to the tracked `bin/ocelli.sh`."),
         ),
     ),
+
+    # -- the shipped native graph -------------------------------------------
+    Guard(
+        id="shipped-native",
+        file="scripts/shipped_native_check.py",
+        gate="native",
+        spec="F-238, acceptance rows AC1 and AC2",
+        refuses="An objc2 package in the resolved graph of `ocelli-native` "
+                "built with `--no-default-features`, on either Apple target, "
+                "over normal and build edges, and a shipped graph that does "
+                "not resolve at all.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "shipped-native.metal-planted",
+                lambda box: box.substitute(
+                    "crates/ocelli-render/Cargo.toml",
+                    'wgpu = { workspace = true, features = ["std", '
+                    '"parking_lot", "dx12", "gles", "vulkan", "wgsl", '
+                    '"webgpu", "webgl"] }',
+                    'wgpu = { workspace = true, features = ["std", '
+                    '"parking_lot", "dx12", "metal", "gles", "vulkan", '
+                    '"wgsl", "webgpu", "webgl"] }'),
+                script("python3", "scripts/shipped_native_check.py"),
+                "reaches the shipped native graph",
+                needs="cargo", profile="deep",
+                control=script("python3", "scripts/shipped_native_check.py"),
+                note="AC2. Metal is planted back into ocelli-render's native "
+                     "table, which is the shipped feature set's only route to "
+                     "wgpu's Metal backend, and the check must refuse because "
+                     "the RESOLVED graph names objc2 again. A check that read "
+                     "a feature list instead of the graph would stay green. "
+                     "The control is the same command over the unmutated "
+                     "sandbox, which must resolve and pass."),
+            Probe(
+                "shipped-native.build-dep-planted",
+                _plant_objc2_build_dependency,
+                script("python3", "scripts/shipped_native_check.py"),
+                "reaches the shipped native graph",
+                needs="cargo", profile="deep",
+                control=script("python3", "scripts/shipped_native_check.py"),
+                note="The F-238 review's S1. objc2 planted under "
+                     "`[build-dependencies]` of `ocelli-native` is compiled "
+                     "when the archive is built, and the licence closure "
+                     "refuses it already, so the shipped-graph walk must "
+                     "refuse it too, and over normal edges alone it stayed "
+                     "green. The plant adds a lock edge, so the probe "
+                     "resolves the sandbox lock offline before running the "
+                     "check. The control is the same command over the "
+                     "unmutated sandbox."),
+        ),
+    ),
     Guard(
         id="packages",
         file="scripts/package_check.py",
@@ -11510,7 +12698,15 @@ GUARDS: tuple[Guard, ...] = (
                 "from another package's file. A resolve trace that does not "
                 "record the dcmjs ES entry is refused as well. A tarball that "
                 "carries a wasm file without THIRD_PARTY_LICENSES or "
-                "THIRD_PARTY_NOTICES is refused.",
+                "THIRD_PARTY_NOTICES is refused. The @ocelli/wasm tarball is "
+                "refused without both modules and their glue, and refused "
+                "when its build id is absent, names another git SHA than "
+                "this HEAD, does not name this index, records unstaged "
+                "tracked changes, or records a digest its own module bytes "
+                "do not hash to. The consumer "
+                "proof must pin a render-only export on the root entry and "
+                "its absence on ./decode, so a staging edit that swaps the "
+                "two modules is refused.",
         claims=("*",),
         probes=(
             Probe(
@@ -11579,10 +12775,37 @@ GUARDS: tuple[Guard, ...] = (
                     "package_check.check_manifest, healthy",
                     "import sys; sys.path.insert(0, 'scripts');\n"
                     "import package_check as p;\n"
-                    "m = {'name': '@ocelli/core', 'version': '0.1.0'};\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.1.0'}};\n"
                     "bad = p.check_manifest('core', m, '0.1.0');\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "packages.peer-dep-skew", None,
+                python_snippet(
+                    "package_check.check_manifest, peer skew",
+                    "import sys; sys.path.insert(0, 'scripts');\n"
+                    "import package_check as p;\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.0.9'}};\n"
+                    "bad = p.check_manifest('core', m, '0.1.0');\n"
+                    "print('\\n'.join(bad));\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "peer-depends on @ocelli/wasm",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_manifest, peer healthy",
+                    "import sys; sys.path.insert(0, 'scripts');\n"
+                    "import package_check as p;\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.1.0'}};\n"
+                    "bad = p.check_manifest('core', m, '0.1.0');\n"
+                    "print('\\n'.join(bad));\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-237. The shell peer-depends on the module at the "
+                     "version the module publishes. A range resolves to "
+                     "whatever the registry has, the same defect the react "
+                     "dependency check refuses."),
             Probe(
                 "packages.unreachable-version", None,
                 python_snippet(
@@ -11737,6 +12960,206 @@ GUARDS: tuple[Guard, ...] = (
                      "notice files. The control is that list plus both files "
                      "and returns none. A tarball with no wasm file is not "
                      "asked for them."),
+            Probe(
+                "packages.build-id-absent", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, no build id",
+                    _WASM_IDENTITY_ABSENT),
+                "carries no dist/build-id.json",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The identity file is how a release proves the "
+                     "module is the one its HEAD builds, so its absence is "
+                     "its own refusal rather than a missing-field warning."),
+            Probe(
+                "packages.build-id-parse", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, not json",
+                    _WASM_IDENTITY_PARSE),
+                "does not parse to a build id object",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. A build id that is not valid JSON refuses "
+                     "rather than crashing the gate. The next probe drives "
+                     "the valid-JSON-but-not-an-object half of the same "
+                     "refusal."),
+            Probe(
+                "packages.build-id-non-object", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, not an object",
+                    _WASM_IDENTITY_NON_OBJECT),
+                "does not parse to a build id object",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. Valid JSON that parses to a list is refused by "
+                     "the same sentence as the unparseable form. Deleting "
+                     "the object check crashes this probe instead of "
+                     "refusing, which the harness reads red."),
+            Probe(
+                "packages.build-id-version", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, other version",
+                    _WASM_IDENTITY_VERSION),
+                "not the workspace version",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The build id records the package version beside "
+                     "the SHA, and the pairing is one version."),
+            Probe(
+                "packages.build-id-stale", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, stale sha",
+                    _WASM_IDENTITY_STALE),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The recorded SHA is another tree's and this "
+                     "HEAD is current. The digests in the input are correct, "
+                     "so the SHA mismatch is the only refusal. A presence "
+                     "check passes this input, which is the wrong "
+                     "implementation AC3 rejects."),
+            Probe(
+                "packages.build-id-digest", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, digest mismatch",
+                    _WASM_IDENTITY_DIGEST),
+                "hash to",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The SHA is current and the digests are not the "
+                     "bytes' hash, which is an edited identity beside "
+                     "unrebuilt modules."),
+            Probe(
+                "packages.build-id-module-absent", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, module absent",
+                    _WASM_IDENTITY_MODULE_ABSENT),
+                "tarball has no dist/decode/ocelli_wasm_bg.wasm",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The build id names a digest for a module the "
+                     "tarball does not carry, so the decode half of Q3 is "
+                     "refused when it is missing."),
+            Probe(
+                "packages.build-id-dirty", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, dirty tree",
+                    _WASM_IDENTITY_DIRTY),
+                "does not record a tree without unstaged tracked changes",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237 review S1. The build id records whether the "
+                     "working tree had unstaged tracked changes, and a build "
+                     "over such changes names a SHA its bytes do not come "
+                     "from. The read requires the refusal for a build id "
+                     "with dirty true and for one with the field absent, "
+                     "which is what pins the fail-closed direction: "
+                     "loosening the check to `is True` accepts the absent "
+                     "field and turns this probe red."),
+            Probe(
+                "packages.build-id-tree", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, foreign tree",
+                    _WASM_IDENTITY_TREE),
+                "must name the index the pack staged from",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237 review pass 2, D1. The build id records the git "
+                     "write-tree of the staged index beside the SHA. The "
+                     "read requires the refusal for a tree that is not this "
+                     "index's and for the field absent, which pins the "
+                     "fail-closed direction the same way the dirty probe "
+                     "does. The staged-index case itself is the accept "
+                     "direction: a tree recorded from a staged index passes "
+                     "while the index is still that one, which "
+                     "test_release_wasm.py's stage suite drives."),
+            Probe(
+                "packages.build-id-tarball-stale", None,
+                python_snippet(
+                    "package_check.wasm_identity_from_tarball, stale",
+                    _PACKED_IDENTITY_STALE),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_from_tarball, current",
+                    _PACKED_IDENTITY_CURRENT),
+                note="S2. The pure inputs above enter at "
+                     "wasm_identity_problems. This one enters at "
+                     "wasm_identity_from_tarball with a real tarball and the "
+                     "sandbox's own git HEAD, so the refusal is seen at the "
+                     "end of the path a pack takes. Deleting the whole "
+                     "function turns both this and the pure probes red, and "
+                     "deleting the call in main is what the next probe "
+                     "watches."),
+            Probe(
+                "packages.build-id-call-in-main", None,
+                python_snippet("package_check main, stale build id",
+                               _MAIN_REFUSES_STALE_ID),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check main, honest build id",
+                    _MAIN_ACCEPTS_HONEST_ID),
+                note="S2. All seven earlier build id probes called the "
+                     "detection function directly, so deleting the call in "
+                     "main left every one of them green. This one runs "
+                     "main() with run, tarball_paths and check_consumer "
+                     "stubbed over a wasm tarball whose build id is stale, "
+                     "and requires the stale refusal in main's own output, "
+                     "so any unwiring of the call is red: the two lines "
+                     "commented out, the call kept with its result "
+                     "discarded, the branch keyed on anything but "
+                     "MODULE_PACKAGE, and the deletion. The control runs the "
+                     "same stubs over an honest build id and must be green, "
+                     "which is what says the refusal names the stale id and "
+                     "not the stubbing."),
+            Probe(
+                "packages.module-surface-smoke", None,
+                python_snippet(
+                    "package_check.module_surface_problems, no render pin",
+                    _SMOKE_WITHOUT_RENDER_PIN),
+                "cannot tell the render module from the decode module",
+                level=1,
+                control=python_snippet(
+                    "package_check.module_surface_problems, healthy",
+                    _MODULE_SURFACE_HEALTHY),
+                note="S3. Both modules export init, ocelli_version and the "
+                     "panic surface, so a smoke built on those alone accepts "
+                     "a root entry that is the decode module. The input is "
+                     "the real SMOKE_SCRIPT with the render-only assertion "
+                     "removed, and the control is the real pair."),
+            Probe(
+                "packages.module-surface-check", None,
+                python_snippet(
+                    "package_check.module_surface_problems, no type pin",
+                    _CHECK_TS_WITHOUT_RENDER_PIN),
+                "does not read apply_commands from the root entry",
+                level=1,
+                control=python_snippet(
+                    "package_check.module_surface_problems, healthy",
+                    _MODULE_SURFACE_HEALTHY),
+                note="S3, the type half. The real CHECK_TS with the "
+                     "render-only pin removed. A swapped staging would then "
+                     "type-check under bundler and node16 with the gate "
+                     "green."),
         ),
         limit="The consumer install, node import, two tsc resolutions and "
               "publish dry run need an npm install. `node_modules` is ignored "
@@ -11755,7 +13178,56 @@ GUARDS: tuple[Guard, ...] = (
               "and its control is the healthy list. "
               "`packages.wasm-without-notices` calls check_tarball with a "
               "wasm path and no third-party notice file, and its control is "
-              "that list with both notice files.",
+              "that list with both notice files. "
+              "`packages.build-id-tarball-stale` and "
+              "`packages.build-id-call-in-main` watch the wiring of the "
+              "build id refusal, the first through a real tarball and the "
+              "sandbox's own git HEAD, the second by running main() with "
+              "the npm steps stubbed over a stale build id and requiring "
+              "the refusal in its output, which any unwiring of the call "
+              "turns off. The two "
+              "module-surface probes delete the render-only assertion from "
+              "the real smoke text and the real type check text in memory, "
+              "and a real staging swap is driven red by the consumer install "
+              "in the `packages` gate itself, which no sandbox can run. The "
+              "surface refusal reads the same two constants the consumer "
+              "files are written from, so its wiring is one layer beside the "
+              "runtime one: dropping the module_surface_problems call leaves "
+              "the smoke's throw and tsc's TS2339 and TS2578 alive in the "
+              "real install, and gutting a constant turns this refusal red. "
+              "The module-and-glue presence refusal for @ocelli/wasm has no "
+              "dedicated probe, the same standing as the generic REQUIRED "
+              "check beside it, and its addition is recorded in the "
+              "entry_sites count.",
+    ),
+    Guard(
+        id="release-wasm",
+        file="scripts/release_wasm.py",
+        gate="-",
+        spec="docs/RELEASE.md item 6 and the F-237 review's D3 ruling",
+        refuses="A release tarball whose build id does not name the release "
+                "revision or its tree, does not record a clean tree, whose "
+                "recorded digests differ from a cold build of the tagged "
+                "source, or whose packed module bytes differ from that cold "
+                "build. A revision that does not resolve to a commit, a cold "
+                "build or a pack that fails, and a tarball without the build "
+                "id or without both modules are refused as well.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_release_wasm.py "
+                    "(run by the `guards` gate)",),
+        limit="The cold build needs wasm-pack and the pinned toolchain for "
+              "minutes, which no probe sandbox carries and no floor probe "
+              "may wait on. The tests drive the comparison and the tarball "
+              "round trip on synthetic inputs, and the real cold build runs "
+              "when `/release` runs the script at preflight item 8, before "
+              "any tag, push or publish. The script reads the dirty flag, "
+              "the SHA and the tree out of the build id stage.mjs wrote, so "
+              "a stage that lied about any of them is caught here only when "
+              "the bytes differ from the tag's build: a dirty change that "
+              "leaves both modules byte-identical to what the tag builds "
+              "would pass with a false clean flag. The packages gate refuses "
+              "a recorded dirty flag and a tree that is not the index it "
+              "runs at, for the same reason it refuses a recorded stale SHA.",
     ),
     Guard(
         id="viewer-build",
@@ -11980,13 +13452,25 @@ GUARDS: tuple[Guard, ...] = (
     ),
 
     # -- the runner and the source resolver --------------------------------
+    # Step 6 of the native arm is probed through its own extracted lines and
+    # a stub `cargo` and stub desktop binary, because a probe that ran the
+    # step for real would run the whole native arm inside the sandbox. The
+    # builders are in the `Step 6 of the native arm` section above `GUARDS`.
+
     Guard(
         id="runner",
         file="bin/ocelli.sh",
         gate="-",
-        spec="`.claude/WORKFLOW.md`, a skipped gate is not a pass",
+        spec="`.claude/WORKFLOW.md`, a skipped gate is not a pass. F-238, "
+             "the shipped native build links and its desktop binary reports",
         refuses="A command whose prerequisite is absent, rather than running "
-                "it and reporting whatever comes out.",
+                "it and reporting whatever comes out. And a shipped native "
+                "build whose own output names no ocelli-desktop executable "
+                "or names more than one, or a shipped native desktop binary "
+                "that exits non-zero, does not report the NoAdapter tier on "
+                "an Apple host, reports NoAdapter without its no-backend "
+                "cause line, or prints no tier on any other host, rather "
+                "than failing the native arm.",
         claims=("*",),
         probes=(
             Probe("runner.absent-prerequisite", None,
@@ -11998,7 +13482,212 @@ GUARDS: tuple[Guard, ...] = (
                        "the sandbox's natural state. The control is "
                        "`gate --list`, which proves the runner itself works "
                        "in the sandbox and does not print this message."),
+            Probe("runner.step6-exits-without-a-report",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=3),
+                  Invoke("probe-f238-step6.sh, an honest report and exit 3",
+                         _run_step6_probe),
+                  "exited 3 instead of reporting its tier",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The non-zero-exit refusal. The step's own lines are "
+                       "extracted from the sandbox copy of the runner and "
+                       "run against a stub `cargo` whose build writes a "
+                       "binary that prints the honest Apple report and then "
+                       "exits 3, the way a panic while tearing down would: "
+                       "the report alone passes both Apple greps, so the "
+                       "non-zero status is the only thing this refusal "
+                       "hangs on. The control is the same fragment against "
+                       "a binary that reports and exits 0."),
+            Probe("runner.step6-wrong-tier-on-apple",
+                  lambda box: _write_step6_probe(
+                      box, report=_DEV_APPLE_REPORT, exit_code=0),
+                  Invoke("probe-f238-step6.sh, a development-style report",
+                         _run_step6_probe),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The Apple match refusal. The stub prints a "
+                       "development-style report and only its tier line is "
+                       "load bearing: it is a tier, so the step reached a "
+                       "report, and it is not the shipped one, so the "
+                       "branch must refuse. The control prints the shipped "
+                       "report and exits 0."),
+            Probe("runner.step6-wrong-tier-over-the-cause-line",
+                  lambda box: _write_step6_probe(
+                      box, report=_WRONG_TIER_APPLE_REPORT, exit_code=0),
+                  Invoke("probe-f238-step6.sh, a wrong tier line over the "
+                         "cause line",
+                         _run_step6_probe),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The wrong-tier refusal's exit. The rejected state "
+                       "pairs a tier line that is not the shipped one with "
+                       "the cause line, so the Apple match refusal is the "
+                       "only one that fires and its exit is the only "
+                       "non-zero the step can produce. "
+                       "step6-wrong-tier-on-apple's rejected state also "
+                       "lacks the cause line, so there a later refusal's "
+                       "own exit produces the non-zero and this refusal's "
+                       "exit could go missing unwatched. The control is the "
+                       "honest report, which the step must accept."),
+            Probe("runner.step6-override-cannot-reach-the-binary",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      override_report=_OVERRIDDEN_APPLE_REPORT,
+                      without_env_u=True),
+                  Invoke("probe-f238-step6.sh, env -u dropped and "
+                         "OCELLI_TIER=cpu exported",
+                         lambda box: _run_step6_probe(
+                             box, env={"OCELLI_TIER": "cpu"})),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke(
+                      "probe-f238-step6.sh, env -u intact and "
+                      "OCELLI_TIER=cpu exported",
+                      _step6_override_stays_out),
+                  note="The F-238 review's S2. The rejected state drops "
+                       "`env -u` from the extracted fragment, so the "
+                       "caller's `OCELLI_TIER=cpu` reaches the stub binary, "
+                       "which answers it the way `probe.rs` does: the "
+                       "override returns from `detect` before the "
+                       "no-backend guard, so the report names `Override` "
+                       "and carries no cause line, and the step must "
+                       "refuse. The control is the same fragment with "
+                       "`env -u` intact, which must stay green, so its "
+                       "green and the red above differ only in the shield."),
+            Probe("runner.step6-cause-line-missing",
+                  lambda box: _write_step6_probe(
+                      box, report=_APPLE_REPORT_WITHOUT_CAUSE,
+                      exit_code=0),
+                  Invoke("probe-f238-step6.sh, NoAdapter without its cause "
+                         "line",
+                         _run_step6_probe),
+                  "without its no-backend cause line",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The F-238 review's S3. The stub prints the NoAdapter "
+                       "tier line without the `backends` cause line, which "
+                       "is what reaches the step when a `probe.rs` stops "
+                       "setting `no_backend_compiled`, and the step must "
+                       "refuse rather than let the cause go silent. The "
+                       "control prints the full report."),
+            Probe("runner.step6-no-tier-off-apple",
+                  lambda box: _write_step6_probe(
+                      box, report="", exit_code=0, host="Linux"),
+                  Invoke("probe-f238-step6.sh, an off-Apple host and no "
+                         "report",
+                         _run_step6_probe),
+                  "printed no tier report",
+                  control=Invoke("probe-f238-step6.sh, an off-Apple host "
+                                 "and a report", _step6_off_apple_report),
+                  note="The off-Apple refusal. The fragment runs with "
+                       "`uname` pinned to Linux, so the branch runs on "
+                       "every host, this Apple one included, and the stub "
+                       "prints nothing, so no line starts with `Tier`. The "
+                       "control prints a report whose first line is a tier "
+                       "and exits 0."),
+            Probe("runner.step6-target-triple-over-a-stale-binary",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_DEV_APPLE_REPORT),
+                  Invoke("probe-f238-step6.sh, CARGO_BUILD_TARGET set over "
+                         "a stale release binary",
+                         _run_step6_probe_naming_its_binary),
+                  "the step ran the binary its build named",
+                  polarity="accept",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The F-238 review's S1. The stub build honours the "
+                       "exported `CARGO_BUILD_TARGET` the way cargo does: "
+                       "it writes the desktop binary into the triple "
+                       "directory and its `--message-format` JSON names "
+                       "that path, while an earlier build's desktop binary "
+                       "sits at the target directory's "
+                       "`release/ocelli-desktop` printing a "
+                       "development-style report, which is not the shipped "
+                       "one, so a run of the stale path refuses. The stub "
+                       "binary touches a marker file when it runs, and the "
+                       "runner reads it, because the step's own lines are "
+                       "silent on a green run: an exit 0 without the "
+                       "marker is reported as the refusal it is. The "
+                       "control is the same fragment with no target "
+                       "exported and the stub writing "
+                       "`release/ocelli-desktop`."),
+            Probe("runner.step6-no-named-executable",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_HONEST_APPLE_REPORT,
+                      named_desktops=0),
+                  Invoke("probe-f238-step6.sh, a build that names no "
+                         "desktop executable",
+                         lambda box: _run_step6_probe(
+                             box,
+                             env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})),
+                  "named no ocelli-desktop executable",
+                  control=Invoke(
+                      "probe-f238-step6.sh, a triple build that names the "
+                      "desktop binary",
+                      _step6_triple_build_names_the_binary),
+                  note="The ruling's refuse half. The build's output names "
+                       "no ocelli-desktop executable and the earlier "
+                       "build's binary sits at the path the target "
+                       "directory would suggest, printing the honest "
+                       "shipped report, so a step that falls back to that "
+                       "path runs it and passes. The step must refuse with "
+                       "its own refusal instead. The control is the same "
+                       "exported target and the same stale binary, with "
+                       "the build writing and naming the desktop binary in "
+                       "the triple directory, which the step must run and "
+                       "pass."),
+            Probe("runner.step6-two-named-executables",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_HONEST_APPLE_REPORT,
+                      named_desktops=2),
+                  Invoke("probe-f238-step6.sh, a build that names two "
+                         "desktop executables",
+                         lambda box: _run_step6_probe(
+                             box,
+                             env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})),
+                  "named 2 ocelli-desktop executables, expected exactly one",
+                  control=Invoke(
+                      "probe-f238-step6.sh, a triple build that names the "
+                      "desktop binary",
+                      _step6_triple_build_names_the_binary),
+                  note="The pass 6 review's S1. The build names two "
+                       "ocelli-desktop executables. A multi-target build's "
+                       "stream carries two, one under each target's "
+                       "directory: cargo emits one such message per "
+                       "requested target, so which single binary a "
+                       "first-match parse checks is decided by the order "
+                       "cargo finishes the units and not by anything the "
+                       "step controls. The step must refuse naming the "
+                       "count and run nothing. A parse that takes the "
+                       "first match runs the first named binary, which "
+                       "here prints the honest report and passes, so "
+                       "under the break it exists to catch, as over a "
+                       "parse that fell back to the stale path, this probe "
+                       "reports HARNESS rather than red. The control is "
+                       "the same exported "
+                       "target and the same stale binary with the build "
+                       "naming exactly one desktop executable, which the "
+                       "step must run and pass."),
         ),
+        limit="The step 6 probes run the step's extracted lines against a "
+              "stub `cargo` and a stub desktop binary, because driving them "
+              "for real means running the whole native arm inside the "
+              "sandbox. The stubs' reports follow `tier_report` in "
+              "`crates/ocelli-native/src/lib.rs`. The stub build honours an "
+              "exported `CARGO_BUILD_TARGET` and, asked for a message "
+              "format, prints the `compiler-artifact` lines the step reads, "
+              "naming the paths it wrote, of which two desktop ones is the "
+              "state `runner.step6-two-named-executables` refuses. "
+              "`bin/ocelli.sh gate native` stays the end-to-end watcher: it "
+              "runs the step against the real binary on every run.",
     ),
     Guard(
         id="source-dir",
@@ -13481,7 +15170,9 @@ GUARDS: tuple[Guard, ...] = (
         gate="oracle",
         spec="HLD section 18, the LUT chain's VOI stage",
         refuses="A VOI declaration the reference cannot apply, and a window "
-                "the row does not carry.",
+                "the row does not carry. The explicit colour observation requires "
+                "a finite LINEAR pair and a boolean inversion, with malformed "
+                "pairs exercised in params_test.mjs.",
         claims=("*",),
         covered_by=("tools/oracle/tests/params_test.mjs",),
     ),
@@ -13491,7 +15182,9 @@ GUARDS: tuple[Guard, ...] = (
         gate="oracle",
         spec="`tools/oracle/render-params.json` is the declared parameter set",
         refuses="A render parameter the page does not implement, and a "
-                "parameter set that does not resolve for a row.",
+                "parameter set that does not resolve for a row. AC20 unknown, "
+                "duplicate and malformed observation rows are exercised by "
+                "params_test.mjs without changing the default declaration.",
         claims=("*",),
         covered_by=("tools/oracle/tests/params_test.mjs",),
     ),
@@ -13664,6 +15357,9 @@ GUARDS: tuple[Guard, ...] = (
                 "subject whose story is not in progress or done.",
         claims=("*",),
         covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
+        limit="Five new comparison argument refusals are exercised by the "
+              "comparison conflict and controlled-colour selector tests, "
+              "including publication and missing or unknown case values.",
     ),
     Guard(
         id="codec.wasm-runner",
@@ -14243,6 +15939,76 @@ GUARDS: tuple[Guard, ...] = (
               "have no probe.",
     ),
     Guard(
+        id="viewer-browser.auto",
+        file="examples/folder-viewer/tests/browser/auto.mjs",
+        gate="viewer-browser",
+        spec="F-227 design AC15, a series that stores no window is drawn at "
+             "one automatic window that the corner names as the reply does",
+        refuses="A series window reply that is not the nearest-rank window "
+                "of the sampled slices, a PT slice whose corner is not the "
+                "series window with Auto window, a disc-centre grey that is "
+                "not that window's on the first or last slice, more than one "
+                "series window request for a series or any for a scroll, a "
+                "drag, Reset or the row, a drag that keeps the words, a Reset "
+                "or Auto window row that does not restore them, a windowed CT "
+                "labelled Auto window, a refused series window not labelled "
+                "Auto window, this image, a linked Reset that leaves the "
+                "other cell anywhere but its own series window, and a series "
+                "that loses its window after a process restart, under a 4 MiB "
+                "cache that evicts the files posted at open or there answers "
+                "anything but one 410 then 200, or with a file "
+                "changed on disk outside or inside its sample, and a page that "
+                "sends more than 17 series window requests under a 1 MiB "
+                "cache or then shows anything but Auto window, this image, "
+                "and a run that leaves a viewer it started still running.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `seriesProblems`, `refusedProblems` and "
+               "`linkedProblems`, `restartProblems`, `evictedProblems`, "
+               "`changedProblems` and `starvedProblems`, which the script "
+               "prints and exits 1 on, and "
+               "the probe below drives the per-slice branch.",
+        probes=(
+            Probe(
+                "viewer-browser.auto-per-slice",
+                _auto_check_accepts_a_per_slice_window,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { PT_SLICES, ptSlope, expectedWindow, "
+                    "seriesProblems } from "
+                    "'./examples/folder-viewer/tests/browser/auto.mjs';\n"
+                    "const pt = expectedWindow(PT_SLICES, ptSlope, 1);\n"
+                    "const reply = { center: String(pt.center), width: "
+                    "String(pt.width), sampled: 16, skipped: 0 };\n"
+                    "const line = 'WW ' + reply.width + '  WL ' + "
+                    "reply.center + '  Auto window';\n"
+                    "const slices = Array.from({ length: PT_SLICES }, () => "
+                    "({ line, fault: '', grey: 0 }));\n"
+                    "slices[1].line = 'WW 9  WL 9  Auto window, this image';\n"
+                    "const blank = { line: '', fault: '', grey: 0 };\n"
+                    "const problems = seriesProblems({ slices, replies: "
+                    "[reply], afterScroll: 1, beforeOthers: 1, total: 2, "
+                    "dragged: blank, reset: blank, row: blank, rowLabel: '', "
+                    "mr: blank, ct: blank, back: blank });\n"
+                    "if (problems.some((text) => text.startsWith('PT slice 2 "
+                    "reads'))) process.exit(0);\n"
+                    "console.error('auto check accepted a per-slice window'); "
+                    "process.exit(1);",
+                ),
+                "auto check accepted a per-slice window",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the per-slice corner branch with slice 2 "
+              "showing its own window. The observation itself needs Chromium "
+              "and a release build of the viewer, which a disposable sandbox "
+              "does not have, so it is watched by the `viewer-browser` gate "
+              "and its CI job. The reply, grey, request count, drag, Reset, "
+              "row, MR, CT, shown-again, refused, linked, restart, eviction, "
+              "changed-file and stopping-rule branches have no probe.",
+    ),
+    Guard(
         id="bench.cold-start",
         file="tools/bench/src/runners/wasm_cold_start.mjs",
         gate="bench",
@@ -14271,6 +16037,168 @@ GUARDS: tuple[Guard, ...] = (
               "sandbox do not carry. The mark-count refusal does not share "
               "that limit and is watched in the floor by the phase-table unit "
               "test.",
+    ),
+    Guard(
+        id="bench.comparison",
+        file="tools/bench/src/comparison.mjs",
+        gate="bench",
+        spec="`.claude/plans/F-223-design.md`, the comparison mode's pure "
+             "functions, and HLD section 26",
+        refuses="A comparison.json that disagrees with the code's vocabulary, "
+                "a statistic summarised over a partial sample, a process "
+                "inventory that changed between snapshots, a workload "
+                "selected by path or by first found, a footprint text with "
+                "no parsable process, and a published record carrying a key "
+                "the closed schema does not define or a value of the wrong "
+                "type.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_test.mjs",),
+        limit="The runtime composition adds seven refusal sites: closed "
+              "condition insertion, duplicate-condition rejection, paired "
+              "cold/warm labels and the typed memory upper-bound child. "
+              "Permanent literal fixtures cover missing, unknown, duplicate "
+              "and wrong-sample cases, with unchanged statistic thresholds.",
+    ),
+    Guard(
+        id="bench.colour-frame",
+        file="tools/bench/src/runners/viewer_colour_frame.mjs",
+        gate="bench",
+        spec="F-239 AC31, release-only measured replies, ICC held identity and RSS samples",
+        refuses="A non-release viewer, no valid RSS reading, a passed, corrupt "
+                "or absent checked byte, an unsuccessful preview, wrong source, "
+                "channels, body length or dimensions/window headers, incomplete "
+                "sample validation, ICC application metadata, the requested child budget, charged TRC "
+                "heap or frame stability, and a file post that fails, is not held, "
+                "names no id or returns a non-object report.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",),
+        limit="All twenty-four refusal sites have permanent controls. The release "
+              "guard and empty-RSS tests cover build and measurement identity. "
+              "SampleWindow's corrupt, missing and passed-sample tests cover "
+              "stream offsets. Wrong channels, length and status each have "
+              "HTTP controls. validatePreview's source/header/check-count test "
+              "covers every numeric header both missing and wrong. holdFile's "
+              "held/id and HTTP/non-object tests cover all four post refusals. "
+              "ICC metadata, budget and census controls cover all eight added "
+              "sites, with real fake-child byte, budget and heap-growth failures. "
+              "The tests use tiny local HTTP fixtures and serialized fake RSS "
+              "readings, with no browser, viewer binary or timing claim.",
+    ),
+    Guard(
+        id="bench.colour-frame-fixture",
+        file="tools/bench/src/viewer_colour_frame_fixture.mjs",
+        gate="bench",
+        spec="F-239 AC31 synthetic inputs and PS3.5 7.1.2 even Value Length",
+        refuses="An unknown workload name, an odd long-form Value Length, "
+                "and a FileHandle write that makes no progress.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",),
+        limit="The fixture-controls test covers all three refusal sites with "
+              "a supported-workload/even-length/partial-write control. The "
+              "public builder always supplies even lengths and real file "
+              "handles, so the two otherwise unreachable defensive leaf "
+              "guards are exported only from a test-owned module copy. "
+              "Production source and its public exports are unchanged.",
+    ),
+    Guard(
+        id="bench.icc-frame-fixture",
+        file="tools/bench/src/viewer_icc_frame_fixture.mjs",
+        gate="bench",
+        spec="F-240 AC15, bound synthetic ICC profiles and sample validation",
+        refuses="Missing or mismatched asset provenance, a non-curv or non-gamma "
+                "source, insufficient aligned table space or missing TRCs, an "
+                "incomplete hand-vector or marker set, unknown workload, row, "
+                "window or reply variant, an 8-bit indexing mutant requested "
+                "for the 8-bit fixture, odd Value Length and a stalled write.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",
+                    "tools/bench/tests/viewer_icc_frame_guard_test.mjs"),
+        limit="All fifteen refusal sites have permanent controls. The ICC guard "
+              "suite makes tiny disposable copies of the owned assets and "
+              "changes each intrinsic profile, provenance or vector condition "
+              "while preserving unrelated bytes. A test-owned module copy "
+              "redirects only its asset root and exports the otherwise "
+              "unreachable longHeader and writeAll leaves. Production source "
+              "and exports are unchanged. Named main tests also reject wrong "
+              "profile bytes and wrong 16-bit indexing through the real runner "
+              "with applied metadata and correct transport headers. No browser, "
+              "viewer binary, full-size fixture or timing observation is claimed.",
+    ),
+    Guard(
+        id="bench.comparison-runtime",
+        file="tools/bench/src/comparison_run.mjs",
+        gate="bench",
+        spec="F-223 equipped comparison lifecycle, clocks and privacy",
+        refuses="Missing inputs or pinned tools, invalid observed clocks, "
+                "unobserved pixels or process inventories, different browser "
+                "identities, failed trials, source changes, private output, "
+                "invalid publication and incomplete resource cleanup.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_run_test.mjs",
+                    "tools/bench/tests/comparison_page_test.mjs"),
+        limit="Permanent Node controls exercise clock origins, per-side trial "
+              "counts, privacy, failed CT preconditions, signal cleanup, "
+              "retained environment and invalid-publication refusals, and "
+              "setup-only CPU coherence retries through actual orchestration. "
+              "The opted-in browser control exercises the real metadata "
+              "provider and retained refusal after both browsers close. "
+              "Installed Chromium and macOS footprint "
+              "paths are exercised by equipped functional receipts and remain "
+              "outside the floor. The tests do not claim every native I/O "
+              "refusal fired, and no equipped timing acceptance follows.",
+    ),
+    Guard(
+        id="oracle.comparison-voi-adapter",
+        file="tools/oracle/src/bench-series.mjs",
+        gate="bench",
+        spec="PS3.3 C.11.2 VOI selectors and pinned-loader5.8.2 interoperability",
+        refuses="An unknown string being normalized as a recognized VOI "
+                "function, or an existing array or absent value being altered.",
+        claims=("*",),
+        covered_by=("tools/oracle/tests/bench_series_test.mjs",),
+        limit="The recognition list is a normalization boundary, not a new "
+              "pixel predicate. Literal typed fixtures cover all three valid "
+              "selectors, existing arrays, unknown strings and absent values. "
+              "The separate browser control observes the real next-frame "
+              "commit. No package source or default budget is changed.",
+    ),
+    Guard(
+        id="oracle.comparison-page",
+        file="tools/oracle/page/bench.mjs",
+        gate="bench",
+        spec="F-223 comparator page, actual rendered commits and fixed errors",
+        refuses="An unready or superseded open, an absent displayed image, "
+                "invalid window parameters, absent renderer identity and an "
+                "unwritten or wrongly sized native canvas.",
+        claims=("*",),
+        covered_by=("tools/oracle/tests/bench_series_test.mjs",
+                    "tools/bench/tests/comparison_page_test.mjs (explicit browser opt-in)",),
+        limit="The permanent pure suite covers grouping, ordering and the "
+              "typed VOI adapter. The opted-in browser suite checks actual "
+              "committed indices, changed pixels and visible blank stages. "
+              "The page refusals need the equipped browser and synthetic "
+              "functional checks, not a floor-only Node test. Positive actual "
+              "canvas capture does not demonstrate every defensive refusal.",
+    ),
+    Guard(
+        id="bench.colour-comparison",
+        file="tools/bench/src/comparison_colour.mjs",
+        gate="bench",
+        spec="F239 AC32 and F240 AC16, explicit controlled supplemental mode",
+        refuses="An unknown case, malformed or changed dataset identity, "
+                "nonstandard measurement dimensions, a path or inventory "
+                "mismatch, an absent informative CT pixel precheck, an actual "
+                "cache budget differing from the declared case, invalid "
+                "trial or process receipts, or differing browser builds.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_colour_test.mjs",),
+        limit="Fake-tool tests drive calibration, alternating counts, window "
+              "parameters, actual budget, measurement validity, memory "
+              "receipt presence and cleanup. Tiny identity files challenge "
+              "manifest schema, sizes, paths, inventory and digests. They "
+              "are not DICOM or performance evidence. The real browser and "
+              "all-process collector belong to the separately reviewed "
+              "F223 runtime and run only on the equipped host.",
     ),
     Guard(
         id="panic-probe",
@@ -14499,6 +16427,13 @@ CONSTANTS: tuple[Constant, ...] = (
              "NATIVE_FEATURES",
              r"^NATIVE_FEATURES = (\{.*?^})",
              why="The native backends the host resolve must keep."),
+    Constant("decode-graph", "scripts/decode_graph_check.py",
+             "SHIPPED_NATIVE_FEATURES",
+             r"^SHIPPED_NATIVE_FEATURES = (NATIVE_FEATURES - \{\"metal\"\})$",
+             why="D-33. The native backends the shipped table must keep. "
+                 "Widening it back toward the full set would ship Metal "
+                 "again, and the shipped-native guard beside it would not "
+                 "notice a narrowing that the objc2 check still survives."),
     Constant("ci-floor", "scripts/ci_floor_check.py", "NOT_IN_FLOOR",
              r"^NOT_IN_FLOOR = (\{.*?\})$",
              why="Deviation D-04. A gate leaving the floor is a decision."),

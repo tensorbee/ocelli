@@ -126,10 +126,42 @@ class RitkVendor(unittest.TestCase):
     def test_a_non_manifest_source_change_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             vendor = self.copy_vendor(directory)
-            (vendor / "src" / "lib.rs").write_text("changed\n")
+            # An unpatched published source file. src/lib.rs is one of the
+            # recorded D-31 patches, so its bytes are checked against the
+            # patch record instead of the archive inventory.
+            (vendor / "src" / "jpeg_2000" / "codestream.rs").write_text("changed\n")
             problems = self.check(vendor)
-        self.assertTrue(any("published file changed: src/lib.rs" in problem
+        self.assertTrue(any("published file changed" in problem
                             for problem in problems), problems)
+
+    def test_a_planted_byte_in_each_patched_source_file_is_refused(self):
+        # A patched file is exempt from the archive inventory, so it is held
+        # to its own recorded bytes instead, and the refusal names it. F-239
+        # records the D-31 colour-decode files and F-243 the D-20 JPEG-LS
+        # files, and a planted byte in each is refused by name.
+        self.assertEqual(sorted(pin_and_size_check.RITK_PATCHED_HASHES), [
+            "src/jpeg_2000/image.rs",
+            "src/jpeg_2000/mod.rs",
+            "src/jpeg_2000/packet/reader.rs",
+            "src/jpeg_ls/bitstream.rs",
+            "src/jpeg_ls/context/mod.rs",
+            "src/jpeg_ls/decoder.rs",
+            "src/jpeg_ls/encoder.rs",
+            "src/jpeg_ls/scan.rs",
+            "src/jpeg_ls/tests/conformance.rs",
+            "src/lib.rs",
+        ])
+        for name in sorted(pin_and_size_check.RITK_PATCHED_HASHES):
+            with self.subTest(source=name), \
+                 tempfile.TemporaryDirectory() as directory:
+                vendor = self.copy_vendor(directory)
+                source = vendor / name
+                source.write_bytes(source.read_bytes() + b" ")
+                problems = self.check(vendor)
+            self.assertEqual(problems, [
+                f"ritk-codecs {name} has undeclared changes beyond its "
+                "recorded patch"
+            ])
 
     def test_coordinated_source_and_inventory_tamper_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -192,6 +224,99 @@ class RitkVendor(unittest.TestCase):
         self.assertTrue(any("Cargo.toml.orig" in problem and
                             "default-features" in problem
                             for problem in problems), problems)
+
+
+class DicomObjectVendor(unittest.TestCase):
+    """F-244 and D-18. The published package, one recorded patch, and no other change."""
+
+    def check(self, vendor: Path = pin_and_size_check.DICOM_OBJECT_VENDOR,
+              workspace: Path = ROOT / "Cargo.toml"):
+        return pin_and_size_check.check_dicom_object_vendor(
+            vendor=vendor, workspace=workspace)
+
+    def copy_vendor(self, directory: str) -> Path:
+        copied = Path(directory) / "dicom-object-0.10.0"
+        shutil.copytree(pin_and_size_check.DICOM_OBJECT_VENDOR, copied)
+        return copied
+
+    def test_the_exact_vendor_inventory_patch_and_provenance_are_accepted(self):
+        self.assertEqual(self.check(), [])
+
+    def test_a_planted_byte_in_any_vendored_file_is_refused_by_name(self):
+        names = sorted(
+            str(path.relative_to(pin_and_size_check.DICOM_OBJECT_VENDOR))
+            for path in pin_and_size_check.DICOM_OBJECT_VENDOR.rglob("*")
+            if path.is_file())
+        self.assertEqual(len(names), pin_and_size_check.DICOM_OBJECT_PUBLISHED_FILES
+                         + len(pin_and_size_check.DICOM_OBJECT_ADDITIONS))
+        for name in names:
+            with self.subTest(file=name), \
+                 tempfile.TemporaryDirectory() as directory:
+                vendor = self.copy_vendor(directory)
+                path = vendor / name
+                path.write_bytes(path.read_bytes() + b"\n")
+                problems = self.check(vendor)
+            self.assertTrue(any(name in problem or "inventory digest" in problem
+                                for problem in problems), problems)
+
+    def test_a_second_patch_beside_the_first_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vendor = self.copy_vendor(directory)
+            collector = vendor / "src" / "collector.rs"
+            text = collector.read_text()
+            self.assertIn("first = false;", text)
+            collector.write_text(text.replace(
+                "LazyDataToken::ItemStart { len: _ } => { /* no-op */ }",
+                "LazyDataToken::ItemStart { len: _ } => { first = true; }"))
+            problems = self.check(vendor)
+        self.assertTrue(any("src/collector.rs has undeclared changes" in problem
+                            for problem in problems), problems)
+
+    def test_removing_the_patch_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vendor = self.copy_vendor(directory)
+            collector = vendor / "src" / "collector.rs"
+            collector.write_text(collector.read_text().replace(
+                "                    first = false;\n                }\n"
+                "                LazyDataToken::ItemStart",
+                "                }\n                LazyDataToken::ItemStart"))
+            problems = self.check(vendor)
+        self.assertTrue(any("src/collector.rs has undeclared changes" in problem
+                            for problem in problems), problems)
+
+    def test_coordinated_source_and_inventory_tamper_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vendor = self.copy_vendor(directory)
+            source = vendor / "src" / "mem.rs"
+            source.write_bytes(source.read_bytes() + b"// coordinated tamper\n")
+            inventory = vendor / "PACKAGE-INVENTORY.sha256"
+            replacement = hashlib.sha256(source.read_bytes()).hexdigest()
+            inventory.write_text("\n".join(
+                f"{replacement}  ./src/mem.rs" if row.endswith("  ./src/mem.rs")
+                else row for row in inventory.read_text().splitlines()) + "\n")
+            problems = self.check(vendor)
+        self.assertTrue(any("inventory digest" in problem for problem in problems),
+                        problems)
+
+    def test_an_unrecorded_file_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vendor = self.copy_vendor(directory)
+            (vendor / "src" / "extra.rs").write_text("// extra\n")
+            problems = self.check(vendor)
+        self.assertTrue(any("carries an unrecorded file: src/extra.rs" in problem
+                            for problem in problems), problems)
+
+    def test_registry_wiring_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "Cargo.toml"
+            workspace.write_text((ROOT / "Cargo.toml").read_text().replace(
+                'dicom-object = { version = "=0.10.0", '
+                'path = "vendor/dicom-object-0.10.0", ',
+                'dicom-object = { version = "0.10", '))
+            problems = self.check(workspace=workspace)
+        self.assertIn(
+            "workspace dicom-object dependency is not the exact path and version",
+            problems)
 
 
 class DecodeExports(unittest.TestCase):

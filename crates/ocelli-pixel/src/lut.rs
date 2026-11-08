@@ -132,6 +132,14 @@ impl LutDescriptor {
         self.largest_representable_value
     }
 
+    /// Owned sample storage, excluding this descriptor itself.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.inputs
+            .capacity()
+            .saturating_add(self.values.capacity())
+            .saturating_mul(size_of::<f32>())
+    }
+
     /// Number of entries, which is the descriptor's first value resolved.
     ///
     /// Resolved, so a declared `0` has already become 65,536 here. Palette
@@ -524,6 +532,28 @@ impl PresentationTransform {
             PresentationLutEvidence::Absent => PresentationLutShape::Identity,
         };
         Ok(Self { shape, ymin, ymax })
+    }
+
+    /// INVERSE over `[ymin, ymax]`, with no photometric interpretation.
+    ///
+    /// Deviation D-29's colour invert is this stage's reflection applied to
+    /// each of R, G and B. [`Self::new`] refuses every colour space, which is
+    /// D-23's partition and stays true, so the colour window reaches the same
+    /// arithmetic through this crate-private door rather than by naming a
+    /// monochrome interpretation the frame does not have.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::InvalidDisplayRange`] for a non-finite or descending range.
+    pub(crate) fn inverse_over(ymin: f32, ymax: f32) -> Result<Self, PixelError> {
+        if !ymin.is_finite() || !ymax.is_finite() || ymin > ymax {
+            return Err(PixelError::InvalidDisplayRange);
+        }
+        Ok(Self {
+            shape: PresentationLutShape::Inverse,
+            ymin,
+            ymax,
+        })
     }
 
     /// Whether this stage inverts, which is HLD section 18.4's `invert : u32`.

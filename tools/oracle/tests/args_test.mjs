@@ -61,7 +61,7 @@ test("an unknown argument is refused rather than ignored", () => {
 // A flag whose value went missing would otherwise become `undefined` and
 // surface much later as an unrelated error.
 test("a flag with a missing or empty value is refused", () => {
-  for (const flag of ["--out", "--rows", "--inject"]) {
+  for (const flag of ["--out", "--rows", "--inject", "--colour-observation"]) {
     assert.throws(() => parseArgs([flag]), new RegExp(`${flag} needs a value`));
     assert.throws(() => parseArgs([flag, ""]), new RegExp(`${flag} needs a value`));
     assert.throws(
@@ -318,4 +318,12 @@ test("an unknown fault name is refused, and the message names the real ones", ()
     () => parseArgs(["--inject", "nonsense"]),
     new RegExp(Object.keys(FAULTS)[0]),
   );
+});
+
+
+test("colour observations cannot overwrite the default reference run", () => {
+  assert.throws(()=>parseArgs(["--colour-observation","rgb-window"]),/subset of the corpus/);
+  const options=parseArgs(["--colour-observation","rgb-window","--out",join(tmpdir(),"own-colour-observation")]);
+  assert.equal(options.colourObservation,"rgb-window");
+  assert.equal(options.rows,null);
 });

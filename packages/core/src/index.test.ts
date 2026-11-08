@@ -175,9 +175,15 @@ const PUBLISHED: readonly string[] = [
   // ./tid1500.js, F-097
   "readTid1500",
   "writeTid1500",
+  // ./tid1500.js, F-215
+  "readTid1500Groups",
+  "writeTid1500Groups",
   // ./tid2010.js, F-196
   "readKeyObject",
   "writeKeyObject",
+  // ./tid2010.js, F-215
+  "readKeyObjects",
+  "writeKeyObjects",
   // ./secondary-capture.js, F-196
   "readSecondaryCapture",
   "writeSecondaryCapture",
@@ -249,6 +255,11 @@ const PUBLISHED: readonly string[] = [
   "OCELLI_EVENTS",
   "UNMAPPED_EVENTS",
   "decodeNamedEvent",
+  // ./conformance.js, F-225
+  "readConformanceReport",
+  "CONFORMANCE_RULES",
+  "CONFORMANCE_SCOPE",
+  "SOP_CLASS_NOTES",
   // this file
   "VERSION",
   "coreAvailable",

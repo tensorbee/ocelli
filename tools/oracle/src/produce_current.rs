@@ -10,18 +10,19 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use dicom_core::PrimitiveValue;
 use ocelli_cache::DecodedFrame;
 use ocelli_codec::DecodePhotometricInterpretation;
 use ocelli_core::{Pt, Stored, World};
-use ocelli_dicom::{DispatchPath, Tag, parse_part10};
+use ocelli_dicom::{
+    DispatchPath, MetadataElement, MetadataSet, Tag, palette_color_lut, parse_part10,
+};
 use ocelli_pixel::{
-    ByteOrder, ColorTransform, DecodedLayout, DecodedPhotometric, ImageDimensions,
-    ImageOrientationPatient, ImagePlane, ImagePositionPatient, LutDescriptor, PaletteColorLut,
+    ByteOrder, ColorTransform, ColourWindow, DecodedLayout, DecodedPhotometric, DisplayScale,
+    ImageDimensions, ImageOrientationPatient, ImagePlane, ImagePositionPatient, PaletteColorLut,
     PhotometricInterpretation, PixelDataEncoding, PixelRepresentation, PlanarConfiguration,
     SampleLayout, StoredBits, StoredPixelDescription,
 };
-use ocelli_render::{CpuRaster, RasterColor, RasterGrid, RasterQuality};
+use ocelli_render::{CpuRaster, RasterColor, RasterGrid, RasterQuality, colour_bytes_into};
 use ocelli_viewport::view::{View, f32_from_f64};
 use ocelli_volume::{
     FrameOfReferenceUid, ObliquePlane, OrthoImage, PlaneSample, SliceEvidence, Volume,
@@ -403,7 +404,7 @@ fn render_colour(corpus: &Path, sidecar: &Sidecar) -> Result<Vec<u8>, &'static s
     let load = load_colour(corpus, sidecar)?;
     let description = colour_description(sidecar, load.decoded_rgb)?;
     let stored = unpack_described(&load.bytes, &description)?;
-    let transform = ColorTransform::resolve(
+    let mut transform = ColorTransform::resolve(
         description.layout,
         load.encoding,
         if load.decoded_rgb {
@@ -419,6 +420,14 @@ fn render_colour(corpus: &Path, sidecar: &Sidecar) -> Result<Vec<u8>, &'static s
         load.palette,
     )
     .map_err(|_| "colour-transform-refused")?;
+    if transform.palette().is_none() {
+        transform = transform
+            .with_sample_scale(
+                DisplayScale::from_bits(u16::from(description.bits.bits_stored()))
+                    .map_err(|_| "colour-scale-refused")?,
+            )
+            .map_err(|_| "colour-scale-refused")?;
+    }
     let (rows, columns) = sidecar.source_grid().map_err(|_| "pixel-layout-refused")?;
     raster_colour(sidecar, &transform, &stored, columns, rows)
 }
@@ -440,10 +449,34 @@ fn load_colour(corpus: &Path, sidecar: &Sidecar) -> Result<PixelLoad, &'static s
         | DispatchPath::ExplicitVrBigEndian
         | DispatchPath::DeflatedExplicitVrLittleEndian => PixelDataEncoding::Native,
     };
-    let palette = if decoded_rgb {
+    let palette = if decoded_rgb || photometric_name(sidecar)? != "PALETTE COLOR" {
         None
     } else {
-        palette_from(&parsed, sidecar)?
+        // Project only the shared provider's inputs. Projecting the complete
+        // object would copy native Pixel Data and refuse encapsulated fragments.
+        // LUT interpretation and all palette refusals belong to the provider.
+        let mut metadata = MetadataSet::new();
+        for tag in [
+            Tag(0x0028, 0x0004),
+            Tag(0x0028, 0x0103),
+            RED_DESCRIPTOR,
+            GREEN_DESCRIPTOR,
+            BLUE_DESCRIPTOR,
+            RED_DATA,
+            GREEN_DATA,
+            BLUE_DATA,
+            Tag(0x0028, 0x1221),
+            Tag(0x0028, 0x1222),
+            Tag(0x0028, 0x1223),
+        ] {
+            if let Ok(element) = parsed.object().element(tag) {
+                let value = element.value().primitive().ok_or("palette-refused")?;
+                metadata
+                    .insert(tag, MetadataElement::from_primitive(element.vr(), value))
+                    .map_err(|_| "palette-refused")?;
+            }
+        }
+        palette_color_lut(&metadata).map_err(|_| "palette-refused")?
     };
     Ok(PixelLoad {
         bytes,
@@ -572,128 +605,6 @@ fn colour_planar(
         None | Some(0) => Ok(Some(PlanarConfiguration::Interleaved)),
         Some(1) => Ok(Some(PlanarConfiguration::Planar)),
         Some(_) => Err("pixel-layout-refused"),
-    }
-}
-
-fn palette_from(
-    parsed: &ocelli_dicom::ParsedDicom,
-    sidecar: &Sidecar,
-) -> Result<Option<PaletteColorLut>, &'static str> {
-    if photometric_name(sidecar)? != "PALETTE COLOR" {
-        return Ok(None);
-    }
-    let red = read_lut(parsed, RED_DESCRIPTOR, RED_DATA)?;
-    let green = read_lut(parsed, GREEN_DESCRIPTOR, GREEN_DATA)?;
-    let blue = read_lut(parsed, BLUE_DESCRIPTOR, BLUE_DATA)?;
-    PaletteColorLut::new(red, green, blue)
-        .map(Some)
-        .map_err(|_| "palette-refused")
-}
-
-fn read_lut(
-    parsed: &ocelli_dicom::ParsedDicom,
-    descriptor: Tag,
-    data: Tag,
-) -> Result<LutDescriptor, &'static str> {
-    let descriptor = element_primitive(parsed, descriptor)?;
-    let [count, first, bits] = three_integers(descriptor)?;
-    let entry_count = entry_count(count)?;
-    let first_mapped = i32::try_from(first).map_err(|_| "palette-refused")?;
-    let bits = u8::try_from(bits).map_err(|_| "palette-refused")?;
-    let resolved = if entry_count == 0 {
-        65_536
-    } else {
-        usize::from(entry_count)
-    };
-    let values = lut_values(element_primitive(parsed, data)?, resolved)?;
-    LutDescriptor::new(entry_count, first_mapped, bits, values).map_err(|_| "palette-refused")
-}
-
-fn element_primitive(
-    parsed: &ocelli_dicom::ParsedDicom,
-    tag: Tag,
-) -> Result<&PrimitiveValue, &'static str> {
-    parsed
-        .object()
-        .element(tag)
-        .map_err(|_| "palette-refused")?
-        .value()
-        .primitive()
-        .ok_or("palette-refused")
-}
-
-fn three_integers(primitive: &PrimitiveValue) -> Result<[i64; 3], &'static str> {
-    let values = signed_integers(primitive)?;
-    if values.len() != 3 {
-        return Err("palette-refused");
-    }
-    Ok([
-        *values.first().ok_or("palette-refused")?,
-        *values.get(1).ok_or("palette-refused")?,
-        *values.get(2).ok_or("palette-refused")?,
-    ])
-}
-
-fn entry_count(value: i64) -> Result<u16, &'static str> {
-    if value == 0 {
-        return Ok(0);
-    }
-    u16::try_from(value).map_err(|_| "palette-refused")
-}
-
-fn lut_values(primitive: &PrimitiveValue, count: usize) -> Result<Vec<f32>, &'static str> {
-    let words = match primitive {
-        PrimitiveValue::U16(values) => values.iter().copied().map(u32::from).collect(),
-        PrimitiveValue::I16(values) => {
-            let mut words = Vec::new();
-            for value in values {
-                let word = u32::try_from(i32::from(*value)).map_err(|_| "palette-refused")?;
-                words.push(word);
-            }
-            words
-        }
-        PrimitiveValue::U8(bytes) => words_from_bytes(bytes, count)?,
-        _ => return Err("palette-refused"),
-    };
-    if words.len() != count {
-        return Err("palette-refused");
-    }
-    let mut values = Vec::new();
-    values
-        .try_reserve(words.len())
-        .map_err(|_| "palette-refused")?;
-    for word in words {
-        values.push(f32_from_f64(f64::from(word)));
-    }
-    Ok(values)
-}
-
-fn words_from_bytes(bytes: &[u8], count: usize) -> Result<Vec<u32>, &'static str> {
-    if bytes.len() == count {
-        return Ok(bytes.iter().copied().map(u32::from).collect());
-    }
-    let expected = count.checked_mul(2).ok_or("palette-refused")?;
-    if bytes.len() != expected {
-        return Err("palette-refused");
-    }
-    let mut words = Vec::new();
-    words.try_reserve(count).map_err(|_| "palette-refused")?;
-    for pair in bytes.chunks_exact(2) {
-        let low = u16::from(*pair.first().ok_or("palette-refused")?);
-        let high = u16::from(*pair.get(1).ok_or("palette-refused")?);
-        words.push(u32::from(low | (high << 8)));
-    }
-    Ok(words)
-}
-
-fn signed_integers(primitive: &PrimitiveValue) -> Result<Vec<i64>, &'static str> {
-    match primitive {
-        PrimitiveValue::U8(values) => Ok(values.iter().copied().map(i64::from).collect()),
-        PrimitiveValue::U16(values) => Ok(values.iter().copied().map(i64::from).collect()),
-        PrimitiveValue::I16(values) => Ok(values.iter().copied().map(i64::from).collect()),
-        PrimitiveValue::I32(values) => Ok(values.iter().copied().map(i64::from).collect()),
-        PrimitiveValue::U32(values) => Ok(values.iter().copied().map(i64::from).collect()),
-        _ => Err("palette-refused"),
     }
 }
 
@@ -2136,6 +2047,64 @@ fn canvas_scale(
     Ok((vertical, horizontal))
 }
 
+fn colour_window(sidecar: &Sidecar) -> Result<ColourWindow, &'static str> {
+    match sidecar.json.pointer("/voi/source").and_then(Value::as_str) {
+        Some("none") => Ok(ColourWindow::initial()),
+        Some("explicit-colour") => {
+            let center = sidecar
+                .json
+                .pointer("/voi/windowCenter")
+                .and_then(Value::as_f64)
+                .ok_or("colour-window-refused")?;
+            let width = sidecar
+                .json
+                .pointer("/voi/windowWidth")
+                .and_then(Value::as_f64)
+                .ok_or("colour-window-refused")?;
+            let invert = sidecar
+                .json
+                .pointer("/voi/invert")
+                .and_then(Value::as_bool)
+                .ok_or("colour-window-refused")?;
+            if sidecar
+                .json
+                .pointer("/voi/voiLutFunction")
+                .and_then(Value::as_str)
+                != Some("LINEAR")
+            {
+                return Err("colour-window-refused");
+            }
+            ColourWindow::new(f32_from_f64(center), f32_from_f64(width), invert)
+                .map_err(|_| "colour-window-refused")
+        }
+        _ => Err("colour-window-refused"),
+    }
+}
+
+fn colour_source_bytes(
+    sidecar: &Sidecar,
+    transform: &ColorTransform,
+    stored: &[Stored],
+    columns: u32,
+    rows: u32,
+) -> Result<Vec<u8>, &'static str> {
+    let pixels =
+        usize::try_from(u64::from(columns) * u64::from(rows)).map_err(|_| "canvas-extent")?;
+    let mut scratch = vec![ocelli_pixel::Rgb::BLACK; pixels];
+    let mut packed = vec![0; pixels.checked_mul(3).ok_or("canvas-extent")?];
+    let window = colour_window(sidecar)?;
+    colour_bytes_into(
+        RasterColor::supported(transform).map_err(|_| "raster-refused")?,
+        &window,
+        stored,
+        columns,
+        &mut scratch,
+        &mut packed,
+    )
+    .map_err(|_| "raster-refused")?;
+    Ok(packed)
+}
+
 fn raster_colour(
     sidecar: &Sidecar,
     transform: &ColorTransform,
@@ -2144,6 +2113,13 @@ fn raster_colour(
     rows: u32,
 ) -> Result<Vec<u8>, &'static str> {
     let view = stack_view(sidecar)?;
+    let packed = colour_source_bytes(sidecar, transform, stored, columns, rows)?;
+    // Source bytes are now display RGB. The existing native RGB raster
+    // projects them geometrically without a second inverse or window.
+    let displayed: Vec<Stored> = packed
+        .into_iter()
+        .map(|byte| Stored(f32::from(byte)))
+        .collect();
     let (width, height) = sidecar.frame_size().map_err(|_| "canvas-extent")?;
     let mut raster =
         CpuRaster::open(f64::from(width), f64::from(height), 1.0).map_err(|_| "canvas-extent")?;
@@ -2155,10 +2131,9 @@ fn raster_colour(
         .map_err(|_| "canvas-extent")?;
     let mut rgba = rgba_buffer(width, height)?;
     let drawn = raster
-        .raster_color_into(
+        .raster_rgb_into(
             &view,
-            RasterColor::supported(transform).map_err(|_| "raster-refused")?,
-            stored,
+            &displayed,
             RasterGrid {
                 source: [columns, rows],
                 target: [width, height],
@@ -2517,6 +2492,290 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{CurrentPaths, produce_current};
+
+    // Synthetic Part 10 fixtures, not corpus-derived. PS3.3 C.7.6.3.1.5:
+    // four entries starting at stored value 10, with clamping at both ends.
+    fn ac27_element(out: &mut Vec<u8>, tag: (u16, u16), vr: &[u8; 2], value: &[u8]) {
+        out.extend_from_slice(&tag.0.to_le_bytes());
+        out.extend_from_slice(&tag.1.to_le_bytes());
+        out.extend_from_slice(vr);
+        if matches!(vr, b"OB" | b"OW") {
+            out.extend_from_slice(&[0, 0]);
+            out.extend_from_slice(&u32::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        } else {
+            out.extend_from_slice(&u16::try_from(value.len()).unwrap_or(0).to_le_bytes());
+        }
+        out.extend_from_slice(value);
+    }
+
+    fn ac27_fixture(
+        root: &Path,
+        label: &str,
+        depth: u16,
+        photometric: &str,
+        segmented: bool,
+        red: [u16; 4],
+        omit_blue: bool,
+    ) -> Result<crate::sidecar::Sidecar, String> {
+        let mut meta = Vec::new();
+        ac27_element(&mut meta, (2, 1), b"OB", &[0, 1]);
+        for (tag, value) in [
+            ((2, 2), "1.2.840.10008.5.1.4.1.1.7"),
+            ((2, 3), "2.25.23927"),
+            ((2, 0x10), "1.2.840.10008.1.2.1"),
+            ((2, 0x12), "2.25.23928"),
+        ] {
+            let mut bytes = value.as_bytes().to_vec();
+            if bytes.len() % 2 == 1 {
+                bytes.push(0);
+            }
+            ac27_element(&mut meta, tag, b"UI", &bytes);
+        }
+        let mut file = vec![0; 128];
+        file.extend_from_slice(b"DICM");
+        let length = u32::try_from(meta.len()).map_err(|error| error.to_string())?;
+        ac27_element(&mut file, (2, 0), b"UL", &length.to_le_bytes());
+        file.extend_from_slice(&meta);
+        let mut pi = photometric.as_bytes().to_vec();
+        if pi.len() % 2 == 1 {
+            pi.push(b' ');
+        }
+        let samples = if photometric == "RGB" { 3u16 } else { 1u16 };
+        ac27_element(&mut file, (0x28, 2), b"US", &samples.to_le_bytes());
+        ac27_element(&mut file, (0x28, 4), b"CS", &pi);
+        for (element, value) in [
+            (0x10, 1u16),
+            (0x11, 4),
+            (0x100, 8),
+            (0x101, 8),
+            (0x102, 7),
+            (0x103, 0),
+        ] {
+            ac27_element(&mut file, (0x28, element), b"US", &value.to_le_bytes());
+        }
+        let tables = [(1, red), (2, [255, 200, 100, 0]), (3, [50, 60, 70, 80])];
+        for (channel, _) in tables {
+            if omit_blue && channel == 3 {
+                continue;
+            }
+            let descriptor: Vec<u8> = [4u16, 10, depth]
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect();
+            ac27_element(&mut file, (0x28, 0x1100 + channel), b"US", &descriptor);
+        }
+        for (channel, entries) in tables {
+            if omit_blue && channel == 3 {
+                continue;
+            }
+            let data: Vec<u8> = entries.into_iter().flat_map(u16::to_le_bytes).collect();
+            ac27_element(&mut file, (0x28, 0x1200 + channel), b"OW", &data);
+        }
+        if segmented {
+            ac27_element(&mut file, (0x28, 0x1221), b"OW", &[]);
+        }
+        let pixels = if samples == 1 {
+            vec![9, 11, 13, 99]
+        } else {
+            vec![0; 12]
+        };
+        ac27_element(&mut file, (0x7fe0, 0x10), b"OB", &pixels);
+        let path = root.join(format!("{label}.dcm"));
+        fs::write(&path, &file).map_err(|error| error.to_string())?;
+        Ok(crate::sidecar::Sidecar {
+            id: label.to_owned(),
+            kind: crate::sidecar::ViewKind::Stack,
+            json: serde_json::json!({
+                "row": {"path": format!("{label}.dcm"), "sha256": sha256_file(&path)},
+                "image": {"rows": 1, "columns": 4},
+                "attributes": {"bitsAllocated":8,"bitsStored":8,"highBit":7,
+                    "pixelRepresentation":0,"samplesPerPixel":samples,
+                    "photometricInterpretation":photometric}
+            }),
+        })
+    }
+
+    #[test]
+    fn ac27_producer_uses_shared_r1_palette_and_clamps() -> Result<(), String> {
+        let root = temp_dir("ac27-r1");
+        let result = (|| {
+            for (label, red, expected, fallback) in [
+                (
+                    "r1",
+                    [0, 100, 200, 255],
+                    [
+                        [0.0, 255.0, 50.0],
+                        [100.0, 200.0, 60.0],
+                        [255.0, 0.0, 80.0],
+                        [255.0, 0.0, 80.0],
+                    ],
+                    true,
+                ),
+                // Approved R1: when any word is wider than 8 bits, every
+                // channel is shifted by its declared depth minus eight.
+                (
+                    "wide",
+                    [0, 256, 65280, 65535],
+                    [
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [255.0, 0.0, 0.0],
+                        [255.0, 0.0, 0.0],
+                    ],
+                    false,
+                ),
+            ] {
+                let sidecar = ac27_fixture(&root, label, 16, "PALETTE COLOR", false, red, false)?;
+                let load = super::load_colour(&root, &sidecar).map_err(str::to_owned)?;
+                assert!(!load.decoded_rgb);
+                assert_eq!(
+                    load.palette
+                        .as_ref()
+                        .map(super::PaletteColorLut::entries_read_as_8_bit),
+                    Some(fallback)
+                );
+                let description =
+                    super::colour_description(&sidecar, false).map_err(str::to_owned)?;
+                let stored =
+                    super::unpack_described(&load.bytes, &description).map_err(str::to_owned)?;
+                let transform = super::ColorTransform::resolve(
+                    description.layout,
+                    load.encoding,
+                    super::DecodedPhotometric::Preserved,
+                    super::DecodedLayout::Preserved,
+                    load.palette,
+                )
+                .map_err(|error| format!("{error:?}"))?;
+                let mut actual = [ocelli_pixel::Rgb::BLACK; 4];
+                transform
+                    .map_into(&stored, &mut actual, 4)
+                    .map_err(|error| format!("{error:?}"))?;
+                let channels: Vec<[f32; 3]> =
+                    actual.iter().map(|rgb| [rgb.r, rgb.g, rgb.b]).collect();
+                assert_eq!(channels, expected);
+            }
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result
+    }
+
+    #[test]
+    fn ac27_producer_preserves_selection_and_shared_refusals() -> Result<(), String> {
+        let root = temp_dir("ac27-policy");
+        let result = (|| {
+            // A segmented element's presence is a refusal even at zero length.
+            // The deleted private reader ignored it and would draw this file.
+            for (label, depth, segmented, missing) in [
+                ("segmented", 16, true, false),
+                ("missing", 16, false, true),
+                ("depth", 7, false, false),
+            ] {
+                let sidecar = ac27_fixture(
+                    &root,
+                    label,
+                    depth,
+                    "PALETTE COLOR",
+                    segmented,
+                    [0, 100, 200, 255],
+                    missing,
+                )?;
+                assert!(matches!(
+                    super::load_colour(&root, &sidecar),
+                    Err("palette-refused")
+                ));
+            }
+            // Non-palette eligibility remains sidecar-driven. Malformed palette
+            // attributes must not make an ordinary RGB frame unreadable.
+            let sidecar = ac27_fixture(&root, "rgb", 7, "RGB", true, [0, 100, 200, 255], true)?;
+            let load = super::load_colour(&root, &sidecar).map_err(str::to_owned)?;
+            assert!(load.palette.is_none());
+            Ok(())
+        })();
+        let _ = fs::remove_dir_all(root);
+        result
+    }
+
+    #[test]
+    fn colour_observation_source_bytes_follow_the_approved_window() -> Result<(), String> {
+        use super::{
+            ColorTransform, DecodedLayout, DecodedPhotometric, PhotometricInterpretation,
+            PixelDataEncoding, PlanarConfiguration, SampleLayout,
+        };
+        let layout = SampleLayout::new(
+            3,
+            PhotometricInterpretation::Rgb,
+            Some(PlanarConfiguration::Interleaved),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        let transform = ColorTransform::resolve(
+            layout,
+            PixelDataEncoding::Native,
+            DecodedPhotometric::Preserved,
+            DecodedLayout::Preserved,
+            None,
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        // F-239 AC19 and AC21, PS3.3 C.11.2.1.2's existing LINEAR rule.
+        for (source, center, width, invert, stored, expected) in [
+            (
+                "none",
+                128.0,
+                256.0,
+                false,
+                [10.0, 200.0, 50.0],
+                [10, 200, 50],
+            ),
+            (
+                "explicit-colour",
+                128.0,
+                100.0,
+                false,
+                [100.0, 30.0, 200.0],
+                [57, 0, 255],
+            ),
+            (
+                "explicit-colour",
+                128.0,
+                100.0,
+                true,
+                [100.0, 30.0, 200.0],
+                [198, 255, 0],
+            ),
+            ("explicit-colour", 128.5, 511.0, false, [130.0; 3], [128; 3]),
+            ("explicit-colour", 128.5, 511.0, true, [130.0; 3], [126; 3]),
+        ] {
+            let sidecar = crate::sidecar::Sidecar {
+                id: "own-colour-observation".into(),
+                kind: crate::sidecar::ViewKind::Stack,
+                json: serde_json::json!({
+                    "voi": {"source":source,"windowCenter":center,"windowWidth":width,
+                        "invert":invert,"voiLutFunction":"LINEAR"} }),
+            };
+            let samples = stored.map(ocelli_core::Stored);
+            let actual = super::colour_source_bytes(&sidecar, &transform, &samples, 1, 1)
+                .map_err(str::to_owned)?;
+            assert_eq!(actual, expected);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn colour_observation_refuses_incomplete_or_non_linear_metadata() {
+        for voi in [
+            serde_json::json!({"source":"file"}),
+            serde_json::json!({"source":"explicit-colour","windowCenter":128,"windowWidth":0,"invert":false,"voiLutFunction":"LINEAR"}),
+            serde_json::json!({"source":"explicit-colour","windowCenter":128,"windowWidth":100,"voiLutFunction":"LINEAR"}),
+            serde_json::json!({"source":"explicit-colour","windowCenter":128,"windowWidth":100,"invert":false,"voiLutFunction":"SIGMOID"}),
+        ] {
+            let sidecar = crate::sidecar::Sidecar {
+                id: "own-colour-refusal".into(),
+                kind: crate::sidecar::ViewKind::Stack,
+                json: serde_json::json!({"voi":voi}),
+            };
+            assert_eq!(super::colour_window(&sidecar), Err("colour-window-refused"));
+        }
+    }
 
     fn workspace_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")

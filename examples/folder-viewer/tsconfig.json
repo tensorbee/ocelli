@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../node_modules/.cache/ocelli-tsc/folder-viewer",
+    "tsBuildInfoFile": "../../node_modules/.cache/ocelli-tsc/folder-viewer.tsbuildinfo",
+    "rootDir": "../.."
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.d.mts", "../../packages/core/src/dcmjs.d.ts"],
+  "references": [{ "path": "../../packages/core" }]
+}

@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231
-**Last updated:** 2026-11-07
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244
+**Last updated:** 2026-11-08
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -132,7 +132,7 @@ bin/ocelli.sh native           # the proof
 bin/ocelli.sh gate native      # the same thing, as a gate, in the floor
 ```
 
-Thirteen steps, each exit code read from the command itself.
+Fifteen steps, each exit code read from the command itself.
 
 | Step | What it proves |
 |------|----------------|
@@ -140,18 +140,20 @@ Thirteen steps, each exit code read from the command itself.
 | 2 | `cargo check --workspace --exclude ocelli-native --target wasm32-unknown-unknown`. Every crate the table marks `wasm: yes` builds for wasm32 |
 | 3 | `cargo check --workspace --all-targets`. Every crate the table marks `native: yes` builds natively, tests included |
 | 4 | `scripts/target_feature_check.py`. Resolved features agree across the two targets, or the difference is declared |
-| 5 | `scripts/tests/test_run_codec_wasm.mjs`. The Node executor refuses wrong arity and a module without the production entry point |
-| 6 | The production JPEG 2000 proof executes natively against exact and lossy synthetic truth |
-| 7 | The same source builds as plain and `+simd128` release wasm modules. F-233 passes the flag to every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` on the SIMD build only, so no build script or proc macro sees it and the plain cache is untouched |
-| 8 | `scripts/simd_variant_check.py` decodes the two linked `verify_jpeg2000.wasm` modules and refuses a SIMD module holding no SIMD instruction the plain module lacks, a plain module holding any, and a module that is missing or does not decode. The OK line names every SIMD opcode found, with its count |
-| 9 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
-| 10 | The production HTJ2K proof executes natively against the same truth |
-| 11 | The same source builds as plain and `+simd128` release wasm modules, the flag reaching every crate |
-| 12 | `scripts/simd_variant_check.py` again, over the two `verify_htj2k.wasm` modules |
-| 13 | Node executes both HTJ2K wasm modules |
+| 5 | `scripts/shipped_native_check.py`. The shipped native graph, `ocelli-native` with no default features, resolves no `objc2` package on either Apple target, over normal and build edges. F-238's AC1 |
+| 6 | `cargo build -p ocelli-native --bins --release --no-default-features`, then the desktop binary it produced is run once and the step refuses unless it prints a tier, `Tier Cpu, decided by NoAdapter` on an Apple host. The shipped configuration links and starts. F-238's AC4 |
+| 7 | `scripts/tests/test_run_codec_wasm.mjs`. The Node executor refuses wrong arity and a module without the production entry point |
+| 8 | The production JPEG 2000 proof executes natively against exact and lossy synthetic truth |
+| 9 | The same source builds as plain and `+simd128` release wasm modules. F-233 passes the flag to every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS` on the SIMD build only, so no build script or proc macro sees it and the plain cache is untouched |
+| 10 | `scripts/simd_variant_check.py` decodes the two linked `verify_jpeg2000.wasm` modules and refuses a SIMD module holding no SIMD instruction the plain module lacks, a plain module holding any, and a module that is missing or does not decode. The OK line names every SIMD opcode found, with its count |
+| 11 | Node executes both wasm modules. This is execution evidence, not merely a successful compile |
+| 12 | The production HTJ2K proof executes natively against the same truth |
+| 13 | The same source builds as plain and `+simd128` release wasm modules, the flag reaching every crate |
+| 14 | `scripts/simd_variant_check.py` again, over the two `verify_htj2k.wasm` modules |
+| 15 | Node executes both HTJ2K wasm modules |
 
-Steps 6 to 9 are F-026's codec-specific execution proof with F-233's module
-check, and steps 10 to 13 are the same shape for HTJ2K, the standing
+Steps 8 to 11 are F-026's codec-specific execution proof with F-233's module
+check, and steps 12 to 15 are the same shape for HTJ2K, the standing
 version of F-X013's claim (D-22). `gate wasm` builds
 the render module and the decode module of `ocelli-wasm`. It does not
 exercise `ocelli-codec`.
@@ -159,7 +161,7 @@ exercise `ocelli-codec`.
 ### What the SIMD variant contains, measured once
 
 F-233 measured the SIMD variant on 2026-11-07 with rustc 1.97.1. These are
-recorded facts, not standing checks, and steps 8 and 12 assert only the module
+recorded facts, not standing checks, and steps 10 and 14 assert only the module
 property in the table above. Scratch target directories throughout, built with
 the arm's own commands.
 
@@ -305,6 +307,81 @@ reported `ocelli-native` present under wasm32 and could not tell that from a
 real violation. The table is enforced where it can be: the `compile_error!` in
 `ocelli-native`, and steps 1 to 3 building each target for real.
 
+### The shipped native build, and deviation D-33
+
+The shipped native archive is `ocelli-native` built with
+`--no-default-features`. Its `metal` feature forwards to
+`ocelli-render/metal`, which forwards to `wgpu/metal`, so omitting the
+default omits Metal and, with it, every objc2 crate wgpu-hal's Metal backend
+reaches. The arrangement exists because the objc2 crates are generated from
+Apple SDK headers and the upstream `LICENSE.md` flags the redistribution
+question, which is the operator's answer of 2026-11-06 that F-238 implements.
+Development restores Metal in four places: the native dev-dependency tables
+of `ocelli-render` and `ocelli-compute`, `ocelli-native`'s own default
+feature, the hard `metal` in `ocelli-wasm`'s and `tools/oracle`'s native
+tables, and `ocelli-native`'s own dev-dependency on `wgpu`, which keeps
+`cargo test -p ocelli-native --no-default-features` on Metal. The forwarding
+feature is deliberately absent from
+`ocelli-render`'s default set, because a default is target-blind: a forwarded
+`wgpu/metal` on wasm32 would put the feature name on the wasm32 workspace
+resolve and fail the decode-graph guard. For the same reason
+`ocelli-native`'s dependency on `ocelli-render` is target-gated, so its
+default feature is inert on the wasm32 resolve of a crate that is never
+compiled there.
+
+**The two measurements F-238 took, and the outcome of each.** Both were taken
+on 2026-11-07 against wgpu 30.0.1's own manifests, on this tree, with
+`cargo tree -p ocelli-native --no-default-features -e normal`:
+
+1. **Per target, `metal` off and `gles` on.** Zero objc2 packages on
+   `aarch64-apple-darwin` and on `x86_64-apple-darwin`. The reason is in the
+   pinned manifests: `wgpu/gles` reaches `wgpu-core/gles`, which names only
+   `wgpu-core-deps-windows-linux-android` and `wgpu-core-deps-emscripten`,
+   and neither crate is a dependency on Apple. `wgpu-hal`'s own `gles`, the
+   feature that names `dep:objc2`, is reached on Apple only through `angle`,
+   which D-27 does not name. So `gles` stays in the shipped set, and native
+   GL does not link on macOS in any build, which is the "otherwise
+   unavailable" branch of the design's tier table. `gate gpu` and the
+   development tier are unchanged.
+2. **With no platform filter, `gles` off and `vulkan` on.** The objc2 family
+   is present. `wgpu-hal`'s `vulkan` names `dep:raw-window-metal`, and
+   `wgpu-core-deps-windows-linux-android/vulkan` activates `wgpu-hal/vulkan`
+   in the union resolve because that crate is present for some target in the
+   union even though it is absent from every Apple graph. A no-filter
+   resolve therefore cannot describe the shipped graph for any one target.
+
+The second measurement is why `THIRD_PARTY_LICENSES`' native closure is the
+union of per-target shipped graphs over the five desktop triples recorded in
+`scripts/licence_check.py`, and not one unfiltered resolve. The union over
+explicit triples names exactly what each shipped binary links: the Apple
+graphs hold no objc2 crate, and the Linux and Windows walks exclude
+Apple-gated dependencies by target filter. The regenerated file holds 105
+third-party crates where the development graph held 129, and the dropped
+carriers are the objc2 family with `block2`, `dispatch2`,
+`raw-window-metal` and `wgpu-core-deps-apple`, the Apple-gated carrier
+wgpu-core's `metal` feature activates, plus crates only the emscripten,
+android and union-only legs ever reached: `ndk-sys`, `jni-sys`,
+`jni-sys-macros`, `android_system_properties`,
+`wgpu-core-deps-emscripten`, `crunchy`, `redox_syscall`, `winapi-util`,
+`windows-sys`, `portable-atomic` and `portable-atomic-util`. None of them is
+compiled into anything that ships. The objc2 family's pinned texts and
+fallback reasons stay in `ci/notices/sources.toml`, where `verify-upstream`
+still checks them.
+
+**A build with no backend compiled cannot create an instance.** wgpu 30.0.1's
+`Instance::new` panics when the platform-filtered set of compiled backends is
+empty, and on macOS that set is empty for the shipped build: the `metal` cfg
+needs its feature, the `gles` cfg needs `angle` and the `vulkan` cfg needs
+`vulkan-portability`, and none is enabled. Measured before the guard existed,
+the shipped release binary panicked at startup. `probe.rs` now consults
+`wgpu::Instance::enabled_backend_features()`, the same set the panic's own
+check consults, before creating any instance, and resolves the honest
+unprobed answer there: no adapter seen, tier C, recorded as `NoAdapter`. The
+same guard sits in front of both GL entry points, where it changes nothing
+today: on macOS even a development build reaches GL only through `angle`, and
+on wasm32 the `webgl` feature always fires. AC4 is the shipped binary's own
+report, pasted in the F-238 record: `Tier Cpu, decided by NoAdapter`, exit 0.
+
 ### The DICOM parser is shared and uses `std`
 
 `ocelli-dicom` builds in step 2 for `wasm32-unknown-unknown` and in step 3 for
@@ -387,6 +464,32 @@ module measured 16,455 bytes the same day and is recorded in
 module does not link wgpu or Naga. Cold start was not remeasured, so this
 story does not close gate A4.
 
+F-239's library half measured both modules on 2026-11-07 with
+`bin/ocelli.sh gate wasm`, neither budget file edited and `--accept-size` not
+run. On its base, `sprint/s46` at 699a5148, the render module was 2,179,477
+bytes and the decode module 16,455. On its tip, 01bc1342, they were 2,179,981
+and 16,455. The render module grew by 504 bytes and stays inside the
+2,258,755 byte ceiling. Re-measured after review pass 1's fixes and ruling
+R1's fallback, the render module is again 2,179,981 bytes, not byte-identical
+to 01bc1342's but the same size, and the decode module is byte-identical to
+base. `cargo tree -p
+ocelli-wasm -e normal --target wasm32-unknown-unknown --prefix none` on the
+tip reaches `ocelli-pixel` and `ocelli-render` and no `ocelli-codec`,
+`ocelli-dicom`, `openjph-core` or `ritk-codecs`, and the same with
+`--no-default-features --features decode-worker` reaches `ocelli-pixel`,
+`ocelli-cache` and `ocelli-core` and no other workspace crate.
+
+The 504 bytes, attributed with `twiggy diff` over the two trees built
+unstripped for `wasm32-unknown-unknown` release: `ColourWindow::apply`,
+`ColourWindow::apply_in_place` and the window closure, which ship because
+`raster_rgb_into` reaches them through the shared `map_colour` step even at the
+skipped initial window, the sample scale inside `ColorTransform::pixel` and
+`stored_colour_is_a_display_byte`, the scaled `channel_entries` iterators that
+`RasterColor::supported` walks, and the split `rgb_bytes` and `map_colour`
+steps. F-239's plan expected fat LTO to remove `ColourWindow`, and it does not.
+`colour_bytes_into` itself is not in the module, because no `ocelli-wasm`
+export calls it.
+
 F-231 measured the render artefact at 2,202,907 bytes on 2026-11-07, against
 the ceiling of 2,258,755, which is the 2,151,196 byte baseline and its 5
 percent. The last recorded measurement was 2,179,402 bytes, at F-233's
@@ -402,6 +505,39 @@ budget file was edited.
 one.** A4 asks whether binary size and cold start land within budget and
 estimates 3 to 8 MB uncompressed with Naga dominating. 2,151,196 bytes is the
 F-050 measurement. Cold start was not remeasured. A4 stays open.
+
+F-240 measured both modules on 2026-11-07 with `bin/ocelli.sh gate wasm`,
+neither budget file edited and `--accept-size` not run. On its base,
+`sprint/s46` at 6163b82f, the render module was 2,179,981 bytes and the decode
+module 16,455. Re-measured after review pass 2, they are 2,182,144 and
+16,455: the render module grew by 2,163 bytes over base, about 0.099
+percent, and stays inside the 2,258,755 byte ceiling, and the decode module
+is again 16,455 bytes, the size it already had at base. `cargo tree -p
+ocelli-wasm -e normal --target wasm32-unknown-unknown --prefix none` on the
+tip reaches `ocelli-pixel`, where `icc.rs` lands, and `ocelli-render`, and
+neither `ocelli-dicom` nor the folder viewer, and the same with
+`--no-default-features --features decode-worker` reaches `ocelli-pixel`,
+`ocelli-cache` and `ocelli-core` and no other workspace crate.
+
+**The growth, attributed with `twiggy diff` over the two trees built
+unstripped for `wasm32-unknown-unknown` release, the base `6163b82f` and
+`d3fef64f` "F-240, matrix and tone-curve ICC profiles in ocelli-pixel,
+library part" as pass 1 reviewed it, when the growth measured 2,067
+bytes:** `ColorTransform::map_into`
+and the ICC branches of its `pixel` match, `icc::ToneCurve::evaluate`,
+`icc::IccTransform::apply`, `icc::channel_value`, `icc::encoding_range` and
+`icc::encode_srgb`, the glam `powf` and `floor` the encoding and the
+interpolation use, the drop glue the new `icc` field adds to
+`ColorTransform`'s own, and the `Vec<f32>` helpers the tables share with the
+palettes. The further 96 bytes the pass 1 remediation `72a75882` "F-240,
+review pass 1 remediation in the library" added, three linear
+clamps in `apply`, were not re-attributed: the base tree was not rebuilt for
+a second `twiggy diff`. **`IccProfile::parse` and every tag reader are
+absent from the module**, which is the fat LTO removal the plan expected: no
+`ocelli-wasm` export calls them. What ships is the transform's arithmetic,
+because `pixel`'s match on the attached `Option` is reachable through
+`map_into` whatever a caller attaches, and the field's lifecycle ships with
+`ColorTransform`'s own.
 
 ### The other half of A4, cold start
 
@@ -515,13 +651,14 @@ That switch is D-27. Cargo rejects a member `default-features = false` while
 the workspace entry leaves the defaults on. The version pin is still
 `=30.0.1`.
 
-Native `ocelli-render` names the pinned default backends plus `webgl`.
-wasm32 names `std`, `parking_lot`, `wgsl`, `webgpu` and `webgl`, and drops
-`dx12`, `metal`, `gles` and `vulkan`. `webgl` is not in wgpu 30.0.1's default
-set. `gles` is the native GL backend rather than the browser one. Without
-`webgl` the crate reaches WebGPU on wasm32 and cannot reach WebGL2 at all, so
-HLD section 7's tier B could never resolve in a browser, and a tier the
-resolver can never return is not a tier.
+Native `ocelli-render` names the pinned default backends plus `webgl`, with
+`metal` moved to a forwarding feature under D-33. wasm32 names `std`,
+`parking_lot`, `wgsl`, `webgpu` and `webgl`, and drops `dx12`, `metal`, `gles`
+and `vulkan`. `webgl` is not in wgpu 30.0.1's default set. `gles` is the
+native GL backend rather than the browser one. Without `webgl` the crate
+reaches WebGPU on wasm32 and cannot reach WebGL2 at all, so HLD section 7's
+tier B could never resolve in a browser, and a tier the resolver can never
+return is not a tier.
 
 **The two targets do not resolve the same wgpu features, and step 4 says so.**
 `ci/target-feature-baseline.json` names `wgpu`. The packages `webgl` pulls in
@@ -556,3 +693,199 @@ because the alternative is shipping an override nobody can observe. See
   `ci/target-feature-baseline.json` names `wgpu` under D-27. Removing that
   key makes the check fail. The names come from `[workspace.dependencies]`.
   The `checked_dependencies` array in that file is not read by the check.
+
+### S46 colour and ICC size evidence, 2026-11-08
+
+F-239 AC29 and F-240 AC13 use the release wasm gate, with the shipping
+`opt-level = "z"`, fat LTO, one codegen unit, abort and stripping profile.
+All three actual gates returned 0. Neither size budget changed.
+
+| Source | Render bytes | Gzip bytes, mtime 0 | Decode bytes | Decode gzip bytes |
+|---|---:|---:|---:|---:|
+| Original `5451cb7d`, tree `dd269895` | 2,179,477 | 860,541 | 16,455 | 7,663 |
+| Colour stack tree `12797792` | 2,203,411 | 871,401 | 16,455 | 7,663 |
+| Combined stack tree `3ecb1239` | 2,205,648 | 872,915 | 16,455 | 7,663 |
+
+The render increase is 23,934 bytes from original to colour stack and
+2,237 bytes from colour to combined stack, or 26,171 bytes overall. The
+corresponding gzip changes are 10,860, 1,514 and 12,374 bytes. Every decode
+binary has SHA256
+`07cf6db9ba05bd09fb94b9e8be04c390e0ae80a857c7c4ebc19c74fab1ee7aad`.
+
+These are stack comparisons. The first interval also adds F-231's frame
+cache and session roots. The second includes F-227 and F-238 changes as well
+as F-240. The full interval is not an isolated causal measurement of ICC.
+
+#### Symbols from executable-identical copies
+
+A private analysis build preserved the shipping dependency profile and
+changed stripping only on the final crate with
+`cargo rustc --release --lib -p ocelli-wasm --target wasm32-unknown-unknown -- -C strip=none`.
+Its input retained names and bindgen descriptors, removed DWARF, producers
+and target-feature custom sections, and omitted bindgen-sensitive function
+names. It used pinned bindgen 0.2.127 and Binaryen 125 with the shipping
+wasm-opt flags plus name retention. Every noncustom section of each result
+was byte-identical to its corresponding shipping binary before its symbols
+were used. Added analysis metadata is excluded from all size figures. The original shipping
+`producers` custom section is 62 encoded bytes, identical in all three builds,
+and remains included in the shipping totals.
+
+The colour helpers were not all removed as the plan predicted. The actual
+retaining paths are `publishCpuColor`, `publishCpuCanvas` and
+`publishCpuInteraction` through `Session::draw_committed_target`.
+`ColourWindow::apply`'s closure has 60 encoded code-body bytes and
+`DisplayScale::apply` has 41 in the colour stack. The same session draw
+function grows from 6,070 to 6,493 bytes. Its inlined changes are not charged
+again to standalone helpers.
+
+The seven F-231 cache exports account for 11,424 encoded code-body bytes
+in the colour and combined stacks, and are absent from the original:
+`commit_cached_frame` 4,467, `release_series` 2,166, `show_resident` 1,477,
+`set_frame_budget` 1,106, `content_id` 1,063, `frame_resident` 865 and
+`request_frame_pressure` 280. Their session and cache support also changes.
+This is why the original-to-colour total cannot be labelled colour cost.
+
+ICC parsing is absent from the named executable, and no wasm root calls
+`IccProfile::parse`. ICC application helpers remain through the existing
+CPU colour path: `icc::channel_value` 779, `IccTransform::apply` 395,
+`icc::encode_srgb` 48, `icc::powf` 12 and ICC drop glue 41 code-body bytes,
+1,275 in total. The combined session draw body grows by 648 bytes.
+Other changes include `probe::detect` growing by 60 and `caps::classify`
+by 14 with F-238's evidence field. The full symbol table records both gains
+and reductions. For example, a separate libm power function appears while
+a Naga evaluator closure shrinks, so adding every positive symbol alone
+would overstate the increase.
+
+#### Exact accounting
+
+The following deltas include each section's encoded header and payload.
+All other sections are unchanged.
+
+| Section | Original to colour | Colour to combined |
+|---|---:|---:|
+| Types | 27 | 8 |
+| Function declarations | 68 | 10 |
+| Exports | 136 | 0 |
+| Code | 22,141 | 2,219 |
+| Data | 1,562 | 0 |
+| Total | 23,934 | 2,237 |
+
+The 2,219 combined code bytes balance as 1,275 ICC helper bytes, 648 in
+session/cache names, 162 in colour/CPU names, 129 in other Ocelli names and
+5 in other named functions. These groups classify symbols by name, rather
+than claiming a separate causal cost for every story. Encoded body sizes
+exclude function declarations. Twiggy shallow figures include an additional
+one-byte declaration for the six ICC helper functions and therefore report
+1,281 for those same helpers.
+
+The exact approved graph commands were rerun for both render and decode on
+all three sources, each returning 0:
+
+```sh
+bin/ocelli.sh cargo tree -p ocelli-wasm -e normal --target wasm32-unknown-unknown --prefix none
+bin/ocelli.sh cargo tree -p ocelli-wasm -e normal --target wasm32-unknown-unknown --prefix none --no-default-features --features decode-worker
+```
+
+Both graphs reach `ocelli-pixel`. Neither reaches `ocelli-dicom`,
+`ocelli-codec`, the folder viewer, `openjph-core` or `ritk-codecs`. The
+unchanged decode binary and these graph results exclude a newly linked
+DICOM reader or compressed codec as the explanation for the render increase.
+
+The first private analysis attempts are retained as failed equivalence
+experiments. Keeping DWARF caused Binaryen to fail, while overriding the
+whole Cargo profile changed the dependency build and produced different
+code. Neither is a product failure or a shipping size measurement. Earlier
+reachability receipts without `--target` described native configuration and
+are superseded by the six wasm32 receipts above.
+
+Evidence: `wasm-size-attribution.json`, the three
+`wasm-named-v6-*/attribution.json` files, per-section SHA256 identities,
+complete twiggy listings and retaining paths under the local S46 evidence
+directory. The analysis changes no production source or shipping artifact.
+
+### F-244 isolated release size
+
+The empty-Basic-Offset-Table parser patch was also built in isolation. Its
+base commit is `3da2ea76e6884a796b7b5c531391747df3e77078`, tree
+`5efae178b7aa1a167e1fd251850fdf260ad818a6`. The reviewed tip tree is
+`3aec4ae5e5967354a2023ab2a27d088608b5bae7`. Both exact sources ran
+`bin/ocelli.sh gate wasm` with private targets and two build jobs.
+
+| Module | Base bytes | Tip bytes | Raw delta | Deterministic gzip bytes, both |
+| --- | ---: | ---: | ---: | ---: |
+| Render | 2202907 | 2202907 | 0 | 871190 |
+| Decode | 16455 | 16455 | 0 | 7663 |
+
+The module files are byte-identical across this pair. Render SHA-256 is
+`60cdc9766b4a1b257841fac7cb8415bdb7523e41f4c72dc33d28c3b25520da11`.
+Decode SHA-256 is
+`07cf6db9ba05bd09fb94b9e8be04c390e0ae80a857c7c4ebc19c74fab1ee7aad`.
+Both prescribed `cargo tree` commands specify `wasm32-unknown-unknown`, with
+and without `--no-default-features --features decode-worker`. All four
+commands pass and show no DICOM crate. Both size-budget files are unchanged,
+and no size acceptance command was run. This isolates F-244's size effect,
+without attributing unrelated viewer-stack growth to its parser patch.
+
+### Byte-store follow-up at source c1fe3037
+
+The render Wasm is now 2,205,614 bytes, gzip 872,881, SHA256
+`2065761b0acb229e3b3937f47c4c52b1c6ba9cf6264fa7877d906bcc50bbcfaf`.
+Both totals are 34 bytes smaller than the earlier 3ecb1239 build. The same
+named analysis method was repeated: default release dependency profiles,
+`strip=none` on the final crate only, the pinned bindgen and optimizer flags,
+and exact byte equality of every noncustom section against the shipping file.
+The earlier three-source proofs were preserved.
+
+Only the code section changes encoded size. Its 34-byte decrease is fully
+accounted for by these encoded function bodies, including their length fields:
+
+| Symbol | Before | After | Change |
+|---|---:|---:|---:|
+| `ocelli_render::cpu::byte_from_channel` | 182 | 124 | -58 |
+| `ocelli_wasm::session::Session::draw_committed_target` | 7141 | 7165 | +24 |
+| Total | | | -34 |
+
+The byte store replaces the bounded search with the pinned ties-to-even
+primitive, the shared exact-integer reader and checked byte conversion. Its
+payload decreases by 57 bytes and its length field by one. The session draw
+source is unchanged. Its 24-byte increase is compiled caller variation, not
+a separate source addition or performance conclusion. Other named-symbol size
+sums and the anonymous-function size sum have zero net change.
+
+The function count remains 5074, and the normalized named-symbol set and all
+47 export names and kinds are unchanged. Function reindexing changes some
+section contents, so unchanged section sizes are not cross-version byte
+identity. The header and original 62-byte producers section are unchanged.
+The 34-byte gzip decrease is a whole-module compression observation, not an
+additive gzip cost for either symbol.
+
+Retained ICC helper bodies still total 1275 bytes. No new named parser or
+codec symbol or export appears. Separate source reachability checks remain
+authoritative. Decode Wasm remains byte-identical at 16,455 bytes, gzip 7663,
+SHA256 `07cf6db9ba05bd09fb94b9e8be04c390e0ae80a857c7c4ebc19c74fab1ee7aad`.
+No budget, shipping profile or acceptance baseline changed.
+
+### Nearest-coefficient correction, source 421e7a2e
+
+Release source `421e7a2e48db0fa6cb8d6cac4f988d477f0c3812` was compared
+with the preserved `c1fe30375cdd8d8a0767ff7a941fe2fc4d80dd06` render artifact, SHA256 `2065761b0acb229e3b3937f47c4c52b1c6ba9cf6264fa7877d906bcc50bbcfaf`.
+Exactly three data-section bytes changed: binary32 constants `b81a6f2d` to
+`b81a6f2a`, `b90d1ed9` to `b90d1ef6`, and `b8c74e10` to `b8c74e0f`.
+The complete code section and every other section are byte-identical.
+These are stored constants, not instruction immediates.
+
+Render size remains 2,205,614 bytes. Gzip with mtime 0 rises from 872,881
+to 872,882 bytes. New render SHA256:
+`e9f275dc62700c3b325acbef2283d72c180535c7eec37af59b5936ac316327f2`.
+Decode remains byte-identical at 16,455 bytes, SHA256 `07cf6db9ba05bd09fb94b9e8be04c390e0ae80a857c7c4ebc19c74fab1ee7aad`.
+Both size budgets are unchanged.
+
+The release Wasm gate, explicit development boundary build, all 19 boundary
+tests and CPU-canvas browser checks returned 0. Development output supplies
+functional evidence, not release-size or performance evidence.
+
+The evidence retains an initial checker assumption about instruction opcodes
+and a sandbox-denied browser startup. Corrected data inspection and the
+unchanged browser command with required OS permission passed. Those are
+checker/setup diagnostics, not product failures. Source and physical index
+remained unchanged throughout.

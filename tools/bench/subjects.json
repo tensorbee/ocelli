@@ -212,13 +212,25 @@
       "id": "viewer.resident_memory",
       "title": "Peak resident set size across one pass of the viewer subjects",
       "definition_hld": "23-performance-rules.md section 26, 17-cache-and-allocation.md section 20",
-      "definition": "Starts when the viewer process starts and ends after viewer.open, viewer.first_image, viewer.scroll_rate and viewer.window_step have each run once in that process. The figure is the peak of ps -o rss= sampled every 20 ms, in bytes. Detail carries GET /held and the page heap.",
+      "definition": "Starts when the viewer process starts and ends after viewer.open, viewer.first_image, viewer.scroll_rate and viewer.window_step have each run once in that process and the pet_no_window folder has been opened three times, so a series window is asked for. The figure is the peak of ps -o rss= sampled every 20 ms, in bytes. Detail carries GET /held and the page heap.",
       "unit": "bytes",
       "dimensions": ["host", "profile"],
       "tiers": ["C"],
       "subject_story": "F-216",
       "feeds": ["F-216"],
       "note": "An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
+    },
+    {
+      "id": "viewer.colour_frame",
+      "title": "First colour /preview and nine held colour window steps on an 8192 by 8192 frame",
+      "definition_hld": "23-performance-rules.md section 26, 15-lut-chain.md section 18",
+      "definition": "Four synthetic native Part 10 files of 8192 by 8192 pixels, one 8-bit RGB and one 16-bit PALETTE COLOR as F-239 wrote them, plus an 8-bit RGB frame carrying the F-240 AC2 curv gamma 0x0233 profile and a 16-bit RGB frame carrying a derived two-entry curv table profile, each measured against its own release viewer process. POST /file ingests each file before timing. The first id-only POST /preview is timed through the last reply byte and must report X-Ocelli-Source decoded, including decode, colour resolve, profile apply, palette read, conversion and bytes. Nine later id-only numeric colour window steps must report Source held, at centres 100 to 108 and width 200. Every reply is consumed in full and representative bytes are validated: the F-239 pair against the synthetic pattern, the ICC pair against precomputed hand vectors at neutral marker pixels. The profiled /file reports must carry icc_applied true and icc_kind \"\". The 16-bit ICC workload alone starts its child with OCELLI_CACHE_MIB=512, recorded with the actual /held budget and asserted to agree, and every other workload inherits the default. For the two ICC workloads only, a held census after the first decode and after the window steps must hold at least the decoded samples plus the TRC tables, 3 * 2^bits * 4 bytes, and stay stable across the warm draws. This proves retained charged residency, not the absence of transient or same-sized rebuilding. Source and lifetime checks and actual timings supply separate work-once evidence. The two established untagged workloads retain their original HTTP protocol without those extra census reads. Peak ps -o rss= is sampled every 20 ms from the URL announcement to the last measured preview, with actual readings, count, failures and budget/held metadata retained. The recorded value is the untagged 8-bit RGB median of the nine window steps. No threshold.",
+      "unit": "ms",
+      "dimensions": ["host", "profile", "rows", "columns", "photometric", "icc"],
+      "tiers": ["C"],
+      "subject_story": "F-239",
+      "feeds": ["F-239"],
+      "note": "An increase is worse. The reply is three bytes per pixel with X-Ocelli-Channels: 3 and no alpha. Each workload runs in its own viewer process, because two held 8192 by 8192 frames would exceed one held budget together, and the 16-bit ICC workload cannot be held under the default 256 MiB at all: its 384 MiB encoded and 384 MiB decoded samples are why F-240's amendment authorises an explicit 512 MiB for that child alone, recorded as requested and actual. The row is registered before measurement: AC31 runs bin/ocelli.sh bench viewer.colour_frame on the F-216 host when the colour viewer lands, and no baseline is recorded until then. F-240 AC15's ICC cases run through this same subject and the recorded value stays the untagged 8-bit RGB median, so the F-239 figure is comparable across the extension."
     }
   ]
 }

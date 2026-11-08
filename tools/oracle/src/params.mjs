@@ -162,3 +162,26 @@ export function canvasScale({
   const horizontal = (columnPixelSpacing ?? 1) / millimetresPerCanvasPixel;
   return { vertical, horizontal };
 }
+
+/** Select one declared AC20 observation without changing the default run. */
+export function colourObservation(spec, id) {
+  const rows = spec.colourObservations ?? [];
+  const selected = rows.filter((row) => row.id === id);
+  if (selected.length !== 1) {
+    throw new Error(`unknown or duplicate colour observation ${JSON.stringify(id)}`);
+  }
+  const row = selected[0];
+  if (typeof row.path !== "string" || row.path === "" ||
+      !Number.isFinite(row.windowCenter) || !Number.isFinite(row.windowWidth) ||
+      row.windowWidth < 1 || typeof row.invert !== "boolean") {
+    throw new Error("invalid declared colour observation");
+  }
+  const configured = structuredClone(spec);
+  configured.rules.push({
+    match: { path: row.path },
+    apply: { voi: { source: "explicit-colour", windowCenter: row.windowCenter,
+      windowWidth: row.windowWidth, voiLutFunction: "LINEAR", invert: row.invert } },
+    why: row.why,
+  });
+  return { path: row.path, spec: configured };
+}

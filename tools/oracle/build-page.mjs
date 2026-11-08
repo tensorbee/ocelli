@@ -4,11 +4,12 @@
 // run, rather than served by a dev server, so the bytes the browser executes
 // are a file on disk that can be inspected after a divergence.
 //
-// Three kinds of thing have to end up in `page/dist`, beside the two HTML
+// Three kinds of thing have to end up in `page/dist`, beside the three HTML
 // documents that load them:
 //
 // 1. `app.js`, the bundled stack page entry, and `volume.js`, the bundled
-//    volume and MPR page entry (F-X007). Two pages and one bundler run: the
+//    volume and MPR page entry (F-X007), plus `bench.js` (F-223). Three pages
+//    and one bundler run: the
 //    volume pass loads its own page after the stack page has been closed, so
 //    the stack render is provably the same program it was.
 // 2. `decodeImageFrameWorker.js`, under exactly that name and beside `app.js`.
@@ -38,14 +39,14 @@ export const PAGE_SOURCE = oraclePath("page");
 export const PAGE_DIST = oraclePath("page", "dist");
 
 /**
- * The two pages, each of which loads the bundle of the same base name.
+ * The render and comparison pages, each loading its own bundle.
  *
  * `index.html` is the stack render and `volume.html` is the volume and MPR
  * render. They are separate documents in separate browser contexts rather than
  * two viewports in one, so a change to the volume pass cannot move a stack
  * frame. That is a property F-011 depends on while both stories are in flight.
  */
-export const PAGE_HTML = ["index.html", "volume.html"];
+export const PAGE_HTML = ["index.html", "volume.html", "bench.html"];
 
 /**
  * Codec wasm binaries, keyed by the file name `locateFile` is asked for.
@@ -168,17 +169,18 @@ const NODE_BUILTIN_STUB = {
   },
 };
 
-export async function buildPage() {
-  await rm(PAGE_DIST, { recursive: true, force: true });
-  await mkdir(join(PAGE_DIST, "wasm"), { recursive: true });
+export async function buildPage({ dist = PAGE_DIST } = {}) {
+  await rm(dist, { recursive: true, force: true });
+  await mkdir(join(dist, "wasm"), { recursive: true });
 
   await esbuild.build({
     entryPoints: [
       { in: join(PAGE_SOURCE, "app.mjs"), out: "app" },
       { in: join(PAGE_SOURCE, "volume.mjs"), out: "volume" },
+      { in: join(PAGE_SOURCE, "bench.mjs"), out: "bench" },
       { in: WORKER_ENTRY, out: "decodeImageFrameWorker" },
     ],
-    outdir: PAGE_DIST,
+    outdir: dist,
     bundle: true,
     format: "esm",
     platform: "browser",
@@ -193,14 +195,14 @@ export async function buildPage() {
   });
 
   for (const [name, specifier] of Object.entries(CODEC_WASM)) {
-    await copyFile(require.resolve(specifier), join(PAGE_DIST, "wasm", name));
+    await copyFile(require.resolve(specifier), join(dist, "wasm", name));
   }
 
   for (const name of PAGE_HTML) {
-    await copyFile(join(PAGE_SOURCE, name), join(PAGE_DIST, name));
+    await copyFile(join(PAGE_SOURCE, name), join(dist, name));
   }
 
-  return PAGE_DIST;
+  return dist;
 }
 
 if (isEntryPoint(import.meta.url)) {

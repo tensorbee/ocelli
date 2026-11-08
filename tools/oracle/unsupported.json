@@ -30,7 +30,7 @@
       "feature": "JPEG XL Lossless",
       "boundary": "decoded",
       "errorContains": "No decoder for transfer syntax 1.2.840.10008.1.2.4.110",
-      "rows": ["syntax/jpegxl_lossless.dcm", "syntax/jpegxl_lossless_rgb8.dcm"],
+      "rows": ["syntax/jpegxl_lossless.dcm", "syntax/jpegxl_lossless_rgb8.dcm", "syntax/jpegxl_lossless_empty_bot.dcm"],
       "why": "F-229 design plan fact 12: `tools/oracle/node_modules/@cornerstonejs/` holds `codec-charls`, `codec-libjpeg-turbo-8bit`, `codec-openjpeg` and `codec-openjph`, and `dicom-image-loader` 5.8.2's `dist` contains none of the three JPEG XL UIDs. 1.2.840.10008.1.2.4.110, JPEG XL Lossless, therefore matches no case of the transfer syntax switch in `dicom-image-loader/dist/esm/imageLoader/decodeImageFrame.js` and reaches its final rejection, `No decoder for transfer syntax ${transferSyntax}`, so the load rejects at decode and no reference frame exists. These rows are checked instead by the lossless round trip against the uncompressed synthetic source that the design plan's decision 14 names, which libjxl encoded and is independent of `jxl-oxide`."
     },
     {
@@ -46,7 +46,7 @@
       "feature": "JPEG XL",
       "boundary": "decoded",
       "errorContains": "No decoder for transfer syntax 1.2.840.10008.1.2.4.112",
-      "rows": ["syntax/jpegxl_lossy.dcm", "syntax/jpegxl_xyb_rgb8.dcm"],
+      "rows": ["syntax/jpegxl_lossy.dcm", "syntax/jpegxl_xyb_rgb8.dcm", "syntax/jpegxl_lossy_empty_bot.dcm"],
       "why": "F-229 design plan fact 12: `tools/oracle/node_modules/@cornerstonejs/` holds `codec-charls`, `codec-libjpeg-turbo-8bit`, `codec-openjpeg` and `codec-openjph`, and `dicom-image-loader` 5.8.2's `dist` contains none of the three JPEG XL UIDs. 1.2.840.10008.1.2.4.112, JPEG XL, therefore matches no case of the transfer syntax switch in `dicom-image-loader/dist/esm/imageLoader/decodeImageFrame.js` and reaches its final rejection, `No decoder for transfer syntax ${transferSyntax}`, so the load rejects at decode and no reference frame exists. This is a capability beyond the cornerstone3D 5.8.2 parity surface, so the rows have no reference to be measured against."
     }
   ]

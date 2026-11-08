@@ -34,6 +34,28 @@ const EXPLICIT_VR_BIG_ENDIAN: &str = "1.2.840.10008.1.2.2";
 const COMPLETION_SENTINEL: Tag = Tag(0x0002, 0x0000);
 const PIXEL_DATA: Tag = Tag(0x7fe0, 0x0010);
 
+/// The deepest sequence nesting [`parse_part10`] accepts.
+///
+/// PS3.5 section 7.5 sets no bound on nesting, so the limit is this build's
+/// decision. The value is a power of two at least four times the deepest
+/// nesting measured in the corpus, in the output or fixture of every
+/// repository DICOM writer, Rust and TypeScript, and in the PS3.16 template
+/// shapes those writers target, each wrapped once more by de-identification's
+/// Original Attributes Sequence. The deepest known shape is the PS3.16
+/// 2026d measurement chain: TID 1500 row 6's Imaging Measurements CONTAINER
+/// under the document root, row 9's TID 1501 Measurement Group, row 10's
+/// TID 300 measurement, TID 300 row 1b's TID 301 and TID 301 row 11's
+/// INFERRED FROM of TID 315, TID 315 row 1's CODE and row 2's HAS
+/// PROPERTIES NUM, that NUM's Type 2 Measured Value Sequence (0040,A300) of
+/// PS3.3 C.18, its Type 1 Measurement Units Code Sequence (0040,08EA), and
+/// the Type 3 Equivalent Code Sequence (0008,0121) of PS3.3 Table 8.8-1, at
+/// eight open Sequences, ten wrapped, so the value is the next power of two
+/// at or above four times ten and a parse at the limit succeeds on a 2 MiB
+/// debug test thread. The templates are Extensible, so this is the deepest
+/// shape known, not a ceiling. The preflight enforces it before dicom-rs
+/// recurses over the collected tree.
+pub const MAX_SEQUENCE_DEPTH: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DataSetContainer {
     Sequence {
@@ -184,6 +206,9 @@ pub enum ParseError {
     /// The data set is not valid under the declared transfer syntax.
     #[error("the DICOM data set is invalid under its declared transfer syntax")]
     InvalidDataSet,
+    /// The data set nests sequences deeper than this build reads.
+    #[error("the DICOM data set nests sequences deeper than this build reads")]
+    SequenceTooDeep,
 }
 
 /// Parse one DICOM Part 10 file from memory.
@@ -360,6 +385,7 @@ fn validate_data_set_structure(
     let mut reader = LazyDataSetReader::new_with_ts_options(source, transfer_syntax, options)
         .map_err(|error| map_data_set_error(&error))?;
     let mut containers = Vec::new();
+    let mut sequence_depth = 0_usize;
     let encapsulated = transfer_syntax.is_encapsulated_pixel_data();
 
     loop {
@@ -391,6 +417,13 @@ fn validate_data_set_structure(
                 {
                     return Err(ParseError::InvalidDataSet);
                 }
+                // PS3.5 section 7.5 places no bound on nesting, so the
+                // refusal is this build's constant, counted on open Sequence
+                // containers and returned before dicom-rs recurses.
+                if sequence_depth >= MAX_SEQUENCE_DEPTH {
+                    return Err(ParseError::SequenceTooDeep);
+                }
+                sequence_depth += 1;
                 containers.push(DataSetContainer::Sequence {
                     end: container_end(position_after, len.0)?,
                 });
@@ -411,6 +444,7 @@ fn validate_data_set_structure(
                 match containers.last().copied() {
                     Some(DataSetContainer::Sequence { end }) => {
                         validate_container_end(data_set, end, position_before, position_after)?;
+                        sequence_depth -= 1;
                     }
                     Some(DataSetContainer::PixelSequence {
                         has_basic_offset_table: true,

@@ -102,10 +102,19 @@ export function resolveVoi(policy, context) {
   if (source === "none") {
     return { source: "none" };
   }
+  if (source === "explicit-colour") {
+    if (!Number.isFinite(policy.windowCenter) || !Number.isFinite(policy.windowWidth) ||
+        policy.windowWidth < 1 || typeof policy.invert !== "boolean" ||
+        policy.voiLutFunction !== "LINEAR") {
+      throw new Error("invalid explicit colour window");
+    }
+    return { source, windowCenter: policy.windowCenter, windowWidth: policy.windowWidth,
+      voiLutFunction: "LINEAR", invert: policy.invert };
+  }
   if (source !== "file") {
     throw new Error(
       `render-params.json declares VOI source ${JSON.stringify(source)}. The ` +
-        `only sources are "file" and "none".`,
+        `only sources are "file", "none" and "explicit-colour".`,
     );
   }
 
@@ -164,4 +173,18 @@ export function resolveVoi(policy, context) {
     windowWidth: declaredWidth,
     voiLutFunction: declared.voiLutFunction || DEFAULT_FUNCTION,
   };
+}
+
+/** Reference viewport properties shared by the page and its regression controls.
+ * Preserve the loader's default photometric inversion unless an explicit
+ * colour observation asks to replace it. Window conversion stays in the
+ * pinned reference utility, with no arithmetic copied into this harness.
+ */
+export function viewportProperties(voi, interpolationType, toLowHighRange) {
+  const properties = { interpolationType, VOILUTFunction: voi.voiLutFunction ?? "LINEAR" };
+  if (voi.source === "explicit-colour") properties.invert = voi.invert;
+  if (voi.source !== "none") {
+    properties.voiRange = toLowHighRange(voi.windowWidth, voi.windowCenter, voi.voiLutFunction);
+  }
+  return properties;
 }

@@ -275,6 +275,27 @@ so the human-readable patch account cannot gain an undeclared claim.
 It also checks both licence hashes, the archive and VCS provenance, workspace
 exclusion, exact path and version, and both no-Rayon graphs.
 
+### dicom-object 0.10.0, vendored with one source patch
+
+F-244 vendors `dicom-object` 0.10.0 from the crates.io archive whose SHA-256
+is `0504b87987f0e7624cf7ee063fe7ffdb438c66c092620817fb9bb0f130686b85`, under
+deviation D-18. Its package metadata names VCS revision
+`39603cef65da125e47daffbb32310c6826f2f62b`, which the upstream repository does
+not serve. The upstream `v0.10.0` tag, commit
+`2941c54cae434dd63a54d0a5546b3b0df42e9f6c`, carries `collector.rs`, `lib.rs`
+and `mem.rs` byte-identical to the package, and its MIT and Apache-2.0 texts
+are retained with the package. Ocelli selects the MIT alternative for
+redistribution. The archive's exact 13-file inventory is retained and one
+Rust line is added, `first = false;` at the end of the `ItemEnd` arm of
+`build_encapsulated_data` in `src/collector.rs`, so a zero-length Basic Offset
+Table Item is read as the table per PS3.5 A.4. The pins gate checks every
+inventory hash, binds the inventory and `PATCH-PROVENANCE.md` to digests
+outside the vendor tree, binds the whole patched `collector.rs` to its own
+digest so a second change cannot accompany the first, and checks both licence
+hashes, the VCS revision, workspace exclusion, and the exact path and
+version. The package contains no `unsafe`, and
+`scripts/unsafe_allowlist_check.py` records 0 for it.
+
 ### openjph-core 0.1.0, and the missing packaged licence text
 
 F-X013 checked the crates.io package before reading its implementation. The
@@ -462,7 +483,7 @@ reaches `ocelli-codec`, which
 for `ocelli-native` both answer as a package that matches nothing in their
 graphs, and the reverse tree names `ocelli-folder-viewer` and
 `ocelli-oracle`. **The builds that compile the fifty are the SIMD legs of
-`bin/ocelli.sh native` steps 7 and 11**, where F-233 passes `+simd128` to
+`bin/ocelli.sh native` steps 9 and 13**, where F-233 passes `+simd128` to
 every crate through `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`. F-233
 measured each of the three crates' gated code compiled into its SIMD rlib and
 not into its plain one, and none of it linked into either verification module:

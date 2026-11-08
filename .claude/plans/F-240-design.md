@@ -237,3 +237,93 @@ Also given the same day, relayed by the lead: the features must not grow the was
 ## Open questions
 
 None. Questions 1 to 5 are answered above.
+
+### Lead rulings after review pass 1
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-240-working-pass-1.md`, which checked the transcriptions against ICC.1:2022-05 and the ICC's sRGB note and compared Ocelli with Little CMS 2.18.
+
+- **D1, out-of-gamut colour is clipped** to 0..1 in linear sRGB before encoding, per the ICC sRGB note A.7 and ICC.1 F.8 to F.16, so F-239's colour window never sees a value outside 0..255. A fixture with Adobe RGB 1998 green asserts the clipped bytes.
+- **D2, the PCS-to-sRGB matrix comes from one consistent source.** Use the inverse of the D50 matrix published in the ICC's sRGB note, computed in the test from the printed values, so D50 maps to sRGB white within the matrix's own precision, and the comment's numbers are reproducible from what it cites.
+- **D3, a GPU route given a profiled frame reports unavailable,** in code, with a render test, and `ColourLut::icc`'s documentation says what is now true. A profiled palette is not baked as device RGB on any route that cannot apply the profile.
+- **D4, the LLDs describe this branch only.** Sentences about callers the viewer part will add are removed or marked as the viewer part's.
+- **D5 and D6, expected values come from the formula.** The palette fixture's 187.5147 and 136.9611 are computed by hand and asserted within 1e-3, and AC5's wrong-answer bytes are what the transposed matrix actually gives.
+- **D7 and D8, every guard and route has a test:** a negative s15Fixed16 parameter, the 10.6 and 10.18 range clip, the `XYZ ` type check, the table depth check, and each of the three YBR routes with ICC attached (the profile's input is RGB after the YBR conversion, PS3.3 C.11.15.1.1).
+- **S1, a profile is classified before its size is checked,** so a large lookup-table profile is named as lookup-table, and `D2B3` joins the list (N1).
+
+### Lead rulings after pass 2
+
+- **D1.** `build-targets.md` records the measured tip, 2,182,144 bytes, with its delta and percentage, and attributes the size it reports.
+- **D2.** The ruled 1e-3 stands. The palette fixture asserts the hand value computed from the profile's own s15Fixed16 colourant words, ICC.1 Table 4, `(254.9997, 187.5169, 136.9621)`, within 1e-3, with that derivation in its comment. It must go red under pass 2's mutant M23.
+- **D3.** The three places attribute the PCS-to-device constant to ICC.1 Annex F.3 and say the note's printed matrix is the device-to-PCS one.
+- **D4.** Each residue figure is one stated quantity with its definition and measured value, or it goes.
+- **D5 and D6.** The "one code apart" line is reworded. No added comment line carries a prose semicolon, whatever `prose_check.py` scans.
+- **Nitpicks taken.** N1 derives the two fixture figures. N2 scopes or corrects the 0.0027 figure. N4 removes the viewer-part claim from `color.rs:660`. N3, N5 and N6 stay carried.
+- **AC12.** The transicc comparison is run again against the new matrix and recorded, running Little CMS as a tool only.
+
+### Lead rulings after pass 3
+
+- **D1.** The AC12 record states the Adobe red row as a measured D14 divergence from Little CMS 2.18. It names the cause, the sRGB note's printed matrix against Little CMS's built-in sRGB, and gives the colorimetric answer, green 0, because the two spaces share the red chromaticity. Both values are in one unit, and the same row's blue difference of 0.102 is given too. It says no stored byte differs at the identity window, and gives one measured non-identity colour window that shows it on tier C. "Nothing needed investigation" becomes "below AC12's one-code threshold at the identity window".
+- **The matrix choice stays for this story.** The plan rules the note's printed matrix, and pass 3 measured Ocelli further from the colorimetric answer than Little CMS on this row, by about 1.0e-4 linear. A backlog story is filed at sprint close to measure an inverse derived from the sRGB primaries with Bradford adaptation against Little CMS across every AC12 row, and to adopt it only if it is closer on every row.
+- **D2.** The palette comment prints the linear values as reproduced, and says which gap its figure measures.
+- **N1 taken.** `build-targets.md` names the commit by its title. N3, N5 and N6 stay carried.
+
+
+### Viewer implementation and fixture facts, 2026-11-08
+
+The held colour recipe parses the profile before buffer admission, attaches the
+accepted transform once and charges its retained palette and ICC table storage.
+Scan JSON classifies the same bytes with icc_applied and a closed icc_kind. It
+does not build device-code tables. Missing or unsupported profiles retain the
+F-239 device route. No profile is parsed during a held window redraw.
+
+The corpus adds sc_rgb_icc_gamma1, sc_rgb_icc_gamma22, sc_rgb_icc_srgb_para,
+sc_rgb_icc_swap and sc_rgb_icc_lut. All five profiles are generated here from
+ICC.1:2022 header, tag and type definitions, with the common description,
+copyright and media-white tags. Little CMS 2.18 accepts and converts all five
+with transicc as an external host tool, including the actual lookup profile.
+No Little CMS source or third-party profile was read or copied.
+
+ICC.1:2022 7.2.4 encodes version 4.4.0.0 as 04400000, confirmed directly in the
+published document. Two inherited Rust fixture builders used 04440000, which
+names bug-fix version 4. The builders now use 04400000. No parser arithmetic,
+expected colour value or tolerance changes. The corpus fixture tests pin the
+standard version and the independent fixed-point words.
+
+### Lead clarification, shared regression and stacked size evidence, 2026-11-08
+
+AC14 uses the same corrected helper on base and tip under F-239's shared
+regression instrument clarification. The untagged colour cases keep their
+original registered protocol. Actual measurements remain open until the
+final composed instrument and release products are run on the named host.
+AC13 records the original, colour and combined stacks separately, names
+other stories in each interval and attributes retained code by executable
+identity. Combined growth is never labelled an isolated ICC cost.
+
+### Implementation amendment, AC15 held budget, 2026-11-08
+
+The new 8192 by 8192 native RGB16 ICC workload has 384 MiB of encoded
+samples and 384 MiB of decoded samples. It cannot be held under the 256 MiB
+default. The lead authorizes an explicit 512 MiB held budget for this new
+workload only. Its benchmark detail records both requested and actual budget,
+with a small fake-child control for their agreement. The two existing F239
+workloads retain their default budget and input bytes. The RGB8 ICC workload
+also retains the default budget. If 512 MiB does not admit the intended held
+frame, investigate and report the admission cause rather than increasing it
+again. This is a bounded benchmark setup exception, with no threshold or
+allocator-policy change.
+
+### Supplementary normalized diagnostic scope, 2026-11-08
+
+Root authorized a separate control based on the untouched pre-ICC tree
+12797792, applying only the independently reviewed palette-validation hoist
+and exact final-byte store. It adds no ICC implementation. The resulting
+c4d6e4b3 source passed focused tests and a release build, then the unchanged
+two-case native instrument completed with permitted process observation.
+The initial sandbox RSS refusal is retained separately. The current evidence
+and exact identities are in docs/lld/benchmarks.md.
+
+This adds diagnostic evidence and does not replace the literal historical
+comparison, amend AC14, change a tolerance or call improvements within noise.
+It removes two known differences but does not isolate every remaining product
+change as ICC cost. Any substitution for AC14 remains a separate explicit
+plan decision.

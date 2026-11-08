@@ -399,6 +399,10 @@
   #fps { width: 72px; accent-color: #d0d0d0; }
   #counter, .scrubber label, #fps-value { color: var(--muted); font-variant-numeric: tabular-nums; }
   #counter { min-width: 64px; text-align: right; }
+  #fps:disabled { opacity: 0.45; }
+  #use-slider { font-size: 12px; padding: 2px 8px; white-space: nowrap; }
+  #use-slider.active { background: var(--on); color: var(--on-ink); border-color: var(--on); }
+  #cine-line { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
   #sentence {
     grid-column: 2;
     grid-row: 5;
@@ -466,6 +470,8 @@
   #window-list .window-numbers { color: var(--muted); font-size: 12px; white-space: nowrap; }
   #window-list button.active .window-numbers { color: var(--on-ink); }
   .note-text { color: var(--muted); margin: 6px 0; font-size: 12px; }
+  .profile-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); font-size: 12px; }
+  #mouse-profile { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--raised); border: 1px solid var(--edge); border-radius: 6px; padding: 3px 6px; }
   .swatch {
     width: 22px;
     height: 22px;
@@ -567,6 +573,26 @@
     padding: 6px 8px;
   }
   .table-wrap { overflow: auto; }
+  #headers { position: relative; }
+  .badge {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    border-radius: 8px;
+    background: #ffb02e;
+    color: #141414;
+    font: 600 10px/15px ui-sans-serif, system-ui, sans-serif;
+    text-align: center;
+    pointer-events: none;
+  }
+  #checks { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  #checks h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+  #checks p { margin: 2px 0; color: var(--muted); font-size: 12px; }
+  #checks p:empty { display: none; }
+  .checks-wrap { overflow: auto; max-height: 30vh; }
   table { width: 100%; border-collapse: collapse; }
   th {
     position: sticky;
@@ -655,10 +681,11 @@
   #tip span:empty { display: none; }
   @media (prefers-reduced-motion: reduce) { body { transition: none; } }
   @media (max-width: 1439px) { :root { --left: 196px; --right: 236px; } }
+.symbol-definitions { position: absolute; }
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<svg width="0" height="0" class="symbol-definitions" aria-hidden="true">
   <symbol id="i-scroll" viewBox="0 0 24 24"><path d="M12 3l9 4.5-9 4.5-9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5L12 21l9-4.5"/></symbol>
   <symbol id="i-pan" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></symbol>
   <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21M10.5 7.5v6M7.5 10.5h6"/></symbol>
@@ -717,7 +744,7 @@
   <p id="series-empty">No study is open.</p>
 </aside>
 <div class="toolbar" role="toolbar" aria-label="Image tools">
-  <button type="button" class="icon active" id="tool-scroll" aria-label="Scroll" data-key="S"><svg class="i"><use href="#i-scroll"/></svg><span class="sr">Scroll</span></button>
+  <button type="button" class="icon" id="tool-scroll" aria-label="Scroll" data-key="S"><svg class="i"><use href="#i-scroll"/></svg><span class="sr">Scroll</span></button>
   <button type="button" class="icon" id="tool-pan" aria-label="Pan" data-key="P"><svg class="i"><use href="#i-pan"/></svg><span class="sr">Pan</span></button>
   <button type="button" class="icon" id="tool-zoom" aria-label="Zoom" data-key="Z"><svg class="i"><use href="#i-zoom"/></svg><span class="sr">Zoom</span></button>
   <button type="button" class="icon" id="tool-wl" aria-label="Window level" data-key="W"><svg class="i"><use href="#i-wl"/></svg><span class="sr">W/L</span></button>
@@ -750,7 +777,7 @@
   <button type="button" class="icon active" id="toggle-reference" aria-label="Reference lines" aria-pressed="true"><svg class="i"><use href="#i-reference"/></svg><span class="sr">Reference lines</span></button>
   <span class="spacer"></span>
   <button type="button" class="icon" id="key-image" aria-label="Key image" data-key="K"><svg class="i"><use href="#i-key"/></svg><span class="sr">Key image</span></button>
-  <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span></button>
+  <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span><span class="badge" id="headers-badge" hidden></span></button>
   <span class="sep"></span>
   <button type="button" class="icon" id="fit" aria-label="Fit" data-key="0"><svg class="i"><use href="#i-fit"/></svg><span class="sr">Fit</span></button>
   <button type="button" class="icon" id="reset" aria-label="Reset" data-key="Shift R"><svg class="i"><use href="#i-reset"/></svg><span class="sr">Reset</span></button>
@@ -820,6 +847,8 @@
   <button type="button" class="icon" id="play" aria-label="Play" data-key="Space"><svg class="i"><use href="#i-play"/></svg></button>
   <label>FPS <input id="fps" type="range" min="1" max="30" value="10"></label>
   <span id="fps-value">10</span>
+  <button type="button" id="use-slider" aria-pressed="false" hidden>Use the slider</button>
+  <span id="cine-line"></span>
   <input id="scrub" type="range" min="0" max="0" value="0" disabled aria-label="Image in series">
   <span id="counter">0 / 0</span>
 </div>
@@ -832,7 +861,12 @@
   </section>
   <section>
     <h2>MARKS</h2>
-    <p class="note-text">These are drawings in this browser. They are not DICOM SR. They are not written to the file. They are gone when you reload.</p>
+    <p class="note-text">Marks stay in this browser until you save them. Save marks downloads a DICOM SR TID 1500 file, and a Key Object Selection file for key images. Nothing is written into the opened folder. Put the downloaded files in the folder and open it again to see the marks. Colour and text size are not saved.</p>
+    <div class="row" id="marks-files">
+      <button type="button" id="save-marks">Save marks</button>
+      <button type="button" id="load-marks">Load marks</button>
+    </div>
+    <input id="marks-file" type="file" accept=".dcm,application/dicom" multiple hidden>
     <div class="row" id="swatches"></div>
     <div class="row segment" id="size-row" hidden>
       <button type="button" data-size="12">S</button>
@@ -851,14 +885,21 @@
   </section>
   <section>
     <h2>MOUSE</h2>
+    <label class="profile-row">Profile
+      <select id="mouse-profile" aria-label="Mouse profile">
+        <option value="ocelli">Ocelli</option>
+        <option value="scroll-left">Scroll on left</option>
+        <option value="window-left">Window on left</option>
+      </select>
+    </label>
+    <div class="keys" id="mouse-keys"></div>
     <div class="keys">
-      <kbd>Left</kbd><span>The chosen tool</span>
-      <kbd>Right</kbd><span>Pan</span>
-      <kbd>Middle</kbd><span>Zoom at the press point</span>
       <kbd>Wheel</kbd><span>Next or previous image</span>
       <kbd>Ctrl wheel</kbd><span>Zoom at the pointer</span>
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
+    <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
+    <p class="note-text">This browser keeps the profile and the play rate for this address, so they return after a restart only on the same OCELLI_PORT.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -883,6 +924,18 @@
       <h2>Headers</h2>
       <button type="button" id="close-headers">Close</button>
     </header>
+    <section id="checks" aria-labelledby="checks-title">
+      <h3 id="checks-title">Checks</h3>
+      <p id="checks-scope"></p>
+      <p id="checks-modules"></p>
+      <p id="checks-message"></p>
+      <div class="checks-wrap" id="checks-wrap" hidden>
+        <table>
+          <thead><tr><th>Tag</th><th>Name</th><th>Rule</th><th>Section</th><th>Detail</th></tr></thead>
+          <tbody id="checks-rows"></tbody>
+        </table>
+      </div>
+    </section>
     <input id="filter" type="search" placeholder="Filter tag, name, or value">
     <div class="table-wrap">
       <table>
@@ -923,26 +976,40 @@ const OUTLINE_CAP = 4000;
 const OUTLINE_LONG = "This outline has more than 4000 points, so it is not measured.";
 const NAV = ["scroll", "pan", "zoom", "wl", "wlregion"];
 const TOOLS = NAV.concat(DRAW);
+// Mouse profiles. Left is always the chosen tool, so a drawing tool stays
+// reachable from the toolbar in every profile, and a profile sets the tool
+// left starts on and what middle and right drag. Ctrl with left pans in every
+// profile, for a trackpad with one button. The wheel is not part of one.
+const PROFILES = Object.freeze({
+  "ocelli": Object.freeze({ name: "Ocelli", start: "scroll", middle: "zoom", right: "pan" }),
+  "scroll-left": Object.freeze({ name: "Scroll on left", start: "scroll", middle: "wl", right: "zoom" }),
+  "window-left": Object.freeze({ name: "Window on left", start: "wl", middle: "pan", right: "zoom" })
+});
+const PROFILE_IDS = Object.keys(PROFILES);
+const MOUSE_TEXT = { scroll: "Next or previous image", pan: "Pan", zoom: "Zoom at the press point", wl: "Window" };
+const MOUSE_KEY = "ocelli.mouse";
+const FPS_KEY = "ocelli.fps";
+const FPS_VALUES = Array.from({ length: 30 }, (_, at) => String(at + 1));
 const SENTENCE = {
   "tool-scroll": "Drag up or down to move through the images.",
   "tool-pan": "Drag to move the image.",
   "tool-zoom": "Drag up or down to zoom. A pinch zooms at the pointer.",
   "tool-wl": "Drag to change the window. Centre follows up and down. Width follows left and right.",
   "tool-wlregion": "Drag a rectangle. The window runs from the least to the greatest modality value whose pixel centre is inside it, padding left out, with the function already shown. The local process finds the two values and windowRegion in the library makes the window.",
-  "tool-contour": "A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. It is not saved.",
-  "tool-rect": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.",
-  "tool-ellipse": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.",
-  "tool-text": "A note on this image. Size and colour can be changed. It is not saved.",
-  "tool-length": "The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. It is not saved.",
+  "tool-contour": "A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. Save marks writes it as TID 1500.",
+  "tool-rect": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. Save marks writes it as TID 1500.",
+  "tool-ellipse": "A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. Save marks writes it as TID 1500.",
+  "tool-text": "A note on this image. Size and colour can be changed. Save marks writes it as TID 1500.",
+  "tool-length": "The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. Save marks writes it as TID 1500.",
   "tool-angle": "Drag the first arm to the vertex, then click the end of the second arm. The local process reports the angle at the vertex. It is not saved.",
   "tool-cobb": "Drag one line, then drag a second line. The local process reports the acute angle between them. It is not saved.",
   "tool-bidirectional": "Drag the long axis. A short axis is placed across its middle at half its length. The local process reports both lengths as drawn. It is not saved.",
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
-  reset: "Put the image back to the first usable window in the file and the fitted view.",
+  reset: "Put the image back to the first usable window in the file, or to the automatic window when it stores none, and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
-  invert: "Reverse the grey. The pixels in the file are not changed.",
+  invert: "Reverse the display, each channel on a colour image. The pixels in the file are not changed.",
   rotate: "The displayed picture turns. The pixels are not changed and the marks turn with them.",
   "flip-h": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
   "flip-v": "The displayed picture is mirrored. The pixels are not changed and the marks turn with them.",
@@ -950,14 +1017,16 @@ const SENTENCE = {
   "toggle-cross": "Two lines meet at the pointer. The numbers are the column and row under it, counted from 1, and the modality value of that pixel, which is Hounsfield units on a CT whose file states HU, or states no unit and is not multi-energy. The local process computes the value.",
   "toggle-mag": "This circle enlarges the grey pixels already drawn. It copies them and does not blend them.",
   "toggle-letters": "The patient direction at each edge, read from Image Orientation (Patient), or from Patient Orientation on an image without Image Orientation (Patient). The letters are hidden while the picture is turned or flipped.",
-  "key-image": "Marks this image in the series list for this session. It is not saved and it does not write a Key Object Selection.",
+  "key-image": "Marks this image in the series list. Save marks writes the key images as a Key Object Selection.",
+  "save-marks": "Download the marks of the open study as a DICOM SR TID 1500 file per study, and the key images as a Key Object Selection file per study. Nothing is written into the opened folder.",
+  "load-marks": "Read SR and Key Object Selection files back onto the images of the open study. Each mark goes on the image whose SOP Instance UID and frame it names.",
   headers: "Show the DICOM headers for this image.",
   play: "Play through the images in this series.",
   layout: "Choose 1 by 1 up to 3 by 3 viewports. Drag a series onto a viewport, or click a series to open it in the outlined one.",
   "tile-mode": "Four neighbouring images from the open series, each one decoded by the same preview. Double-click one to open it alone.",
   link: "Link every visible viewport to the outlined one. Scroll, Window and Zoom each start off.",
   "link-scroll": "The other viewports show their image nearest the outlined one's position, when both series share a Frame of Reference UID and lie in nearly the same plane. The local process chooses the image.",
-  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a window row, a region window or Reset. A preset is not sent to an image the local process does not offer it on, a file window past an image's own list shows that image's first usable window, and no window is sent to an image that is not monochrome.",
+  "link-window": "A window set in the outlined viewport is copied to the others when the drag ends, and on a window row, a region window or Reset. A preset is not sent to an image the local process does not offer it on, a file window past an image's own list shows that image's first usable window, and windows are copied only between images of the same kind, monochrome or colour.",
   "link-zoom": "The other viewports take the outlined one's zoom over their own fit. Pan is not copied.",
   "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
@@ -970,10 +1039,44 @@ const SENTENCE = {
 const PRESET_ROW = "A preset from the library, in Hounsfield units. The local process offers the presets on CT only.";
 const FILE_ROW = "A window stored in the file, named by its Window Center & Width Explanation, or by its place in the file when it has none.";
 const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
-const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.";
+const AUTO_ROW = "One window for the whole series, from the 1st to the 99th percentile of modality values over up to 16 of its images, stored zero and padding left out. The local process computes it.";
+const AUTO_NOTE = "This file stores no window, so it is drawn at the automatic window. ";
+const WINDOW_HINT = "Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file, or to the automatic window when it stores none.";
 const LIBRARY_MISSING = "The region window needs the library build. Run npm run build -w @ocelli/core in the repository, then start the viewer again.";
 const DCMJS_MISSING = "The region window needs dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.";
 const ONE_VALUE = "This region holds one value, so it gives no window.";
+// F-215. Saving and reading marks import `/mark-documents.mjs`, which imports
+// the library through the import map. Nothing takes its place when it fails.
+const SAVE_LIBRARY_MISSING = "Saving needs the library build. Run npm run build in the repository, then start the viewer again.";
+const READ_LIBRARY_MISSING = "Reading marks needs the library build. Run npm run build in the repository, then start the viewer again.";
+// F-225. The conformance report of the file the active viewport shows. It is
+// asked for this long after that file's first paint, so a scroll or a cine
+// loop that keeps changing the file asks for nothing.
+const CHECKS_DELAY_MS = 300;
+// Reports kept for this open, oldest dropped first.
+const CHECKS_CAP = 512;
+const CHECKS_LIBRARY_MISSING = "The checks need the library build. Run npm run build in the repository, then start the viewer again.";
+const CHECKS_DCMJS_MISSING = "The checks need dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.";
+const CHECKS_UNREAD = "the checks could not be read";
+// The SOP classes read as documents and left out of the series list:
+// Enhanced SR, Comprehensive SR, Comprehensive 3D SR and Key Object
+// Selection Document. `DOCUMENT_CLASSES` in mark-documents.mjs is the same list.
+const DOCUMENT_CLASSES = [
+  "1.2.840.10008.5.1.4.1.1.88.22",
+  "1.2.840.10008.5.1.4.1.1.88.33",
+  "1.2.840.10008.5.1.4.1.1.88.34",
+  "1.2.840.10008.5.1.4.1.1.88.59"
+];
+// What a loaded item that is not placed is counted under, PS3.3 C.18.6.1.
+const UNPLACED_TEXT = {
+  missing: "not in this folder",
+  duplicate: "on an image whose SOP Instance UID two files share",
+  frameless: "on a multi-frame object with no frame number",
+  outside: "outside its image",
+  graphic: "drawn as a shape this viewer does not draw",
+  geometry: "with no image region to draw",
+  unread: "that could not be read"
+};
 const RELEASE_COMMAND = "cargo run --release -p ocelli-folder-viewer";
 const GONE = "the viewer process at this address is not answering. Run " + RELEASE_COMMAND + " again and open the address it prints";
 const GONE_STATUS = "The viewer process stopped answering. Images already shown stay. Run " + RELEASE_COMMAND + " again.";
@@ -1030,10 +1133,21 @@ const keyButton = document.getElementById("key-image");
 const playButton = document.getElementById("play");
 const fpsInput = document.getElementById("fps");
 const fpsValue = document.getElementById("fps-value");
+const useSliderButton = document.getElementById("use-slider");
+const cineLine = document.getElementById("cine-line");
+const profileSelect = document.getElementById("mouse-profile");
+const mouseKeys = document.getElementById("mouse-keys");
+const mouseUnsaved = document.getElementById("mouse-unsaved");
 const noteInput = document.getElementById("note");
 const modal = document.getElementById("modal");
 const filter = document.getElementById("filter");
 const headerRowsEl = document.getElementById("header-rows");
+const headersBadge = document.getElementById("headers-badge");
+const checksScope = document.getElementById("checks-scope");
+const checksModules = document.getElementById("checks-modules");
+const checksMessage = document.getElementById("checks-message");
+const checksWrap = document.getElementById("checks-wrap");
+const checksRows = document.getElementById("checks-rows");
 const sentence = document.getElementById("sentence");
 const marksEl = document.getElementById("marks");
 const swatches = document.getElementById("swatches");
@@ -1052,6 +1166,13 @@ let sourceMode = "";
 const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
+// F-227. Per series key, the `/series-window` reply's centre and width as the
+// text it arrived in, sent back unchanged. The page does no arithmetic on it.
+const seriesWindows = new Map();
+// One request in flight per series, and the series whose request was refused
+// this open, which use each image's own automatic window.
+const seriesWindowJobs = new Map();
+const seriesWindowRefused = new Set();
 const filePosts = new WeakMap();
 // Every pixel cache key starts with the picked `File`'s serial, never its
 // name, size or time, so a file chosen again is never served an old grey.
@@ -1076,13 +1197,53 @@ let debugBuild = false;
 let thumbAbort = new AbortController();
 const notes = new Map();
 const keyImages = new Set();
-let tool = "scroll";
+// F-215. The state of the open folder, which `resetFolderState` clears when
+// a folder is opened, the operator's decision after review pass 10: a
+// folder's marks are saved from that folder, and nothing carries to the
+// next. Load marks adds to the open folder's state.
+// Every SR document read into this folder or saved from it, by study, which
+// the next save names in Predecessor Documents Sequence, lead amendment 3.
+const sessionDocuments = new Map();
+// Studies with a Key Object Selection saved or read. One whose last key
+// image is unflagged cannot be saved, because a Key Object Selection names
+// at least one image, PS3.16 TID 2010.
+const sessionKeyStudies = new Set();
+// Reports read but not placed whole, by study. No save replaces them, so the
+// status line says their marks come back, review pass 4, D3.
+const sessionPartialReports = new Map();
+// Every SOP Instance UID any read into this folder has named as replaced.
+// Such a report is never placed or kept, whichever was read first, review
+// pass 6, D1.
+const sessionReplaced = new Set();
+// The studies with a mark added, moved, edited or deleted, or a key image
+// changed, since the folder was opened or the study last saved, so a save of
+// a study with no change writes nothing, review pass 8, N3.
+const changedStudies = new Set();
+// Identifiers assigned to untracked groups last only for this open folder.
+const sessionTracking = new Map();
+
+function resetFolderState() {
+  sessionDocuments.clear();
+  sessionKeyStudies.clear();
+  sessionPartialReports.clear();
+  sessionReplaced.clear();
+  changedStudies.clear();
+  sessionTracking.clear();
+}
+let marksModule = null;
+let activeProfile = readPreference(MOUSE_KEY, PROFILE_IDS, "ocelli");
+let tool = PROFILES[activeProfile].start;
 let showCorners = true;
 let showCross = false;
 let showMag = false;
 let showLetters = true;
 let playing = false;
 let playToken = 0;
+// "Use the slider" hands the rate back from the file's Frame Time. A step
+// that took longer than the file's interval marks play as late.
+let useSlider = false;
+let playLate = false;
+let cineShown = "";
 let headerRows = [];
 let nextNote = 1;
 let selected = null;
@@ -1094,6 +1255,24 @@ let pendingPoint = null;
 let pendingKey = "";
 let editingId = null;
 let headerToken = 0;
+// F-225. `reports` maps a picked `File` to `{ report }` or `{ error }` for
+// this open. `shown` is the file whose report the badge is for, `due` the
+// file whose delay has passed, and `busy` is true while the one request is
+// in flight. `token` advances whenever `shown` changes.
+const checks = {
+  reports: new Map(),
+  shown: null,
+  due: null,
+  busy: false,
+  token: 0,
+  timer: 0,
+  // The file the open sheet's Checks section is for.
+  sheet: null
+};
+// `POST /file` requests and thumbnail runs in progress. No report is asked
+// for while either is above zero.
+let filePostsOpen = 0;
+let thumbRuns = 0;
 let currentColor = INKS[0];
 let currentSize = 15;
 let hoverSentence = "";
@@ -1173,6 +1352,8 @@ function blankViewport(cell) {
     tileMode: false,
     imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
+    // F-225. The file of the last image this viewport drew.
+    paintedFile: null,
     loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
     scrollDir: 1,
     mainBusy: false, mainTail: Promise.resolve(),
@@ -1230,11 +1411,28 @@ for (const button of document.querySelectorAll("[data-open]")) {
 document.getElementById("toggle-series").addEventListener("click", () => togglePanel("no-series"));
 document.getElementById("toggle-inspector").addEventListener("click", () => togglePanel("no-inspector"));
 for (const name of ["no-series", "no-inspector"]) {
-  try {
-    if (localStorage.getItem("ocelli." + name) === "1") document.body.classList.add(name);
-  } catch {}
+  if (readPreference("ocelli." + name, ["0", "1"], "0") === "1") document.body.classList.add(name);
 }
 syncPanels();
+profileSelect.value = activeProfile;
+paintMouseKeys();
+// A key pressed on the focused control is the control's own, and the page's
+// tool keys do not run there. A pointer choice gives the focus back to the
+// page, so the next tool key reaches the page and not the control.
+let profileKeyed = false;
+profileSelect.addEventListener("keydown", () => { profileKeyed = true; });
+profileSelect.addEventListener("pointerdown", () => { profileKeyed = false; });
+profileSelect.addEventListener("change", () => {
+  setProfile(profileSelect.value);
+  if (!profileKeyed) profileSelect.blur();
+  profileKeyed = false;
+});
+fpsInput.value = readPreference(FPS_KEY, FPS_VALUES, "10");
+fpsValue.textContent = fpsInput.value;
+useSliderButton.addEventListener("click", () => {
+  useSlider = !useSlider;
+  syncCineLine();
+});
 for (const name of TOOLS) {
   document.getElementById("tool-" + name).addEventListener("click", () => setTool(name));
 }
@@ -1327,6 +1525,20 @@ for (const button of sizeRow.querySelectorAll("[data-size]")) {
   button.addEventListener("click", () => chooseSize(Number(button.dataset.size)));
 }
 document.getElementById("remove").addEventListener("click", deleteSelected);
+document.getElementById("save-marks").addEventListener("click", saveMarks);
+document.getElementById("load-marks").addEventListener("click", () => {
+  if (!seriesList.length) {
+    status.textContent = "Open a folder or the synthetic study first. Load marks reads documents onto its images.";
+    return;
+  }
+  document.getElementById("marks-file").click();
+});
+document.getElementById("marks-file").addEventListener("change", (event) => {
+  const input = event.target;
+  const files = Array.from(input.files || []);
+  input.value = "";
+  if (files.length) readDocuments(files, currentGeneration, "");
+});
 document.getElementById("edit-text").addEventListener("click", () => {
   const note = findNote(selected);
   if (note && (note.type === "text" || note.type === "arrow")) beginEdit(note);
@@ -1338,6 +1550,7 @@ modal.addEventListener("click", closeModal);
 filter.addEventListener("input", paintHeaderRows);
 playButton.addEventListener("click", togglePlay);
 fpsInput.addEventListener("input", () => { fpsValue.textContent = fpsInput.value; });
+fpsInput.addEventListener("change", () => { writePreference(FPS_KEY, fpsInput.value); });
 scrubber.addEventListener("input", () => {
   const vp = activeViewport();
   showIndex(vp, Number(scrubber.value));
@@ -1418,6 +1631,9 @@ if (!document.fullscreenEnabled) {
   SENTENCE.fullscreen = "Full screen is not available in this browser.";
 }
 setLayout(1, 1);
+// The kept profile may start left on W/L, so the active tool button comes
+// from `tool` and not from the markup.
+syncToolButtons();
 syncSwatches();
 syncSizes();
 syncWindowList();
@@ -1523,7 +1739,7 @@ async function ensureFile(file) {
 
 async function postFile(file) {
   const ids = openIds;
-  const response = await fetch("/file", { method: "POST", headers: { "X-Ocelli-Page": PAGE_TOKEN }, body: file });
+  const response = await countedFilePost(file);
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || "the file could not be held");
@@ -1538,6 +1754,16 @@ async function postFile(file) {
   if (ids !== openIds) throw abortError();
   filePosts.set(file, id);
   return id;
+}
+
+// Every `POST /file` goes through here, so the checks can wait for none.
+async function countedFilePost(file) {
+  filePostsOpen += 1;
+  try {
+    return await fetch("/file", { method: "POST", headers: { "X-Ocelli-Page": PAGE_TOKEN }, body: file });
+  } finally {
+    filePostsOpen -= 1;
+  }
 }
 
 function sendPreview(image, headers, id, signal) {
@@ -1586,8 +1812,62 @@ async function postHeaders(file) {
 function togglePanel(name) {
   const on = !document.body.classList.contains(name);
   document.body.classList.toggle(name, on);
-  try { localStorage.setItem("ocelli." + name, on ? "1" : "0"); } catch {}
+  writePreference("ocelli." + name, on ? "1" : "0");
   syncPanels();
+}
+
+// Every read and write of this browser's storage is in these two, inside try
+// and catch, because a private window or blocked site data can throw. A
+// missing key, a value outside `allowed` or a throw gives `fallback`, and
+// nothing is written back.
+function readPreference(key, allowed, fallback) {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(key);
+  } catch {
+    return fallback;
+  }
+  return allowed.includes(stored) ? stored : fallback;
+}
+
+// False when the browser did not keep the value.
+function writePreference(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// A profile change sets the tool left starts on, which cancels a draft
+// first, as any tool change does.
+function setProfile(id) {
+  if (!PROFILE_IDS.includes(id)) return;
+  activeProfile = id;
+  profileSelect.value = id;
+  mouseUnsaved.hidden = writePreference(MOUSE_KEY, id);
+  paintMouseKeys();
+  setTool(PROFILES[id].start);
+}
+
+function paintMouseKeys() {
+  const profile = PROFILES[activeProfile];
+  const rows = [
+    ["Left", "The chosen tool"],
+    ["Middle", MOUSE_TEXT[profile.middle]],
+    ["Right", MOUSE_TEXT[profile.right]],
+    ["Ctrl left", "Pan"]
+  ];
+  const nodes = [];
+  for (const [key, text] of rows) {
+    const kbd = document.createElement("kbd");
+    kbd.textContent = key;
+    const span = document.createElement("span");
+    span.textContent = text;
+    nodes.push(kbd, span);
+  }
+  mouseKeys.replaceChildren(...nodes);
 }
 
 function syncPanels() {
@@ -1613,8 +1893,16 @@ function showTip(node) {
   tip.style.top = top + "px";
 }
 
+function iccWarning(info) {
+  if (!info || !info.colour || !info.icc || info.icc_applied) return "";
+  return "This image's " + (info.icc_kind || "unsupported") + " ICC profile was not applied.";
+}
+
 function showSentence() {
-  sentence.textContent = hoverSentence || windowNotice || SENTENCE[toolId(tool)] || "";
+  const words = hoverSentence || windowNotice || SENTENCE[toolId(tool)] || "";
+  const image = currentImage(activeViewport());
+  const warning = image ? iccWarning(image.info) : "";
+  sentence.textContent = words + (warning ? " " + warning : "");
 }
 
 function setWindowNotice(text) {
@@ -1714,6 +2002,8 @@ function numeric(text) {
 
 async function readFolder(fileList) {
   const generation = ++currentGeneration;
+  // The one point where the open folder's mark state starts afresh.
+  resetFolderState();
   stopPlay();
   seriesList = [];
   seriesByKey.clear();
@@ -1726,6 +2016,7 @@ async function readFolder(fileList) {
   thumbFiles.clear();
   changedNote = "";
   thumbGeneration += 1;
+  resetChecks();
   resetViewports();
   const files = Array.from(fileList);
   beginOpen(files);
@@ -1749,7 +2040,7 @@ async function readFolder(fileList) {
       }
       let response;
       try {
-        response = await fetch("/file", { method: "POST", headers: { "X-Ocelli-Page": PAGE_TOKEN }, body: file });
+        response = await countedFilePost(file);
       } catch {
         failed += 1;
         continue;
@@ -1778,7 +2069,9 @@ async function readFolder(fileList) {
   }
   await Promise.all([worker(), worker(), worker(), worker()]);
   if (generation !== currentGeneration) return;
-  groupSeries(found);
+  // F-215. An SR or Key Object Selection is a document, not a series.
+  const documents = found.filter((row) => DOCUMENT_CLASSES.includes((row.info || {}).sopClassUid));
+  groupSeries(found.filter((row) => !documents.includes(row)));
   const skipText = skipped ? " Skipped " + skipped + " files that are not DICOM Part 10." : "";
   const failText = failed ? " " + failed + " files could not be read." : "";
   const largeText = oversized
@@ -1796,6 +2089,7 @@ async function readFolder(fileList) {
   }
   startViewports(seriesList[best].key);
   loadThumbs();
+  if (documents.length) await readDocuments(documents.map((row) => row.file), generation, status.textContent);
 }
 
 function groupSeries(found) {
@@ -1816,7 +2110,7 @@ function groupSeries(found) {
       map.set(key, series);
     }
     const reported = Number(info.frames);
-    const listed = info.monochrome && Number.isFinite(reported) && reported > 1
+    const listed = drawable(info) && Number.isFinite(reported) && reported > 1
       ? Math.floor(reported)
       : 1;
     const steps = Math.min(listed, FRAME_LIST_CAP);
@@ -1825,6 +2119,7 @@ function groupSeries(found) {
       series.images.push({
         file: row.file,
         frame: frameIndex,
+        seriesKey: key,
         info,
         reported: Number.isFinite(reported) && reported > 0 ? Math.floor(reported) : 1
       });
@@ -1942,11 +2237,11 @@ function paintThumbBitmap(grey) {
     const row = sourceY * grey.width;
     for (let x = 0; x < drawW; x += 1) {
       const sourceX = Math.min(grey.width - 1, Math.floor(((x + 0.5) * grey.width) / drawW));
-      const value = bytes[row + sourceX];
+      const source = (row + sourceX) * grey.channels;
       const at = ((originY + y) * 128 + (originX + x)) * 4;
-      data[at] = value;
-      data[at + 1] = value;
-      data[at + 2] = value;
+      data[at] = bytes[source];
+      data[at + 1] = bytes[source + (grey.channels === 3 ? 1 : 0)];
+      data[at + 2] = bytes[source + (grey.channels === 3 ? 2 : 0)];
       data[at + 3] = 255;
     }
   }
@@ -1955,6 +2250,15 @@ function paintThumbBitmap(grey) {
 }
 
 async function loadThumbs() {
+  thumbRuns += 1;
+  try {
+    await paintThumbs();
+  } finally {
+    thumbRuns -= 1;
+  }
+}
+
+async function paintThumbs() {
   thumbAbort = new AbortController();
   const signal = thumbAbort.signal;
   const generation = ++thumbGeneration;
@@ -1962,7 +2266,7 @@ async function loadThumbs() {
     if (generation !== thumbGeneration || signal.aborted) return;
     if (thumbBitmaps.has(series.key)) continue;
     const image = series.images[Math.floor(series.images.length / 2)];
-    if (!image || !image.info.monochrome) continue;
+    if (!image || !drawable(image.info)) continue;
     try {
       // The thumbnail is the file window. It goes through the shared cache
       // under the file window's key, so a viewport on the file window and
@@ -2000,12 +2304,17 @@ function loadSeries(vp, key) {
     selected = null;
     cancelDraft();
   }
+  const previous = currentImage(vp);
+  const next = series.images[positions.get(key) || 0] || series.images[0];
+  if (previous && next && Boolean(previous.info.colour) !== Boolean(next.info.colour)) vp.invert = false;
   vp.loadToken += 1;
   vp.tileToken += 1;
   vp.liveToken += 1;
   vp.prefetchAbort.abort();
   vp.tileAbort.abort();
   vp.seriesKey = key;
+  vp.shownWindow = null;
+  vp.paletteFallback = false;
   vp.fitMode = true;
   vp.layoutDirty = true;
   vp.overrideWindow = null;
@@ -2025,6 +2334,10 @@ function loadSeries(vp, key) {
   // A new series in any shown cell needs its line, and a new source moves
   // the others. One coalesced request covers both.
   if (cellShown(vp)) scheduleLink();
+}
+
+function drawable(info) {
+  return Boolean(info && (info.monochrome || info.colour));
 }
 
 function currentImage(vp) {
@@ -2120,6 +2433,7 @@ function commitLabels(vp) {
     ? (vp.viewIndex + 1) + " / " + count + " of " + total
     : (vp.viewIndex + 1) + " / " + count;
   paintMarks();
+  syncCineLine();
 }
 
 async function showIndex(vp, next) {
@@ -2127,12 +2441,21 @@ async function showIndex(vp, next) {
   if (!series || !series.images.length) return;
   const count = series.images.length;
   const active = vp.cell === activeCell;
-  const previousKey = noteKey(currentImage(vp));
+  const previousImage = currentImage(vp);
+  const previousKey = noteKey(previousImage);
   const wrapped = ((next % count) + count) % count;
   vp.scrollDir = directionOf(vp, vp.viewIndex, wrapped, count);
   vp.viewIndex = wrapped;
   positions.set(series.key, vp.viewIndex);
   const image = series.images[vp.viewIndex];
+  if (previousImage && Boolean(previousImage.info.colour) !== Boolean(image.info.colour)) {
+    vp.overrideWindow = null;
+    vp.draftWindow = null;
+    vp.activePreset = null;
+    vp.windowIndex = 0;
+    vp.shownWindow = null;
+    vp.invert = false;
+  }
   // A preset leaves a viewport that moves to an image the local process does
   // not offer it on. A file window index stays, and `effectiveIndex` reads
   // it against this image's own list.
@@ -2143,6 +2466,7 @@ async function showIndex(vp, next) {
     if (active) {
       selected = null;
       cancelDraft();
+      if (image.file !== checks.shown) checksShown(null);
     }
     if (valueState.cell === vp.cell) {
       resetValue();
@@ -2157,7 +2481,7 @@ async function showIndex(vp, next) {
   vp.liveToken += 1;
   if (vp.tileMode && !gridAllowed(vp)) setTileMode(vp, false, true);
   if (active) syncToolButtons();
-  if (!image.info.monochrome) {
+  if (!drawable(image.info)) {
     vp.shownWindow = null;
     vp.shownFacts = null;
     commitLabels(vp);
@@ -2165,12 +2489,15 @@ async function showIndex(vp, next) {
     vp.dom.tiles.hidden = true;
     vp.dom.ink.replaceChildren();
     paintOverlays(vp);
-    showFault(vp, "this preview shows monochrome frames only");
+    showFault(vp, "this image has a colour space this build cannot draw");
+    faultShown(vp, image);
     return;
   }
   if (vp.tileMode) paintTiles(vp);
   schedulePrefetch(vp);
-  const hit = takeGrey(cacheKey(image, vp));
+  // A series that is still to get its window is drawn only once it has it,
+  // so no grey of this image's own window is taken from the cache first.
+  const hit = seriesWindowWanted(vp, image) ? null : takeGrey(cacheKey(image, vp));
   if (hit) {
     applyGrey(vp, hit, image);
     return;
@@ -2195,9 +2522,18 @@ async function pumpMain(vp) {
       const token = vp.loadToken;
       const wanted = vp.viewIndex;
       const image = currentImage(vp);
-      if (!image || !image.info.monochrome || !cellShown(vp)) break;
+      if (!image || !drawable(image.info) || !cellShown(vp)) break;
       const moved = () => token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image;
       try {
+        if (seriesWindowWanted(vp, image)) {
+          // F-227. The first image of a series that stores no window waits
+          // for the series window, so it is never drawn at two windows.
+          await ensureSeriesWindow(seriesOf(vp));
+          if (moved()) continue;
+          if (vp.cell === activeCell) syncWindowList();
+          schedulePrefetch(vp);
+          if (vp.tileMode) paintTiles(vp);
+        }
         const grey = await fetchGrey(image, vp);
         if (moved()) continue;
         applyGrey(vp, grey, image);
@@ -2216,6 +2552,7 @@ async function pumpMain(vp) {
           break;
         }
         showFault(vp, error instanceof Error ? error.message : "the frame could not be shown");
+        faultShown(vp, image);
         break;
       }
     }
@@ -2232,23 +2569,37 @@ function applyGrey(vp, grey, image) {
     center: grey.center,
     width: grey.widthText,
     fn: grey.fn || "LINEAR",
-    fullRange: grey.fullRange
+    auto: grey.auto
   };
   vp.shownFacts = grey.facts;
+  vp.paletteFallback = grey.paletteFallback;
   drawGrey(vp, grey);
   if (image === currentImage(vp)) {
     commitLabels(vp);
     paintOverlays(vp);
     paintEdges(vp);
+    vp.paintedFile = image.file;
+    if (vp.cell === activeCell) checksShown(image.file);
   }
-  if (vp.cell === activeCell) syncKey();
+  if (vp.cell === activeCell) {
+    syncKey();
+    showSentence();
+  }
+}
+
+// A mixed series may put another kind in a tile or a prefetch slot. Its
+// window starts from that image's own defaults, in its own units.
+function windowView(image, view) {
+  const source = currentImage(view);
+  return source && Boolean(source.info.colour) !== Boolean(image.info.colour) ? PLAIN_VIEW : view;
 }
 
 // `view` is a viewport record, or PLAIN_VIEW for the file window.
 function cacheKey(image, view) {
+  view = windowView(image, view);
   const win = view.overrideWindow
     ? view.overrideWindow.center + "/" + view.overrideWindow.width + "/" + view.overrideWindow.fn
-    : (view.activePreset || "file" + fileKeyIndex(image, view));
+    : (view.activePreset || (image.info.colour ? "colour" : "file" + fileKeyIndex(image, view) + "/" + seriesHeader(image, view)));
   return fileSerial(image.file) + "\0" + image.frame + "\0" + win + "\0" + (view.invert ? "1" : "0");
 }
 
@@ -2256,6 +2607,9 @@ function dropCache() {
   cacheGeneration += 1;
   cache.clear();
   inflight.clear();
+  seriesWindows.clear();
+  seriesWindowJobs.clear();
+  seriesWindowRefused.clear();
   for (let index = 0; index < preparedSlots.length; index += 1) preparedSlots[index].grey = null;
   posting.clear();
   cacheBytes = 0;
@@ -2264,6 +2618,137 @@ function dropCache() {
     vp.prefetchAbort.abort();
     vp.tileAbort.abort();
   }
+}
+
+// F-227. An image the local process draws at an automatic window: monochrome,
+// with no window and no VOI LUT Sequence in its own list. The process decides
+// in the end, and its reply names the window it used.
+function autoEligible(image) {
+  if (!image || !image.info || !image.info.monochrome) return false;
+  const listed = windowInfo(image);
+  return listed.windows.length === 0 && listed.voiLuts.length === 0;
+}
+
+// The `X-Ocelli-Series-Window` value a request for this image in this view
+// sends, or "". Only a viewport in the file window state sends it, and never
+// a thumbnail, which is PLAIN_VIEW and keeps each image's own window. A
+// request that names a file window index sends none, because the two
+// together are refused.
+function seriesHeader(image, view) {
+  if (!image || view === PLAIN_VIEW || view.overrideWindow || view.activePreset) return "";
+  if (!autoEligible(image)) return "";
+  const index = effectiveIndex(image, view);
+  if (index != null && index > 0) return "";
+  const entry = seriesWindows.get(image.seriesKey);
+  return entry ? entry.center + " " + entry.width : "";
+}
+
+// Whether this viewport must wait for its series window before drawing.
+function seriesWindowWanted(vp, image) {
+  if (!vp || !image || vp.overrideWindow || vp.activePreset || vp.draftWindow) return false;
+  if (!autoEligible(image)) return false;
+  return !seriesWindows.has(image.seriesKey) && !seriesWindowRefused.has(image.seriesKey);
+}
+
+// One shared request per series per open. A refusal stores nothing and marks
+// the series, so its images keep their own windows without asking again.
+function ensureSeriesWindow(series) {
+  if (!series || seriesWindows.has(series.key) || seriesWindowRefused.has(series.key)) return Promise.resolve();
+  const pending = seriesWindowJobs.get(series.key);
+  if (pending) return pending;
+  const generation = cacheGeneration;
+  const job = askSeriesWindow(series).then((entry) => {
+    if (generation !== cacheGeneration) return;
+    if (entry) seriesWindows.set(series.key, entry);
+    else seriesWindowRefused.add(series.key);
+  }).catch(() => {}).finally(() => {
+    if (seriesWindowJobs.get(series.key) === job) seriesWindowJobs.delete(series.key);
+  });
+  seriesWindowJobs.set(series.key, job);
+  return job;
+}
+
+// The id the page already holds for a file, without posting it, or "" for a
+// file F-224 marked changed, one the process would not hold, or one whose
+// last post failed, which the process skips when it is sampled rather than
+// the page posting it again. A post already on its way is waited for.
+async function heldId(file) {
+  if (changedFiles.has(file)) return "";
+  if (filePosts.has(file)) return filePosts.get(file);
+  const pending = posting.get(file);
+  if (!pending) return "";
+  try {
+    return await pending;
+  } catch (error) {
+    if (error && error.name === "AbortError") throw error;
+    return "";
+  }
+}
+
+// Post one gone file again, or "" when it cannot be posted.
+async function repost(file, id) {
+  if (filePosts.get(file) === id) filePosts.delete(file);
+  try {
+    return await ensureFile(file);
+  } catch (error) {
+    if (error && error.name === "AbortError") throw error;
+    return "";
+  }
+}
+
+function seriesBody(lines) {
+  return lines.map((line) => (line.id || "-") + " " + line.image.frame).join("\n");
+}
+
+// `POST /series-window` with one line per image in the series' order, each
+// with the id the page holds, so no file is posted to ask. The process
+// samples the images and names every sampled id it no longer holds in its
+// 410. Those files alone are posted again, and the page asks once more, for
+// as long as each round names an id no earlier round posted, which a restart
+// or F-216's eviction can do and which ends because the open's own ids are
+// finite. The reply's strings are kept as they arrived.
+async function askSeriesWindow(series) {
+  const lines = [];
+  for (const image of series.images) lines.push({ image, id: await heldId(image.file) });
+  const posted = new Set();
+  for (;;) {
+    const response = await fetch("/series-window", { method: "POST", body: seriesBody(lines) });
+    if (response.status === 410) {
+      const reply = await response.json().catch(() => null);
+      const gone = new Set(reply && Array.isArray(reply.gone) ? reply.gone : []);
+      if (!gone.size || Array.from(gone).every((id) => posted.has(id))) return null;
+      const fresh = new Map();
+      for (const line of lines) {
+        if (!gone.has(line.id)) continue;
+        if (!fresh.has(line.image.file)) {
+          const id = await repost(line.image.file, line.id);
+          if (id) posted.add(id);
+          fresh.set(line.image.file, id);
+        }
+        line.id = fresh.get(line.image.file);
+      }
+      continue;
+    }
+    if (response.status === 503 && response.headers.get("X-Ocelli-Error") === "busy") {
+      await response.arrayBuffer().catch(() => {});
+      await sleepAbortable(40);
+      continue;
+    }
+    if (!response.ok) {
+      await response.arrayBuffer().catch(() => {});
+      return null;
+    }
+    const reply = await response.json();
+    if (typeof reply.center !== "string" || typeof reply.width !== "string") return null;
+    return { center: reply.center, width: reply.width, sampled: reply.sampled, skipped: reply.skipped };
+  }
+}
+
+// The words the corner and a tile add for an automatic window.
+function autoWords(auto) {
+  if (auto === "series") return "  Auto window";
+  if (auto === "image") return "  Auto window, this image";
+  return "";
 }
 
 // The picked files a series lists, each once.
@@ -2483,20 +2968,23 @@ function superseded(view, wantedView, wantedToken, signal) {
 async function requestGrey(image, options) {
   const view = (options && options.view) || PLAIN_VIEW;
   const signal = options && options.signal;
-  const chosen = options && options.window ? options.window : view.overrideWindow;
+  const window = windowView(image, view);
+  const chosen = window === view && options && options.window ? options.window : window.overrideWindow;
   const headers = { "X-Ocelli-Frame": String(image.frame) };
-  if (view.invert) headers["X-Ocelli-Invert"] = "1";
+  if (window.invert) headers["X-Ocelli-Invert"] = "1";
   if (chosen) {
     headers["X-Ocelli-Window-Center"] = String(chosen.center);
     headers["X-Ocelli-Window-Width"] = String(chosen.width);
     headers["X-Ocelli-Window-Function"] = chosen.fn;
-  } else if (view.activePreset) {
-    headers["X-Ocelli-Window-Preset"] = view.activePreset;
+  } else if (window.activePreset) {
+    headers["X-Ocelli-Window-Preset"] = window.activePreset;
   } else {
     // Index 0 is the file window with no header, which a file storing no
     // window also takes.
-    const index = effectiveIndex(image, view);
+    const index = effectiveIndex(image, window);
     if (index != null && index > 0) headers["X-Ocelli-Window-Index"] = String(index);
+    const series = seriesHeader(image, window);
+    if (series) headers["X-Ocelli-Series-Window"] = series;
   }
   const wantedView = view.viewIndex;
   const wantedToken = view.loadToken;
@@ -2526,8 +3014,11 @@ async function requestGrey(image, options) {
     }
     const width = Number(response.headers.get("X-Ocelli-Width"));
     const height = Number(response.headers.get("X-Ocelli-Height"));
+    const channels = Number(response.headers.get("X-Ocelli-Channels"));
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (!width || !height || bytes.length !== width * height) {
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 ||
+        (channels !== 1 && channels !== 3) || channels !== (image.info.colour ? 3 : 1) ||
+        bytes.length !== width * height * channels) {
       throw new Error("the preview response did not match the frame");
     }
     // A reply that was on its way when the file was found changed carries
@@ -2536,7 +3027,9 @@ async function requestGrey(image, options) {
     return {
       width,
       height,
-      fullRange: response.headers.get("X-Ocelli-Full-Range") === "1",
+      channels,
+      paletteFallback: response.headers.get("X-Ocelli-Palette-Fallback") === "1",
+      auto: response.headers.get("X-Ocelli-Auto-Window") || "none",
       center: response.headers.get("X-Ocelli-Window-Center") || "",
       widthText: response.headers.get("X-Ocelli-Window-Width") || "",
       fn: response.headers.get("X-Ocelli-Window-Function") || "",
@@ -2566,6 +3059,9 @@ function headerNumber(response, name) {
 function schedulePrefetch(vp) {
   const series = seriesOf(vp);
   if (!series || !series.images.length) return;
+  // F-227. Nothing is fetched at an image's own window while its series
+  // window is on its way. `pumpMain` schedules again once it has arrived.
+  if (seriesWindowWanted(vp, currentImage(vp))) return;
   const count = series.images.length;
   if (prefetchCovered(vp, series, count)) return;
   vp.prefetchAbort.abort();
@@ -2577,7 +3073,7 @@ function schedulePrefetch(vp) {
     const index = vp.viewIndex + offset;
     if (index < 0 || index >= count) continue;
     const image = series.images[index];
-    if (!image || !image.info.monochrome) continue;
+    if (!image || !drawable(image.info)) continue;
     const key = cacheKey(image, vp);
     if (cache.has(key) || inflight.has(key)) continue;
     requestGrey(image, { view: vp, signal }).then((grey) => {
@@ -2593,14 +3089,24 @@ function prefetchCovered(vp, series, count) {
     const index = vp.viewIndex + offset;
     if (index < 0 || index >= count) continue;
     const image = series.images[index];
-    if (!image || !image.info.monochrome) continue;
+    if (!image || !drawable(image.info)) continue;
     const key = cacheKey(image, vp);
     if (!cache.has(key) && !inflight.has(key)) return false;
   }
   return true;
 }
 
-function fillGreyImage(image, bytes) {
+function fillGreyImage(image, bytes, channels) {
+  if (channels === 3) {
+    const data = image.data;
+    for (let source = 0, offset = 0; source < bytes.length; source += 3, offset += 4) {
+      data[offset] = bytes[source];
+      data[offset + 1] = bytes[source + 1];
+      data[offset + 2] = bytes[source + 2];
+      data[offset + 3] = 255;
+    }
+    return;
+  }
   if (LITTLE) {
     const words = new Uint32Array(image.data.buffer);
     if (words.length === bytes.length) {
@@ -2630,7 +3136,7 @@ function prepareDisplay(grey) {
   if (!grey || preparedSlot(grey)) return;
   const bytes = grey.bytes;
   if (!grey.width || !grey.height || !bytes) return;
-  if (bytes.length !== grey.width * grey.height || bytes.length > PREPARED_PIXEL_CAP) return;
+  if (bytes.length !== grey.width * grey.height * grey.channels || grey.width * grey.height > PREPARED_PIXEL_CAP) return;
   let slot = null;
   for (let index = 0; index < preparedSlots.length; index += 1) {
     if (preparedSlots[index].grey == null) {
@@ -2650,7 +3156,7 @@ function prepareDisplay(grey) {
   if (!slot.image || slot.image.width !== grey.width || slot.image.height !== grey.height) {
     slot.image = new ImageData(grey.width, grey.height);
   }
-  fillGreyImage(slot.image, bytes);
+  fillGreyImage(slot.image, bytes, grey.channels);
   slot.grey = grey;
 }
 
@@ -2679,7 +3185,7 @@ function paintGrey(context, node, grey) {
     };
     canvasBuffers.set(node, buffer);
   }
-  fillGreyImage(buffer.image, grey.bytes);
+  fillGreyImage(buffer.image, grey.bytes, grey.channels);
   context.putImageData(buffer.image, 0, 0);
 }
 
@@ -2735,7 +3241,7 @@ async function paintTiles(vp) {
     const image = series && series.images[vp.viewIndex + index];
     labels[index].textContent = image ? "Image " + (vp.viewIndex + index + 1) : "";
     labels[index].classList.remove("changed");
-    if (!image || !image.info.monochrome) {
+    if (!image || !drawable(image.info)) {
       node.width = 1;
       node.height = 1;
       node.dataset.aspect = "1";
@@ -2763,8 +3269,8 @@ async function paintTiles(vp) {
       paintGrey(context, node, grey);
       // A tile with no window name, because its frame's list is not known
       // yet or the file stores no window, is named by the numbers it is
-      // drawn at, and by "full range" as the corner says.
-      const drawnAt = "WW " + grey.widthText + "  WL " + grey.center + (grey.fullRange ? "  full range" : "");
+      // drawn at, and by the automatic window's words as the corner says.
+      const drawnAt = "WW " + grey.widthText + "  WL " + grey.center + autoWords(grey.auto);
       labels[index].textContent = "Image " + (vp.viewIndex + index + 1) + "  " + (word || drawnAt);
       const aspect = greyAspect(grey.facts);
       node.dataset.aspect = String(aspect.y / aspect.x);
@@ -2928,9 +3434,12 @@ function paintOverlays(vp) {
   let windowLine = "WW " + width + "  WL " + center;
   const word = windowWord(vp, image);
   if (word) windowLine += "  " + word;
-  if (vp.shownWindow && vp.shownWindow.fullRange && !vp.overrideWindow && !vp.draftWindow && !vp.activePreset) windowLine += "  full range";
+  if (vp.shownWindow && !vp.overrideWindow && !vp.draftWindow && !vp.activePreset) windowLine += autoWords(vp.shownWindow.auto);
   // The file window describes a picture this page does not show.
-  if (!info.monochrome) windowLine = "Window not applicable";
+  if (!drawable(info)) windowLine = "Window not applicable";
+  const warning = iccWarning(info);
+  if (warning) windowLine += "\n" + warning;
+  if (info.colour && vp.paletteFallback) windowLine += "\nThis palette was read as 8-bit because all its entries fit in 8 bits.";
   assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
   paintScale(vp);
 }
@@ -2977,6 +3486,15 @@ function assignEdge(node, hide, value) {
   const text = hidden ? "" : value;
   if (node.hidden !== hidden) node.hidden = hidden;
   if (node.textContent !== text) node.textContent = text;
+}
+
+// F-225. A fault shown for the viewport's current image counts as that
+// image's first paint for the checks, so a colour or refused file gets its
+// report like a drawn one. A refused file is where the report helps most.
+function faultShown(vp, image) {
+  if (image !== currentImage(vp)) return;
+  vp.paintedFile = image.file;
+  if (vp.cell === activeCell) checksShown(image.file);
 }
 
 function showFault(vp, message) {
@@ -3098,6 +3616,7 @@ function resetView(vp) {
 // answered for this frame replaces the scan's, which is frame 0's.
 function windowInfo(image) {
   const info = (image && image.info) || {};
+  if (info.colour) return { presets: [], windows: [], voiLuts: [] };
   const own = image ? image.frameWindows : null;
   return {
     presets: Array.isArray(info.presets) ? info.presets : [],
@@ -3118,6 +3637,7 @@ function windowInfo(image) {
 // once its list arrives. So no request names an index the frame's own list
 // has not confirmed.
 function effectiveIndex(image, view) {
+  if (image && image.info.colour) return null;
   if (!windowsKnown(image)) return null;
   const windows = windowInfo(image).windows;
   const usable = (win) => Boolean(win) && win.center != null && win.width != null;
@@ -3153,6 +3673,13 @@ function windowRows(image) {
   for (const preset of listed.presets) {
     rows.push({ kind: "preset", token: preset.token, label: preset.name, center: preset.center, width: preset.width, disabled: blocked });
   }
+  // F-227. A file that stores no window has one row, the automatic window,
+  // which is the file window state. Its numbers are the series window's text
+  // once the local process has given it.
+  if (autoEligible(image)) {
+    const entry = seriesWindows.get(image.seriesKey);
+    rows.push({ kind: "auto", label: "Auto window", center: entry ? entry.center : null, width: entry ? entry.width : null, disabled: false });
+  }
   listed.windows.forEach((win, index) => {
     const empty = win.center == null || win.width == null;
     rows.push({ kind: "file", index, label: win.label, center: win.center, width: win.width, disabled: blocked || empty || Boolean(image.frameWindowsFailed) });
@@ -3165,12 +3692,14 @@ function windowRows(image) {
 function activeRow(vp, image, rows) {
   if (vp.draftWindow || vp.overrideWindow) return -1;
   if (vp.activePreset) return rows.findIndex((row) => row.kind === "preset" && row.token === vp.activePreset);
+  if (autoEligible(image)) return rows.findIndex((row) => row.kind === "auto");
   const index = effectiveIndex(image, vp);
   return rows.findIndex((row) => row.kind === "file" && row.index === index);
 }
 
 // The word the bottom right corner adds to the window line.
 function windowWord(vp, image) {
+  vp = windowView(image, vp);
   if (vp.draftWindow) return "manual";
   if (vp.overrideWindow) return vp.overrideWindow.from === "region" ? "region" : "manual";
   const listed = windowInfo(image);
@@ -3187,7 +3716,7 @@ function syncWindowList() {
   const image = vp ? currentImage(vp) : null;
   const rows = windowRows(image);
   const on = vp && image ? activeRow(vp, image, rows) : -1;
-  const sig = JSON.stringify([rows, on]);
+  const sig = JSON.stringify([rows, on, Boolean(image), Boolean(image && image.info.colour)]);
   if (sig === windowListSig) return;
   windowListSig = sig;
   windowList.replaceChildren();
@@ -3198,7 +3727,7 @@ function syncWindowList() {
     button.disabled = row.disabled;
     button.className = at === on ? "active" : "";
     button.dataset.row = String(number);
-    button.dataset.sentence = row.kind === "lut" ? VOI_LUT_ROW : row.kind === "preset" ? PRESET_ROW : FILE_ROW;
+    button.dataset.sentence = row.kind === "lut" ? VOI_LUT_ROW : row.kind === "preset" ? PRESET_ROW : row.kind === "auto" ? AUTO_ROW : FILE_ROW;
     const key = document.createElement("kbd");
     key.textContent = number <= 9 ? String(number) : "";
     const label = document.createElement("span");
@@ -3206,18 +3735,20 @@ function syncWindowList() {
     label.textContent = row.label;
     const numbers = document.createElement("span");
     numbers.className = "window-numbers";
-    numbers.textContent = row.kind === "lut" ? "LUT" : row.center == null ? "empty" : "WW " + row.width + "  WL " + row.center;
+    numbers.textContent = row.kind === "lut" ? "LUT" : row.center == null ? (row.kind === "auto" ? "this image" : "empty") : "WW " + row.width + "  WL " + row.center;
     button.append(key, label, numbers);
     button.addEventListener("click", () => chooseRow(activeViewport(), number));
     windowList.append(button);
   });
   const listed = windowInfo(image);
-  windowNote.textContent = image && !image.info.monochrome
-    ? "This image is not monochrome, so it has no window to set."
+  windowNote.textContent = image && image.info.colour
+    ? "This image is colour, so the file's windows and the presets do not apply. Drag to window each channel."
+    : image && !image.info.monochrome
+      ? "This image has no window to set."
     : listed.voiLuts.length
       ? "This file has a VOI LUT Sequence, which this preview does not apply, so its rows cannot be chosen. Drag with the W/L tool to set your own window."
-      : image && !rows.length
-        ? "This file stores no window, so the full range of its values is shown. " + WINDOW_HINT
+      : autoEligible(image)
+        ? AUTO_NOTE + WINDOW_HINT
         : WINDOW_HINT;
 }
 
@@ -3228,6 +3759,7 @@ function chooseRow(vp, number) {
   if (!row || row.disabled) return;
   if (row.kind === "preset") chooseWindow(vp, { preset: row.token });
   else if (row.kind === "file") chooseWindow(vp, { index: row.index });
+  else if (row.kind === "auto") chooseWindow(vp, { index: 0 });
 }
 
 // The commit point of a window change is a successful preview reply. The
@@ -3236,7 +3768,7 @@ function chooseRow(vp, number) {
 // alone and puts the refusal in the sentence line.
 async function chooseWindow(vp, next) {
   const image = currentImage(vp);
-  if (!image || !image.info.monochrome) return false;
+  if (!image || !drawable(image.info)) return false;
   const token = vp.loadToken;
   const index = vp.viewIndex;
   const trial = {
@@ -3275,7 +3807,7 @@ async function chooseWindow(vp, next) {
 // id with no body, so the file is not posted again. A refused answer keeps
 // the scan's list and disables its file rows.
 async function refreshFrameWindows(image) {
-  if (!image || !image.info.windowsPerFrame || image.frame === 0 || image.frameWindowsAsked) return;
+  if (!image || image.info.colour || !image.info.windowsPerFrame || image.frame === 0 || image.frameWindowsAsked) return;
   image.frameWindowsAsked = true;
   try {
     let id = await ensureFile(image.file);
@@ -3541,8 +4073,10 @@ function zoomAt(vp, clientX, clientY, factor) {
 }
 
 function pointerMode(event) {
-  if (event.button === 2 || (event.button === 0 && event.ctrlKey)) return "pan";
-  if (event.button === 1) return "zoom";
+  if (event.button === 0 && event.ctrlKey) return "pan";
+  const profile = PROFILES[activeProfile];
+  if (event.button === 1) return profile.middle;
+  if (event.button === 2) return profile.right;
   return tool;
 }
 
@@ -3709,6 +4243,7 @@ function onPointerUp(event) {
     const origin = grip.origin;
     grip = null;
     if (note && pointsMoved(note, origin)) {
+      markStudyChanged(noteKey(currentImage(vp)));
       renderInkAll();
       remeasure(note, noteKey(currentImage(vp)), currentImage(vp));
       paintMarks();
@@ -3720,6 +4255,7 @@ function onPointerUp(event) {
     const note = findNote(move.id);
     move = null;
     if (pointsMoved(note, origin)) {
+      markStudyChanged(noteKey(currentImage(vp)));
       renderInkAll();
       if (note) remeasure(note, noteKey(currentImage(vp)), currentImage(vp));
       paintMarks();
@@ -3968,7 +4504,7 @@ function paintValue() {
 
 function requestValue(vp, point, column, row) {
   const image = currentImage(vp);
-  if (!image || !image.info.monochrome) return;
+  if (!image || !drawable(image.info)) return;
   const key = noteKey(image);
   if (valueState.key !== key || valueState.cell !== vp.cell) {
     resetValue();
@@ -4198,6 +4734,9 @@ function addNote(note, key, image) {
   const list = notes.get(key) || [];
   note.id = nextNote;
   nextNote += 1;
+  markStudyChanged(key);
+  // TID 1410 row 3. Kept when the mark moves or is recoloured.
+  if (!note.tracking) note.tracking = newUid();
   if (note.type === "text") note.size = currentSize;
   list.push(note);
   notes.set(key, list);
@@ -4558,8 +5097,13 @@ function moveNote(event) {
   if (!note || !move.originImage) return;
   const now = clientToImage(vp, event.clientX, event.clientY);
   if (!now) return;
-  const dx = now.x - move.originImage.x;
-  const dy = now.y - move.originImage.y;
+  // Lead amendment 6. The whole mark moves only as far as keeps every point
+  // inside 0 to Columns and 0 to Rows, PS3.3 Table C.18.6-1, so a saved
+  // mark always loads back.
+  const xs = move.origin.map((point) => point.x);
+  const ys = move.origin.map((point) => point.y);
+  const dx = clamp(now.x - move.originImage.x, -Math.min(...xs), vp.imageWidth - Math.max(...xs));
+  const dy = clamp(now.y - move.originImage.y, -Math.min(...ys), vp.imageHeight - Math.max(...ys));
   note.points = move.origin.map((point) => ({ x: point.x + dx, y: point.y + dy }));
   const node = vp.dom.ink.querySelector('[data-id="' + note.id + '"]');
   if (!node) return;
@@ -4593,8 +5137,8 @@ function moveGrip(event) {
   const note = findNote(grip.id);
   const now = clientToImage(vp, event.clientX, event.clientY);
   if (!note || !now || !note.points[grip.index]) return;
-  const free = note.type === "contour";
-  note.points[grip.index] = free ? now : { x: clamp(now.x, 0, vp.imageWidth), y: clamp(now.y, 0, vp.imageHeight) };
+  // Every handle, a freeform's included, stays inside the image, lead amendment 6.
+  note.points[grip.index] = { x: clamp(now.x, 0, vp.imageWidth), y: clamp(now.y, 0, vp.imageHeight) };
   const node = vp.dom.ink.querySelector('[data-id="' + note.id + '"]');
   if (node) repaintNote(vp, node, note);
   paintSelection(vp);
@@ -4690,6 +5234,7 @@ function deleteSelected() {
   const key = noteKey(currentImage(activeViewport()));
   const list = notes.get(key);
   if (!list || selected == null) return;
+  markStudyChanged(key);
   notes.set(key, list.filter((note) => note.id !== selected));
   selected = null;
   renderInkAll();
@@ -4851,6 +5396,7 @@ function commitNote() {
     // An arrow's note is optional. Clearing it keeps the arrow.
     if (edited && edited.type === "arrow") {
       edited.text = text;
+      markStudyChanged(key);
       renderInkAll();
       paintMarks();
       return;
@@ -4862,6 +5408,7 @@ function commitNote() {
     const note = findNote(editing);
     if (note) {
       note.text = text;
+      markStudyChanged(key);
       note.color = note.color || currentColor;
       note.size = note.size || currentSize;
     }
@@ -4885,6 +5432,7 @@ function toggleKey() {
   const image = currentImage(activeViewport());
   if (!image) return;
   const key = noteKey(image);
+  markStudyChanged(key);
   if (keyImages.has(key)) keyImages.delete(key);
   else keyImages.add(key);
   renderSeries();
@@ -4897,6 +5445,282 @@ function syncKey() {
   if (on === keyButtonOn) return;
   keyButtonOn = on;
   keyButton.classList.toggle("active", on);
+}
+
+// F-215. Saving and reading marks as DICOM documents. The mapping is in
+// mark-documents.mjs and the bytes come from `@ocelli/core`.
+
+/** A 2.25 UID from 128 random bits, PS3.5 B.2. */
+function newUid() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
+  return "2.25." + value.toString();
+}
+
+function loadMarksModule() {
+  if (!marksModule) {
+    marksModule = import("/mark-documents.mjs").then(
+      (module) => (module && typeof module.buildDocuments === "function" ? module : null),
+      () => null
+    );
+  }
+  return marksModule;
+}
+
+function allImages() {
+  const images = [];
+  for (const series of seriesList) for (const image of series.images) images.push(image);
+  return images;
+}
+
+function markImage(image) {
+  const info = image.info || {};
+  return {
+    key: noteKey(image),
+    sopClass: info.sopClassUid || "",
+    sopInstance: info.sopInstanceUid || "",
+    series: info.seriesUid || "",
+    study: info.studyUid || "",
+    frame: image.frame,
+    frames: image.reported,
+    columns: Number(info.columns) || 0,
+    rows: Number(info.rows) || 0,
+    patientName: info.patientName || "",
+    patientId: info.patientId || "",
+    studyDate: info.studyDate || "",
+    // The stored Study Time, not F-212's display text, which drops the fraction.
+    studyTime: info.studyTimeValue || "",
+    accession: info.accession || ""
+  };
+}
+
+function plural(count, one, many) {
+  return count + " " + (count === 1 ? one : many);
+}
+
+/** Two digits, for Content Date and Content Time. */
+function twoDigits(value) {
+  return String(value).padStart(2, "0");
+}
+
+function downloadDocument(written) {
+  const url = URL.createObjectURL(new Blob([written.bytes], { type: "application/dicom" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = written.name;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+async function saveMarks() {
+  if (!Array.from(notes.values()).some((list) => list.length) && !keyImages.size && !sessionDocuments.size && !sessionKeyStudies.size && !sessionPartialReports.size) {
+    status.textContent = "There are no marks or key images to save.";
+    return;
+  }
+  const generation = currentGeneration;
+  const module = await loadMarksModule();
+  if (generation !== currentGeneration) return;
+  // Take one synchronous snapshot after loading, so edits made while the
+  // import was pending are included and another folder is never changed.
+  const entries = [];
+  const saving = [];
+  for (const image of allImages()) {
+    const key = noteKey(image);
+    const list = notes.get(key) || [];
+    if (!list.length && !keyImages.has(key)) continue;
+    entries.push({
+      image: markImage(image),
+      marks: list.map((note) => ({ type: note.type, points: note.points, text: note.text, tracking: note.tracking, result: note.result })),
+      key: keyImages.has(key)
+    });
+    saving.push({ list, study: (image.info || {}).studyUid });
+  }
+  // One image of each study in the folder, for a study whose every mark was
+  // deleted since an earlier report, which is saved as a report of no marks.
+  const studies = {};
+  for (const image of allImages()) {
+    const study = (image.info || {}).studyUid;
+    if (study && !studies[study]) studies[study] = markImage(image);
+  }
+  const replacing = Array.from(sessionDocuments.keys()).some((study) => studies[study]);
+  // Review pass 2, D3. A study whose last key image was unflagged is counted
+  // before this return, so the status line can say why it is not saved.
+  const unflagging = Array.from(sessionKeyStudies).some((study) => studies[study]);
+  const keeping = Array.from(sessionPartialReports.keys()).some((study) => studies[study]);
+  if (!entries.length && !replacing && !unflagging && !keeping) {
+    status.textContent = "There are no marks or key images to save.";
+    return;
+  }
+  if (!module) {
+    status.textContent = SAVE_LIBRARY_MISSING;
+    return;
+  }
+  const now = new Date();
+  const built = module.buildDocuments({
+    entries,
+    predecessors: Object.fromEntries(sessionDocuments),
+    studies,
+    keyStudies: Array.from(sessionKeyStudies),
+    partialReports: Object.fromEntries(Array.from(sessionPartialReports, ([study, reports]) => [study, Array.from(reports.keys())])),
+    changed: Array.from(changedStudies),
+    contentDate: now.getFullYear() + twoDigits(now.getMonth() + 1) + twoDigits(now.getDate()),
+    contentTime: twoDigits(now.getHours()) + twoDigits(now.getMinutes()) + twoDigits(now.getSeconds())
+  });
+  const remarks = [];
+  for (const [kind, count] of Object.entries(built.unsaved)) {
+    remarks.push(plural(count, kindName(kind).toLowerCase() + " mark was", kindName(kind).toLowerCase() + " marks were") + " not saved.");
+  }
+  if (built.noUid) remarks.push(plural(built.noUid, "mark or key image is", "marks or key images are") + " on an image with no SOP Instance UID, so not saved.");
+  if (built.failed) {
+    // One document holds fewer than 4000 content items, MEASUREMENT_ITEM_LIMIT
+    // in the library, and a saved mark takes four to six.
+    status.textContent = "Nothing was saved. The " + (built.failed === "sr" ? "TID 1500 document, which holds fewer than 4000 content items for a study, about five for each mark," : "Key Object Selection") + " could not be written, and the marks are unchanged.";
+    return;
+  }
+  // Said last, after what the save replaced.
+  const kept = built.kept ? [plural(built.kept, "report placed only in part is kept, so the marks it holds come back.", "reports placed only in part are kept, so the marks they hold come back.")] : [];
+  if (built.unchanged) remarks.push(plural(built.unchanged, "study has", "studies have") + " no mark or key image changed since the folder was opened or its last save, so nothing is written for it.");
+  if (built.unflagged) remarks.push(plural(built.unflagged, "study has", "studies have") + " no key image left. That is not saved, because a Key Object Selection must name at least one image, so the earlier Key Object Selection still flags its images.");
+  if (!built.documents.length) {
+    status.textContent = ["Nothing was saved."].concat(remarks, kept).join(" ");
+    return;
+  }
+  // Every document is built before the first download starts.
+  for (const written of built.documents) {
+    downloadDocument(written);
+    if (written.kind === "sr") module.rememberReport(sessionDocuments, written.study, { ...written.reference, empty: Boolean(written.empty) });
+    else sessionKeyStudies.add(written.study);
+    changedStudies.delete(written.study);
+  }
+  // Graphic Data is FL, so the page keeps the value it wrote and a second
+  // save writes the same numbers.
+  for (const { list, study } of saving) {
+    const report = built.documents.find((written) => written.kind === "sr" && written.study === study);
+    if (!report) continue;
+    for (const note of list) {
+      if (!module.SAVED_KINDS.includes(note.type)) continue;
+      note.points = module.froundPoints(note).points;
+      note.report = report.reference.sopInstance;
+    }
+  }
+  if (built.cleared) remarks.push(plural(built.cleared, "study has", "studies have") + " no marks left, so its file holds no marks and replaces the earlier one.");
+  if (built.withoutNumber) remarks.push(plural(built.withoutNumber, "length was", "lengths were") + " saved without a number, because the image has no patient spacing or the length was not measured.");
+  status.textContent = ["Saved " + plural(built.saved.marks, "mark", "marks") + " and " + plural(built.saved.keyImages, "key image", "key images") + " in " + plural(built.documents.length, "file.", "files.")].concat(remarks, kept).join(" ");
+}
+
+/** Mark the study of the image whose note key is `key` as changed. */
+function markStudyChanged(key) {
+  for (const image of allImages()) {
+    if (noteKey(image) !== key) continue;
+    const study = (image.info || {}).studyUid;
+    if (study) changedStudies.add(study);
+    return;
+  }
+}
+
+/**
+ * Read documents onto the open study. `files` are `File`s. Every item of
+ * one read is applied together, and a read for a folder the page has left
+ * applies nothing.
+ */
+async function readDocuments(files, generation, before) {
+  const module = await loadMarksModule();
+  if (generation !== currentGeneration) return;
+  const lead = before ? before + " " : "";
+  if (!module) {
+    status.textContent = lead + plural(files.length, "document was", "documents were") + " not read. " + READ_LIBRARY_MISSING;
+    return;
+  }
+  const documents = [];
+  let unreadable = 0;
+  for (const file of files) {
+    let bytes;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      unreadable += 1;
+      continue;
+    }
+    if (generation !== currentGeneration) return;
+    const read = module.readDocument(file.name, bytes);
+    if (read) documents.push(read);
+    else unreadable += 1;
+  }
+  const images = allImages();
+  const byKey = new Map(images.map((image) => [noteKey(image), image]));
+  // A later report replaces its predecessor's loaded marks before the
+  // tracking-identifier deduplication. Unrelated drawings have no report.
+  const replaced = new Set(sessionReplaced);
+  for (const document of documents) {
+    if (document.kind === "sr") for (const uid of document.predecessors) replaced.add(uid);
+  }
+  for (const [key, list] of notes) {
+    const kept = list.filter((note) => !note.report || !replaced.has(note.report));
+    if (list.some((note) => note.id === selected && !kept.includes(note))) selected = null;
+    notes.set(key, kept);
+  }
+  const shown = new Set();
+  for (const list of notes.values()) for (const note of list) if (note.tracking) shown.add(note.tracking);
+  const placed = module.placeDocuments(documents, images.map(markImage), shown, sessionReplaced);
+  module.stableTracking(sessionTracking, placed, newUid);
+  placed.marks = placed.marks.filter(({ mark }) => {
+    if (shown.has(mark.tracking)) {
+      placed.repeated += 1;
+      return false;
+    }
+    shown.add(mark.tracking);
+    return true;
+  });
+  for (const { key, mark, report } of placed.marks) {
+    const image = byKey.get(key);
+    const list = notes.get(key) || [];
+    const tracking = mark.tracking;
+    const note = {
+      type: mark.type,
+      points: mark.points.map((point) => ({ x: point.x, y: point.y })),
+      color: INKS[0],
+      tracking,
+      report,
+      id: nextNote
+    };
+    nextNote += 1;
+    if (mark.type === "text") {
+      note.text = mark.text;
+      note.size = 15;
+    }
+    list.push(note);
+    notes.set(key, list);
+    if (image) remeasure(note, key, image);
+  }
+  for (const key of placed.keys) keyImages.add(key);
+  for (const { study, reference, empty } of placed.predecessors) {
+    module.rememberReport(sessionDocuments, study, { ...reference, empty });
+  }
+  // A partial report a later document replaced is still named next time,
+  // review pass 7, D1.
+  for (const { study, reference } of module.notePartialReports(sessionPartialReports, placed, sessionReplaced)) {
+    module.rememberReport(sessionDocuments, study, { ...reference, empty: false });
+  }
+  for (const study of placed.hidden) changedStudies.add(study);
+  for (const read of documents) if (read.kind === "ko") sessionKeyStudies.add(read.study);
+  renderInkAll();
+  paintMarks();
+  renderSeries();
+  syncKey();
+  const parts = ["Read " + plural(documents.length, "document", "documents") + ": " + plural(placed.marks.length, "mark", "marks") + " and " + plural(placed.keys.length, "key image", "key images") + " placed."];
+  for (const [reason, count] of Object.entries(placed.unplaced)) {
+    parts.push(plural(count, "item", "items") + " " + (UNPLACED_TEXT[reason] || reason) + " " + (count === 1 ? "was" : "were") + " not placed.");
+  }
+  if (placed.repeated) parts.push(plural(placed.repeated, "mark was", "marks were") + " already shown.");
+  if (placed.replaced.length) parts.push("Replaced by a later document: " + placed.replaced.join(", ") + ".");
+  if (placed.keyObjects.length) parts.push("Key images from " + placed.keyObjects.join(", ") + ".");
+  if (unreadable) parts.push(plural(unreadable, "file is", "files are") + " not a document this viewer reads.");
+  status.textContent = lead + parts.join(" ");
 }
 
 function onKey(event) {
@@ -4991,7 +5815,7 @@ function zoomCentre(vp, factor) {
 function typingTarget(event) {
   const node = event.target;
   if (!node || !node.tagName) return false;
-  if (node.tagName === "TEXTAREA") return true;
+  if (node.tagName === "TEXTAREA" || node.tagName === "SELECT") return true;
   if (node.tagName !== "INPUT") return false;
   const type = String(node.type || "text").toLowerCase();
   return type === "text" || type === "search";
@@ -5010,12 +5834,23 @@ function startPlay() {
   playButton.setAttribute("aria-label", "Pause");
   playButton.classList.add("active");
   const token = ++playToken;
+  playLate = false;
+  syncCineLine();
   const loop = async () => {
     while (playing && token === playToken) {
       const started = performance.now();
       await showIndex(vp, vp.viewIndex + 1);
-      const fps = Number(fpsInput.value) || 10;
-      const remain = 1000 / fps - (performance.now() - started);
+      // The wait before the next image is the interval to it. A step that
+      // took longer is not skipped, so play can run slower than the file asks,
+      // and no image is dropped to keep the rate.
+      const interval = stepInterval(currentImage(vp), upcomingImage(vp));
+      const spent = performance.now() - started;
+      const late = fileInterval(currentImage(vp), upcomingImage(vp)) !== null && spent > interval;
+      if (late !== playLate && token === playToken) {
+        playLate = late;
+        syncCineLine();
+      }
+      const remain = interval - spent;
       if (remain > 0) await delay(remain);
     }
   };
@@ -5028,6 +5863,78 @@ function stopPlay() {
   playButton.innerHTML = ICON_PLAY;
   playButton.setAttribute("aria-label", "Play");
   playButton.classList.remove("active");
+  playLate = false;
+  syncCineLine();
+}
+
+function upcomingImage(vp) {
+  const series = seriesOf(vp);
+  if (!series || !series.images.length) return null;
+  return series.images[(vp.viewIndex + 1) % series.images.length];
+}
+
+// The file's interval in milliseconds from `from` to `to`, or null. PS3.3
+// C.7.6.5.1.1 gives Frame Time as the interval between frames of one
+// multi-frame object, so a step to another file, or any step while "Use the
+// slider" is on, has none.
+function fileInterval(from, to) {
+  if (useSlider || !sameFileNext(from, to)) return null;
+  const info = from.info;
+  if (!info || info.cine !== "frame-time") return null;
+  const ms = Number(info.frameTimeMs);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
+// Whether `to` is another frame of the file `from` shows, which is the only
+// step a file's Frame Time can time. A file listed as one image has none.
+function sameFileNext(from, to) {
+  return Boolean(from && to && from !== to && from.file === to.file);
+}
+
+// The wait between two images in milliseconds. The file's Frame Time comes
+// first and the slider otherwise.
+function stepInterval(from, to) {
+  const fromFile = fileInterval(from, to);
+  if (fromFile !== null) return fromFile;
+  return 1000 / (Number(fpsInput.value) || 10);
+}
+
+// The line beside the slider names where the rate of the outlined viewport's
+// image comes from. The slider is disabled while the file's Frame Time is in
+// use, and "Use the slider" is offered only then.
+function cineText(image, next) {
+  const info = image ? image.info : null;
+  if (!info) return "";
+  const cine = info.cine;
+  const ms = Number(info.frameTimeMs);
+  if (cine === "frame-time" && Number.isFinite(ms) && ms > 0) {
+    if (!sameFileNext(image, next)) return "Frame Time applies between frames of one file. The rate is the slider.";
+    const head = "Frame Time " + ms + " ms, " + (1000 / ms).toFixed(1).replace(/\.0$/, "") + " per second, from the file";
+    if (useSlider) return head + ". The rate is the slider.";
+    return playing && playLate ? head + ". Playing slower than the file asks." : head;
+  }
+  if (cine === "vector") return "This file gives a Frame Time Vector, which this page does not play. The rate is the slider.";
+  if (cine === "rate") return "This file gives a frame rate and no Frame Time. The rate is the slider.";
+  if (cine === "unusable") return "The cine timing in this file is not usable. The rate is the slider.";
+  if (cine === "unreadable") return "This page could not read the frames of this file. The rate is the slider.";
+  return "This file gives no Frame Time. The rate is the slider.";
+}
+
+function syncCineLine() {
+  const vp = activeViewport();
+  const image = currentImage(vp);
+  const next = upcomingImage(vp);
+  const offered = Boolean(sameFileNext(image, next) && image.info && image.info.cine === "frame-time" && Number(image.info.frameTimeMs) > 0);
+  const text = cineText(image, next);
+  const shown = text + "\0" + offered + "\0" + useSlider;
+  if (shown === cineShown) return;
+  cineShown = shown;
+  cineLine.textContent = text;
+  cineLine.title = text;
+  useSliderButton.hidden = !offered;
+  useSliderButton.classList.toggle("active", useSlider);
+  useSliderButton.setAttribute("aria-pressed", useSlider ? "true" : "false");
+  fpsInput.disabled = offered && !useSlider;
 }
 
 function delay(ms) {
@@ -5050,6 +5957,11 @@ async function openHeaders() {
   filter.value = "";
   headerRows = [];
   headerRowsEl.replaceChildren();
+  // The sheet asks at once rather than after the delay, because opening it
+  // is a request for exactly this file.
+  checks.sheet = file;
+  paintChecks();
+  checksNow(file);
   let response;
   try {
     response = await postHeaders(file);
@@ -5114,6 +6026,227 @@ function paintHeaderRows() {
 function closeModal() {
   modal.hidden = true;
   headerToken += 1;
+  checks.sheet = null;
+}
+
+// F-225. The file the badge is for changed, or `null` when the active
+// viewport shows nothing drawn. A file with no report yet is asked for after
+// CHECKS_DELAY_MS, if it is still the one shown.
+function checksShown(file) {
+  if (file === checks.shown) return;
+  checks.shown = file;
+  checks.due = null;
+  checks.token += 1;
+  clearTimeout(checks.timer);
+  syncChecksBadge();
+  if (!file || checks.reports.has(file)) return;
+  const token = checks.token;
+  checks.timer = setTimeout(() => checksDue(token), CHECKS_DELAY_MS);
+}
+
+function checksDue(token) {
+  if (token !== checks.token) return;
+  // Never beside a folder read or a thumbnail run. Ask again a delay later.
+  if (filePostsOpen > 0 || thumbRuns > 0) {
+    checks.timer = setTimeout(() => checksDue(token), CHECKS_DELAY_MS);
+    return;
+  }
+  checks.due = checks.shown;
+  pumpChecks();
+}
+
+// The open sheet's file, asked for now.
+function checksNow(file) {
+  if (checks.reports.has(file)) return;
+  if (file !== checks.shown) checksShown(file);
+  clearTimeout(checks.timer);
+  checks.due = file;
+  pumpChecks();
+}
+
+// A new open. Nothing of the last open's reports is kept, and a reply still
+// in flight is dropped by the generation check in `pumpChecks`.
+function resetChecks() {
+  checks.reports.clear();
+  checks.shown = null;
+  checks.due = null;
+  checks.token += 1;
+  checks.sheet = null;
+  clearTimeout(checks.timer);
+  syncChecksBadge();
+}
+
+// One request at a time. After each reply the loop reads `due` again, so a
+// file whose delay passed while a request was out is asked for next.
+async function pumpChecks() {
+  if (checks.busy) return;
+  checks.busy = true;
+  try {
+    for (;;) {
+      const file = checks.due;
+      if (!file || checks.reports.has(file)) break;
+      const generation = currentGeneration;
+      const entry = await fetchChecks(file);
+      // A null entry from an attempt the page has left must not end the
+      // loop, or the new open's due waits with no timer to restart it. A
+      // null entry for this generation still ends the attempt.
+      if (!entry) {
+        if (generation !== currentGeneration) continue;
+        break;
+      }
+      // A reply for an open the page has left is dropped, and the loop reads
+      // `due` again, because the new open's request may have come due while
+      // this one was out and found the loop busy.
+      if (generation !== currentGeneration) continue;
+      // A report is a function of the file's bytes alone, so one that arrives
+      // after its file stopped being shown is kept for when it is shown again.
+      if (checks.reports.size >= CHECKS_CAP) checks.reports.delete(checks.reports.keys().next().value);
+      checks.reports.set(file, entry);
+      if (checks.due === file) checks.due = null;
+      if (file === checks.shown) syncChecksBadge();
+      if (file === checks.sheet && !modal.hidden) paintChecks();
+    }
+  } finally {
+    checks.busy = false;
+  }
+}
+
+function sendChecks(file, id) {
+  if (id) {
+    return fetch("/conformance", {
+      method: "POST",
+      headers: { "X-Ocelli-File": id },
+      body: new Uint8Array(0)
+    });
+  }
+  return fetch("/conformance", { method: "POST", body: file });
+}
+
+// `{ report }`, `{ error }`, or `null` when the open was left. Every refusal
+// and failed request reads as CHECKS_UNREAD, and the headers table beside it
+// is not touched.
+//
+// A 410 sends the same request once more with the file as its body, and does
+// not post the file again. The process lets a file's encoded bytes go once
+// every frame of it is held, so the id of a file already drawn usually
+// answers 410. Posting it again would give it a new id whose frames are not
+// held, and the next window change on it would decode again. The body form
+// holds nothing. A second refusal is an error, not another try.
+async function fetchChecks(file) {
+  const core = await loadLibrary();
+  if (!core || typeof core.readConformanceReport !== "function") {
+    let built = false;
+    try {
+      built = (await fetch("/lib/ocelli-core/index.js", { method: "GET" })).ok;
+    } catch {}
+    return { error: built ? CHECKS_DCMJS_MISSING : CHECKS_LIBRARY_MISSING };
+  }
+  let response;
+  try {
+    const id = await ensureFile(file);
+    response = await sendChecks(file, id);
+    if (response.status === 410 && id) response = await sendChecks(file, "");
+  } catch (error) {
+    if (error && error.name === "AbortError") return null;
+    return { error: CHECKS_UNREAD };
+  }
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    return { error: CHECKS_UNREAD };
+  }
+  if (!response.ok) return { error: CHECKS_UNREAD };
+  const read = core.readConformanceReport(text);
+  return read.ok ? { report: read.report } : { error: CHECKS_UNREAD };
+}
+
+// Hidden until a report arrives for the shown file, and while it has no
+// finding.
+function syncChecksBadge() {
+  const entry = checks.shown ? checks.reports.get(checks.shown) : null;
+  const count = entry && entry.report ? entry.report.findings.length : 0;
+  const text = count > 999 ? "999+" : String(count);
+  if (headersBadge.textContent !== text) headersBadge.textContent = text;
+  if (headersBadge.hidden !== !(count > 0)) headersBadge.hidden = !(count > 0);
+}
+
+const CHARACTER_CLASS_TEXT = {
+  control: "a control character",
+  backslash: "a backslash",
+  "outside-repertoire": "outside the repertoire of the VR",
+  "non-default": "outside the default repertoire"
+};
+
+function measureText(measure) {
+  if (!measure) return "";
+  if (measure.unit === "bytes") return measure.measured + " bytes, limit " + measure.limit;
+  if (measure.unit === "characters") return measure.measured + " characters, limit " + measure.limit;
+  if (measure.unit === "values") {
+    const allowed = measure.maximum === null
+      ? measure.minimum + " or more"
+      : measure.minimum === measure.maximum
+        ? String(measure.minimum)
+        : measure.minimum + " to " + measure.maximum;
+    return measure.measured + " values, allowed " + allowed;
+  }
+  return "character at index " + measure.index + ", " + (CHARACTER_CLASS_TEXT[measure.class] || measure.class);
+}
+
+function findingDetail(finding) {
+  const parts = [];
+  for (const step of finding.path) parts.push("in " + step.sequence + " item " + step.item);
+  if (finding.value !== null) parts.push("value " + finding.value);
+  const measured = measureText(finding.measure);
+  if (measured) parts.push(measured);
+  return parts.join(", ");
+}
+
+function modulesText(modules) {
+  if (modules.evaluated) {
+    return modules.iod + ", " + modules.table + ". Presence checked for " + modules.modules.join(", ")
+      + ". Not checked: " + modules.notChecked.join(", ") + ".";
+  }
+  if (modules.sopClass) return "Presence not checked, because this report does not cover SOP class " + modules.sopClass + ". Value rules ran.";
+  if (modules.sopClassNote) return "Presence not checked, because the SOP Class UID is " + modules.sopClassNote + ". Value rules ran.";
+  return "Presence not checked for this SOP class. Value rules ran.";
+}
+
+// The Checks section of the open sheet, for `checks.sheet`. The scope
+// sentence is the report's own, which `readConformanceReport` refuses to
+// accept unless it is the catalogue sentence exactly.
+function paintChecks() {
+  const entry = checks.sheet ? checks.reports.get(checks.sheet) : null;
+  checksRows.replaceChildren();
+  checksWrap.hidden = true;
+  checksScope.textContent = "";
+  checksModules.textContent = "";
+  if (!entry) {
+    checksMessage.textContent = "Checking.";
+    return;
+  }
+  if (!entry.report) {
+    checksMessage.textContent = entry.error || CHECKS_UNREAD;
+    return;
+  }
+  const report = entry.report;
+  checksScope.textContent = report.scope;
+  checksModules.textContent = modulesText(report.modules);
+  const un = report.counts.notCheckedUn;
+  const count = report.findings.length;
+  checksMessage.textContent = (count === 0 ? "No finding for the listed rules." : count + (count === 1 ? " finding." : " findings."))
+    + (un > 0 ? " " + un + (un === 1 ? " element is" : " elements are") + " encoded as UN and not checked." : "");
+  if (count === 0) return;
+  for (const finding of report.findings) {
+    const row = document.createElement("tr");
+    for (const field of [finding.tag, finding.keyword || "", finding.rule, finding.section, findingDetail(finding)]) {
+      const cell = document.createElement("td");
+      cell.textContent = field;
+      row.append(cell);
+    }
+    checksRows.append(row);
+  }
+  checksWrap.hidden = false;
 }
 
 function currentWindowText(vp, field) {
@@ -5131,6 +6264,8 @@ function dragWindow(vp) {
   if (vp.draftWindow) return { center: vp.draftWindow.center, width: vp.draftWindow.width, fn: vp.draftWindow.fn };
   if (vp.shownWindow) return { center: vp.shownWindow.center, width: vp.shownWindow.width, fn: vp.shownWindow.fn };
   if (vp.overrideWindow) return { center: vp.overrideWindow.center, width: vp.overrideWindow.width, fn: vp.overrideWindow.fn };
+  const image = currentImage(vp);
+  if (image && image.info.colour) return { center: 128, width: 256, fn: "LINEAR" };
   return {
     center: Number(currentWindowText(vp, "windowCenter")) || 0,
     width: Number(currentWindowText(vp, "windowWidth")) || 1,
@@ -5358,6 +6493,10 @@ function syncActiveOutline() {
 
 function syncControls() {
   const vp = activeViewport();
+  // Another active viewport shows the report of the file it has drawn, and
+  // one that has not drawn its current file shows none until it does.
+  const shownImage = currentImage(vp);
+  checksShown(shownImage && shownImage.file === vp.paintedFile ? shownImage.file : null);
   document.getElementById("invert").classList.toggle("active", vp.invert);
   document.getElementById("flip-h").classList.toggle("active", vp.flipH);
   document.getElementById("flip-v").classList.toggle("active", vp.flipV);
@@ -5370,6 +6509,7 @@ function syncControls() {
     scrubber.max = "0";
     scrubber.value = "0";
     scrubber.disabled = true;
+    syncCineLine();
   }
   marksSig = "";
   keyButtonOn = null;
@@ -5577,7 +6717,7 @@ function clearAllLines() {
 function copyWindow(source) {
   if (!links.window || source.cell !== activeCell) return;
   const image = currentImage(source);
-  if (!image || !image.info.monochrome) return;
+  if (!image || !drawable(image.info)) return;
   const win = source.overrideWindow;
   const preset = win ? null : source.activePreset;
   // The file window index travels too. A target reads it against its own
@@ -5586,7 +6726,7 @@ function copyWindow(source) {
   for (const vp of shownViewports()) {
     if (vp === source) continue;
     const target = currentImage(vp);
-    if (!target || !target.info.monochrome) continue;
+    if (!target || !drawable(target.info) || Boolean(target.info.colour) !== Boolean(image.info.colour)) continue;
     // A preset goes only where the local process offers it.
     if (preset && !presetOffered(target, preset)) continue;
     vp.overrideWindow = win ? { center: win.center, width: win.width, fn: win.fn, from: win.from } : null;

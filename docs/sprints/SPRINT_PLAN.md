@@ -5,9 +5,9 @@ one goal, not a fixed calendar box. The sprint clock starts at the first
 `/start-feature` of that sprint.
 
 **Phase 1 is S01 to S44**, 118 stories and 397 engineer-weeks, feature parity
-with cornerstone3D. **S45 is further Phase 1**, the local folder viewer, and
-it is outside that imported total. **Phase 1.5 is S46 to S76**, 39 stories
-and 352 engineer-weeks, the eight differentiating capabilities of HLD Part
+with cornerstone3D. **S45 to S50 extend Phase 1** with the local and single showcase viewer.
+They are outside that imported total. **Phase 1.5 starts with S46 and
+continues in S51 to S80**, 39 stories and 352 engineer-weeks, the eight differentiating capabilities of HLD Part
 III. Phase 2 and Phase 3 carry F-IDs in `BACKLOG.md` and no sprint,
 deliberately.
 
@@ -21,9 +21,10 @@ the HLD's v5.8.9, which does not exist, and that is deviation **D-11**.
 ## How sprints were allocated
 
 Stories were initially packed into sprints inside a milestone under two caps,
-at most six stories and at most sixteen estimated engineer-weeks. The tracked
-allocation never places a story in a sprint at or before the sprint holding
-something it depends on.
+at most six stories and at most sixteen estimated engineer-weeks. The current showcase waves allow a dependency earlier within the same
+sprint only when it is completed before its consumer starts, as
+`/start-feature` requires. Source review alone does not meet that prerequisite.
+A later sprint dependency is never a scheduling shortcut.
 
 **Some sprints hold one story and that is not a packing failure.** It is the
 head or the tail of a dependency chain. S06 holds only F-016, because every
@@ -69,8 +70,9 @@ capacity claim follows from it.
 ## What re-planning looks like
 
 Phase 1.5 sizing is provisional by the HLD's own statement, 352 engineer-weeks
-"to be re-estimated once Phase 1 evidence exists". Do not treat S46 onward as
-committed.
+"to be re-estimated once Phase 1 evidence exists". The operator authorized the showcase completion waves S47 to S50 on
+2026-11-08, deferring later scheduled work by four sprints. These are ordered
+work packages, not measured-capacity or calendar completion promises.
 
 The six Appendix A spike gates each carry the authority to stop or reshape the
 programme. They are not backlog stories, they are questions, and `/spike`
@@ -99,6 +101,33 @@ other sentence in this file**, all of which is hand-curated prose.
 | SR as the native annotation type | F-094 | E15.1 | S35 | 4w |
 | `ocelli-compute` crate exists | F-008 | E1.8 | S02 | 2w |
 | Stable render hashes from the oracle | F-015 | E2.7 | S04 | 2w |
+
+## Single showcase delivery, S47 to S50
+
+All user-facing features are delivered in one viewer. A separate example,
+a code snippet or a library-only panel is not acceptance of a viewer feature.
+A capability unavailable on a declared tier remains explicitly unavailable,
+including CPU volume rays under D-07 and F-X005. Later AI, whole-slide,
+streaming and other scheduled stories must include their viewer workflow,
+feature-matrix row and browser evidence as part of their own completion.
+
+F-202 to F-205 retain their identities with explicit narrower ownership.
+F-245 to F-265 carry the remaining bounded slices. The current S46 story
+closure is unchanged. F-235, F-237, F-238 and F-241 remain S47 and F-242
+remains S48. Other stories previously scheduled S47 onward move four sprints,
+without changing their estimates or dependency order. The pending close
+backlog drafts were never filed and must start at F-266 instead.
+
+The wave estimates below are sums of provisional lead engineering estimates.
+They are not a team-size claim, observed velocity or calendar duration. The
+canonical plans remain drafts for the normal pre-implementation design round.
+
+| Wave | Concrete deliverable | Stories | Estimated engineer-weeks |
+|------|----------------------|---------|--------------------------|
+| S47 | One viewer, worker decode, one to one and shared preferences, with the existing video and VOI work | 8 | 32 |
+| S48 | Metadata, histogram, overlays, interpolation, remaining stack tools and ECG, with MPEG-2 | 8 | 36 |
+| S49 | MPR, cursor, slab, fusion and segmentation workflows | 7 | 31 |
+| S50 | Volume controls, priors, documents/GSPS read/apply, safe JPEG XL recompression, browser conformance and the complete feature gate | 7 | 30 |
 
 ## Goals per sprint
 
@@ -652,10 +681,11 @@ The local folder viewer opens a synthetic study or a folder, and the page shows 
 
 _S45 to S48, 38 stories, 135 engineer-weeks._
 
-F-208 to F-221, F-223 to F-234, F-236, F-239, F-240, F-243 and F-244 run in S46 beside F-119, and
-F-235, F-237, F-238 and F-241 run in S47 beside F-120, and F-242 runs in S48 beside F-121 and F-122. Their rows are in the S46, S47 and S48 tables under
-M14. The generator writes each milestone heading once, before its first
-sprint, and S46 is M14's first.
+F-208 to F-221, F-223 to F-234, F-236, F-239, F-240, F-243 and F-244
+run in S46 beside F-119. Their rows appear in S46 under M14, whose first
+sprint is S46. F-235, F-237, F-238 and F-241 remain S47, and F-242 remains
+S48. Those exception rows appear under M21 beside the new showcase work.
+The generator writes each milestone heading once, before its first sprint.
 
 #### Sprint S45
 
@@ -670,7 +700,7 @@ sprint, and S46 is M14's first.
 
 Bounded GPU residency on unbounded data. The first of the three checkable claims in HLD C.7.
 
-_S46 to S49, 7 stories, 50 engineer-weeks._
+_S46 to S53, 7 stories, 50 engineer-weeks._
 
 #### Sprint S46
 
@@ -712,29 +742,88 @@ _S46 to S49, 7 stories, 50 engineer-weeks._
 | F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w |
 | F-244 | E3.10 | Encapsulated Pixel Data with an empty Basic Offset Table opens per PS3.5 A.4: dicom-object 0.10.0 vendored with its collector patched so the zero-length first Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence, for every encapsulated syntax the registry decodes, single-frame and multi-frame, with frames that span Fragments delimited by their codestream start and end markers where A.4 lets a frame span Fragments, a present Extended Offset Table applied through EncapsulatedFrameIndex::from_extended, and an empty-table corpus row per decodable syntax | Rust | 2w |
 
+### M21, One showcase viewer and usable feature completion
+
+One viewer exposes every developed user-facing library feature through real workflows, with explicit tier limits and measured or source-qualified cornerstone3D parity. S47 to S50 are the next four implementation waves, not a measured calendar forecast.
+
+_S47 to S50, 25 stories, 104 engineer-weeks._
+
 #### Sprint S47
 
-**Goal**: Frustum and LOD chunk selection, VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today, The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place, Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate, DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name.
+**Goal**: Worker decode and owned frame render in the single showcase viewer, One stored pixel per device pixel in the single showcase viewer, Validated shared preferences in the single showcase viewer, VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today, The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place, Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate, DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name, One showcase viewer for local, DICOMweb and future user-facing workflows.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
-| F-120 | E30.2 | Frustum and LOD chunk selection | Rust | 8w |
+| F-202 | E38.12 | Worker decode and owned frame render in the single showcase viewer | All | 6w |
+| F-204 | E38.14 | One stored pixel per device pixel in the single showcase viewer | All | 2w |
+| F-205 | E38.15 | Validated shared preferences in the single showcase viewer | All | 3w |
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today | Rust | 2w |
 | F-237 | E19.6 | The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place | Build | 1w |
 | F-238 | E19.7 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | Build | 2w |
 | F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name | All | 12w |
+| F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w |
 
 #### Sprint S48
 
-**Goal**: Adaptive per-LOD sample count with opacity correction, Residency budget, prefetch and eviction policy, MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name.
+**Goal**: MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name, Nearest and linear display interpolation controls in the showcase, DICOM overlay planes and display shutters drawn in the showcase, Image and region histograms in the showcase, Searchable recursive metadata browser in the showcase, Metadata comparison and copy in the showcase, Remaining annotation and manipulation tools in the showcase, Bounded ECG waveform reading and display in the single showcase viewer.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-242 | E4.12 | MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name | All | 8w |
+| F-246 | E38.41 | Nearest and linear display interpolation controls in the showcase | All | 3w |
+| F-247 | E38.42 | DICOM overlay planes and display shutters drawn in the showcase | All | 4w |
+| F-248 | E38.43 | Image and region histograms in the showcase | All | 3w |
+| F-249 | E38.44 | Searchable recursive metadata browser in the showcase | All | 4w |
+| F-250 | E38.45 | Metadata comparison and copy in the showcase | All | 2w |
+| F-263 | E38.58 | Remaining annotation and manipulation tools in the showcase | All | 6w |
+| F-265 | E38.60 | Bounded ECG waveform reading and display in the single showcase viewer | All | 6w |
+
+#### Sprint S49
+
+**Goal**: Orthographic and oblique MPR in the single showcase viewer, Labelmap, contour and surface segmentation displays in the showcase, Patient-space linked cursor in the showcase, MIP, MinIP and average slab controls in the showcase, Patient-space multi-volume fusion in the showcase, Fractional between-slice stack sampling in the showcase, Segmentation editing and DICOM interchange in the showcase.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-203 | E38.13 | Orthographic and oblique MPR in the single showcase viewer | All | 6w |
+| F-251 | E38.46 | Labelmap, contour and surface segmentation displays in the showcase | All | 5w |
+| F-252 | E38.47 | Patient-space linked cursor in the showcase | All | 3w |
+| F-253 | E38.48 | MIP, MinIP and average slab controls in the showcase | All | 4w |
+| F-254 | E38.49 | Patient-space multi-volume fusion in the showcase | All | 5w |
+| F-261 | E38.56 | Fractional between-slice stack sampling in the showcase | All | 3w |
+| F-264 | E38.59 | Segmentation editing and DICOM interchange in the showcase | All | 5w |
+
+#### Sprint S50
+
+**Goal**: Actual 3D volume viewport in the showcase, Volume transfer functions, shading and clipping in the showcase, Prior-study search and side-by-side reading in the showcase, Rendered exports, document workflows and planned GSPS read/apply in the showcase, Safe JPEG XL JPEG Recompression decoding and showcase workflow, Browser-owned DICOM conformance checks in the showcase, One-viewer feature inventory, parity matrix and standing workflow gate.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-255 | E38.50 | Actual 3D volume viewport in the showcase | All | 6w |
+| F-256 | E38.51 | Volume transfer functions, shading and clipping in the showcase | All | 3w |
+| F-257 | E38.52 | Prior-study search and side-by-side reading in the showcase | All | 4w |
+| F-258 | E38.53 | Rendered exports, document workflows and planned GSPS read/apply in the showcase | All | 5w |
+| F-259 | E38.54 | Safe JPEG XL JPEG Recompression decoding and showcase workflow | All | 5w |
+| F-260 | E38.55 | Browser-owned DICOM conformance checks in the showcase | All | 4w |
+| F-262 | E38.57 | One-viewer feature inventory, parity matrix and standing workflow gate | All | 3w |
+
+#### Sprint S51
+
+**Goal**: Frustum and LOD chunk selection.
+
+| F-ID | Epic ref | Story | Layer | Est |
+|------|----------|-------|-------|-----|
+| F-120 | E30.2 | Frustum and LOD chunk selection | Rust | 8w |
+
+#### Sprint S52
+
+**Goal**: Adaptive per-LOD sample count with opacity correction, Residency budget, prefetch and eviction policy.
 
 | F-ID | Epic ref | Story | Layer | Est |
 |------|----------|-------|-------|-----|
 | F-121 | E30.3 | Adaptive per-LOD sample count with opacity correction | Rust | 8w |
 | F-122 | E30.4 | Residency budget, prefetch and eviction policy | Rust | 8w |
-| F-242 | E4.12 | MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name | All | 8w |
 
-#### Sprint S49
+#### Sprint S53
 
 **Goal**: Chunk-cost indicator surface, 4D and time-series as a first-class chunked axis.
 
@@ -747,9 +836,9 @@ _S46 to S49, 7 stories, 50 engineer-weeks._
 
 Kernels sharing the renderer's device, every tier-A kernel carrying a declared fallback.
 
-_S50 to S55, 7 stories, 68 engineer-weeks._
+_S54 to S59, 7 stories, 68 engineer-weeks._
 
-#### Sprint S50
+#### Sprint S54
 
 **Goal**: ocelli-compute: dispatch, buffer pools, device sharing with the renderer.
 
@@ -757,7 +846,7 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-125 | E31.1 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w |
 
-#### Sprint S51
+#### Sprint S55
 
 **Goal**: Region growing and interactive segmentation kernels.
 
@@ -765,7 +854,7 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-126 | E31.2 | Region growing and interactive segmentation kernels | Rust | 12w |
 
-#### Sprint S52
+#### Sprint S56
 
 **Goal**: Filtering: denoise, smooth, sharpen, gradient.
 
@@ -773,7 +862,7 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-127 | E31.3 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w |
 
-#### Sprint S53
+#### Sprint S57
 
 **Goal**: Per-frame histogram and ROI statistics on GPU, Tier-B fallback path for every kernel.
 
@@ -782,7 +871,7 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 | F-128 | E31.4 | Per-frame histogram and ROI statistics on GPU | Rust | 8w |
 | F-131 | E31.7 | Tier-B fallback path for every kernel | Rust | 8w |
 
-#### Sprint S54
+#### Sprint S58
 
 **Goal**: Full-resolution MPR and oblique resampling on compute.
 
@@ -790,7 +879,7 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-129 | E31.5 | Full-resolution MPR and oblique resampling on compute | Rust | 10w |
 
-#### Sprint S55
+#### Sprint S59
 
 **Goal**: Registration refinement kernels.
 
@@ -802,9 +891,9 @@ _S50 to S55, 7 stories, 68 engineer-weeks._
 
 SAM2-class prompting against GPU-resident tensors, and GSPS write with coded concepts.
 
-_S56 to S60, 8 stories, 57 engineer-weeks._
+_S60 to S64, 8 stories, 57 engineer-weeks._
 
-#### Sprint S56
+#### Sprint S60
 
 **Goal**: ONNX Runtime Web on WebGPU with GPU-resident tensors, GSPS write.
 
@@ -813,7 +902,7 @@ _S56 to S60, 8 stories, 57 engineer-weeks._
 | F-132 | E32.1 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w |
 | F-139 | E34.1 | GSPS write | Rust | 6w |
 
-#### Sprint S57
+#### Sprint S61
 
 **Goal**: Zero-copy bridge from volume textures to model input, SNOMED CT and UCUM coded concept library.
 
@@ -822,7 +911,7 @@ _S56 to S60, 8 stories, 57 engineer-weeks._
 | F-133 | E32.2 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w |
 | F-140 | E34.2 | SNOMED CT and UCUM coded concept library | Rust | 6w |
 
-#### Sprint S58
+#### Sprint S62
 
 **Goal**: Prompt surface: point, box, and 3D propagation, Bulk annotations tier for very large object counts.
 
@@ -831,7 +920,7 @@ _S56 to S60, 8 stories, 57 engineer-weeks._
 | F-134 | E32.3 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w |
 | F-141 | E34.3 | Bulk annotations tier for very large object counts | Rust | 8w |
 
-#### Sprint S59
+#### Sprint S63
 
 **Goal**: Annotation provenance: tool, version, algorithm, operator.
 
@@ -839,7 +928,7 @@ _S56 to S60, 8 stories, 57 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-142 | E34.4 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w |
 
-#### Sprint S60
+#### Sprint S64
 
 **Goal**: Result to DICOM SEG with model and prompt provenance.
 
@@ -851,9 +940,9 @@ _S56 to S60, 8 stories, 57 engineer-weeks._
 
 Real multi-monitor, a published divergence bound, and a CRDT over state that is already a serialisable struct.
 
-_S61 to S69, 11 stories, 104 engineer-weeks._
+_S65 to S73, 11 stories, 104 engineer-weeks._
 
-#### Sprint S61
+#### Sprint S65
 
 **Goal**: Window Management API: enumeration, placement, persistence, Render attestation: presentation state plus output hash.
 
@@ -862,7 +951,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 | F-136 | E33.1 | Window Management API: enumeration, placement, persistence | TS | 8w |
 | F-151 | E36.2 | Render attestation: presentation state plus output hash | Rust | 8w |
 
-#### Sprint S62
+#### Sprint S66
 
 **Goal**: Multi-window session state sync across displays, Per-display calibration probe and DICOM Part 14 reporting.
 
@@ -871,7 +960,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 | F-137 | E33.2 | Multi-window session state sync across displays | TS | 7w |
 | F-138 | E33.3 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w |
 
-#### Sprint S63
+#### Sprint S67
 
 **Goal**: Deterministic pipeline audit: pin every source of variance.
 
@@ -879,7 +968,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-150 | E36.1 | Deterministic pipeline audit: pin every source of variance | Rust | 10w |
 
-#### Sprint S64
+#### Sprint S68
 
 **Goal**: Cross-target reproducibility harness: browser, desktop, server.
 
@@ -887,7 +976,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-152 | E36.3 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w |
 
-#### Sprint S65
+#### Sprint S69
 
 **Goal**: Divergence measurement and reporting.
 
@@ -895,7 +984,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-153 | E36.4 | Divergence measurement and reporting | Rust | 6w |
 
-#### Sprint S66
+#### Sprint S70
 
 **Goal**: CRDT over viewport presentation state.
 
@@ -903,7 +992,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-154 | E37.1 | CRDT over viewport presentation state | Rust+TS | 12w |
 
-#### Sprint S67
+#### Sprint S71
 
 **Goal**: Shared annotation editing with conflict resolution.
 
@@ -911,7 +1000,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-155 | E37.2 | Shared annotation editing with conflict resolution | Rust+TS | 14w |
 
-#### Sprint S68
+#### Sprint S72
 
 **Goal**: Presence: cursors, viewport follow, participant list.
 
@@ -919,7 +1008,7 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-156 | E37.3 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w |
 
-#### Sprint S69
+#### Sprint S73
 
 **Goal**: Transport, auth and session lifecycle.
 
@@ -931,9 +1020,9 @@ _S61 to S69, 11 stories, 104 engineer-weeks._
 
 Radiology and pathology in one scene graph, sharing one annotation coordinate model.
 
-_S70 to S76, 7 stories, 74 engineer-weeks._
+_S74 to S80, 7 stories, 74 engineer-weeks._
 
-#### Sprint S70
+#### Sprint S74
 
 **Goal**: Runtime pyramid discovery from VL Whole Slide Microscopy metadata.
 
@@ -941,7 +1030,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-143 | E35.1 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w |
 
-#### Sprint S71
+#### Sprint S75
 
 **Goal**: Frame-level DICOMweb tile retrieval and tile cache.
 
@@ -949,7 +1038,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-144 | E35.2 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w |
 
-#### Sprint S72
+#### Sprint S76
 
 **Goal**: ICC colour management pipeline.
 
@@ -957,7 +1046,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-145 | E35.3 | ICC colour management pipeline | Rust | 10w |
 
-#### Sprint S73
+#### Sprint S77
 
 **Goal**: Additive multi-channel blending for immunofluorescence.
 
@@ -965,7 +1054,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-146 | E35.4 | Additive multi-channel blending for immunofluorescence | Rust | 10w |
 
-#### Sprint S74
+#### Sprint S78
 
 **Goal**: Unified viewport model: WSI and volume in one scene graph.
 
@@ -973,7 +1062,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-147 | E35.5 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w |
 
-#### Sprint S75
+#### Sprint S79
 
 **Goal**: Cross-modality annotation correlation.
 
@@ -981,7 +1070,7 @@ _S70 to S76, 7 stories, 74 engineer-weeks._
 |------|----------|-------|-------|-----|
 | F-148 | E35.6 | Cross-modality annotation correlation | Rust | 12w |
 
-#### Sprint S76
+#### Sprint S80
 
 **Goal**: Multi-server data sources within one study.
 

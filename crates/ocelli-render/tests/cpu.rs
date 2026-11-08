@@ -978,10 +978,11 @@ fn supported_colour_is_drawn_and_icc_is_not_scored() {
 }
 
 #[test]
-fn a_colour_sample_or_palette_entry_above_255_is_unavailable() {
-    // The GPU bake refuses a palette entry that is not a display byte.
-    // A stored colour sample above 255 has no scale. Drawing either as 255
-    // would be a different image from the tier that refuses it.
+fn a_colour_sample_above_255_is_unavailable_and_a_wide_palette_is_scaled() {
+    // A stored colour sample above 255 with no sample scale is refused.
+    // Drawing it as 255 would be a different image from the tier that
+    // refuses it. The GPU bake and this raster read a palette entry through
+    // the same `PaletteColorLut` lookup, so they read the same display byte.
     let mut raster = require_raster(1.0, 1.0, 1.0);
     let view = View::new();
     let rgb = require_color(PhotometricInterpretation::Rgb, None);
@@ -1015,6 +1016,10 @@ fn a_colour_sample_or_palette_entry_above_255_is_unavailable() {
     assert!(drawn.is_ok());
     assert_eq!(at_byte, [255, 0, 0, 255]);
 
+    // F-239 item 11. A 16-bit palette entry above 255 is no longer refused.
+    // Its descriptor's third value is 16 and the entry exceeds 255, so ruling
+    // R1 does not read the palette as 8-bit and the entry is shifted right by 8
+    // on the way out of the table, `1000 >> 8 = 3`, and is a display byte.
     let red = wide_descriptor(&[0.0, 1_000.0]);
     let green = wide_descriptor(&[0.0, 0.0]);
     let blue = wide_descriptor(&[0.0, 0.0]);
@@ -1022,8 +1027,21 @@ fn a_colour_sample_or_palette_entry_above_255_is_unavailable() {
     assert!(palette.is_ok());
     let Ok(palette) = palette else { return };
     let transform = require_color(PhotometricInterpretation::PaletteColor, Some(palette));
-    let palette_refused = RasterColor::supported(&transform);
-    assert!(matches!(palette_refused, Err(RasterError::Unavailable)));
+    let mut scaled = [7_u8; 4];
+    raster.invalidate();
+    let drawn = raster.raster_color_into(
+        &view,
+        accepted(&transform),
+        &stored(&[1.0]),
+        RasterGrid {
+            source: [1, 1],
+            target: [1, 1],
+        },
+        RasterQuality::Settled { generation: 0 },
+        &mut scaled,
+    );
+    assert!(drawn.is_ok());
+    assert_eq!(scaled, [3, 0, 0, 255]);
 }
 
 #[test]

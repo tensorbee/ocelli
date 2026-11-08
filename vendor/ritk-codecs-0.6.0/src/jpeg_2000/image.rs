@@ -13,6 +13,7 @@ use std::ops::Range;
 
 use super::codestream::{parse_main_header, parse_sot};
 use super::marker;
+use super::packet::reader::decode_tile_planes;
 use super::packet::{decode_tile_part, TileCodingParams, WaveletTransform};
 use crate::dimensions::{checked_pixel_count, checked_sample_count};
 use crate::PixelLayout;
@@ -216,6 +217,204 @@ fn restore_component_sample(dc_shifted: i32, precision: u32, signed: bool) -> i6
     } else {
         i64::from(dc_shifted) + (1i64 << (precision - 1))
     }
+}
+
+/// Restore one unsigned colour sample to its declared range.
+///
+/// The DC level shift of a decoded colour sample is limited to the
+/// component's declared range, as the reference decoders do: OpenJPEG clamps
+/// in its DC level-shift step and openjph-core in its shift undo. Lossy
+/// ringing can leave a sample outside the range, and a value outside it is
+/// not a colour this build can hand on.
+fn restore_clamped_colour_sample(dc_shifted: i32, precision: u32) -> i64 {
+    let restored = i64::from(dc_shifted) + (1i64 << (precision - 1));
+    let max = (1i64 << precision) - 1;
+    restored.clamp(0, max)
+}
+
+/// Decode a three-component (colour) DICOM-encapsulated J2K codestream,
+/// returning interleaved rescaled `f32` pixel values.
+///
+/// # Specification
+/// - Transfer syntax 1.2.840.10008.1.2.4.90 (lossless) and .91 (lossy or
+///   lossless) with `Csiz = 3`, per PS3.5 8.2.4 Table 8.2.4-1.
+/// - The multiple-component transform follows the wavelet: the reversible
+///   5/3 kernel pairs with the RCT and the irreversible 9/7 kernel with the
+///   ICT (ISO 15444-1 Annex G), applied inside the decode before the DC
+///   level shift is restored.
+/// - Modality LUT applied: `output = stored_integer × slope + intercept`.
+pub fn decode_j2k_fragment_colour(fragment: &[u8], layout: PixelLayout) -> Result<Vec<f32>> {
+    if !is_soc(fragment) {
+        bail!(
+            "J2K: fragment does not begin with SOC 0xFF4F \
+             (first 2 bytes: {:02X?})",
+            &fragment[..fragment.len().min(2)]
+        );
+    }
+
+    let (header, pos) = parse_main_header(fragment).context("J2K: parse main header")?;
+
+    let siz = &header.siz;
+    let cod = &header.cod;
+    let qcd = &header.qcd;
+
+    let num_guard_bits = qcd.num_guard_bits();
+    let qcd_exponents = qcd.exponents();
+    let qcd_mantissas = qcd.mantissas();
+    if siz.csiz != 3 {
+        bail!(
+            "J2K: colour decode requires exactly three components, Csiz={}",
+            siz.csiz
+        );
+    }
+    // All three components share one DICOM descriptor, so depth, signedness
+    // and sampling must agree, and sub-sampling has no interleaved colour
+    // reading. This is the same requirement openjph-core's validity check
+    // makes of the transform.
+    let first = siz
+        .components
+        .first()
+        .context("J2K: SIZ declared no components")?;
+    for (index, component) in siz.components.iter().enumerate() {
+        if component.xr_siz != 1 || component.yr_siz != 1 {
+            bail!(
+                "J2K: component {index} uses unsupported sampling XRsiz={} YRsiz={}; \
+                 DICOM interleaved decode requires 1x1 sampling",
+                component.xr_siz,
+                component.yr_siz
+            );
+        }
+        if component.precision() != first.precision() || component.is_signed() != first.is_signed()
+        {
+            bail!("J2K: component {index} does not share component 0's precision and signedness");
+        }
+    }
+    let c_prec = first.precision();
+    let c_signed = first.is_signed();
+    if c_prec > i32::BITS {
+        bail!(
+            "J2K: component 0 precision {c_prec} exceeds the native decoder's {}-bit coefficient capacity",
+            i32::BITS
+        );
+    }
+    if cod.progression_order != 0 {
+        bail!(
+            "J2K: native decode supports LRCP progression order 0; found {}",
+            cod.progression_order
+        );
+    }
+    if cod.mct > 1 {
+        bail!("J2K: COD declares multiple-component transform {}", cod.mct);
+    }
+    if cod.scod != 0 {
+        bail!(
+            "J2K: native decode requires default precincts without SOP/EPH; Scod=0x{:02X}",
+            cod.scod
+        );
+    }
+    if cod.num_layers == 0 {
+        bail!("J2K: COD declares zero quality layers");
+    }
+    if cod.xcb_o != 4 || cod.ycb_o != 4 {
+        bail!(
+            "J2K: native decode requires 64x64 nominal code-blocks; found {}x{}",
+            cod.cb_width(),
+            cod.cb_height()
+        );
+    }
+    if cod.cb_style != 0 {
+        bail!(
+            "J2K: native decode requires default code-block style; found 0x{:02X}",
+            cod.cb_style
+        );
+    }
+    let transform = match cod.wavelet_transform {
+        0 => WaveletTransform::Irreversible,
+        1 => WaveletTransform::Reversible,
+        other => bail!("J2K: unsupported wavelet transform {other}; expected 0 or 1"),
+    };
+
+    // Validate layout consistency.
+    let expected_comps = layout.samples_per_pixel;
+    if siz.csiz as usize != expected_comps {
+        bail!(
+            "J2K: Csiz={} does not match layout samples_per_pixel={}",
+            siz.csiz,
+            expected_comps
+        );
+    }
+
+    let img_w = siz.width() as usize;
+    let img_h = siz.height() as usize;
+    if img_w != layout.cols || img_h != layout.rows {
+        bail!(
+            "J2K: image dimensions {}×{} do not match layout {}×{}",
+            img_w,
+            img_h,
+            layout.cols,
+            layout.rows
+        );
+    }
+
+    let tile_count = usize::try_from(siz.num_tiles().context("J2K: validate tile grid")?)
+        .context("J2K: tile count does not fit the platform address size")?;
+    let tile_parts = scan_tile_parts(fragment, pos, tile_count)?;
+
+    let pixels = checked_pixel_count(layout.cols, layout.rows).context("J2K image")?;
+    let total_samples =
+        checked_sample_count(pixels, layout.samples_per_pixel).context("J2K output samples")?;
+    let mut out = vec![0f32; total_samples];
+
+    for tile_part in tile_parts {
+        let isot = tile_part.isot;
+        let bounds = siz
+            .tile_bounds(isot)
+            .context("J2K: validate SOT tile index")?;
+        let tw = bounds.width;
+        let th = bounds.height;
+        let mut decoded = decode_tile_planes(
+            &fragment[tile_part.data],
+            tw,
+            th,
+            TileCodingParams {
+                num_guard_bits,
+                precision: c_prec,
+                num_decomp_levels: cod.num_decomp_levels,
+                num_layers: cod.num_layers,
+                exponents: &qcd_exponents,
+                mantissas: &qcd_mantissas,
+                transform,
+            },
+            3,
+            cod.mct == 1,
+        )
+        .with_context(|| format!("J2K: decode tile {isot} colour components"))?;
+
+        for (component, plane) in decoded.drain(..).enumerate() {
+            for py in 0..th {
+                for px in 0..tw {
+                    let img_x = bounds.x0 + px;
+                    let img_y = bounds.y0 + py;
+                    if img_x >= img_w || img_y >= img_h {
+                        continue;
+                    }
+                    let dc_shifted = plane[py * tw + px];
+                    let raw = if c_signed {
+                        i64::from(dc_shifted)
+                    } else {
+                        restore_clamped_colour_sample(dc_shifted, c_prec)
+                    };
+                    let rescaled = raw as f64 * f64::from(layout.rescale_slope)
+                        + f64::from(layout.rescale_intercept);
+                    let out_idx = ((img_y * img_w + img_x) * layout.samples_per_pixel) + component;
+                    if out_idx < out.len() {
+                        out[out_idx] = rescaled as f32;
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

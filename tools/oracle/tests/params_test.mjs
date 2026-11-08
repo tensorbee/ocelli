@@ -15,10 +15,11 @@ import { Enums, utilities } from "@cornerstonejs/core";
 
 import {
   canvasScale,
+  colourObservation,
   resolveRenderParams,
   RENDER_PARAMS_PATH,
 } from "../src/params.mjs";
-import { fullRange, minimumWidth, resolveVoi, FULL_RANGE } from "../src/voi.mjs";
+import { fullRange, minimumWidth, resolveVoi, viewportProperties, FULL_RANGE } from "../src/voi.mjs";
 import { parseManifest } from "../src/manifest.mjs";
 import { repoPath } from "../src/paths.mjs";
 
@@ -674,4 +675,50 @@ test("a modality with no default and no catch-all is refused", () => {
     () => resolveVoi(FROM_FILE, context({ modality: "XA", defaults: { CT: {} } })),
     /XA/,
   );
+});
+
+
+test("AC20 observations select two explicit windows without changing the default", () => {
+  const before=JSON.stringify(SPEC);
+  for (const [id,invert] of [["rgb-window",false],["rgb-window-invert",true]]) {
+    const selected=colourObservation(SPEC,id);
+    assert.equal(selected.path,"synthetic/sc_rgb_interleaved.dcm");
+    const params=resolveRenderParams(selected.spec,row({path:selected.path,categories:["colour"]}));
+    assert.deepEqual(resolveVoi(params.voi,{}),{source:"explicit-colour",
+      windowCenter:128,windowWidth:100,voiLutFunction:"LINEAR",invert});
+    assert.equal(resolveRenderParams(SPEC,row({path:selected.path,categories:["colour"]})).voi.source,"none");
+  }
+  assert.equal(JSON.stringify(SPEC),before);
+});
+
+test("AC20 refuses unknown, duplicate and malformed declared observation rows", () => {
+  for (const id of ["missing","constructor"]) assert.throws(()=>colourObservation(SPEC,id),/unknown or duplicate/);
+  const duplicate=structuredClone(SPEC);duplicate.colourObservations.push({...duplicate.colourObservations[0]});
+  assert.throws(()=>colourObservation(duplicate,"rgb-window"),/unknown or duplicate/);
+  for (const broken of [{path:""},{windowCenter:Infinity},{windowWidth:0},{invert:1}]) {
+    const spec=structuredClone(SPEC);Object.assign(spec.colourObservations[0],broken);
+    assert.throws(()=>colourObservation(spec,"rgb-window"),/invalid declared/);
+  }
+});
+
+test("explicit colour VOI refuses malformed pairs, missing invert and another function", () => {
+  const valid={source:"explicit-colour",windowCenter:128,windowWidth:100,invert:false,voiLutFunction:"LINEAR"};
+  for (const broken of [{windowCenter:NaN},{windowWidth:0},{invert:undefined},{invert:1},{voiLutFunction:"SIGMOID"}])
+    assert.throws(()=>resolveVoi({...valid,...broken},{}),/invalid explicit/);
+});
+
+
+test("reference properties preserve default MONOCHROME1 inversion and bind explicit colour inversion", () => {
+  const convert=utilities.windowLevel.toLowHighRange;
+  const mono=viewportProperties({source:"file",windowCenter:40,windowWidth:400,voiLutFunction:"LINEAR"},0,convert);
+  assert.equal(Object.hasOwn(mono,"invert"),false,"the loader owns MONOCHROME1's initial inversion");
+  assert.deepEqual(mono.voiRange,convert(400,40,"LINEAR"));
+  const initial=viewportProperties({source:"none"},0,convert);
+  assert.deepEqual(initial,{interpolationType:0,VOILUTFunction:"LINEAR"});
+  for (const invert of [false,true]) {
+    const properties=viewportProperties({source:"explicit-colour",windowCenter:128,windowWidth:100,
+      voiLutFunction:"LINEAR",invert},0,convert);
+    assert.equal(properties.invert,invert);
+    assert.deepEqual(properties.voiRange,convert(100,128,"LINEAR"));
+  }
 });

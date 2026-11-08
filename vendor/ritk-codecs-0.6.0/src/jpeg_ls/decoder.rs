@@ -2,11 +2,11 @@
 
 use super::bitstream::BitReader;
 use super::sample_limits::maximum_near_for_precision;
-use super::scan::{decode_scan, Predictor, ScanParams};
+use super::scan::{decode_scan, verify_scan_end, Predictor, ScanParams};
 use crate::dimensions::checked_pixel_count;
 use anyhow::{bail, Context, Result};
 
-/// Interleave mode from the SOS header (JPEG-LS standard §C.1.3).
+/// Interleave mode from the SOS header (JPEG-LS standard §C.2.3).
 ///
 /// Single-component DICOM frames require `None` (0). Multi-component
 /// encodings use `LineInterleaved` or `SampleInterleaved` but are not
@@ -132,6 +132,7 @@ impl JpegLsDecoder {
         let mut reader = BitReader::new(data);
         let mut samples = Vec::with_capacity(pixel_count);
         decode_scan(&mut reader, &params, &mut samples).context("JPEG-LS scan decode failed")?;
+        verify_scan_end(&reader).context("JPEG-LS scan decode failed")?;
 
         let bits_per_sample = usize::try_from(self.bits_per_sample)
             .context("JPEG-LS precision does not fit this platform")?;

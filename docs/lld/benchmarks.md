@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-227, F-239, F-240
+**Last updated:** 2026-11-08
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -61,7 +61,7 @@ machine that recorded it, and against nothing else.
 
 | Path | What it is |
 |------|-----------|
-| `tools/bench/subjects.json` | tracked, the subject registry. One row per thing this project will ever measure |
+| `tools/bench/subjects.json` | tracked, the subject registry. One row per baseline subject |
 | `tools/bench/run.mjs` | the driver, and `--help` says what each flag does |
 | `tools/bench/src/paths.mjs` | every path the harness resolves, and whether it is the script node was asked to run |
 | `tools/bench/src/registry.mjs` | parse, and resolve each row's blocking story |
@@ -77,8 +77,8 @@ machine that recorded it, and against nothing else.
 
 ## The subject registry, and why the rows exist before the subjects do
 
-`tools/bench/subjects.json` carries one row per thing this project will ever
-measure. Each names the story that gives it a subject, the specification
+`tools/bench/subjects.json` carries one row per baseline subject. The explicit
+two-viewer mode beside it is defined by `tools/bench/comparison.json`. Each names the story that gives it a subject, the specification
 sections that define it, and **where the measurement starts and stops, in
 words**.
 
@@ -442,6 +442,32 @@ its own series, which is the same effect reproducing. **The protocol was not
 changed to produce a tighter number**, and the recorded series is the first
 controlled one taken rather than the best of the three.
 
+**F-243 measured the patched decoder against its base**, with the same release
+runner, 31 samples of four decodes after one warm-up, on one Apple M4 Max with
+16 cores and 48 GiB under Darwin 27.0.0. That is not the host class the
+baseline was recorded on, whose Darwin release is 25.5.0, so these figures are
+compared base against tip and never against the baseline. The runner gained an
+optional argument naming the corpus row, and with none it decodes the same row
+and prints the same record as before, so the subject's invocation is
+unchanged. Base is `aba1cb09` built from an archive of that commit with the
+new runner and the two banded codestreams copied in. Three runs each,
+interleaved, runner medians in ms:
+
+| Row | Base `aba1cb09` | Tip `55cab08d` |
+|-----|------|-----|
+| `jpegls_lossless` | 0.1161, 0.1226, 0.1176 | 0.1219, 0.1223, 0.1222 |
+| `jpegls_near_lossless` | 0.1226, 0.1184, 0.1182 | 0.1166, 0.1170, 0.1168 |
+| `jpegls_banded_lossless` | 0.1163, 0.1171, 0.1155 | 0.0104, 0.0103, 0.0104 |
+| `jpegls_banded_near_lossless` | 0.1253, 0.1237, 0.1235 | 0.0104, 0.0103, 0.0103 |
+
+The middle values put the subject's own row 3.9 per cent above base on the same
+host. The banded rows are about eleven times faster on the tip
+because the base decoder lost synchronisation on them and decoded the rest of
+the frame in regular mode, which is the defect rather than a speed-up.
+`bin/ocelli.sh bench --compare` did not run, because the worktree it was tried
+in has no benchmark browser installed, and on this host class it would report
+incomparable. `ci/bench-baseline.json` is unedited and the comparison is owed.
+
 Paired spike release wasm modules were 222,226 bytes with upstream defaults
 and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
 Dependency graph absence and linked binary size are separate evidence.
@@ -671,6 +697,25 @@ of those rows names F-216.
 The synthetic Part 10 files are written under `tools/bench/out/`, which is
 ignored. They are not staged.
 
+F-227 adds one informational workload, `pet_no_window`, under
+`tools/bench/out/viewer-pet-no-window/`: 267 files of 128 by 128, signed
+16-bit, no window, a Rescale Slope of `0.5 + 0.125 (i mod 7)` for file `i`, and
+stored 0 outside a disc of radius 50. Its first image waits for the series'
+`/series-window` reply, so `viewer.first_image` reports it as
+`pet_no_window_ms` and `pet_no_window_median_ms` in its detail, and
+`viewer.open` reports the open of that folder the same way. Neither has a
+threshold, because the operator accepted the cost of the extra decodes, and
+neither moves the recorded value, which stays the CT median. F-216's CT and DX
+workloads store Window Center 40, so they never ask for a series window.
+`viewer.resident_memory` opens the `pet_no_window` folder three times, so the
+run includes three series window rounds, and its bound carries F-227's named
+term `P * 4 MiB` for the rounds' pools, `serverRssBound`'s
+`SERIES_POOL_BYTES`, with the fixed constant at 24 MiB so the total stays
+F-216's 528,194,192 bytes. The
+figures of record are measured at sprint close on an idle host and kept in a
+surviving run file. The implementer's runs during the story are informational
+only, taken on a loaded host.
+
 Playwright's `postDataBuffer` is empty for these fetch bodies. The window
 subject also records the byte length of the body the page passes to `fetch`.
 A preview body that is not empty fails the run. After the timed steps the
@@ -702,3 +747,319 @@ compute a window of their own.
 tool classes, blend modes, VOI LUT functions, transfer syntaxes, segmentation
 representations, core events and adapters. A benchmark harness is on none of
 those axes.
+
+
+## Local viewer comparison, F-223
+
+`bin/ocelli.sh bench --compare-cornerstone --pseudo <local-root>` runs the two
+local viewers with the same pinned full Chromium build and real inputs. It
+requires the locked `tools/bench` and `tools/oracle` installs. `OCELLI_PSEUDO_DIR`
+may supply the root. Neither this mode nor its supplemental mode changes a
+baseline, and neither is an automatic floor or sprint timing gate.
+
+The controller builds the release viewer and `ocelli-compare`, then builds the
+separate `bench.html` and `bench.js` beside the existing oracle entries. Their
+source and binary digests are recorded with the Git HEAD and staged tree. A
+tracked or new measurement source that differs from the index refuses the run.
+The existing stack and volume bundles are separate entries and were checked
+byte-identical after adding the comparison entry.
+
+Before any timed trial, the qualifying pseudo CT subset is opened in both
+viewers at center 40, width 400, LINEAR. Their selected file names, file sizes,
+native canvas dimensions and actual RGBA readbacks must agree. `ocelli-compare
+pair` applies the existing monochrome and systematic-bias predicates. A failed
+or low-information frame writes a refusal with no timings. Private frame files
+are removed with the temporary input copies. This is one-frame agreement for
+cost comparison, with none of the oracle corpus acceptance implied. The
+opted-in prepared-subset browser regression calls this actual precheck with
+the release comparator, alongside its upload-count and literal-pixel checks.
+It therefore covers the controller capture callback as well as the pages.
+
+The default matrix retains its five closed workload selection rules. Pseudo
+full submits every file below the original root, including auxiliary files.
+The subset directories use neutral regular-file copies in content-selected
+order. Copy-on-write is attempted with `COPYFILE_FICLONE`, which falls back to
+ordinary copying when the filesystem does not support cloning. Actual
+directory uploads skip symbolic links, so selected subsets contain none. The
+source files remain unchanged and the full-root workload retains its original
+every-file policy.
+Both page consumers list at most 65,536 frames per file and retain omitted
+counts per series. There is no aggregate series cap. Matching that policy
+preserves the largest-series tie and its selected first file. A
+preflight read of every original file warms the operating system file cache on
+both sides. A cold trial starts a fresh browser and native server. A warm trial
+uses a new page in the retained browser and server after a completed priming
+trial. Creating a page closes the actor's previous page and its automatically
+owned context, including after a failed trial. Only the browser and native
+server are retained. Window steps keep one drawn page. Both conditions have qualified labels
+such as `pseudo-full/cold` and `pseudo-full/warm`, and neither overwrites the
+other. N is per side, with alternation and the starting side recorded. Each
+declared metric/workload visit shares one starting side across its cold and
+warm conditions, then flips once for the next workload. The sequence continues
+across metrics. Unavailable workloads reserve their place without observations,
+and unavailable conditions do not cause extra flips. CPU reuses the measured
+memory sessions. Missing
+workloads and inapplicable conditions remain explicit unavailable cells.
+
+Each duration except page-ready stays inside one page's performance clock.
+Page-ready maps the controller spawn clock and browser first-ready rAF clock
+through their respective `performance.timeOrigin + performance.now()` values.
+Plain subtraction between context-relative timestamps and wall-clock durations
+are not used. A new visible canvas commit is required for first-image and
+window observations. Pending requests retain the prior presented index until
+an actual commit. A retained visible image is not a blank sample. Native-stage
+visibility and faults are sampled independently on every scroll rAF and after
+the final settle.
+
+The comparator provider adapts recognized valid VOI strings to the array shape
+loader5.8.2 createImage expects. Otherwise it would derive `L` from `LINEAR`
+and refuse subsequent actor updates. Arrays, unknown strings and absent values
+are unchanged. Installed package bytes and shipped cache and worker defaults
+remain unchanged. The fixed output caveats disclose this adaptation.
+
+On macOS one serial footprint call samples every browser descendant, every
+CDP-reported process and, for Ocelli, the native server. Sampling rounds are at
+least 250 ms apart. Each round retains its actual PID inventory and timestamp.
+The report names the sampled concurrent footprint as a lower bound and states
+the minimum250ms sampling pause. Actual timestamps remain in raw evidence.
+The separately reported sum of
+per-process peaks is an upper bound because those peaks need not coincide.
+Both bounds are summarized over the same three sessions. The Node static
+server is infrastructure and recorded separately. Unattributed GPU-driver
+memory is included on neither side. CPU is from those same sessions, and a
+changed process inventory makes the CPU observation invalid. Before measured
+actions, at most three inventory-plus-counter reads establish a coherent CPU
+baseline. Only a locally identified missing PID permits another setup read.
+Persistent incoherence refuses before navigation or sampling. Final snapshots,
+actions and trials are never retried. Other platforms carry an explicit missing
+memory collector, with no estimate.
+
+Ignored `comparison.json` and `comparison.txt` carry the raw observations,
+conditions, defaults, input digest and source identity. `--publish` also writes
+`docs/benchmarks/cornerstone-comparison.json` and its generated Markdown pair.
+Publication refuses pre-existing builds, injected tools and invalid cells. All
+output strings, rendered text and serialized JSON are scanned against private
+input headers and path components before writing. Foreign browser or I/O errors
+are replaced by fixed refusal sentences. A failed new attempt removes the
+previous ignored artifact names, so an older green file cannot describe a red
+exit. Owned browsers, servers, input copies and the exclusive output lock are
+closed or removed on success, failure and handled signals. Environment
+refusals retain both browser and renderer strings in ignored reports, without a
+pixel verdict or timing figures, and exit 2 after cleanup. Invalid measurements
+keep their ignored raw records even when publication was requested. They never
+replace the tracked pair. Privacy, interruption or cleanup failures remove the
+attempt's ignored reports. Pre-launch flag refusals do not take ownership of
+prior artifacts.
+
+### Controlled colour and ICC supplement
+
+`--colour-case rgb8|ybr422|palette16|icc8-gamma22|icc16-table` selects a separate
+controlled mode and refuses `--publish`. Generate an isolated input root with
+`.venv/bin/python scripts/corpus_synth.py --comparison-colour <case> --out
+<empty-root>`. The exact closed manifest, inventories, file sizes and digests
+must validate before use. The default five-workload matrix is unchanged.
+
+The unchanged informative CT calibration runs first from `calibration-ct`.
+Only then do the declared `colour` inputs run open, first-image, nine window
+steps and three all-process memory sessions. The two fixed directory names are
+public generator selectors. Every uncontrolled name below each selected root
+and every identifying header remains in the output deny set. No colour pixel
+score is inferred. ICC cases state that Ocelli applies the profile and
+cornerstone renders device RGB, so their rendered images deliberately differ.
+The ICC16 case declares and verifies an actual 512 MiB native budget. All other
+cases verify 256 MiB through `/held`, rather than trusting configuration alone.
+
+This mode writes ignored `colour-comparison.json`, `colour-comparison.md` and
+`colour-comparison.sha256`. The digest binds the exact JSON bytes. Raw alternating
+trials and the complete process receipts remain in the JSON, with separate
+memory bounds. No equipped comparison or cost conclusion follows from the
+fake-tool contract tests or bounded functional smoke checks.
+
+## Measured largest colour frames, F-239 and F-240
+
+The release viewer was measured on the Apple M4 Max, 16 CPUs, 48 GiB,
+Darwin 27.0.0. All four inputs are generated 8192 by 8192 single frames.
+Each first request decodes, and each following window request uses the held
+frame. Nine complete window replies per case were checked against literal
+hand markers. These are native HTTP observations, not browser frame rates.
+
+The integrated source tree is `c1fe30375cdd8d8a0767ff7a941fe2fc4d80dd06`.
+Node 24.13.0 ran the registered instrument. Its release binary SHA-256 is
+`b32c96cf33a3c719b49150b98040db4ffce8a02f82fe0e8e724be51ddaac2d59`.
+No threshold was introduced.
+
+| Input | First request ms | Median of nine window requests ms | Window range ms | Peak native RSS bytes | RSS samples |
+| --- | ---: | ---: | --- | ---: | ---: |
+| rgb8 | 2231.128 | 2751.412 | 2709.600 to 2838.806 | 614203392 | 1247 |
+| palette16 | 2577.263 | 3128.093 | 3112.358 to 3145.082 | 484638720 | 1421 |
+| icc8 | 6190.263 | 6685.115 | 6666.811 to 6701.147 | 614236160 | 3057 |
+| icc16 | 6458.714 | 6817.156 | 6783.150 to 6838.736 | 1017888768 | 3129 |
+
+Every RSS series has positive samples and zero collection failures. The
+held-cache budget is 256 MiB except for the explicitly declared 512 MiB ICC16
+case. That budget bounds retained cache entries, not the whole process RSS.
+ICC8 retains 3072 bytes of tone-curve tables and ICC16 retains 786432 bytes.
+The held-frame charge remains 201330640 bytes for ICC8 and 403440616 bytes
+for ICC16 after the first draw and after all nine windows. Stable retained
+charges do not prove that no temporary work occurred.
+
+Palette validation was hoisted out of the draw-band loop after the earlier Node 26.6.0
+instrument measured a 19023.172 ms palette window median on source
+`0c327dd72326758516ec8bda41687554486311be`. The matching Node 26.6.0 after-hoist median is 5092.812 ms,
+an observed 73.228 percent reduction. The descriptor borrows the same immutable
+palette once per draw. The pixel mapping and tie rule are unchanged. Initial
+and window hand-marker checks pass on both runs. These timings still show
+slow updates for the largest admitted images.
+
+The current final-byte store preserves the approved guard and ties-to-even
+rule and reduces the conversion work. The current Node 24 and earlier Node 26
+runs have different instrument identities, so their difference is not an
+isolated byte-store speed measurement.
+
+Other agent build, test and browser jobs were held during these measurements.
+External desktop and security processes remained active. Load averages were
+recorded in each run on the 16 CPU host, so the observations do not claim a fully idle host.
+The records retain every sample and exact build identity. Raw run SHA-256:
+
+- Before hoist: `631c8f5d7cc703494f7c8f4609054832a1dc03cbca65491402a32beb01c6a38e`.
+- After hoist, Node 26: `e3886ccbecccaa3987d60ec6e8d005c716b009c9e640e83cdb81996d6326cd64`.
+- Current byte store, Node 24: `3b5fc0eb00d6173d45792745c91f4c110f64bdc84b351abcce19ea85051f48a9`.
+
+The equipped Cornerstone comparison and the declared monochrome regression
+runs remain separate acceptance observations. No relative cost claim follows
+from this one-sided largest-frame instrument.
+
+### Same-host monochrome observations
+
+The original source and assembled viewer were run serially with the same
+Node 24.13.0, Playwright 1.62.1 and Chromium 151.0.7922.34 on Darwin 27.0.0,
+Apple M4 Max, 16 CPUs, 48 GiB. The original 5451cb7d product used only the
+reviewed shared-instrument adaptation. CT and DX fixture bytes and default
+budgets were checked unchanged. The assembled product includes the conformance
+report and automatic-window work, so these are stack observations.
+
+The original measured tree is `68702951938d8d7194e8862739d0a51ffcf60244`,
+HEAD `5451cb7d4ca6c9e1304b96e1e95c493acbbbd060`, with only the shared
+instrument adaptation staged. The assembled measured tree is
+`9b586d477dc5172969253f6a9d8bc44437214a63`. These identities name the
+observations, not subsequent byte-store or completion edits.
+
+| Subject | Original source | Assembled source | Unit |
+| --- | ---: | ---: | --- |
+| viewer.open | 933.000 | 970.000 | ms |
+| viewer.first_image | 8.400 | 12.500 | ms |
+| viewer.scroll_rate | 108.995 | 109.067 | frames_per_second |
+| viewer.window_step | 2.100 | 3.400 | ms |
+| viewer.resident_memory | 458555392.000 | 463585280.000 | bytes |
+
+Every subject meets its answered absolute budget. Both sources report zero
+release and debug blank scroll samples, successful restart recovery and zero
+preview request bodies during held window updates. The assembled DX first
+image median is 28.9 ms and its window median is 17.0 ms. Automatic-window PET
+first image is 17.2 ms, informational with no added threshold.
+
+The existing baseline comparator was also applied to these saved observations.
+It matches the host and instrument exactly. The assembled first-image 12.5 ms
+is 28.866 percent above the recorded 9.7 ms, and window 3.4 ms is 41.667 percent
+above 2.4 ms. Both are `moved` with sense `worse`, beyond their existing 25 percent
+bands, despite meeting the absolute 20 ms and 5 ms budgets. No new baseline,
+tolerance change or relative-regression pass is claimed. The original source
+open 933 ms is also outside its existing 6 percent band in the improving direction.
+
+Other agent builds and browser jobs were held during these observations.
+External processes remained, with load averages about 5.5 to 6 on 16 CPUs. These
+records do not claim a fully idle machine. Source digests and all samples
+remain in the run records. Earlier Node 26.6 runs are retained as diagnostics,
+with correctly incomparable historical results due to their Node mismatch.
+
+Raw `f239-monochrome-base-node24` SHA-256:
+`ec83cc798e490c0d016ef97f1b7373e690526ab5d6482cfbd42e55ab7ec505b3`.
+
+Raw `s46-monochrome-tip-node24` SHA-256:
+`5f822caa093008d580d28250a545cc83bf0ffe2b4acc404b1cefcfaaede2d5cf`.
+
+### Untagged colour against the pre-ICC product
+
+The pre-ICC source `12797792d47afbd8aba2320cd27951c33645a125` was built
+in release mode, binary SHA-256
+`943dff2d8b2c61be5fe9ef0cf3c942c2e4a6aaae48ff31fcde53d138db442bdc`.
+The assembled release source is `c1fe30375cdd8d8a0767ff7a941fe2fc4d80dd06`,
+binary SHA-256
+`b32c96cf33a3c719b49150b98040db4ffce8a02f82fe0e8e724be51ddaac2d59`.
+Both products used the current registered subject's fixture and measurement
+exports on the same M4 Max host with Node 24.13.0. A private driver bound by
+its recorded hash selected only the two untagged cases for the old product.
+It supplied the explicit binary path and did not overlay product source.
+The old product has no ICC implementation and was never sent an ICC fixture.
+
+| Input | Pre-ICC first ms | Assembled first ms | Pre-ICC window median ms | Assembled window median ms |
+| --- | ---: | ---: | ---: | ---: |
+| rgb8 | 4955.386 | 2231.128 | 4728.307 | 2751.412 |
+| palette16 | 19287.031 | 2577.263 | 19257.557 | 3128.093 |
+
+Each first request decoded and all nine following window requests used the
+held frame. Complete replies and hand markers passed, with positive RSS
+samples and zero collection failures. Both untagged cases used the default
+256 MiB held budget. The source fixture module is byte-identical on the old
+and assembled products. The driver records each old fixture's content digest,
+helper hashes, host, binary hash and every sample.
+
+The assembled product also contains the palette validation hoist and the
+exact final byte-store repair. These observations establish the behaviour
+and cost of the combined stack on untagged frames. They do not isolate the
+cost of adding ICC support. Other agent builds and browser jobs were held,
+while external desktop activity remained, so no fully idle host is claimed.
+These measured untagged cases improve on the pre-ICC observations. The
+separate monochrome relative-band misses remain open and are not waived.
+
+Pre-ICC raw run SHA-256:
+`61c638f921c418c6a19dbe3207c2930ec28ad6f7d81e6b7c33d21897c576f4fd`.
+
+Assembled raw run SHA-256:
+`3b5fc0eb00d6173d45792745c91f4c110f64bdc84b351abcce19ea85051f48a9`.
+
+#### Supplementary normalized pre-ICC control
+
+The literal `12797792` source, binary and historical observations above remain
+unchanged. A separate private control starts from that exact source and adds
+only the independently reviewed palette-validation hoist and exact final-byte
+store. The resulting source is
+`c4d6e4b3d17e35c54b4a2240cdb2ff10176cf336`, with release binary SHA-256
+`0dc9860fe164d0842dd7a31262ea8ac46df0822a07e58a207d5c71d6ea94c25f`.
+The complete delta changes only `cpu.rs` and `colour.rs`. It adds no ICC parser,
+transform, profile policy, dependency, cache budget or window rule.
+
+The unchanged two-case measurement body and shared fixture exports ran under
+Node 24.13.0 on the same M4 Max host. Input content digests match the untouched
+historical run. This private entry is bound by SHA-256
+`2e06d1044e2777b76da40c1f98612dbd5733c21b239984e366c3586f222648bf`.
+
+| Input | Normalized first ms | Nine held windows median ms | Window min to max ms | Sampled peak RSS bytes |
+| --- | ---: | ---: | ---: | ---: |
+| rgb8 | 2172.713 | 2561.928 | 2532.335 to 2655.332 | 614514688 |
+| palette16 | 2586.171 | 3000.127 | 2988.722 to 3015.822 | 485064704 |
+
+Both first requests decoded and all nine following requests used the held
+frame. Complete-body and 30 hand-marker checks passed on every reply. RSS
+collection used the existing requested 20 ms period, with 1175 RGB readings
+and 1366 palette readings and zero failures. Both cases used the default
+256 MiB held budget. Owned build and browser jobs were held. External desktop
+activity remained, so no fully idle host is claimed. Start and end one-minute
+load averages were 2.889 and 2.878.
+
+The first attempted command exited one because the process sandbox denied
+all RSS reads. It produced no valid result and its receipt remains separate.
+After verifying and preserving its empty output directory, the exact unchanged
+entry ran with process observation permitted and exited zero in 57.538 seconds.
+Source, binary and driver hashes were unchanged before and after that run.
+
+This supplementary control removes two known shared optimization differences.
+It does not isolate every remaining product difference as ICC overhead. It
+neither replaces the literal story-base observation nor calls the large
+historical improvements within noise. No baseline, tolerance, numerical gold
+or acceptance criterion changes. Any use as a substitute for AC14's stated
+comparison requires its own explicit plan decision. Existing relative-band
+movement flags remain separate.
+
+Normalized raw run SHA-256:
+`3bd1c59366540291875e78a5f8bb0b3a0cbd6f2cc2573c80677842631b418913`.

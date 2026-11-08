@@ -3,10 +3,10 @@
 
     python3 -m unittest discover -s scripts/tests -p 'test_guard_catalogue.py'
 
-Needs nothing but the standard library, and nothing here builds a sandbox: the
-sandbox's own refusals are covered by `scripts/guard_probe.py --self-test`,
-which the `guards` gate runs, and building one per test would make this file
-slower than the harness it tests.
+Needs nothing but the standard library. One close-state regression builds a
+real disposable sandbox to distinguish inherited fixture handoffs from a
+handoff planted after setup. The sandbox's own refusals are covered by
+`scripts/guard_probe.py --self-test`, which the `guards` gate runs.
 
 **These are assertions about the DECLARATION.** That every entry is well
 formed, that its citation resolves to a real section or a real deviation row,
@@ -17,6 +17,7 @@ probe runner's job and not this file's.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
@@ -29,7 +30,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS, _workspace_manifest_with_exclusion)
+                              GUARDS, _close_preflight, _write_close_state,
+                              _workspace_manifest_with_exclusion)
 
 
 class SandboxCopyPreservesTrackedShape(unittest.TestCase):
@@ -132,6 +134,63 @@ class SandboxCopyPreservesTrackedShape(unittest.TestCase):
                 )
 
 
+
+class CloseStateHandoffIsolation(unittest.TestCase):
+    def test_copied_and_planted_handoffs_are_distinct(self) -> None:
+        source_handoffs = ROOT / ".claude" / "handoffs"
+        before = {p.name: p.read_bytes()
+                  for p in source_handoffs.glob("*-ready.md")}
+
+        def commit_handoff(box: sandbox.Sandbox, name: str) -> str:
+            relative = f".claude/handoffs/{name}-ready.md"
+            box.write(relative, "Own synthetic handoff for close-state control.\n")
+            box.git("add", "--", relative)
+            box.git("commit", "-q", "-m", "probe inherited handoff", "--", relative)
+            return relative
+
+        def ready(box: sandbox.Sandbox) -> None:
+            result = _close_preflight(box)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("is ready to close", result.stdout)
+            self.assertEqual(box.git("status", "--porcelain").stdout, "")
+
+        try:
+            with sandbox.sandbox() as box:
+                inherited = commit_handoff(box, "probe-inherited")
+                # Exercise the actual lazy control, which prepares state once.
+                ready(box)
+                self.assertFalse((box.path / inherited).exists())
+                self.assertEqual(list((box.path / ".claude/handoffs").glob("*-ready.md")), [])
+
+                # The second setup has an already-done backlog and ignored
+                # run state. It must not force that old state into the index.
+                again = commit_handoff(box, "probe-inherited-again")
+                _write_close_state(box)
+                self.assertFalse((box.path / again).exists())
+                ready(box)
+
+                planted = commit_handoff(box, "probe-unconsumed")
+                sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                                   box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+                self.assertIsNotNone(sprint)
+                state_path = f".claude/scratch/{sprint.group(1)}-run.json"
+                data = json.loads(box.read(state_path))
+                tree = box.git("write-tree").stdout.strip()
+                data["sprint_reviews"][-1]["tree"] = tree
+                data["verifications"][-1]["tree"] = tree
+                box.write(state_path, json.dumps(data) + "\n")
+                result = _close_preflight(box)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("handoffs remain: probe-unconsumed-ready.md", result.stdout)
+                self.assertNotIn("stale", result.stdout)
+                self.assertNotIn("working tree is not clean", result.stdout)
+                self.assertNotIn("is not HEAD tree", result.stdout)
+                self.assertTrue((box.path / planted).is_file())
+        finally:
+            after = {p.name: p.read_bytes()
+                     for p in source_handoffs.glob("*-ready.md")}
+            self.assertEqual(after, before, "source handoffs remain byte-identical")
+
 class WorkspaceExcludeProbeBuilder(unittest.TestCase):
     def test_it_extends_an_existing_exclusion_without_a_duplicate_key(
             self) -> None:
@@ -186,6 +245,7 @@ class CatalogueIsWellFormed(unittest.TestCase):
                 "test_gen_sprint_plan.py",
                 "test_guard_readers.py",
                 "test_staged_readers.py",
+                "test_release_wasm.py",
             ],
         )
 

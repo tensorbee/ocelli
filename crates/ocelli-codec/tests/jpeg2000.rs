@@ -398,6 +398,269 @@ fn manifest_backed_lossless_is_exact_and_lossy_keeps_the_fixed_distribution() ->
     Ok(())
 }
 
+/// The corpus colour rows are 64 by 96, three samples at eight bits, from
+/// `scripts/corpus_synth.py`'s saturated RGB reference.
+fn colour_frame(photometric_interpretation: &str) -> Result<FrameDesc, Box<dyn Error>> {
+    Ok(FrameDesc::new(FrameDescInput {
+        rows: 64,
+        columns: 96,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: photometric_interpretation.to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    })?)
+}
+
+/// The marker pixels of the saturated reference, `scripts/corpus_synth.py`'s
+/// `saturated_rgb_ramp`: pure red, pure green, pure blue, then the F-239
+/// plan's worked 200 100 50 triple, all in the first four pixels of row 0.
+#[test]
+fn inverse_rct_is_exact_before_the_level_shift() -> TestResult {
+    // ISO/IEC 15444-1 G.2 at B = 8, from the F-239 plan's working. The
+    // level-shifted RGB `200 100 50` is `72 -28 -78`, whose forward RCT is
+    // `Y0 = floor((72 + 2 * -28 + -78) / 4) = -16`, `Y1 = -78 - -28 = -50`,
+    // `Y2 = 72 - -28 = 100`. The inverse is
+    // `I1 = -16 - floor((100 + -50) / 4) = -28`, `I0 = 100 + -28 = 72`,
+    // `I2 = -50 + -28 = -78`, and undoing the shift gives `200 100 50`.
+    //
+    // Pure red `255 0 0` level-shifts to `127 -128 -128`, forward
+    // `Y0 = floor(-257 / 4) = -65`, `Y1 = 0`, `Y2 = 255`. Its chroma `Y2`
+    // spans one bit more than the depth, reaching 255 where the clamp of an
+    // early level shift would cut it, which is why the inverse runs before
+    // the shift is undone. Both markers sit in this reference, and the
+    // lossless `.90` syntax must reproduce all of it byte for byte.
+    let codestream = include_bytes!("fixtures/j2k_colour_lossless_ybr_rct.j2k");
+    let reference = include_bytes!("fixtures/j2k_colour_reference_rgb8le.raw");
+    let desc = colour_frame("YBR_RCT")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    Jpeg2000Decoder::lossless_only().decode(codestream, &desc, &mut out)?;
+    assert_eq!(out.as_slice(), reference);
+
+    // The named markers, three bytes per interleaved pixel.
+    assert_eq!(out.get(0..3), Some(&[255, 0, 0][..]), "pure red");
+    assert_eq!(out.get(3..6), Some(&[0, 255, 0][..]), "pure green");
+    assert_eq!(out.get(6..9), Some(&[0, 0, 255][..]), "pure blue");
+    assert_eq!(
+        out.get(9..12),
+        Some(&[200, 100, 50][..]),
+        "the worked RCT triple"
+    );
+    Ok(())
+}
+
+/// The recorded AC25 measurement for the `.91` row: the largest per-channel
+/// difference against OpenJPEG's own decode of the same codestream, through
+/// `scripts/tests/test_corpus_synth.py`'s pylibjpeg route. A decode change
+/// here is a re-measurement, not a tolerance to widen.
+#[test]
+fn inverse_ict_uses_g6_literal_coefficients() -> TestResult {
+    // ISO/IEC 15444-1 G.3, from the F-239 plan's working. Transformed
+    // components `Y0 = -28, Y1 = 22, Y2 = -38` give
+    // `I0 = -28 + 1.402 * -38 = -81.276`,
+    // `I1 = -28 - 0.34413 * 22 - 0.71414 * -38 = -8.43354`,
+    // `I2 = -28 + 1.772 * 22 = 10.984`. Adding the level shift's 128 gives
+    // `46.724 119.56646 138.984`, which the decoder rounds to `47 120 139`.
+    // A whole frame of those coefficients is not buildable by an available
+    // encoder, so this corpus row is a recorded bound and not a coefficient
+    // pin: the decode agrees with OpenJPEG, an independent conforming
+    // implementation of the same inverse, within the recorded one-code
+    // maximum. The measured maximum is one code on every channel, and the
+    // exact hand values are pinned in the vendored patch's own unit test
+    // `inverse_ict_9_7_is_the_annex_g_transform`. A decode with the inverse
+    // left out differs at 18,345 of 18,432 samples against the same
+    // comparison.
+    let codestream = include_bytes!("fixtures/j2k_colour_lossy_ybr_ict.j2k");
+    let openjpeg = include_bytes!("fixtures/j2k_colour_lossy_ict_openjpeg.raw");
+    let desc = colour_frame("YBR_ICT")?;
+    let mut out = vec![0xa5; desc.output_len()];
+    Jpeg2000Decoder::general().decode(codestream, &desc, &mut out)?;
+    let measurement = colour_measurement(&out, openjpeg)?;
+    assert!(
+        measurement.max_per_channel.iter().all(|&d| d <= 1),
+        "the recorded maximum was one code per channel, got {:?}",
+        measurement.max_per_channel
+    );
+    Ok(())
+}
+
+#[test]
+fn a_three_component_codestream_is_reported_rgb_and_refusals_are_kept() -> TestResult {
+    // PS3.5 8.2.4: YBR_RCT and YBR_ICT name the codestream's own component
+    // transform, so the decode hands back RGB and says so. RGB names no
+    // transform and is preserved. A codestream that contradicts the data
+    // set's component count, depth, sampling or progression is refused.
+    let mut registry = Registry::new();
+    register_jpeg2000_decoders(&mut registry)?;
+    let colour = colour_frame("YBR_RCT")?;
+    assert_eq!(
+        registry.decode_photometric_interpretation(JPEG2000_LOSSLESS, &colour)?,
+        DecodePhotometricInterpretation::Rgb
+    );
+    assert_eq!(
+        registry.decode_sample_layout(JPEG2000_LOSSLESS, &colour)?,
+        DecodeSampleLayout::Interleaved
+    );
+    let rgb = colour_frame("RGB")?;
+    assert_eq!(
+        registry.decode_photometric_interpretation(JPEG2000_LOSSLESS, &rgb)?,
+        DecodePhotometricInterpretation::Preserved
+    );
+
+    let codestream = include_bytes!("fixtures/j2k_colour_lossless_ybr_rct.j2k");
+    // A monochrome descriptor against a three-component codestream is the
+    // codestream contradicting the data set.
+    let mut out = vec![0xa5; corpus_desc()?.output_len()];
+    assert_eq!(
+        Jpeg2000Decoder::lossless_only().decode(codestream, &corpus_desc()?, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    // PS3.5 Table 8.2.4-1: the two 4:2:2 photometrics are not valid for the
+    // JPEG 2000 syntaxes, so a descriptor carrying one is refused before the
+    // codestream is read.
+    let mut out = vec![0xa5; colour_frame("YBR_FULL_422")?.output_len()];
+    assert_eq!(
+        Jpeg2000Decoder::lossless_only().decode(
+            codestream,
+            &colour_frame("YBR_FULL_422")?,
+            &mut out
+        ),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    // Two components have no photometric PS3.5 8.2.4 permits here and no
+    // colour transform is defined over them. The SIZ loses its third
+    // component specifier and declares Csiz 2.
+    let mut two = codestream.to_vec();
+    let siz = marker_offset(&two, [0xff, 0x51])?;
+    let siz_length = usize::from(u16::from_be_bytes(
+        two.get(siz + 2..siz + 4)
+            .ok_or("SIZ length is truncated")?
+            .try_into()?,
+    ));
+    two.splice(siz + siz_length - 3..siz + siz_length, Vec::new());
+    two.get_mut(siz + 2..siz + 4)
+        .ok_or("SIZ length is truncated")?
+        .copy_from_slice(&u16::try_from(siz_length - 3)?.to_be_bytes());
+    two.get_mut(siz + 38..siz + 40)
+        .ok_or("SIZ component count is truncated")?
+        .copy_from_slice(&2_u16.to_be_bytes());
+    let mut out = vec![0xa5; colour_frame("YBR_RCT")?.output_len()];
+    assert_eq!(
+        Jpeg2000Decoder::lossless_only().decode(&two, &colour_frame("YBR_RCT")?, &mut out),
+        Err(CodecError::UnsupportedPixelFormat)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    // One component of a different depth cannot share the descriptor's one
+    // Bits Stored, and a sub-sampled component has no interleaved reading.
+    // ISO/IEC 15444-1 A.5.1: after Csiz the component specifiers are
+    // `(Ssiz, XRsiz, YRsiz)` triples, so component 0's Ssiz sits at
+    // `siz + 40`, its XRsiz at `siz + 41` and its YRsiz at `siz + 42`.
+    for (name, offset, value) in [("unequal depth", 40_u8, 0x0b_u8), ("sub-sampled", 41, 2)] {
+        let mut edited = codestream.to_vec();
+        *edited
+            .get_mut(siz + usize::from(offset))
+            .ok_or("SIZ component is truncated")? = value;
+        let mut out = vec![0xa5; colour_frame("YBR_RCT")?.output_len()];
+        assert_eq!(
+            Jpeg2000Decoder::lossless_only().decode(&edited, &colour_frame("YBR_RCT")?, &mut out),
+            Err(CodecError::UnsupportedPixelFormat),
+            "{name}"
+        );
+        assert!(out.iter().all(|byte| *byte == 0xa5), "{name}");
+    }
+
+    // PS3.5 8.2.4 note 2: a YBR_RCT or YBR_ICT descriptor names the
+    // codestream's own transform, so a codestream that says it applied none
+    // contradicts the descriptor. SGcod's multiple-component-transform byte
+    // sits eight bytes into the COD segment, as the monochrome MCT refusal
+    // above writes it.
+    let mut no_transform = codestream.to_vec();
+    let cod = marker_offset(&no_transform, [0xff, 0x52])?;
+    *no_transform
+        .get_mut(cod + 8)
+        .ok_or("COD marker is truncated")? = 0;
+    let mut out = vec![0xa5; colour_frame("YBR_RCT")?.output_len()];
+    assert_eq!(
+        Jpeg2000Decoder::lossless_only().decode(&no_transform, &colour_frame("YBR_RCT")?, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+
+    // A progression other than LRCP is the vendored reader's own refusal.
+    let mut rlcp = codestream.to_vec();
+    let cod = marker_offset(&rlcp, [0xff, 0x52])?;
+    *rlcp.get_mut(cod + 5).ok_or("COD marker is truncated")? = 1;
+    let mut out = vec![0xa5; colour_frame("YBR_RCT")?.output_len()];
+    assert_eq!(
+        Jpeg2000Decoder::lossless_only().decode(&rlcp, &colour_frame("YBR_RCT")?, &mut out),
+        Err(CodecError::DecoderFailure)
+    );
+    assert!(out.iter().all(|byte| *byte == 0xa5));
+    Ok(())
+}
+
+#[test]
+fn a_transformed_codestream_refuses_a_descriptor_that_names_no_transform() -> TestResult {
+    // PS3.5 8.2.4: a codestream whose multiple component transform is on
+    // hands back RGB samples, so Photometric Interpretation shall be
+    // YBR_RCT or YBR_ICT. `RGB` or `YBR_FULL` over such a codestream would
+    // draw already-RGB samples through a YBR matrix and report a space the
+    // pixels cannot have, so the decode refuses the contradiction instead.
+    let codestream = include_bytes!("fixtures/j2k_colour_lossless_ybr_rct.j2k");
+    for photometric in ["RGB", "YBR_FULL"] {
+        let desc = colour_frame(photometric)?;
+        let mut out = vec![0xa5; desc.output_len()];
+        assert_eq!(
+            Jpeg2000Decoder::lossless_only().decode(codestream, &desc, &mut out),
+            Err(CodecError::FrameMismatch),
+            "{photometric} over a transformed codestream must be refused"
+        );
+        assert!(out.iter().all(|byte| *byte == 0xa5), "{photometric}");
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColourMeasurement {
+    samples: usize,
+    differing: usize,
+    max_per_channel: [u32; 3],
+}
+
+/// Per-channel difference measurement for interleaved colour bytes.
+fn colour_measurement(actual: &[u8], expected: &[u8]) -> Result<ColourMeasurement, Box<dyn Error>> {
+    if actual.len() != expected.len() || !actual.len().is_multiple_of(3) {
+        return Err("colour buffers have different or invalid lengths".into());
+    }
+    let mut measurement = ColourMeasurement {
+        samples: actual.len() / 3,
+        differing: 0,
+        max_per_channel: [0; 3],
+    };
+    for (index, (actual, expected)) in actual.iter().zip(expected.iter()).enumerate() {
+        let difference = (*actual as i32 - *expected as i32).unsigned_abs();
+        if difference > 0 {
+            measurement.differing += 1;
+        }
+        // `index` runs over a multiple-of-three length, so the channel is 0,
+        // 1 or 2 and `get_mut` below always finds the slot.
+        let channel = index % 3;
+        let slot = measurement
+            .max_per_channel
+            .get_mut(channel)
+            .ok_or("channel index")?;
+        *slot = (*slot).max(difference);
+    }
+    Ok(measurement)
+}
+
 fn frame(
     rows: u16,
     columns: u16,

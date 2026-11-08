@@ -696,18 +696,152 @@ impl Tile {
         // Parse packets from tile data
         self.parse_all_packets(&tile_data)?;
 
-        // Decode codeblocks and perform IDWT
+        // Decode codeblocks and perform IDWT. The DC level shift is deferred
+        // when the codestream declares a colour transform, because ISO/IEC
+        // 15444-1 Annex G applies the forward transform after the DC level
+        // shift, so the inverse has to run before the shift is undone. RCT's
+        // chroma spans one bit more than the image depth, which the shift's
+        // clamp would cut. The inverse runs on the whole tile, whose first
+        // three components are the transform's inputs.
+        let colour_transform = self.employ_color_transform;
+        let defer = colour_transform && self.tile_comps.len() >= 3;
         for tc in &mut self.tile_comps {
             for res in &mut tc.resolutions {
                 for sb in &mut res.subbands {
                     sb.decode_codeblocks()?;
                 }
             }
-            tc.perform_idwt()?;
+            tc.perform_idwt(defer)?;
+        }
+
+        if colour_transform {
+            if self.tile_comps.len() < 3 {
+                return Err(OjphError::Codec {
+                    code: 0x00060040,
+                    message: "the color transform needs three components".into(),
+                });
+            }
+            // The transform kind follows the wavelet: the reversible 5/3
+            // kernel is paired with the reversible RCT and the irreversible
+            // 9/7 kernel with the irreversible ICT, ISO/IEC 15444-1 G.2 and
+            // G.3 through PS3.5 8.2.4.
+            if self.tile_comps[0].reversible {
+                Self::rct_backward(&mut self.tile_comps);
+            } else {
+                Self::ict_backward(&mut self.tile_comps);
+            }
+        }
+
+        for tc in &mut self.tile_comps {
+            tc.finish_deferred_level_shift();
         }
 
         self.is_complete = true;
         Ok(())
+    }
+
+    /// Inverse RCT (ISO/IEC 15444-1 G.2) across the first three components.
+    ///
+    /// With `Y0` the luma component and `Y1`, `Y2` its chroma pair:
+    /// `I1 = Y0 - floor((Y2 + Y1) / 4)`, `I0 = Y2 + I1`, `I2 = Y1 + I1`.
+    /// The integer shift is arithmetic, which floors for negative operands,
+    /// matching the standard's floor. The crate's own `gen_rct_backward` is
+    /// the same three lines and is called rather than re-derived. Components
+    /// of a transform the crate's own validity check accepted share their
+    /// dimensions, and the loops stay inside the overlap of whatever the
+    /// components hold, so a shape outside that cannot panic.
+    fn rct_backward(tile_comps: &mut [TileComp]) {
+        let rows = tile_comps[..3]
+            .iter()
+            .map(|tc| tc.decoded_lines.len())
+            .min()
+            .unwrap_or(0);
+        for row in 0..rows {
+            let width = tile_comps[..3]
+                .iter()
+                .map(|tc| tc.decoded_lines.get(row).map_or(0, Vec::len))
+                .min()
+                .unwrap_or(0);
+            if width == 0 {
+                continue;
+            }
+            let (first, rest) = tile_comps.split_at_mut(1);
+            let (second, third) = rest.split_at_mut(1);
+            let y0 = &mut first[0].decoded_lines[row];
+            let y1 = &mut second[0].decoded_lines[row];
+            let y2 = &mut third[0].decoded_lines[row];
+            let mut i0 = vec![0_i32; width];
+            let mut i1 = vec![0_i32; width];
+            let mut i2 = vec![0_i32; width];
+            {
+                // `width` is a tile-component dimension, which SIZ carries as
+                // `u32`, so the conversion cannot truncate.
+                let repeat = width as u32;
+                let y = super::tile_comp::wrap_i32_line(y0.as_slice());
+                let cb = super::tile_comp::wrap_i32_line(y1.as_slice());
+                let cr = super::tile_comp::wrap_i32_line(y2.as_slice());
+                let mut r = super::tile_comp::wrap_i32_line_mut(&mut i0);
+                let mut g = super::tile_comp::wrap_i32_line_mut(&mut i1);
+                let mut b = super::tile_comp::wrap_i32_line_mut(&mut i2);
+                crate::transform::colour::gen_rct_backward(
+                    &y, &cb, &cr, &mut r, &mut g, &mut b, repeat,
+                );
+            }
+            y0[..width].copy_from_slice(&i0);
+            y1[..width].copy_from_slice(&i1);
+            y2[..width].copy_from_slice(&i2);
+        }
+    }
+
+    /// Inverse ICT (ISO/IEC 15444-1 G.3) across the first three components.
+    ///
+    /// `I0 = Y0 + 1.402 Y2`, `I1 = Y0 - 0.34413 Y1 - 0.71414 Y2`,
+    /// `I2 = Y0 + 1.772 Y1`. The crate's own `gen_ict_backward` carries
+    /// those literal coefficients, which the F-239 patch pins, and is
+    /// called rather than re-derived. The inputs are the unrounded
+    /// sample-domain floats, because the reconstruction's single rounding
+    /// runs after the transform.
+    fn ict_backward(tile_comps: &mut [TileComp]) {
+        let rows = tile_comps[..3]
+            .iter()
+            .map(|tc| tc.decoded_lines_f32.len())
+            .min()
+            .unwrap_or(0);
+        for row in 0..rows {
+            let width = tile_comps[..3]
+                .iter()
+                .map(|tc| tc.decoded_lines_f32.get(row).map_or(0, Vec::len))
+                .min()
+                .unwrap_or(0);
+            if width == 0 {
+                continue;
+            }
+            let (first, rest) = tile_comps.split_at_mut(1);
+            let (second, third) = rest.split_at_mut(1);
+            let y0 = &mut first[0].decoded_lines_f32[row];
+            let y1 = &mut second[0].decoded_lines_f32[row];
+            let y2 = &mut third[0].decoded_lines_f32[row];
+            let mut i0 = vec![0.0_f32; width];
+            let mut i1 = vec![0.0_f32; width];
+            let mut i2 = vec![0.0_f32; width];
+            {
+                // `width` is a tile-component dimension, which SIZ carries as
+                // `u32`, so the conversion cannot truncate.
+                let repeat = width as u32;
+                crate::transform::colour::gen_ict_backward(
+                    y0.as_slice(),
+                    y1.as_slice(),
+                    y2.as_slice(),
+                    &mut i0,
+                    &mut i1,
+                    &mut i2,
+                    repeat,
+                );
+            }
+            y0[..width].copy_from_slice(&i0);
+            y1[..width].copy_from_slice(&i1);
+            y2[..width].copy_from_slice(&i2);
+        }
     }
 
     /// Parse all packets from a tile data buffer (LRCP order).
@@ -925,5 +1059,94 @@ impl Tile {
         self.tile_comps
             .get_mut(comp_num as usize)
             .and_then(|tc| tc.pull_line())
+    }
+}
+
+#[cfg(test)]
+mod rct_backward_bounds {
+    use super::*;
+
+    fn component(lines: Vec<Vec<i32>>) -> TileComp {
+        TileComp {
+            comp_num: 0,
+            comp_rect: Rect::default(),
+            num_resolutions: 1,
+            resolutions: Vec::new(),
+            reversible: true,
+            bit_depth: 8,
+            is_signed: false,
+            lines: Vec::new(),
+            decoded_lines: lines,
+            decoded_lines_f32: Vec::new(),
+            level_shift_deferred: true,
+            cur_pull_line: 0,
+        }
+    }
+
+    /// The widest repeat the caller can pass: three equal rows, where
+    /// `repeat` equals every one of the six line buffers' exact length.
+    /// `Y0 = 8, Y1 = 0, Y2 = 4` is `I1 = 8 - ((4 + 0) >> 2) = 7`,
+    /// `I0 = 4 + 7 = 11`, `I2 = 0 + 7 = 7`, G.2's inverse.
+    #[test]
+    fn equal_rows_transform_every_sample_at_the_bound() {
+        let mut tile_comps = vec![
+            component(vec![vec![8, 8, 8, 8]]),
+            component(vec![vec![0, 0, 0, 0]]),
+            component(vec![vec![4, 4, 4, 4]]),
+        ];
+        Tile::rct_backward(&mut tile_comps);
+        assert_eq!(tile_comps[0].decoded_lines, vec![vec![11, 11, 11, 11]]);
+        assert_eq!(tile_comps[1].decoded_lines, vec![vec![7, 7, 7, 7]]);
+        assert_eq!(tile_comps[2].decoded_lines, vec![vec![7, 7, 7, 7]]);
+    }
+
+    /// A shorter third row caps the repeat at its length, so the longer
+    /// components' tails are neither read nor written and survive unchanged.
+    #[test]
+    fn a_shorter_row_caps_the_repeat_and_leaves_the_tails() {
+        let mut tile_comps = vec![
+            component(vec![vec![8, 8, 8, 8]]),
+            component(vec![vec![0, 0, 0, 0]]),
+            component(vec![vec![4, 4]]),
+        ];
+        Tile::rct_backward(&mut tile_comps);
+        assert_eq!(tile_comps[0].decoded_lines, vec![vec![11, 11, 8, 8]]);
+        assert_eq!(tile_comps[1].decoded_lines, vec![vec![7, 7, 0, 0]]);
+        assert_eq!(tile_comps[2].decoded_lines, vec![vec![7, 7]]);
+    }
+
+    /// The F-239 plan's AC25 hand case through the crate's own
+    /// `gen_ict_backward`: transformed components `Y0 = -28, Y1 = 22,
+    /// Y2 = -38` invert to `-81.276 -8.43354 10.984` under equation G-6's
+    /// literal coefficients, and adding the DC level shift's 128 and the
+    /// decoder's one rounding gives `47 120 139`, the plan's bytes.
+    ///
+    /// The tolerance is 1e-4, far above this build's f32 representation
+    /// error near these magnitudes and far below the gap between Annex G's
+    /// `1.402` and the full-range YBR matrix coefficient `1.4019876`, which
+    /// would move the first output by about `0.00047` at `Y2 = -38`. Every
+    /// coefficient multiplies an input of magnitude at least 22 here, so a
+    /// change of more than 1e-4 to any one of the four turns an assert red.
+    /// A coefficient swapped in from a different matrix cannot pass.
+    #[test]
+    fn ict_backward_is_the_annex_g_transform() {
+        let y = [-28.0_f32];
+        let cb = [22.0_f32];
+        let cr = [-38.0_f32];
+        let mut r = [0.0_f32];
+        let mut g = [0.0_f32];
+        let mut b = [0.0_f32];
+        crate::transform::colour::gen_ict_backward(&y, &cb, &cr, &mut r, &mut g, &mut b, 1);
+        for (actual, expected) in [r[0], g[0], b[0]]
+            .iter()
+            .zip([-81.276_f32, -8.43354, 10.984])
+        {
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "{actual} against the Annex G value {expected}"
+            );
+        }
+        let bytes: [i32; 3] = [r[0], g[0], b[0]].map(|value| (value + 128.0).round() as i32);
+        assert_eq!(bytes, [47, 120, 139]);
     }
 }

@@ -77,7 +77,7 @@ Cine. Play uses the file's Frame Time when the open series has one, and the slid
 | `FrameTimeVector` | the slider | `This file gives a Frame Time Vector, which this page does not play. The rate is the slider.` |
 | `RecommendedDisplayFrameRate` or `CineRate` | the slider | `This file gives a frame rate and no Frame Time. The rate is the slider.` |
 | `Unavailable` | the slider | `This file gives no Frame Time. The rate is the slider.` |
-| unusable, reason `Cine` | the slider | `The Frame Time in this file is not usable. The rate is the slider.` |
+| unusable, reason `Cine` | the slider | `The cine timing in this file is not usable. The rate is the slider.` |
 
 The per-second figure is `1000 / milliseconds`, shown to one decimal place and trimmed of a trailing `.0`. That is display only. The loop waits `milliseconds` minus the time the step took. While the file's timing is in use the slider is disabled, and a "Use the slider" toggle hands the rate back. A step that takes longer than the interval is not skipped, so playback can run slower than the file asks, and the line says so while playing. No frame is dropped to keep the rate.
 
@@ -98,7 +98,7 @@ In scope:
 - The two keys and the guarded storage above, and wrapping the two existing panel reads and writes.
 - `inspect_json` gains `"cine"` and `"frameTimeMs"`.
 - Play uses the file interval as above.
-- One sentence in `more.html` `#preferences`: "The image page keeps two choices in this browser, the mouse profile and the play rate. There is still no preferences module in the crates or packages." The `not yet` mark stays, because the module it names still does not exist.
+- One sentence in `more.html` `#preferences`: "The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages." The `not yet` mark stays, because the module it names still does not exist.
 
 Out of scope: key rebinding, per-tool bindings, sweep playback, Frame Time Vector playback, preferences for presets or layouts, and the React example's preferences, which F-205 owns.
 
@@ -162,7 +162,7 @@ The origin is `http://127.0.0.1:<port>/`. The port is ephemeral unless `OCELLI_P
 | AC8 | A Frame Time Vector of matching length gives `vector` | Same test, frames 2, vector `0\40` | Playing the vector's second value as one interval | implementation |
 | AC9 | `cine_timing` agrees with `assemble_display` on every timing fixture | `series_open.rs` test `cine_timing_matches_display_timing` over the existing cine fixtures | A second parser that disagrees on `0` | implementation (B only) |
 | AC10 | `startPlay` uses `frameTimeMs` when present and not overridden | Page test pins the branch that reads `frameTimeMs` before `fpsInput` | Converting to fps and rounding to the slider's integer | implementation |
-| AC11 | `more.html` says the page keeps two choices and that no preferences module exists | `more_and_use_are_static_pages` extended | Claiming a preferences module | implementation |
+| AC11 | `more.html` says the page keeps four choices and that no preferences module exists | `more_and_use_are_static_pages` extended | Claiming a preferences module | implementation |
 | AC12 | A live browser drag in each profile does what the table says, and a file with Frame Time plays at that rate | Click-through on Chrome against a running viewer | Anything the string pins cannot see | external, sprint close, operator |
 
 The Rust tests read page strings. They do not execute the page. AC12 is not claimed by any Rust test and stays open until someone performs it.
@@ -253,3 +253,29 @@ Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-
 4. **AC7's unusable value needs two or more frames.** Frame Time 0 on a single-frame object is legal per the C.7.6.5.1.1 note and reports `none`.
 5. **Middle-button window drags go through F-213's window state,** clearing the preset and the file window index the same way the left-button window drag does, keyed on the drag mode rather than the button.
 6. **Names.** The series loader is `loadSeries`. README steps, and the AC12 file, are measured from the tree. AC12 uses a monochrome multi-frame XA or NM file, because ultrasound cine is usually colour.
+
+### Lead rulings after review pass 1
+
+- **D1.** A key pressed while the profile control has focus does not change the profile. `typingTarget` treats a SELECT as a typing target, and the control is blurred after a pointer choice. A browser step chooses a profile, presses W, and requires the profile and the stored key unchanged.
+- **D2.** `more.html`, this plan's sentence and the AC11 pin name all four kept choices: the mouse profile, the play rate, and the two hidden side columns.
+- **D3.** `unusable` is reported only for a `SeriesOpenReason::Cine` refusal. Any other refusal gets a line that makes no claim about Frame Time. A fixture covers a non-cine refusal on a file with no timing, red under pass 1's M11.
+- **D4.** The tool buttons are synced once at start, so a reload on `window-left` shows W/L active.
+- **S1.** A one-frame Frame Time of -40 is a test case expecting the Cine refusal, red under M12.
+- **S2.** The file rate is offered only when the next image is another frame of the same file, the test `fileInterval` already makes, and the line and the slider follow it.
+- **Nitpicks taken.** N1, the fixture's tag order follows its comment. N2, the README says choosing a profile also switches the current tool. N3 is not taken.
+
+### Lead rulings after review pass 2
+
+- **D2.** A `SeriesOpenReason::Cine` refusal reads "The cine timing in this file is not usable. The rate is the slider.", true for a refused Frame Time, Frame Time Vector, Recommended Display Frame Rate or Cine Rate. The AC10 pin and README step 5 follow, and a fixture with Cine Rate 0 and no Frame Time replies `unusable`. `cine_timing` is not widened to name the failed attribute.
+- **D1.** README step 5 names the third fallback, a file whose frames this page could not read.
+- **S1.** Both focus-flag listener lines are pinned in `the_page_offers_mouse_profiles`, and `window.mjs` gains a step that dispatches a keydown, then a pointerdown, then a choice, and requires the control blurred and W to pick W/L, red under pass 2's MH.
+- **N1 not taken.** It joins the accepted keyboard case, and AC12's click-through covers it on real Chrome.
+
+### Operator showcase status rule, 2026-11-08
+
+The operator requires every user-facing feature in the viewer and asks for
+a versioned comparison matrix on More. Status now describes the usable
+viewer workflow, separately from library implementation and tier support.
+The four persisted choices make Preferences partial, replacing the earlier
+not-yet index wording. The absent general preferences module remains named.
+No interaction or persistence behaviour changes in this documentation update.

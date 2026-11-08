@@ -17,7 +17,7 @@ const T1: i32 = 3;
 const T2: i32 = 7;
 const T3: i32 = 21;
 
-/// ISO/IEC 14495-1 Table C.1. `J[i]` is the run segment length `2^J[i]`.
+/// ISO/IEC 14495-1 A.2.1 step 3. `J[i]` is the run segment length `2^J[i]`.
 const J: [u32; 32] = [
     0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11, 12, 13,
     14, 15,

@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067, F-240
+**Last updated:** 2026-11-07
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -175,6 +175,18 @@ producer.
 `volume_ray_admission` returns `TierCUnavailable` before a sample is read and
 writes no colour buffer. There is no CPU ray. That is D-07 applied to this
 feature, not a new availability state.
+
+ICC colour management is F-240's declaration. Tier C is full for the matrix
+and tone-curve subset, through `ColorTransform::with_icc` and `map_into` in
+`ocelli-pixel`. Tiers A and B are unavailable: `ColourLut::icc` still returns
+`ColourLutError::Unavailable`, and a GPU route given a profiled frame reports
+unavailable rather than drawing device RGB. The palette bake in
+`ocelli-render` carries the frame's profile presence,
+`IccProfilePresence`, and refuses a profile the subset accepted before any
+texel is built, so no GPU route bakes device RGB beside a profile it cannot
+apply. A profile the subset refused keeps the CPU route's own bytes on every
+tier, which is deviation D-30, and is not a quiet second answer. The
+refusals are named in `docs/lld/pixel-pipeline.md`.
 
 ## What this contract does not build
 

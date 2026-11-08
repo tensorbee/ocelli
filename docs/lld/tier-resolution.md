@@ -1,7 +1,7 @@
 # Tier resolution
 
-**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016, F-110
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-004, F-037, F-039, F-042, F-050, F-X001, F-X002, F-X016, F-110, F-238
+**Last updated:** 2026-11-07
 
 How a session decides whether it is tier A, tier B or tier C, and how it
 records why. This describes what the code does today.
@@ -337,6 +337,47 @@ In a browser the value comes from the shell instead, because reading a query
 parameter, a config endpoint or `localStorage` is DOM work and HLD section 10
 puts DOM work in TypeScript. `ocelli-render` receives a parsed `TierRequest`
 and reads no environment of its own.
+
+## A build with no backend compiled resolves tier C and says so
+
+Deviation D-33. The shipped native archive has no Metal compiled on Apple,
+and on macOS it has no GL either, because reaching GL there needs the
+`angle` feature. wgpu 30.0.1's `Instance::new` panics when the
+platform-filtered set of compiled backends is empty, which that build is, so
+`probe.rs` consults `wgpu::Instance::enabled_backend_features()` before it
+creates any instance. An empty set resolves the same unprobed answer the
+tier C override path resolves, with `NoAdapter` as the recorded reason and
+no device, because there is nothing for a device to be. The same guard sits
+in front of `resolve_webgl` and `resolve_native_gl`, where it returns the
+no-adapter result rather than reaching the panic.
+
+Measured on an Apple M4 Max on 2026-11-07, the binary `bin/ocelli.sh native`
+step 6 links and runs:
+
+```text
+$ target/release/ocelli-desktop
+Tier Cpu, decided by NoAdapter. OCELLI_TIER override: NotRequested.
+  caps      compute false, max_tex_3d 0, max_buffer 0
+  adapters  0 seen, device created false, measured tier Some(Cpu)
+  backends  none compiled for this target
+  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown
+```
+
+The `backends` line is the cause of the `NoAdapter` above it: a machine with
+backends compiled and no GPU attached prints the same `NoAdapter` and the
+same zero adapters, and only this line tells the macOS user of the shipped
+build that their hardware is not the problem. `probe.rs`'s guard records it
+on the evidence, because the resolver never reaches an instance to observe
+it.
+
+Development is unchanged. The same crate built with its default features
+resolves `Tier A, decided by Benchmark` on the Apple M4 Max through Metal,
+because that build carries `ocelli-native`'s `default = ["metal"]`, which
+forwards to `ocelli-render/metal` and so to wgpu. `ocelli-render`'s native
+dev-dependency table is the test suite's restore, because
+`cargo test -p ocelli-render` builds that crate without its dependents, and
+`probe::tests::a_development_build_compiles_at_least_one_backend` is the test
+that turns the removal of that restore red.
 
 ## Filling `Caps`
 

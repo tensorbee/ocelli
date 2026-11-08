@@ -1,4 +1,4 @@
-//! Monochrome frames of one Part 10 object.
+//! Monochrome and colour frames of one Part 10 object.
 //!
 //! Windowed samples go through `LutChain`. The grey byte is
 //! `display_index`, the same address the colour table uses.
@@ -7,7 +7,8 @@
 //! A VOI LUT Sequence is refused unless that override replaces it.
 //! Enhanced multi-frame rescale and window values come from the functional
 //! groups, with the top-level attributes as the fallback.
-//! Invert flips the display byte after the chain.
+//! Monochrome invert flips the display byte after the chain. Colour uses
+//! the library's per-channel window and invert before display-byte rounding.
 
 use std::cell::Cell;
 use std::collections::HashSet;
@@ -22,32 +23,35 @@ use dicom_core::{DicomValue, PrimitiveValue, Tag, VR};
 use dicom_object::mem::{InMemDicomObject, InMemElement};
 use dicom_object::{DefaultDicomObject, StandardDataDictionary};
 use ocelli_codec::{
-    DecodePhotometricInterpretation, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation,
-    RawDecoder, Registry, register_htj2k_decoders, register_jpeg_decoders,
-    register_jpeg2000_decoders, register_jpegls_decoders, register_jpegxl_decoders,
-    register_native_and_rle_decoders,
+    DecodePhotometricInterpretation, DecodeSampleLayout, Decoder, FrameDesc, FrameDescInput,
+    PixelDataVr, PixelRepresentation, RawDecoder, Registry, register_htj2k_decoders,
+    register_jpeg_decoders, register_jpeg2000_decoders, register_jpegls_decoders,
+    register_jpegxl_decoders, register_native_and_rle_decoders,
 };
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    DispatchPath, EncapsulatedFrameIndex, FrameGeometry, FunctionalGroupSource, MetadataElement,
-    MetadataSet, MetadataValue, MultiframeMetadata, ParseError, TopLevelFallback,
-    parse_decimal_string, parse_part10,
+    CineTiming, DispatchPath, EncapsulatedFrameIndex, FrameGeometry, FunctionalGroupSource,
+    MetadataElement, MetadataSet, MetadataValue, MultiframeMetadata, ParseError, SeriesOpenReason,
+    TopLevelFallback, check_conformance, cine_timing, parse_decimal_string, parse_part10,
 };
 use ocelli_pixel::{
-    ByteOrder, ImageDimensions, ImagePlane, LutChain, ModalityTransform, PhotometricInterpretation,
+    AutoWindow, ByteOrder, DecodedLayout, DecodedPhotometric, ImageDimensions, ImagePlane,
+    LutChain, ModalityTransform, PhotometricInterpretation, PixelDataEncoding, PlanarConfiguration,
     PresentationLutEvidence, PresentationLutShape, SampleLayout, StoredBits,
-    StoredPixelDescription, StoredSampleTable, VoiFunction, VoiTransform,
+    StoredPixelDescription, StoredRange, StoredSampleTable, VoiFunction, VoiTransform, auto_window,
 };
 use ocelli_render::display_index;
 use ocelli_viewport::presentation::WindowPreset;
 use ocelli_viewport::view::f32_from_f64;
+
+use crate::colour::{ColourRecipe, ColourScratch, ColourUnavailableReason};
 
 use crate::corners::{
     age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
     person_name_text,
 };
 use crate::measure::{CalibrationInputs, FactorInput, SpacingInput, choose_spacing};
-use crate::value::{ValueFacts, value_facts};
+use crate::value::{ValueFacts, stored_padding, value_facts};
 
 const ROWS: Tag = Tag(0x0028, 0x0010);
 const COLUMNS: Tag = Tag(0x0028, 0x0011);
@@ -85,6 +89,11 @@ pub(crate) const MODALITY: Tag = Tag(0x0008, 0x0060);
 const SERIES_DESCRIPTION: Tag = Tag(0x0008, 0x103E);
 const INSTANCE_NUMBER: Tag = Tag(0x0020, 0x0013);
 const SOP_INSTANCE: Tag = Tag(0x0008, 0x0018);
+/// SOP Class UID, PS3.3 C.12.1. The page reads it to tell an SR or Key
+/// Object Selection document from an image.
+const SOP_CLASS: Tag = Tag(0x0008, 0x0016);
+/// Study Instance UID, PS3.3 C.7.2.1.
+const STUDY_UID: Tag = Tag(0x0020, 0x000D);
 const PATIENT_NAME: Tag = Tag(0x0010, 0x0010);
 const PATIENT_ID: Tag = Tag(0x0010, 0x0020);
 const STUDY_DATE: Tag = Tag(0x0008, 0x0020);
@@ -122,7 +131,7 @@ const MAX_HEADER_ROWS: usize = 4096;
 const VALUE_CAP: usize = 1024;
 const BULK_TEXT_CAP: usize = 64;
 
-/// One grey frame ready to draw.
+/// One display frame ready to draw.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Preview {
     /// Columns.
@@ -131,19 +140,26 @@ pub struct Preview {
     pub height: u32,
     /// Number of Frames, or 1 when that attribute is absent.
     pub frames: u32,
-    /// The file had no window, so the grey bytes use the modality range.
-    pub full_range: bool,
-    /// One display byte per pixel, row major.
+    /// Which automatic window drew the bytes. Always None for colour.
+    pub auto: AutoSource,
+    /// One grey or three RGB display bytes per pixel, row major.
     pub grey: Vec<u8>,
+    /// One grey byte or three packed RGB bytes per pixel.
+    pub channels: u8,
+    /// A wide palette was explicitly read as 8-bit entries.
+    pub palette_fallback: bool,
+    /// The file requested ICC colour management, not applied in F-239.
+    pub icc: bool,
     /// Zero-based frame that was decoded.
     pub frame: u32,
-    /// Window center that was applied, in modality units.
+    /// Window center in modality units for monochrome, display units for colour.
     pub window_center: f32,
     /// Window width that was applied.
     pub window_width: f32,
     /// VOI LUT Function that was applied.
     pub window_function: &'static str,
-    /// The display bytes were flipped after the LUT chain.
+    /// Inverted presentation: monochrome flips display bytes, while colour
+    /// inverts floating channels after its window and before byte rounding.
     pub inverted: bool,
     /// Spacing and edge letters for the shown frame.
     pub facts: FrameFacts,
@@ -155,11 +171,41 @@ pub struct Preview {
     /// when uncalibrated or refused.
     pub calibration_mm: Option<(f64, f64)>,
     /// The file window pair that was drawn, or `None` for a preset, a
-    /// numeric window or the full range.
+    /// numeric window or an automatic window. Always `None` for colour.
     pub window_index: Option<u32>,
     /// Number of Window Center and Window Width pairs the file gives this
-    /// frame, 0 when it gives none or they cannot be paired.
+    /// frame, 0 when it gives none or they cannot be paired. Always 0 for
+    /// colour, which does not offer the file's window pairs.
     pub window_count: u32,
+}
+
+/// The automatic window a preview was drawn at, F-227.
+///
+/// A monochrome file that stores no window and no VOI LUT Sequence takes the
+/// automatic window of `ocelli_pixel`. `Series` is the one window of its
+/// series that the page sent back in `X-Ocelli-Series-Window`, `Image` is the
+/// window of this image alone. An image with any window of its own is always
+/// `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoSource {
+    /// The file window, a preset or a numeric window.
+    None,
+    /// The series window the request carried.
+    Series,
+    /// This image's own automatic window.
+    Image,
+}
+
+impl AutoSource {
+    /// The `X-Ocelli-Auto-Window` token.
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Series => "series",
+            Self::Image => "image",
+        }
+    }
 }
 
 /// Spacing and patient-direction letters for one frame.
@@ -193,19 +239,21 @@ pub struct FrameFacts {
 
 /// Which frame to decode, and an optional replacement window.
 ///
-/// Absent window fields keep the file window, including the full-range
-/// fallback. Invert is applied to the grey byte after `display_index`.
+/// Absent window fields keep the monochrome file window or automatic
+/// window, and use centre 128 and width 256 for colour. Monochrome invert
+/// follows `display_index`, while colour invert precedes byte rounding.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FrameRequest {
     /// Zero-based frame index.
     pub frame: u32,
-    /// Flip each grey byte as `255 - byte`.
+    /// Invert the presentation, per channel on colour.
     pub invert: bool,
     /// Replacement Window Center. Set together with [`Self::window_width`].
     pub window_center: Option<f32>,
     /// Replacement Window Width.
     pub window_width: Option<f32>,
-    /// Replacement VOI LUT Function. Absent keeps the file function.
+    /// Replacement VOI LUT Function. Absent keeps the monochrome file
+    /// function and uses LINEAR on colour. Other functions refuse on colour.
     pub window_function: Option<VoiFunction>,
     /// Named window from `WindowPreset`. It refuses a VOI LUT Sequence
     /// and it is not combined with a numeric window.
@@ -214,6 +262,12 @@ pub struct FrameRequest {
     /// pairs. Absent is index 0. It is not combined with a preset or a
     /// numeric window, and it refuses a VOI LUT Sequence.
     pub window_index: Option<u32>,
+    /// Centre and width of the series window, F-227, exactly as
+    /// `/series-window` wrote them and the page sent them back. Applied only
+    /// to an image that stores no window of its own, in place of that image's
+    /// own automatic window. It is not combined with a preset, a numeric
+    /// window or a file window index.
+    pub series_window: Option<(f32, f32)>,
 }
 
 impl PreviewError {
@@ -223,7 +277,8 @@ impl PreviewError {
         match self {
             Self::NotPart10 => "not-part10",
             Self::Attribute => "attribute",
-            Self::NotMonochrome => "not-monochrome",
+            Self::ColourUnavailable(_) => "colour-unavailable",
+            Self::ColourNotApplicable => "colour-not-applicable",
             Self::TooLarge => "too-large",
             Self::Decode => "decode",
             Self::Window => "window",
@@ -249,9 +304,12 @@ pub enum PreviewError {
     /// An image attribute is missing or not usable.
     #[error("an image attribute is missing or not usable")]
     Attribute,
-    /// The frame is not monochrome.
-    #[error("this preview shows monochrome frames only")]
-    NotMonochrome,
+    /// This build cannot draw the colour shape, for a closed reason.
+    #[error("{0}")]
+    ColourUnavailable(ColourUnavailableReason),
+    /// A scalar window operation was requested on colour.
+    #[error("this window operation does not apply to a colour image")]
+    ColourNotApplicable,
     /// The frame is larger than the preview will allocate.
     #[error("the frame is larger than this preview will draw")]
     TooLarge,
@@ -311,11 +369,17 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
         &mut native,
         &mut samples,
         &mut |_| {},
-        &mut |_| Vec::new(),
+        &mut |_, _| Vec::new(),
     )?;
     let mut scratch = Vec::new();
     let mut grey = Vec::new();
-    render_held(&held, request, &mut scratch, &mut grey)
+    render_held(
+        &held,
+        request,
+        &mut scratch,
+        &mut ColourScratch::default(),
+        &mut grey,
+    )
 }
 
 /// Refuse a window header that cannot name one window.
@@ -324,8 +388,9 @@ pub fn preview_frame(bytes: &[u8], request: FrameRequest) -> Result<Preview, Pre
 ///
 /// Returns [`PreviewError::Window`] when center and width are not paired,
 /// a preset is combined with a numeric window or a function, a file window
-/// index is combined with a preset or a numeric window, or a number is not
-/// finite.
+/// index is combined with a preset or a numeric window, a series window is
+/// combined with any of those or with a function, a series window has no
+/// positive finite width, or a number is not finite.
 pub(crate) fn validate_frame_request(request: FrameRequest) -> Result<(), PreviewError> {
     if request.window_center.is_some() != request.window_width.is_some() {
         return Err(PreviewError::Window);
@@ -350,6 +415,23 @@ pub(crate) fn validate_frame_request(request: FrameRequest) -> Result<(), Previe
         || request.window_width.is_some_and(|width| !width.is_finite())
     {
         return Err(PreviewError::Window);
+    }
+    if let Some((center, width)) = request.series_window {
+        // One window per request. A series window beside another named one
+        // would have to be silently preferred, so it is refused instead. A
+        // function alone would draw the series centre and width under another
+        // function and still say series, review pass 16 N2.
+        if request.window_preset.is_some()
+            || request.window_center.is_some()
+            || request.window_width.is_some()
+            || request.window_index.is_some()
+            || request.window_function.is_some()
+        {
+            return Err(PreviewError::Window);
+        }
+        if !center.is_finite() || !width.is_finite() || width <= 0.0 {
+            return Err(PreviewError::Window);
+        }
     }
     Ok(())
 }
@@ -531,8 +613,8 @@ fn note_borrowed_decode() {
 
 /// One decoded frame held so a later window does not decode it again.
 ///
-/// The samples are decoder output. Grey bytes are not stored, because a
-/// window change has to run `LutChain` again.
+/// The samples are decoder output. Display bytes are not stored, because a
+/// window change maps the decoded samples through their recipe again.
 pub(crate) struct HeldFrame {
     /// Decoder output for this frame. Its capacity is charged in
     /// [`HeldFrame::charged_bytes`].
@@ -545,10 +627,12 @@ pub(crate) struct HeldFrame {
     pub(crate) recipe: Result<Recipe, PreviewError>,
     /// Spacing and edge letters. Returned only after the chain is built.
     pub(crate) facts: Result<FrameFacts, PreviewError>,
-    /// Full-range center and width when the file has no window. Otherwise an error.
-    pub(crate) full_range: Result<(f32, f32), PreviewError>,
-    /// Request-independent inputs of the value at a point, or the refusal
-    /// that blocks every point. [`render_held`] does not read it. Boxed, so
+    /// This image's own automatic window, F-227, computed once when the file
+    /// has no window. Otherwise an error, and never read.
+    pub(crate) auto: Result<AutoWindow, PreviewError>,
+    /// Request-independent scalar value facts. Colour uses its recipe for
+    /// RGB readouts and keeps ColourNotApplicable here. [`render_held`] does
+    /// not read these facts. Boxed, so
     /// a refused frame does not carry the facts' size inline. The facts'
     /// heap bytes are charged in [`HeldFrame::charged_bytes`].
     pub(crate) value: Result<Box<ValueFacts>, PreviewError>,
@@ -566,21 +650,49 @@ pub(crate) struct HeldFrame {
 }
 
 impl HeldFrame {
+    pub(crate) fn channels(&self) -> usize {
+        if matches!(
+            self.description.layout.photometric_interpretation(),
+            PhotometricInterpretation::Monochrome1 | PhotometricInterpretation::Monochrome2
+        ) {
+            1
+        } else {
+            3
+        }
+    }
+
     /// The bytes the cache charges for this frame.
     ///
     /// The capacity of the sample buffer, the struct itself, and the heap
     /// bytes of the value facts when the frame has them.
     pub(crate) fn charged_bytes(&self) -> usize {
         let value = self.value.as_ref().map_or(0, |facts| facts.heap_bytes());
+        let colour = match &self.recipe {
+            Ok(Recipe::Colour(recipe)) => recipe.heap_bytes(),
+            _ => 0,
+        };
         self.samples
             .capacity()
             .saturating_add(size_of::<Self>())
             .saturating_add(value)
+            .saturating_add(colour)
     }
 }
 
+/// Existing monochrome admission allowance, unchanged by colour support.
+pub(crate) fn monochrome_held_overhead() -> usize {
+    size_of::<HeldFrame>()
+        .saturating_add(size_of::<crate::value::ValueFacts>())
+        .saturating_add(crate::value::UNIT_MAX_BYTES)
+}
+
 /// Chain inputs that do not depend on the request.
-pub(crate) struct Recipe {
+pub(crate) enum Recipe {
+    Monochrome(MonochromeRecipe),
+    Colour(Box<ColourRecipe>),
+}
+
+pub(crate) struct MonochromeRecipe {
     /// Modality stage. A Modality LUT Sequence never reaches this value.
     pub(crate) modality: ModalityTransform,
     /// Photometric Interpretation of the frame.
@@ -599,8 +711,14 @@ pub(crate) struct Recipe {
 
 /// The file window, computed once.
 pub(crate) enum FileWindow {
-    /// No Window Center or Window Width. LINEAR_EXACT over the modality range.
-    Full,
+    /// No Window Center or Window Width, F-227. The automatic window of
+    /// `ocelli_pixel`, LINEAR_EXACT from the 1st to the 99th percentile.
+    Auto {
+        /// This frame's Pixel Padding Value range in stored space, PS3.3
+        /// C.7.5.1.1.2, or the refusal that leaves the frame out of a series
+        /// window. The series pool reads it.
+        padding: Result<Option<StoredRange>, PreviewError>,
+    },
     /// The file's centers, widths, and function.
     ///
     /// PS3.3 C.11.2.1.2.2 pairs the values by position, so an empty value
@@ -617,6 +735,8 @@ pub(crate) enum FileWindow {
 
 /// Decode one frame into samples and a window recipe.
 ///
+/// `acquire` receives the requested sample bytes and the held frame
+/// overhead, including any prepared colour box and palette allocations.
 /// `on_samples` runs once the sample buffer has its capacity and before
 /// those bytes are decoded. The caller can count that buffer while it is
 /// still outside the cache.
@@ -635,7 +755,7 @@ pub(crate) fn decode_held<F, A>(
 ) -> Result<HeldFrame, PreviewError>
 where
     F: FnMut(usize),
-    A: FnMut(usize) -> Vec<u8>,
+    A: FnMut(usize, usize) -> Vec<u8>,
 {
     let _in_flight = DecodeInFlight::enter();
     note_decode();
@@ -670,6 +790,7 @@ struct FrameParts {
 fn frame_parts(
     object: &DefaultDicomObject,
     frame: u32,
+    encoding: PixelDataEncoding,
 ) -> Result<(FrameParts, FrameDesc), PreviewError> {
     let rows = required_u16(object, ROWS)?;
     let columns = required_u16(object, COLUMNS)?;
@@ -681,13 +802,22 @@ fn frame_parts(
     }
     let photometric = photometric(object)?;
     let samples = required_u16(object, SAMPLES_PER_PIXEL)?;
-    if samples != 1 {
-        return Err(PreviewError::NotMonochrome);
-    }
+    let colour = !matches!(
+        photometric,
+        PhotometricInterpretation::Monochrome1 | PhotometricInterpretation::Monochrome2
+    );
     let bits_allocated = required_u16(object, BITS_ALLOCATED)?;
     let bits_stored = required_u16(object, BITS_STORED)?;
     let high_bit = required_u16(object, HIGH_BIT)?;
     let representation = pixel_representation(object)?;
+    if colour
+        && (representation != ocelli_pixel::PixelRepresentation::Unsigned
+            || !(8..=16).contains(&bits_stored))
+    {
+        return Err(PreviewError::ColourUnavailable(
+            ColourUnavailableReason::Samples,
+        ));
+    }
     let frames = frame_count(object)?;
     if frame >= frames {
         return Err(PreviewError::Frame);
@@ -715,17 +845,40 @@ fn frame_parts(
         representation,
     )
     .map_err(|_| PreviewError::Attribute)?;
-    let layout =
-        SampleLayout::new(1, photometric, None).map_err(|_| PreviewError::NotMonochrome)?;
+    let planar = if samples == 3 {
+        Some(if encoding == PixelDataEncoding::Encapsulated {
+            PlanarConfiguration::Interleaved
+        } else {
+            match required_u16(object, Tag(0x0028, 0x0006))? {
+                0 => PlanarConfiguration::Interleaved,
+                1 => PlanarConfiguration::Planar,
+                _ => {
+                    return Err(PreviewError::ColourUnavailable(
+                        ColourUnavailableReason::Space,
+                    ));
+                }
+            }
+        })
+    } else {
+        None
+    };
+    let layout = SampleLayout::new(
+        u8::try_from(samples).map_err(|_| PreviewError::Attribute)?,
+        photometric,
+        planar,
+    )
+    .map_err(|_| PreviewError::ColourUnavailable(ColourUnavailableReason::Space))?;
     let dimensions = ImageDimensions::new(height, width).map_err(|_| PreviewError::Attribute)?;
     let description = StoredPixelDescription::new(dimensions, layout, stored_bits);
-    let count = description
-        .sample_count()
-        .map_err(|_| PreviewError::Attribute)?;
-    let bytes_per_sample = usize::from(stored_bits.bits_allocated() / 8);
-    let expected = count
-        .checked_mul(bytes_per_sample)
-        .ok_or(PreviewError::Decode)?;
+    let expected = if encoding == PixelDataEncoding::Encapsulated {
+        desc.output_len()
+    } else {
+        description
+            .sample_count()
+            .map_err(|_| PreviewError::ColourUnavailable(ColourUnavailableReason::ChromaColumns))?
+            .checked_mul(usize::from(stored_bits.bits_allocated() / 8))
+            .ok_or(PreviewError::Decode)?
+    };
     Ok((
         FrameParts {
             frames,
@@ -743,21 +896,41 @@ fn held_from_samples(
     parts: FrameParts,
     samples: Vec<u8>,
     frame_index: usize,
-) -> HeldFrame {
-    let prepared = prepare_held(object, &parts.description, &samples, frame_index);
-    HeldFrame {
+    decoded: DecodeFacts,
+    colour: Option<(MetadataSet, Result<ColourRecipe, PreviewError>)>,
+) -> Result<HeldFrame, PreviewError> {
+    let prepared = prepare_held(object, &parts.description, &samples, frame_index, colour);
+    let mut description = parts.description;
+    if decoded.photometric == DecodedPhotometric::Rgb {
+        description.layout = SampleLayout::new(
+            3,
+            PhotometricInterpretation::Rgb,
+            Some(PlanarConfiguration::Interleaved),
+        )
+        .map_err(|_| PreviewError::Attribute)?;
+    } else if decoded.layout == DecodedLayout::Interleaved
+        && description.layout.samples_per_pixel() == 3
+    {
+        description.layout = SampleLayout::new(
+            3,
+            description.layout.photometric_interpretation(),
+            Some(PlanarConfiguration::Interleaved),
+        )
+        .map_err(|_| PreviewError::Attribute)?;
+    }
+    Ok(HeldFrame {
         samples,
-        description: parts.description,
+        description,
         byte_order: ByteOrder::LittleEndian,
         recipe: prepared.recipe,
         facts: prepared.facts,
-        full_range: prepared.full_range,
+        auto: prepared.auto,
         value: prepared.value,
         calibration: prepared.calibration,
         frames: parts.frames,
         width: parts.width,
         height: parts.height,
-    }
+    })
 }
 
 fn finish_decode<F, A>(
@@ -771,15 +944,47 @@ fn finish_decode<F, A>(
 ) -> Result<HeldFrame, PreviewError>
 where
     F: FnMut(usize),
-    A: FnMut(usize) -> Vec<u8>,
+    A: FnMut(usize, usize) -> Vec<u8>,
 {
     let object = parsed.object();
-    let (parts, desc) = frame_parts(object, frame)?;
-    if desc.output_len() != parts.expected {
+    let encoding = if parsed.transfer_syntax().dispatch_path() == DispatchPath::Encapsulated {
+        PixelDataEncoding::Encapsulated
+    } else {
+        PixelDataEncoding::Native
+    };
+    let (mut parts, desc) = frame_parts(object, frame, encoding)?;
+    let decoded = decode_facts(parsed, &desc)?;
+    parts.expected = decoded.len;
+    if decoded.len == 0 {
         return Err(PreviewError::Decode);
     }
     let frame_index = usize::try_from(frame).map_err(|_| PreviewError::Frame)?;
-    prepare_samples(samples, parts.expected, acquire)?;
+    // Prepare owned colour inputs once, before the cache decides which
+    // unread frame makes room. A palette's actual capacity is part of that
+    // admission, not an extra discovered only when the frame is stored.
+    let colour = if matches!(
+        parts.description.layout.photometric_interpretation(),
+        PhotometricInterpretation::Monochrome1 | PhotometricInterpretation::Monochrome2
+    ) {
+        None
+    } else {
+        let metadata = project_metadata(object)?;
+        let recipe = ColourRecipe::new(
+            &metadata,
+            parts.description,
+            decoded.encoding,
+            decoded.photometric,
+            decoded.layout,
+        );
+        Some((metadata, recipe))
+    };
+    let overhead = colour
+        .as_ref()
+        .map_or_else(monochrome_held_overhead, |(_, recipe)| {
+            size_of::<HeldFrame>()
+                .saturating_add(recipe.as_ref().map_or(0, ColourRecipe::heap_bytes))
+        });
+    prepare_samples(samples, parts.expected, overhead, acquire)?;
     on_samples(samples.capacity());
     decode_frame(
         parsed,
@@ -791,7 +996,7 @@ where
         samples,
     )?;
     let taken = std::mem::take(samples);
-    Ok(held_from_samples(object, parts, taken, frame_index))
+    held_from_samples(object, parts, taken, frame_index, decoded, colour)
 }
 
 /// Size the sample buffer to the decoded frame.
@@ -802,18 +1007,24 @@ where
 fn prepare_samples<A>(
     samples: &mut Vec<u8>,
     output_len: usize,
+    overhead: usize,
     acquire: &mut A,
 ) -> Result<(), PreviewError>
 where
-    A: FnMut(usize) -> Vec<u8>,
+    A: FnMut(usize, usize) -> Vec<u8>,
 {
     if samples.capacity() < output_len {
-        let got = acquire(output_len);
+        let got = acquire(output_len, overhead);
         if got.capacity() >= output_len {
             *samples = got;
         }
     }
     samples.clear();
+    // Admission reserved this exact sample length. Avoid Vec's minimum
+    // fresh capacity making a tiny colour frame larger than that claim.
+    samples
+        .try_reserve_exact(output_len)
+        .map_err(|_| PreviewError::TooLarge)?;
     samples.resize(output_len, 0);
     if samples.len() != output_len {
         return Err(PreviewError::Decode);
@@ -824,7 +1035,7 @@ where
 struct Prepared {
     recipe: Result<Recipe, PreviewError>,
     facts: Result<FrameFacts, PreviewError>,
-    full_range: Result<(f32, f32), PreviewError>,
+    auto: Result<AutoWindow, PreviewError>,
     value: Result<Box<ValueFacts>, PreviewError>,
     calibration: Result<CalibrationInputs, PreviewError>,
 }
@@ -834,15 +1045,20 @@ fn prepare_held(
     description: &StoredPixelDescription,
     samples: &[u8],
     frame_index: usize,
+    colour: Option<(MetadataSet, Result<ColourRecipe, PreviewError>)>,
 ) -> Prepared {
     let photometric = description.layout.photometric_interpretation();
-    let metadata = match project_metadata(object) {
+    let (metadata, colour_recipe) = match colour {
+        Some((metadata, recipe)) => (Ok(metadata), Some(recipe)),
+        None => (project_metadata(object), None),
+    };
+    let metadata = match metadata {
         Ok(metadata) => metadata,
         Err(error) => {
             return Prepared {
                 recipe: Err(error),
                 facts: Err(error),
-                full_range: Err(error),
+                auto: Err(error),
                 value: Err(error),
                 calibration: Err(error),
             };
@@ -854,7 +1070,7 @@ fn prepare_held(
             return Prepared {
                 recipe: Err(PreviewError::Attribute),
                 facts: Err(PreviewError::Attribute),
-                full_range: Err(PreviewError::Attribute),
+                auto: Err(PreviewError::Attribute),
                 value: Err(PreviewError::Attribute),
                 calibration: Err(PreviewError::Attribute),
             };
@@ -863,11 +1079,20 @@ fn prepare_held(
     let facts = frame_facts(&metadata, &multi, frame_index);
     // Spacing is not stage 1, so a refused rescale below never refuses a length.
     let calibration = calibration_inputs(&metadata, &multi, frame_index);
+    if let Some(recipe) = colour_recipe {
+        return Prepared {
+            recipe: recipe.map(|recipe| Recipe::Colour(Box::new(recipe))),
+            facts,
+            calibration,
+            auto: Err(PreviewError::ColourNotApplicable),
+            value: Err(PreviewError::ColourNotApplicable),
+        };
+    }
     if let Err(error) = modality_blocked(&multi, frame_index) {
         return Prepared {
             recipe: Err(error),
             facts,
-            full_range: Err(error),
+            auto: Err(error),
             value: Err(error),
             calibration,
         };
@@ -878,7 +1103,7 @@ fn prepare_held(
             return Prepared {
                 recipe: Err(error),
                 facts,
-                full_range: Err(error),
+                auto: Err(error),
                 value: Err(error),
                 calibration,
             };
@@ -890,7 +1115,7 @@ fn prepare_held(
             return Prepared {
                 recipe: Err(PreviewError::Window),
                 facts,
-                full_range: Err(PreviewError::Window),
+                auto: Err(PreviewError::Window),
                 value: Err(PreviewError::Window),
                 calibration,
             };
@@ -914,20 +1139,31 @@ fn prepare_held(
         VOI_LUT_SEQUENCE,
     );
     let evidence = presentation(object);
-    let (file_window, full_range) =
-        file_window_of(&multi, &modality, description, samples, frame_index);
+    // F-210's padding reader, the one `value_facts` uses, read here on its
+    // own so a unit the value refuses does not hide the padding.
+    let padding = stored_padding(&metadata, description)
+        .map_err(|_| PreviewError::Window)
+        .and_then(stored_range);
+    let (file_window, auto) = file_window_of(
+        &multi,
+        &modality,
+        description,
+        samples,
+        frame_index,
+        padding,
+    );
     let ct = optional_text(object, MODALITY).ok().flatten().as_deref() == Some("CT");
     Prepared {
-        recipe: Ok(Recipe {
+        recipe: Ok(Recipe::Monochrome(MonochromeRecipe {
             modality,
             photometric,
             evidence,
             voi_lut,
             file_window,
             ct,
-        }),
+        })),
         facts,
-        full_range,
+        auto,
         value,
         calibration,
     }
@@ -949,15 +1185,48 @@ fn modality_blocked(
     Ok(())
 }
 
+/// The padding range as stored-space `f32` bounds for the automatic window.
+///
+/// `read_padding` gives one US or SS value and limit, so every bound fits
+/// 16 bits and is exact in `f32`. A bound outside that is refused rather
+/// than rounded, the rule F-210 applies to the value at the pointer.
+fn stored_range(
+    padding: Option<ocelli_dicom::PaddingRange>,
+) -> Result<Option<StoredRange>, PreviewError> {
+    let Some(range) = padding else {
+        return Ok(None);
+    };
+    let low = exact_bound(range.value())?;
+    let high = match range.limit() {
+        Some(limit) => exact_bound(limit)?,
+        None => low,
+    };
+    Ok(Some(StoredRange {
+        low: Stored(low),
+        high: Stored(high),
+    }))
+}
+
+/// A US or SS padding bound as the `f32` it is. Anything wider is refused.
+fn exact_bound(value: i32) -> Result<f32, PreviewError> {
+    if let Ok(narrow) = i16::try_from(value) {
+        return Ok(f32::from(narrow));
+    }
+    u16::try_from(value)
+        .map(f32::from)
+        .map_err(|_| PreviewError::Window)
+}
+
 fn file_window_of(
     multi: &MultiframeMetadata<'_>,
     modality: &ModalityTransform,
     description: &StoredPixelDescription,
     samples: &[u8],
     frame_index: usize,
+    padding: Result<Option<StoredRange>, PreviewError>,
 ) -> (
     Result<FileWindow, PreviewError>,
-    Result<(f32, f32), PreviewError>,
+    Result<AutoWindow, PreviewError>,
 ) {
     let centers = match decimal_slots(multi, frame_index, FRAME_VOI_LUT_SEQUENCE, WINDOW_CENTER) {
         Ok(centers) => centers,
@@ -980,10 +1249,14 @@ fn file_window_of(
         {
             return (Err(PreviewError::Decode), Err(PreviewError::Decode));
         }
-        return match full_range(modality, &stored) {
-            Ok(pair) => (Ok(FileWindow::Full), Ok(pair)),
-            Err(error) => (Err(error), Err(error)),
-        };
+        // F-227. The per-image window is a pool of one, the same library
+        // function the series window folds. A padding range that cannot be
+        // read is not guessed around, so this image's own window refuses,
+        // while a series window the page sends can still draw it.
+        let auto = padding.and_then(|range| {
+            auto_window(&stored, modality, range).map_err(|_| PreviewError::Window)
+        });
+        return (Ok(FileWindow::Auto { padding }), auto);
     }
     if centers.is_empty() || centers.len() != widths.len() {
         return (Err(PreviewError::Window), Err(PreviewError::Window));
@@ -1012,11 +1285,34 @@ pub(crate) fn render_held(
     held: &HeldFrame,
     request: FrameRequest,
     scratch: &mut Vec<Stored>,
+    colour: &mut ColourScratch,
     grey: &mut Vec<u8>,
 ) -> Result<Preview, PreviewError> {
     let recipe = match &held.recipe {
         Ok(recipe) => recipe,
         Err(error) => return Err(*error),
+    };
+    let recipe = match recipe {
+        Recipe::Monochrome(recipe) => recipe,
+        Recipe::Colour(recipe) => {
+            let (center, width) = crate::colour::draw(held, recipe, request, colour, grey)?;
+            return finish_preview(
+                held,
+                request,
+                std::mem::take(grey),
+                RenderedWindow {
+                    center,
+                    width,
+                    function: VoiFunction::Linear,
+                    auto: AutoSource::None,
+                    index: None,
+                    count: 0,
+                },
+                3,
+                recipe.palette_fallback,
+                recipe.icc.present(),
+            );
+        }
     };
     let window = select_window(held, recipe, request)?;
     let evidence = recipe.evidence?;
@@ -1038,6 +1334,53 @@ pub(crate) fn render_held(
     let chain = LutChain::new(recipe.modality.clone(), voi, recipe.photometric, evidence)
         .map_err(|_| PreviewError::Window)?;
     let chain_us = chain_started.map(|started| started.elapsed().as_micros());
+    // PS3.3 C.11.2.1.2 and C.11.2.1.3. The table is `LutChain::apply` once per
+    // stored integer. `display_index` quantises those entries, then each
+    // sample selects one byte. Wider stored widths keep the per-sample loop.
+    let table_started = profiling().then(Instant::now);
+    let table = chain.stored_sample_table(held.description.bits);
+    let table_us = table_started.map(|started| started.elapsed().as_micros());
+    if let Some(table) = table {
+        grey_from_table(held, &table, request.invert, grey, chain_us, table_us)?;
+    } else {
+        grey_from_samples(held, &chain, request.invert, scratch, grey, chain_us)?;
+    }
+    finish_preview(
+        held,
+        request,
+        std::mem::take(grey),
+        RenderedWindow {
+            center,
+            width,
+            function,
+            auto: window.auto,
+            index: window.index,
+            count: window_count(recipe),
+        },
+        1,
+        false,
+        false,
+    )
+}
+
+struct RenderedWindow {
+    center: f32,
+    width: f32,
+    function: VoiFunction,
+    auto: AutoSource,
+    index: Option<u32>,
+    count: u32,
+}
+
+fn finish_preview(
+    held: &HeldFrame,
+    request: FrameRequest,
+    grey: Vec<u8>,
+    window: RenderedWindow,
+    channels: u8,
+    palette_fallback: bool,
+    icc: bool,
+) -> Result<Preview, PreviewError> {
     let facts = held.facts.clone()?;
     // F-211's choice, the one `/measure` makes for this frame, so the scale
     // bar and a length cannot disagree. A refusal shows no bar.
@@ -1050,45 +1393,36 @@ pub(crate) fn render_held(
     let calibration_mm = chosen
         .and_then(|spacing| spacing.mm)
         .map(|mm| (mm.row, mm.column));
-    // PS3.3 C.11.2.1.2 and C.11.2.1.3. The table is `LutChain::apply` once per
-    // stored integer. `display_index` quantises those entries, then each
-    // sample selects one byte. Wider stored widths keep the per-sample loop.
-    let table_started = profiling().then(Instant::now);
-    let table = chain.stored_sample_table(held.description.bits);
-    let table_us = table_started.map(|started| started.elapsed().as_micros());
-    if let Some(table) = table {
-        grey_from_table(held, &table, request.invert, grey, chain_us, table_us)?;
-    } else {
-        grey_from_samples(held, &chain, request.invert, scratch, grey, chain_us)?;
-    }
-    let grey = std::mem::take(grey);
     Ok(Preview {
         width: held.width,
         height: held.height,
         frames: held.frames,
-        full_range: window.full_range,
+        auto: window.auto,
         grey,
+        channels,
+        palette_fallback,
+        icc,
         frame: request.frame,
-        window_center: center,
-        window_width: width,
-        window_function: function_label(function),
+        window_center: window.center,
+        window_width: window.width,
+        window_function: function_label(window.function),
         inverted: request.invert,
         facts,
         calibration_source,
         calibration_mm,
         window_index: window.index,
-        window_count: window_count(recipe),
+        window_count: window.count,
     })
 }
 
 /// The pairs the file gives this frame, or 0 when it gives none or its
 /// window cannot be used.
-fn window_count(recipe: &Recipe) -> u32 {
+fn window_count(recipe: &MonochromeRecipe) -> u32 {
     match &recipe.file_window {
         Ok(FileWindow::Explicit { centers, .. }) => {
             u32::try_from(centers.len()).unwrap_or(u32::MAX)
         }
-        Ok(FileWindow::Full) | Err(_) => 0,
+        Ok(FileWindow::Auto { .. }) | Err(_) => 0,
     }
 }
 
@@ -1207,20 +1541,20 @@ struct ChosenWindow {
     /// The pair `VoiTransform::new` selects.
     selected: usize,
     function: VoiFunction,
-    full_range: bool,
+    auto: AutoSource,
     /// The file window pair drawn, or `None` for a preset, a numeric window
-    /// or the full range.
+    /// or an automatic window.
     index: Option<u32>,
 }
 
 impl ChosenWindow {
-    fn one(center: f32, width: f32, function: VoiFunction, full_range: bool) -> Self {
+    fn one(center: f32, width: f32, function: VoiFunction, auto: AutoSource) -> Self {
         Self {
             centers: vec![center],
             widths: vec![width],
             selected: 0,
             function,
-            full_range,
+            auto,
             index: None,
         }
     }
@@ -1228,7 +1562,7 @@ impl ChosenWindow {
 
 fn select_window(
     held: &HeldFrame,
-    recipe: &Recipe,
+    recipe: &MonochromeRecipe,
     request: FrameRequest,
 ) -> Result<ChosenWindow, PreviewError> {
     if let Some(preset) = request.window_preset {
@@ -1244,7 +1578,7 @@ fn select_window(
             preset.center(),
             preset.width(),
             VoiFunction::Linear,
-            false,
+            AutoSource::None,
         ));
     }
     if request.window_center.is_some() && request.window_width.is_some() {
@@ -1254,22 +1588,31 @@ fn select_window(
             return Err(PreviewError::Window);
         }
         let function = request.window_function.unwrap_or(VoiFunction::Linear);
-        return Ok(ChosenWindow::one(center, width, function, false));
+        return Ok(ChosenWindow::one(center, width, function, AutoSource::None));
     }
     if voi_present(recipe)? {
         return Err(PreviewError::Window);
     }
     match recipe.file_window.as_ref().map_err(|error| *error)? {
-        FileWindow::Full => {
+        FileWindow::Auto { .. } => {
             // An index names a stored pair, and this file stores none.
             if request.window_index.is_some() {
                 return Err(PreviewError::Window);
             }
-            let (center, width) = held.full_range?;
-            // A function sent alone replaces the full-range default. The
-            // default is LINEAR_EXACT only when the request names none.
+            // F-227. The series window is the one the page was given for this
+            // image's series, used as sent. Without it the image draws at its
+            // own automatic window, and the reply says which.
+            let (center, width, auto) = match request.series_window {
+                Some((center, width)) => (center, width, AutoSource::Series),
+                None => {
+                    let own = held.auto?;
+                    (own.center, own.width, AutoSource::Image)
+                }
+            };
+            // A function sent alone replaces the LINEAR_EXACT the automatic
+            // window is checked under. The default holds when it names none.
             let function = request.window_function.unwrap_or(VoiFunction::LinearExact);
-            Ok(ChosenWindow::one(center, width, function, true))
+            Ok(ChosenWindow::one(center, width, function, auto))
         }
         FileWindow::Explicit {
             centers,
@@ -1309,14 +1652,14 @@ fn select_window(
                 widths: fill(widths),
                 selected,
                 function,
-                full_range: false,
+                auto: AutoSource::None,
                 index: Some(index),
             })
         }
     }
 }
 
-fn voi_present(recipe: &Recipe) -> Result<bool, PreviewError> {
+fn voi_present(recipe: &MonochromeRecipe) -> Result<bool, PreviewError> {
     recipe.voi_lut
 }
 
@@ -1329,7 +1672,16 @@ fn photometric(object: &DefaultDicomObject) -> Result<PhotometricInterpretation,
     match required_text(object, PHOTOMETRIC)?.as_str() {
         "MONOCHROME1" => Ok(PhotometricInterpretation::Monochrome1),
         "MONOCHROME2" => Ok(PhotometricInterpretation::Monochrome2),
-        _ => Err(PreviewError::NotMonochrome),
+        "RGB" => Ok(PhotometricInterpretation::Rgb),
+        "YBR_FULL" => Ok(PhotometricInterpretation::YbrFull),
+        "YBR_FULL_422" => Ok(PhotometricInterpretation::YbrFull422),
+        "YBR_PARTIAL_422" => Ok(PhotometricInterpretation::YbrPartial422),
+        "YBR_ICT" => Ok(PhotometricInterpretation::YbrIct),
+        "YBR_RCT" => Ok(PhotometricInterpretation::YbrRct),
+        "PALETTE COLOR" => Ok(PhotometricInterpretation::PaletteColor),
+        _ => Err(PreviewError::ColourUnavailable(
+            ColourUnavailableReason::Space,
+        )),
     }
 }
 
@@ -1344,8 +1696,7 @@ fn photometric_name(photometric: PhotometricInterpretation) -> &'static str {
         PhotometricInterpretation::YbrPartial422 => "YBR_PARTIAL_422",
         PhotometricInterpretation::YbrIct => "YBR_ICT",
         PhotometricInterpretation::YbrRct => "YBR_RCT",
-        // XYB is three samples, so this preview refuses it as not-monochrome
-        // before decode. The arm exists so the match stays exhaustive.
+        // XYB is not an admitted viewer space. Keep the match exhaustive.
         PhotometricInterpretation::Xyb => "XYB",
     }
 }
@@ -1413,40 +1764,61 @@ fn native_dispatch(path: DispatchPath) -> bool {
 /// The borrowed pixel value is the whole element, every frame, already in
 /// transfer-syntax byte order. A parsed copy of those bytes is not required.
 fn borrowed_pixels_fit(object: &DefaultDicomObject, pixels: &[u8]) -> bool {
-    let Ok(rows) = required_u16(object, ROWS) else {
+    let Ok((parts, _)) = frame_parts(object, 0, PixelDataEncoding::Native) else {
         return false;
     };
-    let Ok(columns) = required_u16(object, COLUMNS) else {
+    let Ok(frames) = usize::try_from(parts.frames) else {
         return false;
     };
-    let Ok(samples) = required_u16(object, SAMPLES_PER_PIXEL) else {
-        return false;
-    };
-    let Ok(bits) = required_u16(object, BITS_ALLOCATED) else {
-        return false;
-    };
-    let Ok(frames) = frame_count(object) else {
-        return false;
-    };
-    if bits == 0 || !bits.is_multiple_of(8) {
-        return false;
+    parts
+        .expected
+        .checked_mul(frames)
+        .is_some_and(|all| all > 0 && pixels.len() == all)
+}
+
+#[derive(Clone, Copy)]
+struct DecodeFacts {
+    len: usize,
+    encoding: PixelDataEncoding,
+    photometric: DecodedPhotometric,
+    layout: DecodedLayout,
+}
+
+fn decode_facts(
+    parsed: &ocelli_dicom::ParsedDicom,
+    desc: &FrameDesc,
+) -> Result<DecodeFacts, PreviewError> {
+    let path = parsed.transfer_syntax().dispatch_path();
+    if path != DispatchPath::Encapsulated {
+        return Ok(DecodeFacts {
+            len: native_decoder(path)?.decoded_output_len(desc),
+            encoding: PixelDataEncoding::Native,
+            photometric: DecodedPhotometric::Preserved,
+            layout: DecodedLayout::Preserved,
+        });
     }
-    let Some(bytes_per) = usize::from(bits / 8).checked_mul(usize::from(samples)) else {
-        return false;
-    };
-    let Some(one) = usize::from(rows)
-        .checked_mul(usize::from(columns))
-        .and_then(|count| count.checked_mul(bytes_per))
-    else {
-        return false;
-    };
-    let Ok(frames) = usize::try_from(frames) else {
-        return false;
-    };
-    let Some(all) = one.checked_mul(frames) else {
-        return false;
-    };
-    all > 0 && pixels.len() == all
+    let registry = codecs()?;
+    let uid = parsed.transfer_syntax().uid();
+    Ok(DecodeFacts {
+        len: registry
+            .decoded_output_len(uid, desc)
+            .map_err(|_| PreviewError::Decode)?,
+        encoding: PixelDataEncoding::Encapsulated,
+        photometric: match registry
+            .decode_photometric_interpretation(uid, desc)
+            .map_err(|_| PreviewError::Decode)?
+        {
+            DecodePhotometricInterpretation::Preserved => DecodedPhotometric::Preserved,
+            DecodePhotometricInterpretation::Rgb => DecodedPhotometric::Rgb,
+        },
+        layout: match registry
+            .decode_sample_layout(uid, desc)
+            .map_err(|_| PreviewError::Decode)?
+        {
+            DecodeSampleLayout::Preserved => DecodedLayout::Preserved,
+            DecodeSampleLayout::Interleaved => DecodedLayout::Interleaved,
+        },
+    })
 }
 
 fn decode_frame(
@@ -1458,7 +1830,7 @@ fn decode_frame(
     native: &mut Vec<u8>,
     decoded: &mut [u8],
 ) -> Result<(), PreviewError> {
-    if decoded.len() != desc.output_len() {
+    if decoded.len() != decode_facts(parsed, desc)?.len {
         return Err(PreviewError::Decode);
     }
     let object = parsed.object();
@@ -1479,7 +1851,7 @@ fn decode_frame(
         .map_err(|_| PreviewError::Attribute)?;
     match parsed.transfer_syntax().dispatch_path() {
         DispatchPath::Encapsulated => {
-            decode_encapsulated(parsed, element, desc, frame_count, frame_index, decoded)?;
+            decode_encapsulated(parsed, desc, frame_count, frame_index, decoded)?;
         }
         path => {
             let borrowed = native_byte_slice(element, path, native)?;
@@ -1528,16 +1900,14 @@ fn native_decoder(path: DispatchPath) -> Result<RawDecoder, PreviewError> {
 
 fn decode_encapsulated(
     parsed: &ocelli_dicom::ParsedDicom,
-    element: &InMemElement<StandardDataDictionary>,
     desc: &FrameDesc,
     frame_count: usize,
     frame_index: usize,
     decoded: &mut [u8],
 ) -> Result<(), PreviewError> {
-    let offsets = element.value().offset_table().ok_or(PreviewError::Decode)?;
-    let fragments = element.value().fragments().ok_or(PreviewError::Decode)?;
-    let borrowed: Vec<&[u8]> = fragments.iter().map(Vec::as_slice).collect();
-    let index = EncapsulatedFrameIndex::from_basic(frame_count, offsets, &borrowed)
+    // F-244. One constructor chooses the Extended or Basic Offset Table and
+    // the transfer syntax's frame delimiter, PS3.5 A.4 and PS3.3 C.7.6.3.1.8.
+    let index = EncapsulatedFrameIndex::from_parsed(parsed, frame_count)
         .map_err(|_| PreviewError::Decode)?;
     let parts = index
         .frame_fragments(frame_index)
@@ -1551,12 +1921,17 @@ fn decode_encapsulated(
     let produced = registry
         .decode_photometric_interpretation(uid, desc)
         .map_err(|_| PreviewError::Decode)?;
-    if produced != DecodePhotometricInterpretation::Preserved {
-        return Err(PreviewError::NotMonochrome);
-    }
-    registry
-        .decode(uid, &encoded, desc, decoded)
-        .map_err(|_| PreviewError::Decode)
+    let _ = produced;
+    registry.decode(uid, &encoded, desc, decoded).map_err(|_| {
+        if matches!(
+            desc.photometric_interpretation(),
+            "MONOCHROME1" | "MONOCHROME2"
+        ) {
+            PreviewError::Decode
+        } else {
+            PreviewError::ColourUnavailable(ColourUnavailableReason::Codestream)
+        }
+    })
 }
 
 fn native_byte_slice<'a>(
@@ -1843,40 +2218,6 @@ fn rescale(multi: &MultiframeMetadata<'_>, frame: usize) -> Result<(f32, f32), P
         }
         _ => Err(PreviewError::Window),
     }
-}
-
-fn full_range(modality: &ModalityTransform, stored: &[Stored]) -> Result<(f32, f32), PreviewError> {
-    let mut low: Option<f32> = None;
-    let mut high: Option<f32> = None;
-    for sample in stored {
-        let value = modality.apply(*sample).0;
-        if !value.is_finite() {
-            return Err(PreviewError::Window);
-        }
-        low = Some(match low {
-            Some(held) if held < value => held,
-            Some(_) | None => value,
-        });
-        high = Some(match high {
-            Some(held) if held > value => held,
-            Some(_) | None => value,
-        });
-    }
-    let (Some(low), Some(high)) = (low, high) else {
-        return Err(PreviewError::Window);
-    };
-    let span = high - low;
-    if !span.is_finite() {
-        return Err(PreviewError::Window);
-    }
-    if span.to_bits() == 0.0_f32.to_bits() {
-        return Ok((low, 1.0));
-    }
-    let center = (low + high) / 2.0;
-    if !center.is_finite() {
-        return Err(PreviewError::Window);
-    }
-    Ok((center, span))
 }
 
 fn voi_function(multi: &MultiframeMetadata<'_>, frame: usize) -> Result<VoiFunction, PreviewError> {
@@ -2668,7 +3009,8 @@ pub(crate) struct KeptReplies {
 struct Shared {
     /// Up to and including `monochrome`.
     head: String,
-    /// `frameOfReferenceUid`, the corner fields and `presets`.
+    /// `frameOfReferenceUid`, the corner fields, `presets`, `cine` and
+    /// `frameTimeMs`.
     middle: String,
     /// `windowsPerFrame` and `planes`, to the closing brace.
     tail: String,
@@ -2906,6 +3248,18 @@ impl InspectParts {
         push_field(&mut out, "sopInstanceUid", &sop, false);
         push_field(
             &mut out,
+            "sopClassUid",
+            &sendable_uid(optional_text(object, SOP_CLASS).ok().flatten()),
+            false,
+        );
+        push_field(
+            &mut out,
+            "studyUid",
+            &sendable_uid(optional_text(object, STUDY_UID).ok().flatten()),
+            false,
+        );
+        push_field(
+            &mut out,
             "patientName",
             &text_or_empty(object, PATIENT_NAME)?,
             false,
@@ -2920,6 +3274,17 @@ impl InspectParts {
             &mut out,
             "studyDate",
             &text_or_empty(object, STUDY_DATE)?,
+            false,
+        );
+        // F-215. The stored Study Time, PS3.3 C.7.2.1, which a saved document
+        // copies verbatim. F-212's `studyTime` is display text.
+        push_field(
+            &mut out,
+            "studyTimeValue",
+            &optional_text(object, STUDY_TIME)
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
             false,
         );
         push_field(
@@ -2959,6 +3324,40 @@ impl InspectParts {
         );
         out.push_str(",\"monochrome\":");
         out.push_str(if monochrome { "true" } else { "false" });
+        let colour = photometric(object).ok().is_some_and(|space| match space {
+            PhotometricInterpretation::Monochrome1 | PhotometricInterpretation::Monochrome2 => {
+                false
+            }
+            PhotometricInterpretation::PaletteColor => samples == 1,
+            _ => samples == 3,
+        }) && rows > 0
+            && columns > 0
+            && frames > 0;
+        out.push_str(",\"colour\":");
+        out.push_str(if colour { "true" } else { "false" });
+        let icc_present = object.element(Tag(0x0028, 0x2000)).is_ok();
+        let metadata = project_metadata(object).ok();
+        let icc_status = if colour {
+            metadata
+                .as_ref()
+                .map(|metadata| crate::colour::read_profile(metadata).0)
+                .unwrap_or(if icc_present {
+                    crate::colour::IccStatus::NotApplied("malformed")
+                } else {
+                    crate::colour::IccStatus::Absent
+                })
+        } else {
+            crate::colour::IccStatus::Absent
+        };
+        out.push_str(",\"icc\":");
+        out.push_str(if icc_present { "true" } else { "false" });
+        out.push_str(",\"icc_applied\":");
+        out.push_str(if icc_status.applied() {
+            "true"
+        } else {
+            "false"
+        });
+        push_field(&mut out, "icc_kind", icc_status.kind(), false);
         let mut middle = String::new();
         push_field(
             &mut middle,
@@ -2968,7 +3367,7 @@ impl InspectParts {
         );
         push_corner_fields(&mut middle, object);
         push_presets(&mut middle, object);
-        let metadata = project_metadata(object).ok();
+        push_cine(&mut middle, metadata.as_ref());
         let per_frame = metadata
             .as_ref()
             .and_then(|metadata| MultiframeMetadata::new(metadata).ok())
@@ -3000,6 +3399,41 @@ impl InspectParts {
             per_frame,
             metadata,
         })
+    }
+}
+
+/// `cine` and `frameTimeMs` of one object, from [`cine_timing`].
+///
+/// Frame Time `(0018,1063)` is DS in milliseconds, PS3.3 C.7.6.5, and is the
+/// interval between frames of this object only, C.7.6.5.1.1. `cine` is
+/// `frame-time`, `vector`, `rate`, `none`, `unusable` or `unreadable`.
+/// `frameTimeMs` is the interval as a JSON number for `frame-time` and `null`
+/// otherwise. `unusable` is a timing value [`cine_timing`] refuses with
+/// [`SeriesOpenReason::Cine`]. `unreadable` is any other refusal, or a data set
+/// that cannot be projected, and says nothing about Frame Time. The page owns
+/// the change to a per-second label.
+fn push_cine(out: &mut String, metadata: Option<&MetadataSet>) {
+    let (cine, milliseconds) = match metadata.map(cine_timing) {
+        Some(Ok(CineTiming::FrameTime { milliseconds })) if milliseconds.is_finite() => {
+            ("frame-time", Some(milliseconds))
+        }
+        Some(Ok(CineTiming::FrameTimeVector)) => ("vector", None),
+        Some(Ok(CineTiming::RecommendedDisplayFrameRate { .. } | CineTiming::CineRate { .. })) => {
+            ("rate", None)
+        }
+        Some(Ok(CineTiming::Unavailable)) => ("none", None),
+        // A later source this page does not know plays at the slider, as
+        // every source but Frame Time does.
+        Some(Ok(_)) => ("none", None),
+        Some(Err(error)) if error.reason() == SeriesOpenReason::Cine => ("unusable", None),
+        Some(Err(_)) | None => ("unreadable", None),
+    };
+    push_field(out, "cine", cine, false);
+    out.push_str(",\"frameTimeMs\":");
+    match milliseconds {
+        // `Display` for `f64` never uses an exponent, and the value is finite.
+        Some(value) => out.push_str(&value.to_string()),
+        None => out.push_str("null"),
     }
 }
 
@@ -3142,7 +3576,8 @@ fn window_rows(
     let blank = |slots: &[String]| slots.iter().all(String::is_empty);
     let mut rows = Vec::new();
     // Pairs that cannot be paired, or that carry no number at all, are not
-    // a list of windows. The preview refuses or full-ranges those files.
+    // a list of windows. The preview refuses those files or draws them at
+    // the automatic window.
     if centers.len() == widths.len() && !(blank(&centers) && blank(&widths)) {
         for (at, (center, width)) in centers.iter().zip(&widths).enumerate() {
             let explanation = explanations.get(at).cloned().unwrap_or_default();
@@ -3409,6 +3844,22 @@ pub fn headers_json(bytes: &[u8]) -> Result<String, PreviewError> {
         push_dataset(&mut rows, &dict, element, "", 0);
     }
     Ok(rows_json(&rows))
+}
+
+/// The F-225 conformance report of one Part 10 object, as JSON.
+///
+/// One parse and no pixel decode. The report is `ocelli-dicom`'s own
+/// serialisation and carries no value apart from a SOP Class UID under the
+/// DICOM root. A finding never stops a frame from opening, because nothing
+/// on the open or preview path calls this.
+///
+/// # Errors
+///
+/// Returns [`PreviewError::NotPart10`] when the bytes are not a Part 10
+/// object, the same refusal [`headers_json`] makes.
+pub fn conformance_json(bytes: &[u8]) -> Result<String, PreviewError> {
+    let parsed = parse_part10(bytes).map_err(part10_error)?;
+    Ok(check_conformance(&parsed).to_json())
 }
 
 struct HeaderRow {

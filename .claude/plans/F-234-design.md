@@ -190,3 +190,23 @@ None open.
 - Q2, the value. Answered: lead decision under the operator's delegation of 2026-11-06. A rule the implementer measures against, decision 2.
 - Q3, the refusal. Answered: lead decision under the operator's delegation of 2026-11-06. `ParseError::SequenceTooDeep`, decision 3.
 - Q4, the fuzz shape. Answered: lead decision under the operator's delegation of 2026-11-06. A proptest, decision 5.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-234-working-pass-1.md`.
+
+- **The depth rule counts every DICOM writer the repository has and the templates it targets.** Decision 2's inputs are the deepest nesting in the corpus, in every fixture or output any repository writer produces, Rust or TypeScript (the TID 1500 that `writeTid1500` writes included), and in the PS3.16 template shapes those writers target, each wrapped once more by de-identification's Original Attributes Sequence. The implementer measures each input and states the result, and the constant follows the plan's rule from the largest.
+- **AC10 is the folder viewer's own refusal.** A deep file posted to the folder viewer answers 400 `not-part10`, as `part10_error` maps every `ParseError`, and the next request is served. The test uses a file deep enough to abort the process without the check.
+
+### Lead ruling after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-234-working-pass-2.md`. The template shapes count every sequence a conformant file may carry at each level, Type 3 included, because a valid file that uses an optional sequence must not be refused. The deepest input is therefore the PS3.16 TID 1501 to TID 300 or 301 to TID 320 chain with its Type 1 Referenced SOP Sequence and an optional nested reference, wrapped once more by de-identification, as the review measured it, and the constant follows the plan's rule from that input.
+
+### Lead ruling after review pass 3
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-234-working-pass-3.md`. The figure of 9 in the pass 2 ruling was the lead's error. Pass 3 derived from PS3.16 and PS3.3 a deeper route, TID 1500 to TID 1501 to TID 300 to TID 301 row 11 to TID 315 row 2, whose NUM item opens Measured Value, Measurement Units Code and the Type 3 Equivalent Code Sequence (0008,0121), so 8 open Sequences and 10 inside the de-identification wrapper.
+
+- **The fixture builds that route.** It is the deepest shape known to the lead, and the prose says known rather than deepest, because these templates are Extensible and the deepest is not unique.
+- **The margin is checked against the fixture, not a literal.** A test measures the fixture's maximum open-Sequence depth by parsing it and asserts it equals `DEEPEST_SHAPE_DEPTH`, and the compile-time margin assert stays. `MAX_SEQUENCE_DEPTH` stays 64, which the margin rule still admits.
+- **Tag order.** Every item the fixture writes is in ascending tag order per PS3.5 7.1.
+- **Prose.** The parse.rs doc comment, `DEEPEST_SHAPE_DEPTH`'s doc, the fixture comment and `docs/lld/dicom-ingest.md` state the route and the counts measured in this round, and the re-measured date covers only what was re-measured.

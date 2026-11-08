@@ -268,6 +268,27 @@ async fn detect(request: TierRequest, clock: &mut dyn FnMut() -> u64) -> Detecte
         };
     }
 
+    // F-238. A build with no backend compiled for its target has no instance
+    // to create. wgpu 30.0.1's `Instance::new` panics on exactly that shape,
+    // and the shipped Metal-free macOS binary reached it before this guard
+    // existed. `enabled_backend_features` is the same platform-filtered,
+    // feature-derived set that check consults, so an empty set here is the
+    // panic's own condition and not an approximation of it. The honest answer
+    // is the unprobed one: no adapter seen, no device, tier C, recorded by
+    // `classify` as `NoAdapter`. The cause is recorded on the evidence,
+    // because `NoAdapter` alone is also what a machine with backends and no
+    // GPU reports, and the two should not read the same. Deviation D-33 is
+    // the row that names the build this fires in.
+    if wgpu::Instance::enabled_backend_features().is_empty() {
+        let mut resolution = classify(&TierSignals::unprobed(), request);
+        resolution.evidence.no_backend_compiled = true;
+        return Detected {
+            resolution,
+            adapter: None,
+            instance: None,
+        };
+    }
+
     // `new_instance_with_webgpu_detection` rather than `Instance::new`,
     // because `navigator.gpu` can be defined on a browser that cannot actually
     // produce a WebGPU adapter, and that population is exactly the one D-07
@@ -493,6 +514,17 @@ pub async fn resolve_webgl(
         descriptor.backend_options.gl.fence_behavior = wgpu::GlFenceBehavior::AutoFinish;
     }
     let fence = descriptor.backend_options.gl.fence_behavior;
+    // F-238. A build with no GL backend compiled returns the same NoAdapter a
+    // failed surface would, instead of reaching wgpu's panic in
+    // `Instance::new`. On wasm32 the webgl feature always fires, so the browser
+    // path is unchanged. Natively the gles cfg also needs `angle` on Apple,
+    // which the D-27 set does not name, so a Metal-free macOS build lands here
+    // rather than in the panic.
+    if (wgpu::Instance::enabled_backend_features() & wgpu::Backends::GL).is_empty() {
+        return WebGlProbe::NoAdapter {
+            reason: "no GL backend is compiled into this build".to_owned(),
+        };
+    }
     let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
     let surface = match instance.create_surface(target) {
         Ok(surface) => surface,
@@ -534,10 +566,19 @@ pub async fn resolve_webgl(
 /// wgpu-hal 30.0.1's `gles` module is for Linux and Android with EGL. On a
 /// host where that backend finds nothing this returns `None`. That miss is
 /// not a tier B run. The browser run is [`resolve_webgl`].
+///
+/// F-238. The same is true when no GL backend is COMPILED, which on Apple is
+/// every build without the `angle` feature, the shipped Metal-free one
+/// included. The guard below returns before the instance exists, because
+/// wgpu 30.0.1's `Instance::new` panics when the platform-filtered backend
+/// set is empty.
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn resolve_native_gl(clock: &mut dyn FnMut() -> u64) -> Option<ResolvedAdapter> {
     let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
     descriptor.backends = wgpu::Backends::GL;
+    if (wgpu::Instance::enabled_backend_features() & wgpu::Backends::GL).is_empty() {
+        return None;
+    }
     let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
     let detected = detect_from(
         instance,
@@ -1033,6 +1074,27 @@ mod tests {
         fill_rate_after_wait, fragments, full_pass_is_affordable, measure_with,
     };
     use crate::caps::{AdapterFacts, FillRate, FillRateBands, SoftwareVerdict};
+
+    /// The backend guard in `detect` must be inert in every build the test
+    /// suite runs in. The guard fires when the platform-filtered set of
+    /// compiled backends is empty, which on Apple is any build with `metal`
+    /// off: the `gles` cfg also needs `angle` there and `vulkan` needs
+    /// `vulkan-portability`, so the shipped Metal-free configuration has an
+    /// empty set. Development restores `metal` through this crate's native
+    /// dev-dependencies, and this test is what turns the removal of that
+    /// table red instead of letting `gate gpu` quietly resolve tier C on the
+    /// macOS host. No suite in this repository calls `detect` from a build
+    /// whose compiled backend set is empty, so the true branch is observed
+    /// by running the shipped binary, not by a test.
+    #[test]
+    fn a_development_build_compiles_at_least_one_backend() {
+        assert!(
+            !wgpu::Instance::enabled_backend_features().is_empty(),
+            "no wgpu backend is compiled into this test build, so the \
+             no-backend guard in `detect` would fire in development and \
+             `gate gpu` would resolve tier C"
+        );
+    }
 
     #[test]
     fn an_autofinish_completion_is_not_a_hardware_fill_rate() {

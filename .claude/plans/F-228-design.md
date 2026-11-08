@@ -169,7 +169,7 @@ Compatibility: the folder viewer's pages gain a header and lose two attributes, 
 
 ## State transitions and invariants
 
-Not applicable as a state machine. The probe's variations are independent page loads. Invariant across consumers: the embedder policy text exists once, in `csp-policy.ts`, and every document quotes it byte for byte (AC2). The folder viewer's hashes are a pure function of its compiled pages.
+Not applicable as a state machine. The probe's variations are independent page loads. Invariant across consumers: the embedder policy text exists once, in `csp-policy.ts`, and every marked block quotes it (AC2). The folder viewer's hashes are a pure function of its compiled pages.
 
 ## Ownership, commit and recovery
 
@@ -180,7 +180,7 @@ Not applicable. No resource is held. The folder viewer probe owns one child proc
 | ID | Trigger and expected behavior | Test / observation | Wrong implementation rejected | Evidence stage / owner |
 |----|-------------------------------|--------------------|-------------------------------|------------------------|
 | AC1 | `policyHeader()` is exactly `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'`, contains no forbidden source, and `policyHeader(["https://pacs.example"])` adds that origin to `connect-src` only. A forbidden source passed in is refused | `csp-policy.test.ts`, "the embedding policy is the four directives" | A policy grown by `'unsafe-eval'` or `blob:` to make something pass | implementation |
-| AC2 | README's fenced block, `use.html`'s new 5.1 paragraph and `more.html`'s `#worker` section each contain `policyHeader()` byte for byte, with HTML entities decoded for the two pages | `csp-policy.test.ts`, "every document quotes the one policy" | A fourth copy in prose that drifts | implementation |
+| AC2 | Superseded by the marker rule in the lead amendments after review pass 4 | `csp-policy.test.ts`, "every document quotes the one policy" | A marked block that drifts from `policyHeader()` | implementation |
 | AC3 | Built example, release wasm, the AC1 header on every response. The page shows `core ready`, `Canvas published` and a `Tier` text equal to the no-header control run, the worker canvas's screenshot pixel equals the control's, and no console message contains "Content Security Policy" | `csp-probe.mjs` case `strict` against case `control` | A probe that only checks the page loaded | external, the probe on the operator's Mac, Chromium 151 |
 | AC4 | Minimality, each from the AC3 header with one change, on every response. Without `'wasm-unsafe-eval'`: `core not built` and `Canvas not published`. `worker-src 'none'`: `core not built` and a console violation naming `worker-src`. `connect-src 'none'`: `core not built`. `script-src 'none'`: React does not mount, `#root` is empty. Each case's named failure is asserted, not only the absence of success | `csp-probe.mjs` cases `no-wasm`, `no-worker`, `no-connect`, `no-script` | A minimality claim that passes because the page broke for another reason | external, as AC3 |
 | AC5 | Where the worker's policy comes from. Page with the AC3 header and the worker script with it minus `'wasm-unsafe-eval'`: `core not built`. Page minus `'wasm-unsafe-eval'` and every other response with the full header: `core ready`. Recorded in the run output with the browser version, and the documentation's "every response" rule cites it | `csp-probe.mjs` cases `worker-strict`, `page-strict` | Documenting a page-only header | external, as AC3 |
@@ -266,7 +266,7 @@ None.
 
 ## LLD impact
 
-`docs/lld/typescript-packaging.md`: a new section "The Content Security Policy an embedder needs", with the four directives, the every-response rule and E1, the blob rule and E2, the decode gap and AC9's guard, and the note that the tarball does not carry the module today. The folder viewer's own policy is described there in two sentences, because no LLD file covers the folder viewer.
+`docs/lld/typescript-packaging.md`: a new section "The Content Security Policy an embedder needs", with the four directives, the every-response rule and E1, the blob rule and E2, the decode gap and AC9's guard, and the note that the tarball does not carry the module today. The folder viewer's policy is described by the folder-viewer half, which adds it when that policy exists.
 
 ## User-facing documentation impact
 
@@ -283,3 +283,25 @@ None open.
 - Q3, the compressed frame. Answered: lead decision under the operator's delegation of 2026-11-05. The wasm module decodes nothing, so the worker path is proven with what it does and compressed decode is proven on the folder viewer, item 5, AC9 and AC14. The operator may prefer to hold the worker decode case until a wasm decode story exists, which is what AC9 enforces.
 - Q4, folder viewer CSP. Answered: lead decision under the operator's delegation of 2026-11-05. Yes, hashes computed from the compiled pages, last in the viewer order, items 6 and 7.
 - Q5, the tarball has no wasm module. Answered: lead decision under the operator's delegation of 2026-11-05. Out of scope. It stays the CURRENT_SPRINT operator question, and this story's documentation names where the module is served from today.
+
+### Lead amendments after review pass 1
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-228-working-pass-1.md`.
+
+- **AC2 never skips.** The example half writes the policy text into `README.md` and `docs/lld/typescript-packaging.md` now, and AC2 checks those two exactly, red or green. The Use book quote lands with the folder-viewer half, which adds it to AC2. A skipped test is not an answer here.
+- **`data:` is a forbidden source.** The AC10 scan and the forbidden list include `data:` beside `blob:`, `createObjectURL`, `eval(` and `new Function(`, and the scan walks every shipped source directory found under `packages/*/src` and `examples/viewer-react/src`, not a list written by hand.
+- **`worker-src 'self'` stays although it falls back to `script-src`.** It keeps a later widening of `script-src` from widening workers too. The minimality case for it asserts the fallback rather than a failure, and says so.
+- **`policyHeader` refuses what would widen the policy.** A scheme-only source such as `https:` or `http:`, and any entry containing `;`, `,`, whitespace or a quote, is refused with an error.
+
+### Lead amendments after review pass 4
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-228-working-pass-4.md`. AC2 drew a different finding in four straight passes because it tried to recognise the header in free prose. That is replaced by a marker rule.
+
+- **Each quote is a marked block.** A document quotes the policy in a block preceded, on its own line, by the marker `<!-- ocelli:csp -->`. The line after the block opening, in Markdown a fenced block opened by ```` ```text ```` and in HTML a `<pre>` whose code starts on the next line, is the header line. AC2 checks that each marked block's header line equals the expected header exactly, and that README.md holds exactly two marked blocks and `docs/lld/typescript-packaging.md` exactly one. The folder-viewer half adds the Use book's block and its count.
+- **Prose is not parsed.** No rule inspects lines outside marked blocks. The documents' sentences about the policy are checked by review, as every other sentence is.
+
+### Folder-half integration facts, 2026-11-08
+
+The complete F215/F225 source stack was applied three-way before runtime wiring. The main page now has an import map and a main script, so both are hashed. The native CSP module uses the same target gating as the native serve module. Production wiring replaces the AC11 preparation slice's test-only declaration. The folder browser probe has explicit Node and browser callback globals in ESLint, without changing its wasm-memory allowance list or enforcement rules.
+
+The native response stores one of the three HTML page identities, and both its body and policy derive from that identity. Adding an optional string slice made the existing Reply error variants fail result_large_err. The page identity keeps the existing error path without introducing boxed errors or changing its callers.

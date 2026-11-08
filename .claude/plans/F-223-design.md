@@ -74,7 +74,7 @@ Measured on 2026-11-05 on `sprint/s46` at `b13812c`, and in the F-216 worktree a
 6. **The oracle page's render route.** `page/app.mjs` calls `coreInit()`, `dicomImageLoader.init({ maxWebWorkers: 1, wasmBasePath })`, `enableElement` with `ViewportType.STACK`, adds the file through `dicomImageLoader.wadouri.fileManager.add(file)`, `setStack([imageId], 0)`, sets `VOILUTFunction`, `interpolationType` and `voiRange` from `utilities.windowLevel.toLowHighRange`, paints a sentinel over the canvas, calls `render()`, waits for `Enums.Events.IMAGE_RENDERED`, and reads the canvas back with `getImageData`. A canvas still showing the sentinel after the event is refused, so the oracle already proves the canvas is written before `IMAGE_RENDERED` reaches a listener.
 7. **cornerstone3D 5.8.2 defaults.** `@cornerstonejs/core` `cache/cache.js` sets `this._maxCacheSize = 3 * ONE_GB`. `@cornerstonejs/dicom-image-loader` `init.js` uses `options?.maxWebWorkers || getReasonableWorkerCount()`, which is `Math.max(1, Math.floor(navigator.hardwareConcurrency / 2))`, so 8 on this host. `wadouri` exports `dataSetCacheManager` with `load(uri, loadRequest, imageId)` and `loadFileRequest`.
 8. **The pseudo-PHI folder, attributes only.** 1,696 files: 1,693 `.dcm`, one `LICENSE`, two `.DS_Store`. 612 MiB on disk. 22 studies, 26 series. Every `.dcm` is Implicit VR Little Endian (`1.2.840.10008.1.2`) or Explicit VR Little Endian (`1.2.840.10008.1.2.1`), so **no compressed transfer syntax is present and no codec cost is compared on these studies.** By series: five PT series of 128 by 128 (267, 267, 175, 175 and 174 images), CT 512 by 512 MONOCHROME2 with a file window (152 and 107 images), one PT RGB series of 512 by 512 (145), MR 256 by 256 (60, 26, 26, 19), MG 1421 by 1024 (57), MR 512 by 512 (19), DX 2022 by 2022 (7), CT 665 by 512 (5), and single-image CR, DX, MG and CT objects. The largest DX by pixel count is 2330 rows by 2846 columns, 13,265,590 bytes. The largest file is an MG of 3328 by 2560 at 17,042,396 bytes. Read with `.venv/bin/python3` and pydicom 3.0.2 with `stop_before_pixels=True`. No identifying value was printed or recorded.
-9. **macOS gives a per-process kernel peak.** `/usr/bin/footprint -f bytes -p <pid> -p <pid>` prints, per process, `phys_footprint: <n> B` and `phys_footprint_peak: <n> B`, then `Summary Footprint: <n> B`, which for two unrelated processes was their sum. Two tiny processes took 0.02 s of wall time.
+9. **macOS gives a per-process kernel peak.** `/usr/bin/footprint -f bytes -p <pid> -p <pid>` prints, per process, `phys_footprint: <n> B` and `phys_footprint_peak: <n> B`, then `Summary Footprint: <n> B`. Two tiny processes took 0.02 s of wall time.
 10. **Playwright 1.62.1 ships both builds at revision 1234.** `~/Library/Caches/ms-playwright` holds `chromium-1234` and `chromium_headless_shell-1234`, browser version 151.0.7922.34. `tools/bench/src/browser_session.mjs` already reads `SystemInfo.getProcessInfo` through `browser.newBrowserCDPSession()` for its CPU collector.
 11. **No mechanical lock serialises browser and GPU jobs.** `bin/ocelli.sh` and `scripts/*.py` contain no lock file. `.claude/commands/run-sprint.md` section 3 lists "**the GPU**, for any story running the oracle or a browser tier test" as an exclusive resource, which is a scheduling rule.
 12. **The tracked summary's directory is not prose-checked today.** `scripts/prose_check.py` `INCLUDE_PREFIXES` names `docs/sprints/`, `docs/lld/`, `docs/runbooks/` and `docs/spikes/`, and no `docs/benchmarks/`.
@@ -140,7 +140,7 @@ bin/ocelli.sh bench --compare-cornerstone --pseudo <dir> [--publish] [--software
 |---|---|---|
 | `tools/bench/out/compare/comparison.json` | no, under the ignored `tools/bench/out/` | Every trial's raw figures, the inventory per sample, the pair verdict, machine, versions, defaults, refusals |
 | `tools/bench/out/compare/comparison.txt` | no | The plain report, rendered from the JSON above |
-| `docs/benchmarks/cornerstone-comparison.json` | yes, with `--publish` | The published subset under a closed schema: machine, versions, defaults, workloads by label, per metric and side the median, quartiles, minimum, maximum, N and state, the pair verdict, `architecture`, `not_shown`, input identity |
+| `docs/benchmarks/cornerstone-comparison.json` | yes, with `--publish` | The published subset under a closed schema: machine, versions, the browser's renderer, headed mode and SwiftShader flag, defaults, workloads by label, per metric and side the median, quartiles, minimum, maximum, N and state, the pair verdict, `architecture`, `not_shown`, input identity |
 | `docs/benchmarks/cornerstone-comparison.md` | yes, with `--publish` | Rendered from the tracked JSON by `renderSummary`, byte for byte, with a first line naming the command that wrote it and "do not edit" |
 
 The fixed `architecture` text, carried verbatim in every output:
@@ -176,7 +176,7 @@ Before any timing trial, on pseudo CT's first image by the shared ordering, at c
 1. The Ocelli page draws it. The harness reads `#view` with `getImageData`, whose size is the image's own (fact 4).
 2. The comparator page sizes its element to the image's columns and rows at DPR 1, sets `interpolationType` `NEAREST` and the window through `toLowHighRange` as the oracle page does, calls `resetCamera`, paints the oracle's sentinel, renders, waits for `IMAGE_RENDERED`, refuses a sentinel canvas, and reads the canvas back.
 3. Both sides report the selected file's name and size into the harness's memory. A mismatch refuses with "the two sides selected different images" and nothing about which.
-4. `ocelli-compare pair --reference <cs.raw> --candidate <ocelli.raw> --width W --height H` prints a JSON verdict: `within_one_lsb_fraction`, `count_over_max`, `max_abs_diff`, `signed_mean_bias_informative`, `informative_fraction`, `passes`. `passes` is the monochrome predicate over the full frame and the bias bound over the informative region, and requires `informative_fraction >= INFORMATIVE_FRACTION_FLOOR`.
+4. `ocelli-compare pair --reference <cs.raw> --candidate <ocelli.raw> --width W --height H` prints a JSON verdict: `within_one_lsb_fraction`, `count_over_max`, `max_abs_diff`, `signed_mean_bias_informative`, `informative_fraction`, `low_information`, `passes`. `passes` is the monochrome predicate over the full frame and the bias bound over the informative region, and requires `informative_fraction >= INFORMATIVE_FRACTION_FLOOR`.
 5. A failed or low-information verdict sets the run state to `refused_pixels`, writes the verdict numbers and no timing figure, and exits 1.
 
 ```rust
@@ -185,7 +185,7 @@ pub struct PairVerdict {
     pub within_one_lsb_fraction: f64,
     pub count_over_max: u64,
     pub max_abs_diff: u8,
-    pub signed_mean_bias_informative: f64,
+    pub signed_mean_bias_informative: Option<f64>, // None when no pixel is informative
     pub informative_fraction: f64,
     pub low_information: bool,
     pub passes: bool,
@@ -305,7 +305,7 @@ A pixel refusal on the equipped run is a recorded outcome, not a passing AC18. I
 1. `tools/oracle`: export `checkPins`, add the `dist` parameter to `buildPage`, add `page/bench.html` and `page/bench.mjs` as a third entry point. Measure AC15 before anything else changes.
 2. `tools/oracle/src/tolerance.rs` and `src/bin/ocelli-compare.rs`: `pair_verdict` and the `pair` command, then `tests/pair_fixture.rs`. Each fixture value is computed by hand from 25.1's text and written as a literal.
 3. `tools/bench/comparison.json`, then `src/comparison.mjs` and `tests/comparison_test.mjs` together, each pure function with its hand-computed fixture.
-4. `src/comparison_run.mjs`: prerequisites, lock, exclusive check, build, selection with symbolic links, deny set, two browsers, pixel check, alternated trials, memory sessions, record, publication.
+4. `src/comparison_run.mjs`: prerequisites, lock, exclusive check, build, selection with neutral temporary copies, deny set, two browsers, pixel check, alternated trials, memory sessions, record, publication.
 5. `run.mjs` flags and `bin/ocelli.sh` arm and test list, `tools/bench/package.json` test script and its `$why_no_other_dependency` note, `scripts/bench_check.py` `check_comparison` with its tests, `scripts/prose_check.py` prefix.
 6. The equipped run, then `--publish`, then documentation.
 
@@ -401,3 +401,244 @@ No material question remains. Each lead decision below was given by the sprint l
 8. Exclusive GPU. Answered: lead decision under the operator's request of 2026-11-05. The run is serialised with every other browser or GPU job, and the mode refuses when it sees another Playwright browser.
 
 Decisions this plan made locally, each stated above so a reviewer can challenge it: the header route through `dataSetCacheManager` (3), the matched prefetch policy (4), shipped defaults on both sides (5), the rAF-after-commit endpoint (6), the warm file cache (7), the two memory bounds (8), the CPU figure (9), the `pair` command (10), attribute selection (12), the deny set and closed schema (13), the browser mode probe (15), and the separation rule (17).
+
+### Lead rulings after review pass 2
+
+Made by the sprint lead on 2026-11-06 under the operator's delegation of the quality call, after `.claude/reviews/F-223-working-pass-2.md`.
+
+- **A bias that was not measured is null.** When no pixel is informative, that is an informative fraction of exactly 0, `signed_mean_bias_informative` is absent from the measurement and serialises as `null`, and the reports say it was not measured.
+- **A ratio with a zero denominator is not a number in the tables.** It renders as words saying the denominator is zero. Every other ratio renders to three significant figures, including across a decade.
+
+### Lead implementation clarifications, 2026-11-08
+
+The resumed branch had the reviewed pure-function slice and pair comparator,
+but no comparison runtime or comparator page. Those are implementation work,
+separate from the equipped-host timing observations.
+
+The existing published schema had no cold/warm dimension. The lead approved
+closed workload/condition labels, such as synthetic-ct/cold and
+synthetic-ct/warm, preserving the same selection rules, trial counts and
+statistic cells. Each runtime label has its paired condition, including an
+explicit unavailable condition with its reason. Unknown and duplicate
+conditions are refused. Legacy unqualified unit fixtures remain valid.
+
+The memory method already requires two bounds, while the old cell could
+carry only one statistic set. The lead approved a closed upper_bound child
+for the sum of per-process peaks, separately rendered from the sampled
+concurrent peak. Qualified measured memory cells carry both bounds over the
+same three sessions. CPU uses those same sessions and inventories. No
+threshold, selection, sample count or tolerance changed.
+
+Page-ready starts before an Ocelli page exists. Its start is the controller's
+performance.timeOrigin plus performance.now at process spawn, and its end
+is the page's performance.timeOrigin plus performance.now at the first rAF
+after readiness. Both are mapped to the same host epoch using the high
+resolution time origins. Plain performance.now values from different
+contexts and wall Date.now differences are not subtracted. Open, first image,
+window and scroll durations remain within one page clock. Permanent fake
+clock fixtures reject naive cross-origin subtraction.
+
+The runtime posts every file under the full pseudo root. Only usable image
+headers participate in the CT/DX selector. Temporary subset copies use neutral
+ordinal names and preserve the selected order. Every original path component
+and identifying header value stays in the private deny set. The input identity
+hashes every file in the submitted root, including non-image auxiliary files.
+No input path, raw frame or identifying header value is an output artifact.
+
+
+### Lead ruling, controlled synthetic selector roots, 2026-11-08
+
+The supplemental manifest validates its exact generated inputs before use.
+Its fixed `calibration-ct` and `colour` folder names are public selectors.
+Calibration uses the former as its input root for the unchanged CT precheck.
+The target metadata and every uncontrolled path component below the latter
+join the same deny set. The default operator-input scanner is unchanged.
+A generated tiny target fixture checks that the public selectors can appear in
+output while its uncontrolled basename, header name and UID still refuse it.
+This is a privacy phase test, not a measurement-size dataset acceptance.
+
+
+### Lead ruling, comparator VOI adapter, 2026-11-08
+
+A real second-frame control found the same pinned-loader defect documented in
+`tools/oracle/page/app.mjs`: wadouri returns `voiLUTFunction` as a string, while
+createImage takes its first entry and derives `L` from `LINEAR`. Actor update
+then throws an invalid-function error and the requested frame never commits.
+The comparator's provider wraps only recognized valid VOI strings in a
+one-element array. Existing arrays and invalid or absent values are unchanged.
+The installed packages, renderer, worker and cache defaults are unchanged.
+The raw and published caveats disclose this comparator-only adaptation. Its
+pure typed controls and actual second-frame browser regression are required.
+A pending frame also retains the old visible canvas and its presented index.
+Only an actual rendered image advances the observed index, and blank sampling
+reads actual visible stage state. These changes correct measurement endpoints,
+with no threshold, sample count or pixel predicate changed.
+
+
+### Lead ruling, publication after cleanup, 2026-11-08
+
+Independent controller review found that publishing before `finally` could
+replace the tracked pair before a later cleanup failure made the command red.
+The controller now prepares and scans publication bodies first, and replaces
+the tracked pair only after owned resource cleanup succeeds. A production
+eligibility seam is tested against real temporary prior files. Cleanup failure,
+nonmeasured results and malformed bodies preserve both prior files. Injected
+CLI publication remains refused. No equipped publication was run by this test.
+
+
+### Lead ruling, matching per-file frame listing, 2026-11-08
+
+The comparator matches the actual folder viewer's 65,536-frame per-file
+listing cap and records omitted counts per series. There is no aggregate
+series cap. This preserves ordering, largest-series ties and the selected
+first file. A literal 65,537 and 65,538 two-series fixture executes the actual
+folder grouping consumer and rejects the old comparator's different selected
+series. Removing only the cap must make the permanent control fail.
+Provider count interpretation and its defaults remain unchanged. A new raw
+frame parser, fraction policy or IS grammar is outside this bounded repair.
+
+
+### Verification clarification, actual publication call order
+
+The eligibility seam test alone cannot detect publication moved back before
+cleanup. A permanent test therefore exercises actual controller control flow
+in a disposable module copy. The copy changes only publication destination,
+relocates imports mechanically and bypasses the injected-service refusal for
+that unit fixture. Production CLI injection remains refused. Valid synthetic
+prepared observations drive both failed and successful owned close paths.
+Both real prior files must survive a failed close and remain unchanged when a
+successful close runs, before their replacement. Moving publication before
+cleanup must fail the same control. This is a coordinator test-coverage gap,
+with no new GLM defect or equipped comparison acceptance implied.
+
+
+### Runtime correction, actual prepared-directory uploads, 2026-11-08
+
+Decision 12 already required observing whether the real directory upload follows
+symbolic links and selecting copies when it does not. That execution step was
+missed. The first equipped controller run failed before any timings. Its
+selected CT directory contained 200 links and no regular files. An actual
+browser diagnostic submitted zero files to both consumers from that directory.
+The same 200 selected inputs, copied as regular files, reached both unchanged
+open and first-image endpoints. This is a Codex controller/input-preparation
+defect, separate from the original GLM page findings.
+
+The implementation uses `copyFile` with `COPYFILE_FICLONE`. This flag attempts
+copy-on-write and falls back to an ordinary independent copy. It does not
+require cloning and never hard-links prepared files to original storage.
+Neutral ordinal names, selected content order, input hashes, deny scanning,
+temporary cleanup and the original full-root every-file policy are retained.
+Preparation remains outside the measured folder-open interval. No endpoint,
+pixel predicate, trial count, threshold or tolerance changes.
+
+Permanent controls inspect regular-file inventories, exact bytes and SHA256,
+then modify a prepared copy and prove that its source is unchanged. The real
+browser control drives `prepareInputs` subsets through both folder consumers,
+observes the actual uploaded count before the native page clears its input,
+and checks literal LINEAR ramp pixels at native dimensions. The old symbolic
+link implementation must fail those controls. Recorded source review and
+precheck results remain separate from equipped comparison timings.
+
+
+### Runtime correction, actual precheck capture caller, 2026-11-08
+
+After regular-file subsets reached the consumers, the actual pixel precheck
+exposed a separate Codex controller defect. Its Cornerstone capture callback
+named the request argument `window`, shadowing the browser global and refusing
+before any comparator verdict. Renaming the argument to `request` preserves
+the real `window.__bench.capture(request)` call. The existing capture endpoint,
+window parameters and pixel predicates are unchanged.
+
+The concrete real-browser regression now calls the exported `pixelPrecheck`
+function itself with the selected own synthetic ramp and the actual release
+`ocelli-compare`. This internal instrument export has that test as a named
+consumer. It requires an informative passing verdict. Manual page captures
+alone did not exercise the broken controller callback. The source repair,
+source review, targeted RED/GREEN, actual controlled precheck and later full
+comparison remain distinct evidence. The slow matrix stays stopped until the
+precondition passes. These controller findings are not original GLM page
+findings.
+
+
+### Runtime correction, warm page ownership, 2026-11-08
+
+An independent Codex source read found that warm trials closed the priming
+page but retained each later measured page while creating another. A warm
+sequence could accumulate per-page files, contexts, workers and GPU state.
+This is a further Codex controller defect, not an original GLM page finding.
+
+The actor's `newPage` now closes its previous page and its automatically owned
+browser context before creating the next. The browser and native server stay
+retained, as the warm definition requires. No caller requests multiple live
+pages from one actor. The actual orchestration regression uses real browser
+actors and three fixture trials per side, with a real missing-directory error
+on one trial and later recovery. It asserts at most one live context, actual
+trial disposition and cleanup of every page including the failed trial.
+This fixture count does not change production counts or create timing evidence.
+The fresh GLM runtime audit remains pinned to the earlier db719 source and
+received no steering about this separate finding.
+
+### Lead ruling, coherent CPU setup and retained refusals, 2026-11-08
+
+The equipped run produced an invalid reference memory session. A separate
+catch-only diagnostic observed the local refusal `a process exited during CPU
+collection`, where an inventory PID was absent from the subsequent CPU read.
+It did not identify the PID or prove a process-set change during the workload.
+Preserve every failed observation and its original trial count.
+
+The lead approved at most three inventory-plus-CPU snapshot attempts before
+navigation, sampling or any measured action. Only that exact locally marked
+missing-PID refusal permits another setup attempt. Other counters and foreign
+errors refuse immediately. Persistent incoherence refuses the session before
+work starts. The final snapshot and every measured action, session and trial
+are never retried. The existing process-set and nonnegative CPU-delta predicates
+and the canonical N remain unchanged. Both the default comparison and the
+controlled colour memory consumer use this policy.
+
+A browser-version or renderer mismatch writes an ignored `refused_environment`
+JSON and plain report with both actual side strings and no pixel verdict or
+metrics. A second software renderer result after the headed retry does the
+same. The CLI still exits 2 after successful cleanup. An invalid measurement
+requested with `--publish` keeps its ignored raw record and exits 1 without
+replacing the tracked pair. Cleanup, privacy and interruption failures remove
+the attempt's ignored artifacts. Pre-launch flag refusals take no artifact
+ownership. No publication eligibility, pixel gate or tolerance changes.
+
+Permanent controls exercise actual memory orchestration with OS transports
+substituted, including setup recovery, the exact attempt bound, no action after
+persistent refusal, non-retriable counters and missing final PIDs. The real
+Chromium control runs the actual metadata provider, precheck and controller with
+one deliberately changed browser-version string. It requires both browsers
+closed before the retained refusal is exposed. A separate controller-copy
+control redirects only its publication destination and injected-service guard
+to prove ignored invalid records survive while the prior tracked pair does.
+These fixture observations are functional controls and do not supply a timing
+comparison or a successful equipped memory matrix.
+
+### Lead ruling, starting side belongs to the workload, 2026-11-08
+
+The first numerically complete equipped run used a different starting side
+for each cold or warm cell. That violates decision16 and AC7. Its observations
+remain preserved as protocol-qualified and do not satisfy AC7.
+
+Allocate one starting side on each declared metric/workload visit, shared by
+its cold and warm conditions. Advance the side once when moving to the next
+workload, carrying the sequence across metric boundaries. An unavailable
+workload reserves its place but performs no observations. An unavailable
+condition does not consume another flip. CPU continues reusing the actual
+memory sessions without launching or repeating them. Within-cell alternation,
+N, endpoints, predicates and thresholds remain unchanged.
+
+The permanent actual `measureAll` orchestration control spans multiple
+workloads with both conditions, compares the invoked side order and the raw
+starting-side receipt, and includes an unavailable workload. It substitutes
+only browser transports. The old per-cell flip must fail this control. The
+corrected source requires independent review and a fresh equipped matrix.
+
+
+The report generator also names the primary memory row as the sampled
+concurrent footprint lower bound, keeps the existing sum-of-process-peaks
+upper label and states the minimum250ms pause between completed collection
+rounds. The runtime and renderer share the same interval constant. Actual
+sample timestamps stay in ignored raw evidence. No publication schema,
+sampling behavior or statistic changes.

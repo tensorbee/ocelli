@@ -90,6 +90,50 @@ describe("SR content tree", () => {
     ).toBeNull();
   });
 
+  it("keeps an ellipse of four points and refuses one of two", () => {
+    // PS3.3 C.18.6.1.2: ELLIPSE is four (column,row) pairs, the major axis
+    // endpoints then the minor axis endpoints.
+    const ellipse: ContentItem = {
+      relationship: null,
+      valueType: "SCOORD",
+      concept: length,
+      graphic: "ELLIPSE",
+      points: [[20, 20], [20, 60], [10, 40], [30, 40]],
+      children: [],
+    };
+    expect(contentTree(ellipse)).toEqual(ellipse);
+    expect(contentTree({ ...ellipse, points: [[20, 20], [20, 60]] })).toBeNull();
+    expect(contentTree({ ...ellipse, points: [[20, 20], [20, 60], [10, 40], [30, 40], [0, 0]] })).toBeNull();
+  });
+
+  it("keeps an image frame number and refuses one that is not a positive integer", () => {
+    // PS3.3 C.18.4: Referenced Frame Number counts frames from 1.
+    const image: ContentItem = {
+      relationship: null,
+      valueType: "IMAGE",
+      concept: length,
+      sopClass: "1.2.840.10008.5.1.4.1.1.2",
+      sopInstance: "2.25.7",
+      frame: 3,
+      children: [],
+    };
+    expect(contentTree(image)).toEqual(image);
+    const single: ContentItem = {
+      relationship: null,
+      valueType: "IMAGE",
+      concept: length,
+      sopClass: "1.2.840.10008.5.1.4.1.1.2",
+      sopInstance: "2.25.7",
+      children: [],
+    };
+    const copied = contentTree(single);
+    expect(copied).toEqual(single);
+    expect(copied !== null && "frame" in copied).toBe(false);
+    for (const frame of [0, -1, 1.5, Number.NaN]) {
+      expect(contentTree({ ...image, frame })).toBeNull();
+    }
+  });
+
   it("omits a null algorithm and refuses an empty tool", () => {
     const items = provenanceItems("Length", "0.1.0", null, "reader");
     expect(items).toHaveLength(3);

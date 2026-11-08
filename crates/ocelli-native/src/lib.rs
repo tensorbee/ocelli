@@ -193,6 +193,13 @@ pub fn tier_report(resolution: &Resolution) -> String {
         created = evidence.device_created,
         measured = evidence.measured_tier,
     ));
+    // The cause of a `NoAdapter`, when the build is the cause. A machine with
+    // backends and no GPU prints the same `NoAdapter` line above, so this is
+    // what tells a macOS user of the shipped build that their hardware is not
+    // the problem. D-33 is the deviation that ships such a build.
+    if evidence.no_backend_compiled {
+        out.push_str("\n  backends  none compiled for this target");
+    }
     if let Some(candidate) = &evidence.candidate {
         out.push_str(&format!(
             "\n  candidate {name:?} on {backend:?}, reported {device_type:?}",
@@ -355,6 +362,36 @@ mod tests {
         assert!(report.contains("adapter type Unknown"), "{report}");
         assert!(report.contains("renderer string Software"), "{report}");
         assert!(report.contains("SwiftShader"), "{report}");
+        // The cause line is the empty-backend guard's, and this build has a
+        // backend compiled, so it must be absent here. A report that named
+        // the cause unconditionally would claim a build it knows nothing
+        // about.
+        assert!(!report.contains("backends"), "{report}");
+    }
+
+    /// The cause of a `NoAdapter` is printed when the build is the cause.
+    ///
+    /// The empty-backend guard in `probe.rs` sets the flag on the evidence
+    /// `classify` returned, because an empty platform-filtered set never
+    /// reaches an instance and the resolver cannot see it. The report is
+    /// where a macOS user of the shipped build reads that their hardware is
+    /// not the problem, so the flag and the line are pinned together here.
+    #[test]
+    fn the_report_names_no_backend_compiled_when_the_guard_recorded_it() {
+        use ocelli_render::{TierRequest, TierSignals, classify};
+
+        let mut resolution = classify(&TierSignals::unprobed(), TierRequest::Auto);
+        assert_eq!(
+            resolution.evidence.decided_by,
+            ocelli_render::DecidedBy::NoAdapter
+        );
+        resolution.evidence.no_backend_compiled = true;
+        let report = super::tier_report(&resolution);
+        assert!(
+            report.contains("\n  backends  none compiled for this target"),
+            "{report}"
+        );
+        assert!(report.contains("decided by NoAdapter"), "{report}");
     }
 
     /// A future that is ready on the first poll comes back on the first poll.

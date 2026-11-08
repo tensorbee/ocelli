@@ -28,7 +28,7 @@
   header.top nav a { color: #999999; text-decoration: none; }
   header.top nav a[aria-current="page"] { color: #e6e6e6; }
 
-  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 96px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 96px; }
   main > * { max-width: 72ch; }
   h1 { font-size: 26px; line-height: 1.25; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
   h2 { font-size: 20px; line-height: 1.3; font-weight: 600; margin: 0 0 6px; }
@@ -103,6 +103,22 @@
   a:focus-visible, button:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
   .brand { display: flex; align-items: center; color: #e6e6e6; text-decoration: none; }
   .brand .logo { display: block; height: 20px; width: auto; }
+.use-guide { margin-top: 40px; }
+
+  .comparison-wrap { max-width: none; overflow-x: auto; margin: 20px 0 28px; border: 1px solid #3a3a3a; }
+  .comparison { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px; line-height: 1.5; }
+  .comparison caption { text-align: left; padding: 12px; color: #bdbdbd; }
+  .comparison th, .comparison td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid #333333; }
+  .comparison thead th { background: #222222; }
+  .comparison th[scope="row"] { width: 20%; font-weight: 500; }
+  .comparison .group th { background: #202020; color: #bdbdbd; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .viewer-state { display: block; font-weight: 600; margin-bottom: 3px; }
+  .viewer-state.done { color: #b8e0c2; }
+  .viewer-state.part { color: #e6d6ad; }
+  .viewer-state.none { color: #aaaaaa; }
+  .feature { margin-left: auto; margin-right: auto; }
+  .api-details { margin: 12px 0 16px; }
+  .api-details summary { cursor: pointer; color: #bdbdbd; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -115,36 +131,122 @@
   </nav>
 </header>
 <main>
-  <h1>More than this image</h1>
-  <p class="lede">The image page shows up to nine viewports, each showing one series. The library does more than that page draws. This page names each of those features, says what it is for, where it lives, how to call it, and whether it is built.</p>
+  <h1>Features and the road ahead</h1>
+  <p class="lede">The viewer is Ocelli's showcase. A feature is implemented here only when it has a usable workflow on Images. Library code without that workflow is shown separately.</p>
   <div class="note">
-    <p>There is no picture on this page and no stand-in result. The code below is real API from this repository, so it shows the calls and not their output. The example viewer started with <code>npm run dev</code> is where the library's controls run, and it labels a control <em>unavailable</em> when that control is not built.</p>
+    <p><strong>This is the S46 integration preview.</strong> Sprint acceptance and performance measurements are still in progress. Another running build can show an older feature list.</p>
+    <p><strong>Implemented</strong> means usable in this viewer, with the limits named. <strong>Partial</strong> means a working part exists and the missing part is stated. <strong>Not yet</strong> means the viewer workflow is absent, even when its library is built. <strong>Planned</strong> is future work and is never presented as an implemented advantage.</p>
   </div>
-  <p>Each feature carries one of three marks. <strong>Implemented</strong> means the library code exists with tests. <strong>Partial</strong> means part of it exists and the rest is named. <strong>Not yet</strong> means there is no code. A tier line says what tiers A (WebGPU), B (WebGL2) and C (CPU) do. A tier that cannot run a feature reports unavailable and never draws something else instead.</p>
+  <p>The comparison uses the inspected Cornerstone3D <strong>5.8.2</strong> core, tools and DICOM loader as the tested baseline, checked 8 November 2026. Cornerstone supplies library APIs. A host application still supplies workflows such as prior-study search and saved preferences. Current ecosystem capabilities are identified explicitly.</p>
+  <p>Rendering support depends on the device: A is WebGPU, B is WebGL2 and C is CPU. An unavailable tier is named in the viewer. A working GPU path is not a promise of a CPU implementation. A checked API is not a claim of pixel or performance parity.</p>
 
+
+
+  <h2 id="comparison">Feature comparison</h2>
+  <div class="comparison-wrap" role="region" aria-label="Feature comparison" tabindex="0">
+  <table class="comparison">
+  <caption>Viewer status is the delivery status. A library-only implementation stays Not yet or Partial here.</caption>
+  <thead><tr><th scope="col">Feature</th><th scope="col">Cornerstone</th><th scope="col">Ocelli library</th><th scope="col">Ocelli viewer</th><th scope="col">Delivery</th></tr></thead>
+  <tbody>
+    <tr class="group"><th colspan="5" scope="rowgroup">Viewing and interaction</th></tr>
+    <tr><th scope="row">Stack viewing, zoom, pan, rotate, flip and presets</th><td>Supported</td><td>Built</td><td><span class="viewer-state done">Implemented</span>Available on Images</td><td class="delivery">S46 preview</td></tr>
+    <tr><th scope="row">Several series and linked scroll, window and zoom</th><td>Supported APIs and synchronizers</td><td>Built</td><td><span class="viewer-state done">Implemented</span>Available on Images</td><td class="delivery">S46 preview</td></tr>
+    <tr><th scope="row">RGB, YBR and palette colour</th><td>Supported, format-dependent</td><td>Built</td><td><span class="viewer-state done">Implemented</span>Supported colour shapes draw in the S46 preview</td><td class="delivery">S46 preview</td></tr>
+    <tr data-features="F-263"><th scope="row">Measurements and ROI statistics</th><td>Tools supported</td><td>Built</td><td><span class="viewer-state part">Partial</span>Current tools work. Remaining tool families need viewer controls</td><td class="delivery">S48: F-263</td></tr>
+    <tr data-features="F-204"><th scope="row">One stored pixel to one device pixel</th><td>Display-area scale API</td><td>Zoom building blocks</td><td><span class="viewer-state none">Not yet</span>A dedicated one-to-one mode is missing</td><td class="delivery">S47: F-204</td></tr>
+    <tr data-features="F-246"><th scope="row">Nearest and linear interpolation selector</th><td>Supported</td><td>Built on A, B and C</td><td><span class="viewer-state part">Partial</span>Nearest display works. No mode selector</td><td class="delivery">S48: F-246</td></tr>
+    <tr data-features="F-261"><th scope="row">Between-slice stack blending</th><td>Volume resampling exists. Separate stack mode not verified</td><td>Volume resampling built</td><td><span class="viewer-state none">Not yet</span>A distinct stack-blend workflow is planned</td><td class="delivery">S49: F-261</td></tr>
+    <tr data-features="F-247"><th scope="row">DICOM overlay planes and shutters</th><td>Dedicated plane and shutter parity needs verification</td><td>Reader built</td><td><span class="viewer-state none">Not yet</span>Image drawing and controls are missing</td><td class="delivery">S48: F-247</td></tr>
+    <tr data-features="F-252"><th scope="row">Patient-point cursor across viewports</th><td>Crosshairs and reference-cursor tools</td><td>Geometry built</td><td><span class="viewer-state part">Partial</span>Reference lines work. Shared cursor is missing</td><td class="delivery">S49: F-252</td></tr>
+    <tr data-features="F-248"><th scope="row">Histogram</th><td>Statistics APIs. Histogram UI is application work</td><td>Calculation built</td><td><span class="viewer-state none">Not yet</span>No histogram view</td><td class="delivery">S48: F-248</td></tr>
+    <tr data-features="F-265"><th scope="row">ECG and waveform viewing</th><td>ECG viewports and waveform metadata provider. Configured loading not measured</td><td>Reader and signal rendering planned</td><td><span class="viewer-state none">Not yet</span>No waveform workflow in the viewer</td><td class="delivery">S48: F-265</td></tr>
+  </tbody>
+  <tbody>
+    <tr class="group"><th colspan="5" scope="rowgroup">Volumes and segmentation</th></tr>
+    <tr data-features="F-203"><th scope="row">Orthographic and oblique MPR</th><td>Supported volume viewports</td><td>Built, CPU MPR included</td><td><span class="viewer-state none">Not yet</span>No MPR viewport on Images</td><td class="delivery">S49: F-203</td></tr>
+    <tr data-features="F-253"><th scope="row">MIP, MinIP and average slabs</th><td>Supported GPU blend modes</td><td>GPU reductions built</td><td><span class="viewer-state none">Not yet</span>No thickness or reduction controls</td><td class="delivery">S49: F-253</td></tr>
+    <tr data-features="F-254"><th scope="row">PET/CT and multi-volume fusion</th><td>Supported</td><td>GPU fusion built</td><td><span class="viewer-state none">Not yet</span>No paired-volume workflow</td><td class="delivery">S49: F-254</td></tr>
+    <tr data-features="F-255"><th scope="row">3D volume rendering</th><td>Supported</td><td>GPU ray rendering built</td><td><span class="viewer-state none">Not yet</span>No 3D viewport</td><td class="delivery">S50: F-255</td></tr>
+    <tr data-features="F-256"><th scope="row">Volume opacity, shading and clipping</th><td>Supported APIs</td><td>Built</td><td><span class="viewer-state none">Not yet</span>No volume controls</td><td class="delivery">S50: F-256</td></tr>
+    <tr data-features="F-251"><th scope="row">Labelmap, contour and surface segmentation display</th><td>Supported</td><td>Rendering built</td><td><span class="viewer-state none">Not yet</span>No segmentation display workflow</td><td class="delivery">S49: F-251</td></tr>
+    <tr data-features="F-264"><th scope="row">Segmentation editing and interchange</th><td>Tools and adapters supported</td><td>Tool and format foundations built</td><td><span class="viewer-state none">Not yet</span>No complete viewer editing workflow</td><td class="delivery">S49: F-264</td></tr>
+  </tbody>
+  <tbody>
+    <tr class="group"><th colspan="5" scope="rowgroup">Study workflows and interoperability</th></tr>
+    <tr data-features="F-257"><th scope="row">Prior studies and hanging layouts</th><td>Host application workflow</td><td>Source and layout foundations</td><td><span class="viewer-state none">Not yet</span>Prior-study selection is missing</td><td class="delivery">S50: F-257</td></tr>
+    <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state none">Not yet</span>Images currently opens local folders</td><td class="delivery">S47: F-245</td></tr>
+    <tr data-features="F-249"><th scope="row">Metadata browser</th><td>Metadata APIs. Browser UI belongs to the host</td><td>Typed metadata built</td><td><span class="viewer-state part">Partial</span>Headers are browsable and filterable</td><td class="delivery">S48: F-249</td></tr>
+    <tr data-features="F-250"><th scope="row">Metadata compare and copy</th><td>Host application workflow</td><td>Metadata foundations built</td><td><span class="viewer-state none">Not yet</span>No compare or copy workflow</td><td class="delivery">S48: F-250</td></tr>
+    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Four browser settings saved</td><td><span class="viewer-state part">Partial</span>General tool, window and layout preferences remain</td><td class="delivery">S47: F-205</td></tr>
+    <tr><th scope="row">SR measurements and key images</th><td>Adapters and host workflow</td><td>Read and write built</td><td><span class="viewer-state done">Implemented</span>Save marks and reopen SR/KOS in the viewer</td><td class="delivery">S46 preview</td></tr>
+    <tr data-features="F-258"><th scope="row">Rendered capture and further document exports</th><td>Adapters and host workflow, format-dependent</td><td>Document APIs built</td><td><span class="viewer-state part">Partial</span>SR/KOS work. Other export actions remain</td><td class="delivery">S50: F-258</td></tr>
+    <tr data-features="F-202"><th scope="row">Browser worker decode and render</th><td>DICOM worker decode supported</td><td>Fetch, hand-off and pool built</td><td><span class="viewer-state none">Not yet</span>Local native decoding works. Browser decode is unfinished</td><td class="delivery">S47: F-202</td></tr>
+    <tr data-features="F-241 F-242"><th scope="row">DICOM video</th><td>Video viewport with browser codec limits</td><td>Container reader built</td><td><span class="viewer-state none">Not yet</span>Playback and exact frame workflows are scheduled</td><td class="delivery">S47: F-241<br>S48: F-242</td></tr>
+  </tbody>
+  <tbody>
+    <tr class="group"><th colspan="5" scope="rowgroup">Additional Ocelli capabilities</th></tr>
+    <tr><th scope="row">Labelled series-percentile automatic window</th><td>Per-image range default in the tested baseline</td><td>Pooled percentile window built</td><td><span class="viewer-state done">Implemented</span>Shared series window with a labelled per-image fallback</td><td class="delivery">S46 preview</td></tr>
+    <tr data-features="F-260"><th scope="row">DICOM VR, VM and Type-rule findings</th><td>No corresponding report in the tested baseline</td><td>Scoped conformance report built</td><td><span class="viewer-state done">Implemented</span>Local checks badge and findings, with no file values in findings</td><td class="delivery">S46 preview<br>S50: F-260 browser-only</td></tr>
+    <tr><th scope="row">ICC matrix and tone-curve profiles</th><td>Ignored by the tested baseline</td><td>Supported subset built</td><td><span class="viewer-state done">Implemented</span>Applied profiles or a named unsupported-profile notice</td><td class="delivery">S46 preview</td></tr>
+    <tr data-features="F-259"><th scope="row">JPEG XL lossless and JPEG XL decoding</th><td>No decoder in the tested 5.8.2 loader</td><td>Two syntaxes supported</td><td><span class="viewer-state part">Partial</span>Supported frames draw. Recompression remains refused</td><td class="delivery">S50: F-259</td></tr>
+    <tr><th scope="row">Bounded residency and changed-file refusal</th><td>Caching supported. Identical policy is not claimed</td><td>Budgets, identity checks and release built</td><td><span class="viewer-state done">Implemented</span>Local frame reuse and changed-file notices</td><td class="delivery">S46 preview</td></tr>
+  </tbody>
+  <tbody>
+    <tr class="group"><th colspan="5" scope="rowgroup">Longer roadmap, not implemented advantages</th></tr>
+    <tr data-features="F-120 F-121 F-122 F-123 F-124"><th scope="row">Out-of-core and 4D volume streaming</th><td>Volume streaming exists. Matching residency/LOD guarantees need measurement</td><td>Pyramid and cache groundwork</td><td><span class="viewer-state none">Planned</span>Budgeted LOD, prefetch, eviction and time axis</td><td class="delivery">S51: F-120<br>S52: F-121, F-122<br>S53: F-123, F-124</td></tr>
+    <tr data-features="F-125 F-126 F-127 F-128 F-129 F-130 F-131"><th scope="row">GPU image-processing and segmentation kernels</th><td>Compute and algorithm coverage varies</td><td>Device-sharing groundwork</td><td><span class="viewer-state none">Planned</span>Filters, statistics and segmentation kernels with viewer controls</td><td class="delivery">S54: F-125<br>S55: F-126<br>S56: F-127<br>S57: F-128, F-131<br>S58: F-129<br>S59: F-130</td></tr>
+    <tr data-features="F-132 F-133 F-134 F-135"><th scope="row">Prompted browser AI segmentation</th><td>Browser ONNX/SAM exists in @cornerstonejs/ai</td><td>Planned</td><td><span class="viewer-state none">Planned</span>GPU-resident model integration, prompts and provenance</td><td class="delivery">S60: F-132<br>S61: F-133<br>S62: F-134<br>S64: F-135</td></tr>
+    <tr data-features="F-136 F-137 F-138"><th scope="row">Multi-monitor and per-display calibration</th><td>Examples and host integration</td><td>Foundations only</td><td><span class="viewer-state none">Planned</span>Display placement, state sync and calibration reporting</td><td class="delivery">S65: F-136<br>S66: F-137, F-138</td></tr>
+    <tr data-features="F-258 F-139 F-140 F-141 F-142"><th scope="row">Coded presentation states and annotation provenance</th><td>Adapters and annotation APIs. Exact scope varies</td><td>Annotation foundations, GSPS planned</td><td><span class="viewer-state none">Planned</span>GSPS read/apply, write, coded concepts and provenance in the viewer</td><td class="delivery">S50: F-258<br>S60: F-139<br>S61: F-140<br>S62: F-141<br>S63: F-142</td></tr>
+    <tr data-features="F-150 F-151 F-152 F-153"><th scope="row">Cross-target render attestation</th><td>No equivalent guarantee verified</td><td>Deterministic foundations</td><td><span class="viewer-state none">Planned</span>Output hashes and measured divergence reports</td><td class="delivery">S67: F-150<br>S65: F-151<br>S68: F-152<br>S69: F-153</td></tr>
+    <tr data-features="F-154 F-155 F-156 F-157"><th scope="row">Live collaborative reading</th><td>Host application integration</td><td>Serializable state foundation</td><td><span class="viewer-state none">Planned</span>Shared viewports, annotations, presence and transport</td><td class="delivery">S70: F-154<br>S71: F-155<br>S72: F-156<br>S73: F-157</td></tr>
+    <tr data-features="F-143 F-144 F-145 F-146 F-147 F-148 F-149"><th scope="row">Whole-slide microscopy and unified scene</th><td>WSI viewport exists</td><td>Pyramid and scene groundwork</td><td><span class="viewer-state none">Planned</span>Tiled retrieval, colour management and cross-modality scenes</td><td class="delivery">S74: F-143<br>S75: F-144<br>S76: F-145<br>S77: F-146<br>S78: F-147<br>S79: F-148<br>S80: F-149</td></tr>
+  </tbody>
+  </table>
+  </div>
+  <p>Beyond-baseline rows identify a specific difference from the tested reference. They are not a claim that Ocelli is generally faster or more capable. The controlled comparison is still being completed. AI, multi-monitor and WSI are not advertised as exclusive Ocelli features.</p>
+  <p>Reference sources: <a href="https://www.cornerstonejs.org/docs/examples/">Cornerstone examples</a>, <a href="https://www.cornerstonejs.org/docs/concepts/cornerstone-core/viewports/">viewport capabilities</a>, <a href="https://www.npmjs.com/package/@cornerstonejs/ai">the Cornerstone AI package</a> and <a href="https://docs.ohif.org/platform/extensions/modules/hpmodule/">OHIF host workflows</a>. Version-specific support was checked against the installed 5.8.2 sources. Current AI package support is an ecosystem note, not a measured 5.8.2 parity claim.</p>
+  <h2 id="roadmap">Scheduled showcase delivery</h2>
+  <p>The remaining viewer work is assigned to S47 through S50. Larger streaming, compute, AI, collaboration and whole-slide work stays on the later scheduled roadmap and must include a usable viewer workflow when delivered.</p>
+  <!-- SHOWCASE_SCHEDULE:BEGIN -->
+  <div class="comparison-wrap" role="region" aria-label="Scheduled showcase delivery" tabindex="0">
+  <table class="comparison"><caption>Ordered implementation waves. Estimates express relative engineering effort and are not calendar deadlines.</caption><thead><tr><th scope="col">Sprint</th><th scope="col">Outcome</th><th scope="col">Scheduled work</th></tr></thead><tbody>
+  <tr><th scope="row">S47</th><td>One viewer and browser execution</td><td>Local and DICOMweb sources, worker decode and render, one-to-one display, shared preferences, video playback, plus existing VOI and packaging work.<br><small>F-202, F-204, F-205, F-235, F-237, F-238, F-241, F-245</small></td></tr>
+  <tr><th scope="row">S48</th><td>Complete stack workflows</td><td>Interpolation, overlays and shutters, histograms, recursive metadata, compare and copy, remaining measurement tools, ECG waveforms, and MPEG-2 decoding.<br><small>F-242, F-246, F-247, F-248, F-249, F-250, F-263, F-265</small></td></tr>
+  <tr><th scope="row">S49</th><td>MPR, fusion and segmentation</td><td>Orthographic and oblique MPR, linked patient cursor, slabs, fusion, between-slice sampling, segmentation display, editing and interchange.<br><small>F-203, F-251, F-252, F-253, F-254, F-261, F-264</small></td></tr>
+  <tr><th scope="row">S50</th><td>Volume and study workflows</td><td>3D volume and controls, prior studies, rendered exports and GSPS read/apply, safe JPEG XL recompression, browser conformance, and the complete viewer coverage gate.<br><small>F-255, F-256, F-257, F-258, F-259, F-260, F-262</small></td></tr>
+  </tbody></table></div>
+  <!-- SHOWCASE_SCHEDULE:END -->
+  <p>Every delivery requires a visible control, real data through the library, browser checks, a clear unavailable state for unsupported tiers and an updated comparison row. Library tests alone do not close a showcase story.</p>
+
+  <details class="api-details"><summary>Feature details and library examples</summary>
   <ul class="index">
-    <li><a href="#overlay">Overlay and shutter</a><span class="mark">implemented</span></li>
+    <li><a href="#overlay">Overlay and shutter</a><span class="mark">not yet</span></li>
     <li><a href="#interpolation">Interpolation</a><span class="mark">partial</span></li>
-    <li><a href="#reference">Reference line</a><span class="mark">implemented</span></li>
+    <li><a href="#reference">Reference lines and cursor</a><span class="mark">partial</span></li>
     <li><a href="#series">Several series</a><span class="mark">partial</span></li>
-    <li><a href="#mpr">MPR</a><span class="mark">implemented</span></li>
-    <li><a href="#slab">Slab</a><span class="mark">partial</span></li>
-    <li><a href="#volume">Volume rendering</a><span class="mark">partial</span></li>
-    <li><a href="#fusion">Fusion</a><span class="mark">partial</span></li>
-    <li><a href="#histogram">Histogram</a><span class="mark">partial</span></li>
+    <li><a href="#mpr">MPR</a><span class="mark">not yet</span></li>
+    <li><a href="#slab">Slab</a><span class="mark">not yet</span></li>
+    <li><a href="#volume">Volume rendering</a><span class="mark">not yet</span></li>
+    <li><a href="#fusion">Fusion</a><span class="mark">not yet</span></li>
+    <li><a href="#histogram">Histogram</a><span class="mark">not yet</span></li>
+    <li><a href="#auto-window">Automatic window</a><span class="mark">implemented</span></li>
     <li><a href="#metadata">Metadata browser</a><span class="mark">partial</span></li>
+    <li><a href="#conformance">Conformance report</a><span class="mark">implemented</span></li>
     <li><a href="#one">One to one</a><span class="mark">not yet</span></li>
-    <li><a href="#preferences">Preferences</a><span class="mark">not yet</span></li>
+    <li><a href="#preferences">Preferences</a><span class="mark">partial</span></li>
     <li><a href="#jpegxl">JPEG XL</a><span class="mark">partial</span></li>
-    <li><a href="#worker">Worker decode</a><span class="mark">partial</span></li>
-    <li><a href="#documents">Documents</a><span class="mark">implemented</span></li>
+    <li><a href="#worker">Browser worker decode</a><span class="mark">not yet</span></li>
+    <li><a href="#documents">Documents and exports</a><span class="mark">partial</span></li>
   </ul>
+  </details>
 
   <section class="feature" id="overlay">
     <h2>Overlay planes and display shutters</h2>
-    <span class="status done">Implemented as a reader. Nothing draws it yet.</span>
+    <span class="status none">Not yet in the viewer. The overlay and shutter reader is built.</span>
     <p>An overlay plane is a one bit graphic stored beside the image, such as a marker or a region of interest drawn by the modality, PS3.3 C.9.2. A display shutter masks part of the image that should not be shown, often the collimated edge of a radiograph, PS3.3 C.7.6.11.</p>
     <p class="where">Lives in <code>ocelli-dicom</code>, <code>crates/ocelli-dicom/src/overlay.rs</code>. <code>read_overlays</code> returns an <code>OverlaySet</code> for one frame.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_dicom::{parse_part10, read_overlays, ShutterShape};
 
 let parsed = parse_part10(bytes)?;
@@ -169,14 +271,16 @@ if let Some(shutter) = set.shutter() {
     }
 }
 let grey = set.presentation_value();             // Shutter Presentation Value, when present</code></pre>
+</details>
     <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The example page posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
   </section>
 
   <section class="feature" id="interpolation">
     <h2>Interpolation between pixels and between slices</h2>
-    <span class="status part">Partial. In-plane nearest and linear are built. Blending two stack slices is not.</span>
+    <span class="status part">Partial. The viewer uses nearest sampling. The library also supports linear, but the viewer has no interpolation selector.</span>
     <p>When an image is zoomed, each screen pixel falls between stored pixels. Nearest shows the closest stored value, which keeps edges hard. Linear blends the four neighbours, which looks smoother but is no longer a stored value. A reader should know which one is on.</p>
     <p class="where">Lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/interpolation.rs</code>. <code>Interpolation</code> is <code>Nearest</code> or <code>Linear</code>, and <code>available(mode, tier)</code> answers before a draw.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::{available, Interpolation, Tier};
 
 let mode = Interpolation::Linear;
@@ -184,15 +288,17 @@ if available(mode, resolution.caps.tier) {
     graph.set_stack_interpolation(&amp;ctx, viewport, mode)?;   // tiers A and B
 }
 raster.set_interpolation(mode.mode())?;                       // tier C, CpuRaster</code></pre>
+</details>
     <p>Sampling <em>between</em> two slices is a volume operation. <code>Volume::reslice</code> takes a fractional slice index and reads it through the volume's trilinear sample, shown under MPR below. A stack mode that blends slice <em>n</em> with slice <em>n + 1</em> on screen is not built.</p>
     <p class="tiers">Nearest and linear are available on tiers A, B and C. Linear on an orthographic plane is refused rather than drawn as nearest.</p>
   </section>
 
   <section class="feature" id="reference">
     <h2>Reference line and reference cursor</h2>
-    <span class="status done">Implemented. The plane intersection is in the Rust library, and the shell segments take a projected point.</span>
+    <span class="status part">Partial. Reference lines work in the viewer. A shared patient-point cursor is not yet exposed.</span>
     <p>A reference line shows where the slice in one viewport cuts the image in another, so a reader can tell which axial level a coronal line is at. A reference cursor marks the same patient point in every viewport.</p>
     <p class="where">The line where one image plane cuts another lives in <code>ocelli-viewport</code> as <code>link::reference_segment</code>, which the image page of this folder viewer draws its reference lines with through the local process. A crosshair or a reference cursor lives in <code>@ocelli/core</code>, <code>packages/core/src/crosshair.ts</code> and <code>packages/core/src/intersection.ts</code>, where <code>overlayGrid</code> lives. Those functions take a point already projected into viewport pixels and return segments for the SVG layer.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import { crosshairLines, overlayGrid, referenceCursor, referenceLines } from "@ocelli/core";
 
 // x and y are viewport pixels. Null when the point is outside the viewport.
@@ -204,14 +310,16 @@ const grid = overlayGrid(2, 2, width, height);       // interior lines of a layo
 for (const { x0, y0, x1, y1 } of lines ?? []) {
   // append an SVG line element
 }</code></pre>
+</details>
     <p class="tiers">The shell functions do not project a plane and do not read a frame of reference. <code>reference_segment</code> projects the plane, and the geometry chapter of <a href="/use#geometry">Use</a> shows it. It is CPU arithmetic and runs the same on every tier, as the shell code does.</p>
   </section>
 
   <section class="feature" id="series">
     <h2>Several series at once</h2>
-    <span class="status part">Partial. Slice sync by patient point is built, and the image page shows several series side by side with linked scroll, synced window and synced zoom. Priors are not.</span>
+    <span class="status part">Partial. Multiple viewports and linked scroll, window and zoom work. Prior-study selection is not yet built.</span>
     <p>Reading often means two series side by side: a current scan beside a prior, or two sequences of the same MRI. Scrolling one should move the other to the same anatomy, and a window change may apply to both.</p>
     <p class="where">Lives in <code>ocelli-volume</code> as <code>HeldPlane</code> and in <code>ocelli-viewport</code> as <code>sync::SyncScene</code> and <code>link</code>. A scene moves every viewport that shares the source's Frame of Reference UID onto one patient point. <code>link::closest_coplanar</code> chooses the nearest image in a stack of planes that need not be uniform, which is what the image page scrolls with.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use glam::DVec3;
 use ocelli_core::{Pt, World};
 use ocelli_viewport::sync::SyncScene;
@@ -231,15 +339,17 @@ scene.register(2, Some(FrameOfReferenceUid(uid.clone())), other_plane);
 for change in scene.set_point(1, point)? {
     let (id, index) = (change.id, change.index);
 }</code></pre>
+</details>
     <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
     <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>npm run dev</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
 
   <section class="feature" id="mpr">
     <h2>MPR</h2>
-    <span class="status done">Implemented in the library. The example page reads it unavailable.</span>
+    <span class="status none">Not yet in the viewer. Orthographic and oblique MPR are built in the library.</span>
     <p>Multiplanar reformation rebuilds sagittal, coronal or any oblique plane from a stack of axial slices, so anatomy can be seen in the plane that shows it best. It depends on correct spacing and orientation, which is why a sheared stack is refused rather than straightened.</p>
     <p class="where">Lives in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/ortho.rs</code>, with presentation in <code>ocelli-render</code>, <code>crates/ocelli-render/src/ortho.rs</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_volume::{ObliquePlane, OrthoPlane, PlaneSample, Volume};
 
 let volume = Volume::construct(candidate)?;
@@ -260,18 +370,22 @@ for sample in &amp;axial.samples {
         PlaneSample::Absent =&gt; {}  // a slice not landed or outside, never stored zero
     }
 }</code></pre>
+</details>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::{present_cpu_plane, present_plane};
 
 present_plane(tier, &amp;axial, |samples| upload(samples))?;                      // tiers A and B
 present_cpu_plane(&amp;mut raster, &amp;view, &amp;presentation, &amp;axial, quality, &amp;mut out)?; // tier C</code></pre>
+</details>
     <p class="tiers">Tiers A and B present through <code>present_plane</code> and <code>RenderGraph::show_ortho</code>. Tier C presents through <code>present_cpu_plane</code> into <code>CpuRaster</code>. An absent sample or a raster refusal writes nothing.</p>
   </section>
 
   <section class="feature" id="slab">
     <h2>Slab</h2>
-    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <span class="status none">Not yet in the viewer. The library draws slabs on GPU tiers A and B. CPU reduction is unavailable.</span>
     <p>A slab collapses a thick block of slices into one image. Maximum intensity projection makes contrast filled vessels or lung nodules stand out, minimum intensity projection shows airways, and an average reduces noise.</p>
     <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::BlendMode;
 use ocelli_volume::OrthoPlane;
 
@@ -280,14 +394,16 @@ let image = volume.slab_samples(frame, 10.0)?;            // thickness in mm
 
 graph.show_slab(&amp;ctx, &amp;adapter, viewport, &amp;image, BlendMode::Mip)?;
 // BlendMode::MinIp and BlendMode::Average are the other two reductions.</code></pre>
+</details>
     <p class="tiers">MIP, MinIP and average reduce stored samples and then apply the one existing VOI stage. Tiers A and B draw it. Tier C returns unavailable, because there is no CPU reducer.</p>
   </section>
 
   <section class="feature" id="volume">
     <h2>Volume rendering</h2>
-    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <span class="status none">Not yet in the viewer. The library has GPU volume rendering. CPU volume rendering is unavailable.</span>
     <p>Volume rendering casts a ray through the whole volume and accumulates colour and opacity, so a reader sees bone, vessels or an organ surface in three dimensions. It is for orientation and communication, not for measurement.</p>
     <p class="where">Lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/graph.rs</code>, with <code>OpacityTable</code> in <code>opacity.rs</code>, <code>ShadeWeights</code> in <code>shade.rs</code> and <code>ClipPlane</code> in <code>clip.rs</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::{volume_ray_admission, OpacityPreset, OpacityTable};
 
 // Answer before any sample is read.
@@ -299,14 +415,16 @@ graph.set_opacity(&amp;ctx, viewport, &amp;OpacityTable::preset(OpacityPreset::R
 graph.set_shade(&amp;ctx, viewport, &amp;weights)?;
 graph.set_clip_planes(&amp;ctx, viewport, &amp;planes)?;
 let outcome = graph.tick(&amp;ctx);</code></pre>
+</details>
     <p class="tiers">Tiers A and B run the fragment ray. Tier C returns <code>TierCUnavailable</code> from <code>volume_ray_admission</code> before a sample is read and writes no colour. There is no CPU ray and the ray has no MIP body.</p>
   </section>
 
   <section class="feature" id="fusion">
     <h2>Fusion</h2>
-    <span class="status part">Partial. Built on tiers A and B. Tier C is unavailable.</span>
+    <span class="status none">Not yet in the viewer. The library has same-frame-of-reference GPU fusion.</span>
     <p>Fusion lays one modality over another in the same patient space, most often PET colour over CT grey, so uptake can be placed on anatomy. The two volumes must share a frame of reference, or the overlay is in the wrong place.</p>
     <p class="where">The plane lives in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/fusion.rs</code>. The draw lives in <code>ocelli-render</code>, <code>crates/ocelli-render/src/fusion.rs</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::{FusionError, FusionRequest};
 use ocelli_volume::{plane_from_ortho, world_on_plane, OrthoPlane};
 
@@ -324,14 +442,16 @@ match graph.show_fusion(&amp;ctx, &amp;adapter, &amp;request) {
     Err(FusionError::TierCUnavailable) =&gt; {}
     Err(other) =&gt; {}
 }</code></pre>
+</details>
     <p class="tiers">Tiers A and B draw it when a float sample format and the <code>Rgba16Float</code> target can be bound, and otherwise return <code>FusionError::Unavailable</code>. Tier C returns <code>FusionError::TierCUnavailable</code> before a sample is read.</p>
   </section>
 
   <section class="feature" id="histogram">
     <h2>Histogram</h2>
-    <span class="status part">Partial. The function is built. No histogram view exists.</span>
+    <span class="status none">Not yet in the viewer. Histogram calculation is built.</span>
     <p>A histogram counts how many pixels fall in each value range. It helps choose a window, shows whether an image is clipped, and summarises a region.</p>
     <p class="where">Lives in <code>ocelli-geom</code>, <code>crates/ocelli-geom/src/stats.rs</code>. The counts go into a buffer you own.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_geom::{histogram, roi_statistics};
 
 let mut counts = [0_u32; 256];
@@ -339,14 +459,34 @@ let range = histogram(&amp;samples, &amp;mut counts)?;   // samples: &amp;[f64]
 let (low, high, bin) = (range.min, range.max, range.width);
 
 let stats = roi_statistics(&amp;region, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
+</details>
     <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The example page reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
+  </section>
+
+  <section class="feature" id="auto-window">
+    <h2>Automatic window</h2>
+    <span class="status done">Implemented in the viewer for a series that stores no window.</span>
+    <p>An image can store no Window Center, no Window Width and no VOI LUT Sequence. DICOM leaves the window to the viewer then, and <code>open_frame</code> still invents nothing. The automatic window is a labelled choice: the 1st to the 99th nearest-rank percentile of the modality values, PS3.3 C.11.1, each frame through its own rescale, with stored zero and that frame's Pixel Padding Value range, PS3.3 C.7.5.1.1.2, left out, drawn as <code>LINEAR_EXACT</code>, PS3.3 C.11.2.1.3.2. A frame of one value is drawn mid grey. A frame of padding and zero only is drawn at the output minimum, which is black on <code>MONOCHROME2</code> and white on <code>MONOCHROME1</code>, PS3.3 C.7.6.3.1.2.</p>
+    <p class="where">Lives in <code>ocelli-pixel</code>, <code>crates/ocelli-pixel/src/auto_window.rs</code>. <code>series_sample(n)</code> picks up to 16 images spread through a series, first and last included. <code>AutoWindowPool</code> pools them under a cap of 2^20 samples split equally between them, and <code>auto_window</code> is a pool of one image.</p>
+<details class="api-details"><summary>Library API details</summary>
+<pre><code>use ocelli_pixel::{AutoWindowPool, auto_window, series_sample};
+
+let picked = series_sample(images)?;            // up to 16 indices
+let mut pool = AutoWindowPool::new(picked.len())?;
+pool.add_frame(&amp;stored, &amp;modality, padding)?; // once per picked image
+let window = pool.finish()?;                    // centre, width, basis, counted
+let one = auto_window(&amp;stored, &amp;modality, padding)?;</code></pre>
+</details>
+    <p>The image page draws every image of such a series at one window from its sampled images, so scrolling keeps relative brightness between slices, and the corner says Auto window. A thumbnail, and a series whose window the local process refuses, are drawn at each image's own automatic window, and the corner then says Auto window, this image. A window in the file is always used as it is. cornerstone3D 5.8.2 takes each image's own minimum and maximum instead, so this is a viewer policy and not a parity row, and the oracle keeps its own declared default.</p>
+    <p class="tiers">The window is computed once on the host. Tier C draws it with the one CPU <code>LutChain</code>. Tiers A and B take the same centre and width through <code>AutoWindow::transform</code> and <code>VoiParams::from_chain</code>, and no GPU consumer calls the pool yet.</p>
   </section>
 
   <section class="feature" id="metadata">
     <h2>Metadata browser</h2>
-    <span class="status part">Partial. The data model is built. No browser view exists.</span>
+    <span class="status part">Partial. Headers can be browsed and filtered. Recursive browsing, comparison and copy workflows remain.</span>
     <p>A metadata browser lists every attribute of an instance by tag, keyword and value. It answers questions the image cannot, such as which kernel was used or why the spacing looks wrong.</p>
     <p class="where">Lives in <code>ocelli-dicom</code>, <code>crates/ocelli-dicom/src/metadata.rs</code>. <code>MetadataSet</code> holds tags in order, and each <code>MetadataElement</code> carries a VR and a typed <code>MetadataValue</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_dicom::{MetadataSet, MetadataValue, Tag};
 
 let metadata = MetadataSet::from_object(parsed.object())?;
@@ -361,45 +501,69 @@ for (tag, element) in metadata.iter() {
     }
 }
 let modality = metadata.get(Tag(0x0008, 0x0060));</code></pre>
+</details>
     <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The example viewer reads Metadata browser unavailable.</p>
+  </section>
+
+  <section class="feature" id="conformance">
+    <h2>Conformance report</h2>
+    <span class="status done">Implemented in the viewer through the local process, within the report's stated scope. Browser-only generation remains planned.</span>
+    <p>A viewer that reads only the attributes it draws can show a file that breaks the standard, and another viewer can then refuse the same file. An age with no unit letter, a name longer than its limit and a mandatory attribute left empty all draw. The conformance report names such faults without stopping the image.</p>
+    <p>It checks the values of every element against PS3.5 Table 6.2-1, the value count of the attributes it lists against PS3.6, and the presence of Type 1, 1C, 2 and 2C attributes of seven PS3.3 modules on CR, CT, MR and PET Image Storage. It does not check Enumerated Values or Defined Terms, attributes inside a sequence for presence, any other SOP class for presence, enhanced or multi-frame IODs, or a condition the data set cannot decide, which it names instead. It is not proof that a file conforms to DICOM, and it says so in its first line: "This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM." A finding names a length, a count or a character position and never a value.</p>
+    <p class="where">Lives in <code>ocelli-dicom</code>, <code>crates/ocelli-dicom/src/conformance.rs</code>, and its reader in <code>@ocelli/core</code>, <code>packages/core/src/conformance.ts</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
+<pre><code>use ocelli_dicom::{check_conformance, parse_part10};
+
+let report = check_conformance(&amp;parse_part10(bytes)?);
+let count = report.findings().len();
+let json = report.to_json();               // read by readConformanceReport</code></pre>
+</details>
+    <p class="tiers">Tiers A, B and C are not applicable, because the report reads attributes and no pixel, and it is the same on every tier. The image page shows the count on the Headers button and the findings in Checks on the Headers sheet. The report is made by the local process, because no wasm module links the parser yet.</p>
   </section>
 
   <section class="feature" id="one">
     <h2>One to one</h2>
-    <span class="status none">Not yet.</span>
+    <span class="status none">Not yet in the viewer.</span>
     <p>One to one shows each stored pixel as exactly one screen pixel, so nothing is resampled and fine texture is seen as acquired.</p>
     <p class="where">There is no code for it. A <code>Zoom</code> command in <code>@ocelli/core</code> scales the camera by a factor, and nothing computes the factor that maps one stored pixel to one device pixel.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import { packCommands, viewportId } from "@ocelli/core";
 
 // What exists: an explicit zoom factor. It is not a one to one mode.
 packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
+</details>
     <p class="tiers">The example page reads One to one unavailable.</p>
   </section>
 
   <section class="feature" id="preferences">
     <h2>Preferences</h2>
-    <span class="status none">Not yet.</span>
+    <span class="status part">Partial. Four choices are saved. General viewing, tool and layout preferences remain.</span>
     <p>Preferences keep a reader's choices between sessions, such as default window presets, tool bindings and hanging layouts.</p>
-    <p class="where">There is no preferences module in the crates or packages. The session state that does exist is the viewport snapshot, which restores a viewport after a fault and is not a preference store.</p>
+    <p>The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages.</p>
+    <p class="where">The session state that does exist is the viewport snapshot, which restores a viewport after a fault and is not a preference store.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import { parseSnapshot } from "@ocelli/core";
 
 // What exists: one viewport's state as copied JSON, for recovery.
 const parsed = parseSnapshot(session.snapshot());</code></pre>
+</details>
     <p class="tiers">The example page reads Preferences unavailable.</p>
   </section>
 
   <section class="feature" id="jpegxl">
     <h2>JPEG XL and the transfer syntaxes</h2>
-    <span class="status part">Partial. JPEG XL Lossless and JPEG XL decode. JPEG XL JPEG Recompression has no decoder.</span>
-    <p>The decoder registry knows nineteen transfer syntaxes and six registration functions cover them: raw and RLE Lossless together, JPEG, JPEG 2000, JPEG-LS, HTJ2K and JPEG XL. Seventeen have a decoder. Two do not. Deflated Explicit VR Little Endian deflates the whole data set rather than one frame, PS3.5 A.5, and JPEG XL JPEG Recompression is left unregistered because <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. JPEG XL Lossless and JPEG XL decode through <code>jxl-oxide</code> 0.12.6, and this folder viewer registers all six families, so its preview draws the monochrome frames. cornerstone3D 5.8.2 cannot decode any of the three JPEG XL syntaxes, so the differential oracle has no reference frame for those rows, and their correctness comes instead from round trips against the synthetic sources, exact for the two lossless rows and worst-pixel bounded for the two lossy ones, which libjxl encoded.</p>
+    <span class="status part">Partial. Two JPEG XL syntaxes decode, including supported RGB frames. JPEG recompression is refused.</span>
+    <p>The decoder registry knows nineteen transfer syntaxes and six registration functions cover them: raw and RLE Lossless together, JPEG, JPEG 2000, JPEG-LS, HTJ2K and JPEG XL. Seventeen have a decoder. Two do not. Deflated Explicit VR Little Endian deflates the whole data set rather than one frame, PS3.5 A.5, and JPEG XL JPEG Recompression is left unregistered because <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. JPEG XL Lossless and JPEG XL decode through <code>jxl-oxide</code> 0.12.6, and this folder viewer registers all six families, so its preview draws the supported monochrome and RGB frames. An empty Basic Offset Table, which PS3.5 A.4 requires decoders to accept, opens under every encapsulated syntax with a decoder, and frames that span Fragments are split at their JPEG or JPEG 2000 start and end markers only where both markers and the frame count prove the boundary, so RLE and JPEG XL frames split across Fragments are refused by name. cornerstone3D 5.8.2 cannot decode any of the three JPEG XL syntaxes, so the differential oracle has no reference frame for those rows, and their correctness comes instead from round trips against the synthetic sources, exact for the two lossless rows and worst-pixel bounded for the two lossy ones, which libjxl encoded. JPEG-LS follows T.87's run mode, which the vendored decoder now does under a recorded patch, and refuses any LSE preset it does not apply rather than drawing the frame with other coding parameters.</p>
     <p class="tiers">Tiers A, B and C decode on the CPU and do not select different registry behaviour.</p>
   </section>
 
   <section class="feature" id="worker">
     <h2>Worker decode and the wasm path</h2>
-    <span class="status part">Partial. Fetch, hand-off and the worker pool are built. Decoding those bytes in the worker is not.</span>
+    <p>An embedding page uses <code>default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'</code> on every response, the worker script included. See <a href="/use#js-load">Load the core in a worker</a>. This folder viewer is served under a policy with hashes for its inline scripts and styles and no <code>'wasm-unsafe-eval'</code>, because it decodes in the local process.</p>
+    <span class="status none">Not yet in the viewer. The local process decodes images. The browser worker fetch and transfer foundation is built.</span>
     <p>In the browser path, the DICOM bytes go to a worker that owns the wasm core, and decoded pixels stay there. The main thread keeps the DOM responsive. This folder viewer posts each file once while the local process holds it, and posts it again after eviction or a restart. Opening another folder tells that process to forget the previous folder's files and frames through <code>POST /forget</code>. Leaving the page sends one short beacon naming the page, and the process forgets every file that page posted. A file of the active series rewritten on disk after the folder was opened is forgotten too, once the browser refuses to read it at the next focus, return to the page, series selection or change of active viewport, and a rewrite that keeps the modification time is not detected. It is still not the wasm path. The library's decoded tier, <code>ImageCache</code>, answers a lookup only for the bytes, description and plane a frame was decoded from, and the worker path still holds no frame cache. <code>postWadoInstance</code> passes its optional <code>cache</code> to <code>DicomwebClient</code>, whose default is <code>"no-cache"</code>.</p>
     <p class="where">Lives in <code>@ocelli/core</code>: <code>postWadoInstance</code> in <code>instance-bytes.ts</code>, <code>holdSessionBytes</code> in <code>bulk.ts</code>, and <code>openDecodePool</code> in <code>pool.ts</code>.</p>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import {
   DEFAULT_DECODE_WORKERS, MAX_DECODE_WORKERS, holdSessionBytes, openDecodePool, postWadoInstance,
 } from "@ocelli/core";
@@ -419,21 +583,29 @@ ticket = holdSessionBytes(wasm, new Uint8Array(message.bytes), ticket);
 // Several decode workers, each its own wasm instance. No SharedArrayBuffer.
 const pool = openDecodePool(owner, DEFAULT_DECODE_WORKERS, (index) =&gt; new Worker(url));
 pool?.close();</code></pre>
+</details>
     <p class="tiers">Built: the bounded fetch, the hand-off, the bulk slot, a pool of one to <code>MAX_DECODE_WORKERS</code> workers with <code>threadingEscalation()</code> fixed at <code>"stable"</code>, and the render session's own frame cache. Not built: decoding that envelope in the worker and a render of that frame. The decode workers own their instances and no session cache of their own. The example worker publishes one stored sample to prove the path. The session's <code>releaseSeries</code> releases a series from that cache and reports it as <code>cache.released</code>.</p>
   </section>
 
   <section class="feature" id="documents">
     <h2>Documents</h2>
-    <span class="status done">Implemented in <code>@ocelli/core</code>.</span>
+    <span class="status part">Partial. Save and reopen of marks and key images work. Further document and export workflows remain.</span>
     <p>A measurement is useful beyond the session only if another system can read it. DICOM SR TID 1500 carries measurements, a Key Object Selection flags the images that matter, and a Secondary Capture stores a rendered picture as an image.</p>
     <p class="where">Lives in <code>packages/core/src</code>: <code>tid1500.ts</code>, <code>measurement-persist.ts</code>, <code>annotation-state.ts</code>, <code>tid2010.ts</code> and <code>secondary-capture.ts</code>. The tree they share is <code>sr.ts</code>.</p>
     <h3>TID 1500 measurement report</h3>
-<pre><code>import { readTid1500, writeTid1500 } from "@ocelli/core";
+<details class="api-details"><summary>Library API details</summary>
+<pre><code>import { readTid1500, readTid1500Groups, writeTid1500, writeTid1500Groups } from "@ocelli/core";
 
 // SOP class 1.2.840.10008.5.1.4.1.1.88.34, one NUM per root item.
 const bytes = writeTid1500(items, { study, series, sopClass, sopInstance });
-const items2 = bytes === null ? null : readTid1500(bytes);</code></pre>
+const items2 = bytes === null ? null : readTid1500(bytes);
+
+// TID 1410 measurement groups of any value type, ELLIPSE and an image frame included.
+const report = writeTid1500Groups(groups, source);   // source: patient, study, evidence, predecessors
+const read = report === null ? null : readTid1500Groups(report);   // groups, predecessors, unread</code></pre>
+</details>
     <h3>Save, load, undo</h3>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import {
   createAnnotationState, loadMeasurements, persistMeasurements,
   putAnnotation, redoAnnotation, undoAnnotation,
@@ -446,8 +618,10 @@ let state = createAnnotationState();
 state = putAnnotation(state, "m1", frameOfReferenceUid, tree) ?? state;
 state = undoAnnotation(state) ?? state;
 state = redoAnnotation(state) ?? state;</code></pre>
+</details>
     <h3>Key Object Selection</h3>
-<pre><code>import { readKeyObject, writeKeyObject } from "@ocelli/core";
+<details class="api-details"><summary>Library API details</summary>
+<pre><code>import { readKeyObject, readKeyObjects, writeKeyObject, writeKeyObjects } from "@ocelli/core";
 
 // TID 2010, SOP class 1.2.840.10008.5.1.4.1.1.88.59.
 const kos = writeKeyObject({
@@ -455,17 +629,25 @@ const kos = writeKeyObject({
   study, series, instance,              // the new document's UIDs
   referencedClass, referencedInstance,  // the image being flagged
 });
-const doc = kos === null ? null : readKeyObject(kos);   // title and the reference</code></pre>
+const doc = kos === null ? null : readKeyObject(kos);   // title and the reference
+
+// Many key images under one study, each an IMAGE item with an optional frame.
+// Every reference must be in source.evidence, or nothing is written.
+const many = writeKeyObjects([{ sopClass, sopInstance, frame: 2 }], source);
+const keys = many === null ? null : readKeyObjects(many);   // references, Content Date and Time</code></pre>
+</details>
     <h3>Secondary capture</h3>
+<details class="api-details"><summary>Library API details</summary>
 <pre><code>import { readSecondaryCapture, writeSecondaryCapture } from "@ocelli/core";
 
 // SOP class 1.2.840.10008.5.1.4.1.1.7, 8-bit MONOCHROME2, your display bytes.
 const sc = writeSecondaryCapture({ study, series, instance, columns, rows, pixels });
 const image = sc === null ? null : readSecondaryCapture(sc);</code></pre>
-    <p class="tiers">These functions write and read documents and do not draw, so tiers do not apply. The key image flag on the image page is only a mark in this session. It does not write a Key Object Selection and it is not saved.</p>
+</details>
+    <p class="tiers">These functions write and read documents and do not draw, so tiers do not apply. Save marks on the image page writes the key images through these functions.</p>
   </section>
 
-  <p style="margin-top: 40px" class="where">The <a href="/use">Use</a> page is the full guide to the library, from building it to the oracle.</p>
+  <p class="where use-guide">The <a href="/use">Use</a> page is the full guide to the library, from building it to the oracle.</p>
 </main>
 </body>
 </html>

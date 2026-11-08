@@ -15,7 +15,9 @@ use crate::{CodecError, FrameDesc, PixelRepresentation};
 /// Validate every decoded sample and write the caller's output atomically.
 ///
 /// An error leaves `out` byte-unchanged, which is the contract every adapter in
-/// this crate holds.
+/// this crate holds. The decoded slice holds one sample per stored pixel, so a
+/// three-sample colour frame carries three per pixel in sample-interleaved
+/// order.
 pub(crate) fn convert_samples(
     decoded: &[f32],
     desc: &FrameDesc,
@@ -23,6 +25,7 @@ pub(crate) fn convert_samples(
 ) -> Result<(), CodecError> {
     let expected_samples = usize::from(desc.rows())
         .checked_mul(usize::from(desc.columns()))
+        .and_then(|pixels| pixels.checked_mul(usize::from(desc.samples_per_pixel())))
         .ok_or(CodecError::FrameMismatch)?;
     if decoded.len() != expected_samples {
         return Err(CodecError::FrameMismatch);

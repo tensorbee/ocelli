@@ -20,9 +20,9 @@
 
 use ocelli_core::{Index, Pt, World};
 use ocelli_geom::{
-    CalibrationRequest, CalibrationSource, GeomError, RegionShape, SpacingMm, angle_at,
-    bidirectional, cobb, ellipse, length, polygon_area, polygon_crosses_itself, rectangle,
-    region_bounds, region_contains, roi_statistics, select_calibration,
+    CalibrationRequest, CalibrationSource, GeomError, IndexBounds, RegionShape, SpacingMm,
+    angle_at, bidirectional, cobb, ellipse, length, polygon_area, polygon_crosses_itself,
+    rectangle, region_bounds, region_contains, roi_statistics, select_calibration,
 };
 use ocelli_viewport::view::f32_from_f64;
 
@@ -30,7 +30,8 @@ use crate::preview::{HeldFrame, PreviewError, decode_held, json_string, push_fie
 use crate::value::{ImagePoint, stored_at, stored_integer};
 
 /// Most samples a region's clipped bounds may hold, `4096 * 4096`. One
-/// request then keeps at most 128 MiB of `f64` samples.
+/// request keeps at most 128 MiB of monochrome or 384 MiB of three-channel
+/// colour `f64` samples, separately from the bounded conversion scratch.
 const REGION_SAMPLE_CAP: u64 = 4096 * 4096;
 /// Most bounding-box samples times vertices for a freeform, `2^28`, because
 /// `region_contains` is evaluated per sample and is linear in the vertices.
@@ -271,7 +272,7 @@ pub fn measure_frame(
         &mut native,
         &mut samples,
         &mut |_| {},
-        &mut |_| Vec::new(),
+        &mut |_, _| Vec::new(),
     )?;
     measure_json(&held, frame, shape, points)
 }
@@ -294,6 +295,22 @@ pub(crate) fn measure_json(
     frame: u32,
     shape: MeasureShape,
     points: &[ImagePoint],
+) -> Result<String, PreviewError> {
+    measure_json_with_scratch(
+        held,
+        frame,
+        shape,
+        points,
+        &mut crate::colour::ColourScratch::default(),
+    )
+}
+
+pub(crate) fn measure_json_with_scratch(
+    held: &HeldFrame,
+    frame: u32,
+    shape: MeasureShape,
+    points: &[ImagePoint],
+    scratch: &mut crate::colour::ColourScratch,
 ) -> Result<String, PreviewError> {
     if !shape.accepts(points.len()) {
         return Err(PreviewError::Degenerate);
@@ -330,7 +347,11 @@ pub(crate) fn measure_json(
                 None => shape_area(shape, &index)?,
             };
             let region = region_of(shape, &index)?;
-            let stats = region_statistics(held, &region, area)?;
+            let stats = if let Some(recipe) = crate::colour::recipe(held)? {
+                RegionResult::Colour(colour_statistics(held, recipe, &region, area, scratch)?)
+            } else {
+                RegionResult::Monochrome(region_statistics(held, &region, area)?)
+            };
             push_measure(
                 &mut out,
                 "area",
@@ -338,7 +359,10 @@ pub(crate) fn measure_json(
                 spacing.area_unit,
                 &format!("{area:.2} {}", spacing.area_unit),
             );
-            push_stats(&mut out, &stats);
+            match stats {
+                RegionResult::Monochrome(stats) => push_stats(&mut out, &stats),
+                RegionResult::Colour(stats) => push_colour_stats(&mut out, &stats),
+            };
         }
     }
     out.push('}');
@@ -374,7 +398,7 @@ pub fn region_extent_frame(
         &mut native,
         &mut samples,
         &mut |_| {},
-        &mut |_| Vec::new(),
+        &mut |_, _| Vec::new(),
     )?;
     region_extent(&held, rect)
 }
@@ -397,6 +421,9 @@ pub(crate) fn region_extent(
     held: &HeldFrame,
     rect: [f64; 4],
 ) -> Result<RegionExtent, PreviewError> {
+    if crate::colour::recipe(held)?.is_some() {
+        return Err(PreviewError::ColourNotApplicable);
+    }
     let [x0, y0, x1, y1] = rect;
     let region = RegionShape::Rectangle {
         corner: ImagePoint { x: x0, y: y0 }.to_index(),
@@ -565,26 +592,9 @@ fn region_samples(
     held: &HeldFrame,
     region: &RegionShape<'_>,
 ) -> Result<RegionSamples, PreviewError> {
-    let Some(bounds) = region_bounds(region, held.width, held.height).map_err(geom)? else {
-        return Err(PreviewError::Degenerate);
-    };
-    let columns = u64::from(bounds.last_column - bounds.first_column) + 1;
-    let rows = u64::from(bounds.last_row - bounds.first_row) + 1;
-    let box_samples = columns.saturating_mul(rows);
-    if box_samples > REGION_SAMPLE_CAP {
-        return Err(PreviewError::TooLarge);
-    }
-    if let RegionShape::Polygon { points } = region {
-        let vertices = u64::try_from(points.len()).map_err(|_| PreviewError::TooLarge)?;
-        if box_samples.saturating_mul(vertices) > FREEFORM_WORK_CAP {
-            return Err(PreviewError::TooLarge);
-        }
-        // The shoelace area and the even-odd samples disagree on a ring
-        // that crosses itself, so it is refused before any sample is read.
-        if polygon_crosses_itself(points).map_err(geom)? {
-            return Err(PreviewError::SelfIntersecting);
-        }
-    }
+    let bounds = checked_region(held, region)?;
+    let box_samples = u64::from(bounds.last_column - bounds.first_column + 1)
+        * u64::from(bounds.last_row - bounds.first_row + 1);
     let facts = held.value.as_ref().map_err(|error| *error)?;
     let capacity = usize::try_from(box_samples).map_err(|_| PreviewError::TooLarge)?;
     let mut samples: Vec<f64> = Vec::with_capacity(capacity);
@@ -612,6 +622,131 @@ fn region_samples(
         samples,
         padding_excluded,
     })
+}
+
+fn checked_region(held: &HeldFrame, region: &RegionShape<'_>) -> Result<IndexBounds, PreviewError> {
+    let Some(bounds) = region_bounds(region, held.width, held.height).map_err(geom)? else {
+        return Err(PreviewError::Degenerate);
+    };
+    let columns = u64::from(bounds.last_column - bounds.first_column) + 1;
+    let rows = u64::from(bounds.last_row - bounds.first_row) + 1;
+    let box_samples = columns.saturating_mul(rows);
+    if box_samples > REGION_SAMPLE_CAP {
+        return Err(PreviewError::TooLarge);
+    }
+    if let RegionShape::Polygon { points } = region {
+        let vertices = u64::try_from(points.len()).map_err(|_| PreviewError::TooLarge)?;
+        if box_samples.saturating_mul(vertices) > FREEFORM_WORK_CAP {
+            return Err(PreviewError::TooLarge);
+        }
+        // The shoelace area and the even-odd samples disagree on a ring
+        // that crosses itself, so it is refused before any sample is read.
+        if polygon_crosses_itself(points).map_err(geom)? {
+            return Err(PreviewError::SelfIntersecting);
+        }
+    }
+    Ok(bounds)
+}
+
+enum RegionResult {
+    Monochrome(RegionStats),
+    Colour([RegionStats; 3]),
+}
+
+fn colour_statistics(
+    held: &HeldFrame,
+    recipe: &crate::colour::ColourRecipe,
+    region: &RegionShape<'_>,
+    area: f64,
+    scratch: &mut crate::colour::ColourScratch,
+) -> Result<[RegionStats; 3], PreviewError> {
+    let bounds = checked_region(held, region)?;
+    let capacity = usize::try_from(
+        u64::from(bounds.last_column - bounds.first_column + 1)
+            * u64::from(bounds.last_row - bounds.first_row + 1),
+    )
+    .map_err(|_| PreviewError::TooLarge)?;
+    let mut values: [Vec<f64>; 3] = std::array::from_fn(|_| Vec::new());
+    for channel in &mut values {
+        channel
+            .try_reserve_exact(capacity)
+            .map_err(|_| PreviewError::TooLarge)?;
+    }
+    let step = crate::colour::rows_per_band(held.width)?;
+    let mut first = bounds.first_row;
+    while first <= bounds.last_row {
+        let rows = step.min(bounds.last_row - first + 1);
+        crate::colour::map_band(held, recipe, first, rows, scratch)?;
+        for row in first..first + rows {
+            for column in bounds.first_column..=bounds.last_column {
+                // One containment decision supplies all three channel vectors.
+                if !region_contains(region, column, row).map_err(geom)? {
+                    continue;
+                }
+                let offset = usize::try_from(row - first)
+                    .ok()
+                    .and_then(|n| n.checked_mul(usize::try_from(held.width).ok()?))
+                    .and_then(|n| n.checked_add(usize::try_from(column).ok()?))
+                    .ok_or(PreviewError::Point)?;
+                let rgb = scratch.rgb.get(offset).ok_or(PreviewError::Point)?;
+                for (channel, value) in values.iter_mut().zip([rgb.r, rgb.g, rgb.b]) {
+                    if !value.is_finite() {
+                        return Err(PreviewError::Attribute);
+                    }
+                    channel.push(f64::from(value));
+                }
+            }
+        }
+        first += rows;
+    }
+    let channel = |values: &[f64]| -> Result<RegionStats, PreviewError> {
+        let stats = roi_statistics(values, area).map_err(|error| match error {
+            GeomError::Degenerate => PreviewError::Degenerate,
+            GeomError::Frame => PreviewError::Attribute,
+        })?;
+        Ok(RegionStats {
+            count: stats.count,
+            padding_excluded: 0,
+            unit: "RGB".to_owned(),
+            mean: stats.mean,
+            sd: stats.sd,
+            min: f32_from_f64(stats.min),
+            max: f32_from_f64(stats.max),
+        })
+    };
+    Ok([
+        channel(&values[0])?,
+        channel(&values[1])?,
+        channel(&values[2])?,
+    ])
+}
+
+fn push_colour_stats(out: &mut String, channels: &[RegionStats; 3]) {
+    out.push_str(&format!(
+        ",\"stats\":{{\"count\":{},\"padding_excluded\":0,\"unit\":\"RGB\",\"channels\":{{",
+        channels[0].count
+    ));
+    let mut text = Vec::with_capacity(3);
+    for (at, (name, stats)) in ["r", "g", "b"].into_iter().zip(channels).enumerate() {
+        if at > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "\"{name}\":{{\"count\":{},\"mean\":{},\"sd\":{},\"min\":{},\"max\":{}}}",
+            stats.count, stats.mean, stats.sd, stats.min, stats.max
+        ));
+        text.push(format!(
+            "{} mean {:.1}, SD {:.1}, min {}, max {}",
+            name.to_ascii_uppercase(),
+            stats.mean,
+            stats.sd,
+            stats.min,
+            stats.max
+        ));
+    }
+    out.push_str("},\"text\":");
+    json_string(out, &text.join(", "));
+    out.push('}');
 }
 
 /// The F-075 statistics of [`region_samples`].

@@ -25,7 +25,24 @@ thiserror = { workspace = true }
 # D-27. Same split as ocelli-render. This crate is not in the wasm-pack graph
 # today. The workspace wasm32 check still unifies features, so a default wgpu
 # line here would put the native backends back into that check.
+#
+# D-33, F-238. The table below is the D-27 native set minus `metal`, the one
+# feature that reaches the objc2 crates on Apple, because this crate shares
+# the renderer's device and must drop the same backend at the same time. It
+# is deliberately NOT a forwarding feature like ocelli-render's `metal`:
+# this crate is not in the shipped graph, `cargo tree -i ocelli-compute
+# --workspace -e all` names no dependent, and a feature flag with no named
+# user is forbidden, so there is nothing to forward to. The dev table below
+# restores `metal` for the tests, and a future consumer that ships without
+# Metal adds its own forwarding feature when it arrives, the way
+# `ocelli-native` names `ocelli-render` today.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "gles", "vulkan", "wgsl", "webgpu"] }
+
+# D-33's development half, same as ocelli-render's. The ui cases and the unit
+# tests build this crate alone, and the union with the dependency above is the
+# pinned default set. Dev-only, so it never enters a shipped graph.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

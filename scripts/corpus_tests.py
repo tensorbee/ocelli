@@ -72,6 +72,7 @@ REQUIRED_MODULES = ("pydicom", "numpy")
 REQUIRED_TOOLS = {
     "dcmcjpeg": "DCMTK, for the four JPEG syntaxes pydicom cannot encode",
     "ojph_compress": "OpenJPH, for the three HTJ2K syntaxes",
+    "opj_compress": "OpenJPEG, for the two JPEG 2000 colour syntaxes",
 }
 
 STDLIB_SUITE = "test_corpus_check.py"

@@ -1,0 +1,4 @@
+# Staged from the repository root at pack time by scripts/stage.mjs.
+# dist/ is covered by the root .gitignore.
+THIRD_PARTY_LICENSES
+THIRD_PARTY_NOTICES

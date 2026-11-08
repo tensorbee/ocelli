@@ -16,9 +16,16 @@ export const CT_EDGE = 512;
 export const DX_ROWS = 3000;
 export const DX_COLUMNS = 2900;
 export const STORED = 50;
+// F-227's informational workload, the operator's PT shape: 267 files of 128
+// by 128, signed, no window, a Rescale Slope that changes per file, and
+// stored 0 outside a disc.
+export const PET_COUNT = 267;
+export const PET_EDGE = 128;
+export const PET_RADIUS = 50;
 const MIB = 1024 * 1024;
 const CT_SOP = "1.2.840.10008.5.1.4.1.1.2";
 const DX_SOP = "1.2.840.10008.5.1.4.1.1.1.1";
+const PET_SOP = "1.2.840.10008.5.1.4.1.1.128";
 
 const binaryPromises = new Map();
 
@@ -99,15 +106,25 @@ export function assertNoPreviewBody(count) {
   }
 }
 
+/** `P`, the folder viewer's decode permits and its series window rounds. */
+export const SERVER_PERMITS = 2;
+
+/** F-227's series window pool, at most 2^20 f32 values reserved per round. */
+export const SERIES_POOL_BYTES = 4 * MIB;
+
 /**
- * RSS_peak <= B + 4 * S_max + P * (2 * S_max + 5 * N_max) + 32 MiB.
+ * RSS_peak <= B + 4 * S_max + P * (2 * S_max + 5 * N_max) + P * 4 MiB + 24 MiB.
  * The terms are the design's, stated before the measurement.
  * An upload is held only while it is read and decoded, and those bytes
  * are the upload term 4 * S_max. A decode copy is in flight until the
- * frame is in the cache.
+ * frame is in the cache. F-227 adds the named pool term P * 4 MiB: at most
+ * P series window rounds run at once, each reserving one pool. The
+ * operator kept F-216's total of 528,194,192 bytes at its named budget, so
+ * the fixed constant for the binary, thread stacks and allocator slack drops
+ * from 32 MiB to 24 MiB to absorb the pool term.
  */
-export function serverRssBound(budget, sMax, nMax, permits = 2) {
-  return budget + 4 * sMax + permits * (2 * sMax + 5 * nMax) + 32 * MIB;
+export function serverRssBound(budget, sMax, nMax, permits = SERVER_PERMITS) {
+  return budget + 4 * sMax + permits * (2 * sMax + 5 * nMax) + permits * SERIES_POOL_BYTES + 24 * MIB;
 }
 
 /** Two retained-heap readings within this gap count as the same reading. */
@@ -202,7 +219,11 @@ export function filledPixels(count, stored) {
   return bytes;
 }
 
-/** Explicit VR little endian Part 10, one mono16 frame, stored samples constant. */
+/**
+ * Explicit VR little endian Part 10, one mono16 frame. By default unsigned,
+ * slope 1 and Window Center 40, Width 400 LINEAR. `window: null` writes no
+ * window, `signed` sets Pixel Representation 1.
+ */
 export function mono16Part10({
   rows,
   columns,
@@ -212,6 +233,9 @@ export function mono16Part10({
   modality,
   instanceNumber,
   pixels,
+  window = ["40", "400"],
+  signed = false,
+  slope = "1",
 }) {
   const metaBody = Buffer.concat([
     longEl(0x0002, 0x0001, "OB", Buffer.from([0, 1])),
@@ -235,12 +259,14 @@ export function mono16Part10({
     shortEl(0x0028, 0x0100, "US", u16(16)),
     shortEl(0x0028, 0x0101, "US", u16(16)),
     shortEl(0x0028, 0x0102, "US", u16(15)),
-    shortEl(0x0028, 0x0103, "US", u16(0)),
-    shortEl(0x0028, 0x1050, "DS", textPad("40")),
-    shortEl(0x0028, 0x1051, "DS", textPad("400")),
+    shortEl(0x0028, 0x0103, "US", u16(signed ? 1 : 0)),
+    ...(window ? [
+      shortEl(0x0028, 0x1050, "DS", textPad(window[0])),
+      shortEl(0x0028, 0x1051, "DS", textPad(window[1])),
+    ] : []),
     shortEl(0x0028, 0x1052, "DS", textPad("0")),
-    shortEl(0x0028, 0x1053, "DS", textPad("1")),
-    shortEl(0x0028, 0x1056, "CS", textPad("LINEAR")),
+    shortEl(0x0028, 0x1053, "DS", textPad(slope)),
+    ...(window ? [shortEl(0x0028, 0x1056, "CS", textPad("LINEAR"))] : []),
     longEl(0x7fe0, 0x0010, "OW", pixels),
   ]);
   return Buffer.concat([
@@ -435,6 +461,58 @@ async function ensureSeries(dir, spec) {
   await writeFile(stampPath, stamp);
 }
 
+/** The Rescale Slope of PT file `index`, exact in binary. */
+export function petSlope(index) {
+  return 0.5 + 0.125 * (index % 7);
+}
+
+/** Stored samples of PT file `index`: 0 outside the disc, 1 to 900 inside. */
+export function petPixels(index) {
+  const bytes = Buffer.alloc(PET_EDGE * PET_EDGE * 2);
+  const middle = PET_EDGE / 2;
+  for (let y = 0; y < PET_EDGE; y += 1) {
+    for (let x = 0; x < PET_EDGE; x += 1) {
+      const dx = x - middle;
+      const dy = y - middle;
+      const inside = dx * dx + dy * dy <= PET_RADIUS * PET_RADIUS;
+      bytes.writeInt16LE(inside ? 1 + ((3 * x + 5 * y + index) % 900) : 0, (y * PET_EDGE + x) * 2);
+    }
+  }
+  return bytes;
+}
+
+/** PT file `index` of the `pet_no_window` workload. */
+export function petPart10(index) {
+  return mono16Part10({
+    rows: PET_EDGE,
+    columns: PET_EDGE,
+    sopClass: PET_SOP,
+    sopUid: `2.25.2273${index}`,
+    seriesUid: "2.25.22730001",
+    modality: "PT",
+    instanceNumber: String(index + 1),
+    pixels: petPixels(index),
+    window: null,
+    signed: true,
+    slope: String(petSlope(index)),
+  });
+}
+
+async function ensurePetSeries(dir) {
+  await mkdir(dir, { recursive: true });
+  const stampPath = join(dir, "stamp.json");
+  const stamp = JSON.stringify({ workload: "pet_no_window", count: PET_COUNT, edge: PET_EDGE, radius: PET_RADIUS, writer: 1 });
+  try {
+    if ((await readFile(stampPath, "utf8")) === stamp) return;
+  } catch {
+    // The directory is new, or an older writer left no stamp.
+  }
+  for (let index = 0; index < PET_COUNT; index += 1) {
+    await writeFile(join(dir, `pt-${String(index).padStart(4, "0")}.dcm`), petPart10(index));
+  }
+  await writeFile(stampPath, stamp);
+}
+
 export async function ensureWorkloads(outDir) {
   const ctDir = join(outDir, "viewer-ct");
   const dxDir = join(outDir, "viewer-dx");
@@ -458,7 +536,9 @@ export async function ensureWorkloads(outDir) {
     sopClass: DX_SOP,
     modality: "DX",
   });
-  return { ctDir, dxDir };
+  const petDir = join(outDir, "viewer-pet-no-window");
+  await ensurePetSeries(petDir);
+  return { ctDir, dxDir, petDir };
 }
 
 async function launchBrowser() {
@@ -750,7 +830,13 @@ async function restartAndDraw(page, binary, server) {
     before,
     { timeout: 30000 },
   );
-  const fault = await page.locator("#fault").textContent();
+  // F-208 gave each viewport cell its own `.fault`, and the page has no
+  // `#fault`. The active cell's is read as the scroll sampler reads it, and
+  // a hidden one is no fault.
+  const fault = await page.evaluate(() => {
+    const node = document.querySelector("#wrap .cell.active .fault");
+    return node && !node.hidden ? (node.textContent || "").trim() : "";
+  });
   const reposts = await page.evaluate(
     () => (window.__fileBodySizes || []).length - (window.__filePostsAtRestart || 0),
   );
@@ -764,20 +850,25 @@ function instrumentOf(chromium) {
 export async function measureOpen({ outDir, build, profile }) {
   const chosen = chosenProfile(profile);
   const binary = await ensureViewerBinary(chosen, build);
-  const { ctDir } = await ensureWorkloads(outDir);
+  const { ctDir, petDir } = await ensureWorkloads(outDir);
   const server = await startViewer(binary);
   const reported = await reportedBuild(server.url);
   const { browser, chromium } = await launchBrowser();
   const samples = [];
+  const pet = [];
+  const openOnce = async (dir) => {
+    const page = await openPage(browser, server.url);
+    const started = Date.now();
+    await page.locator("#folder").setInputFiles(dir);
+    await page.waitForFunction(() => /\d+ series\./.test(document.querySelector("#status")?.textContent || ""));
+    const took = Date.now() - started;
+    await page.close();
+    return took;
+  };
   try {
-    for (let index = 0; index < 9; index += 1) {
-      const page = await openPage(browser, server.url);
-      const started = Date.now();
-      await page.locator("#folder").setInputFiles(ctDir);
-      await page.waitForFunction(() => /\d+ series\./.test(document.querySelector("#status")?.textContent || ""));
-      samples.push(Date.now() - started);
-      await page.close();
-    }
+    for (let index = 0; index < 9; index += 1) samples.push(await openOnce(ctDir));
+    // F-227, informational. No threshold.
+    for (let index = 0; index < 9; index += 1) pet.push(await openOnce(petDir));
   } finally {
     await browser.close();
     await stopViewer(server.child);
@@ -790,6 +881,8 @@ export async function measureOpen({ outDir, build, profile }) {
       samples_ms: samples,
       threshold_ms: 1100,
       thresholds_met: value <= 1100,
+      pet_no_window_ms: pet,
+      pet_no_window_median_ms: median(pet),
     },
     instrument: instrumentOf(chromium),
   };
@@ -804,6 +897,7 @@ export async function measureFirstImage({ outDir, build, profile }) {
   const { browser, chromium } = await launchBrowser();
   const ct = [];
   const dx = [];
+  const pet = [];
   try {
     for (let index = 0; index < 9; index += 1) {
       const page = await openPage(browser, server.url);
@@ -813,6 +907,13 @@ export async function measureFirstImage({ outDir, build, profile }) {
     for (let index = 0; index < 9; index += 1) {
       const page = await openPage(browser, server.url);
       dx.push(await openFolder(page, dirs.dxDir));
+      await page.close();
+    }
+    // F-227, informational. The first image of a series that stores no
+    // window waits for its /series-window reply, so this includes it.
+    for (let index = 0; index < 9; index += 1) {
+      const page = await openPage(browser, server.url);
+      pet.push(await openFolder(page, dirs.petDir));
       await page.close();
     }
     const page = await openPage(browser, server.url);
@@ -834,6 +935,8 @@ export async function measureFirstImage({ outDir, build, profile }) {
       dx_median_ms: dxValue,
       ct_threshold_ms: 20,
       dx_threshold_ms: 250,
+      pet_no_window_ms: pet,
+      pet_no_window_median_ms: median(pet),
       restart_recovered: true,
       thresholds_met: value <= 20 && dxValue <= 250,
     },
@@ -1083,6 +1186,13 @@ export async function measureResident({ outDir, build, profile }) {
     await openFolder(ctPage, dirs.ctDir);
     await windowSteps(ctPage, 9);
     await ctPage.close();
+    // F-227. A series that stores no window, so the run includes three
+    // series window rounds, one per open.
+    for (let index = 0; index < 3; index += 1) {
+      const page = await openPage(browser, server.url);
+      await openFolder(page, dirs.petDir);
+      await page.close();
+    }
     const dxPage = await openPage(browser, server.url);
     await openFolder(dxPage, dirs.dxDir);
     await windowSteps(dxPage, 9);
@@ -1125,6 +1235,7 @@ export async function measureResident({ outDir, build, profile }) {
       js_heap_before_gc: before,
       canvases,
       rss_bound_bytes: rssBound,
+      series_pool_term_bytes: SERVER_PERMITS * SERIES_POOL_BYTES,
       heap_bound_bytes: heapBound,
       thresholds_met: value <= rssBound && (retained == null || retained <= heapBound),
     },

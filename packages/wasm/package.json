@@ -1,0 +1,35 @@
+{
+  "name": "@ocelli/wasm",
+  "version": "0.1.0",
+  "description": "The Ocelli wasm module and its decode split, built by wasm-pack from crates/ocelli-wasm.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "main": "./dist/ocelli_wasm.js",
+  "types": "./dist/ocelli_wasm.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/ocelli_wasm.d.ts",
+      "default": "./dist/ocelli_wasm.js"
+    },
+    "./decode": {
+      "types": "./dist/decode/ocelli_wasm.d.ts",
+      "default": "./dist/decode/ocelli_wasm.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "NOTICE",
+    "README.md",
+    "THIRD_PARTY_LICENSES",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "scripts": {
+    "prepack": "node scripts/stage.mjs",
+    "clean": "rm -rf dist THIRD_PARTY_LICENSES THIRD_PARTY_NOTICES"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

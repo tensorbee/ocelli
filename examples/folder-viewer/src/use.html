@@ -162,7 +162,11 @@
         </ol>
       </li>
       <li><a href="#react">React with @ocelli/react</a></li>
-      <li><a href="#rust-parse">Rust, parse</a></li>
+      <li><a href="#rust-parse">Rust, parse</a>
+        <ol>
+          <li><a href="#conformance">Conformance report</a></li>
+        </ol>
+      </li>
       <li><a href="#rust-decode">Rust, decode</a></li>
       <li><a href="#lut">The LUT chain</a></li>
       <li><a href="#geometry">Geometry and spacing</a></li>
@@ -212,7 +216,7 @@
         <tr><td><code>ocelli-core</code></td><td>Coordinate spaces <code>Pt</code>, <code>Transform</code>, <code>World</code>, <code>Index</code>, <code>Canvas</code>. Value spaces <code>Stored</code>, <code>Modality</code>, <code>Display</code>. The error model. No I/O.</td></tr>
         <tr><td><code>ocelli-dicom</code></td><td><code>parse_part10</code>, metadata, frame open, geometry, overlays, series assembly, the DICOMweb response parser.</td></tr>
         <tr><td><code>ocelli-codec</code></td><td>The decoder <code>Registry</code> and the decoder families.</td></tr>
-        <tr><td><code>ocelli-pixel</code></td><td><code>LutChain</code>, <code>ColorTransform</code>, <code>ImagePlane</code>, the stored pixel model.</td></tr>
+        <tr><td><code>ocelli-pixel</code></td><td><code>LutChain</code>, <code>ColorTransform</code>, <code>ImagePlane</code>, the stored pixel model, the matrix and tone-curve ICC subset.</td></tr>
         <tr><td><code>ocelli-geom</code></td><td>Measurement, calibration, statistics, SUV.</td></tr>
         <tr><td><code>ocelli-cache</code></td><td>The budgeted <code>Lru</code> over the encoded, decoded and GPU tiers.</td></tr>
         <tr><td><code>ocelli-volume</code></td><td>Volume assembly, orthogonal and oblique reslice, slab, fusion planes.</td></tr>
@@ -228,14 +232,14 @@
 
   <section class="chapter" id="status">
     <h2><span class="num">3</span>Status and packages</h2>
-    <p>The changelog's only section is <em>Unreleased</em> and says "Nothing is published". The repository has no <code>v</code> release tag. <code>ocelli-wasm</code> carries <code>publish = false</code>. Every crate and both packages are at version <code>0.1.0</code>.</p>
+    <p>The changelog's only section is <em>Unreleased</em> and says "Nothing is published". The repository has no <code>v</code> release tag. <code>ocelli-wasm</code> carries <code>publish = false</code>. Every crate and all three packages are at version <code>0.1.0</code>.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>Where</th><th>What</th></tr></thead>
       <tbody>
         <tr><td><code>@ocelli/core</code></td><td><code>packages/core</code></td><td>The TypeScript shell. One runtime dependency, <code>dcmjs</code> 0.52.2, for the TID 1500 bridge.</td></tr>
         <tr><td><code>@ocelli/react</code></td><td><code>packages/react</code></td><td>React bindings. Depends on <code>@ocelli/core</code>, peer <code>react</code> 18 or later.</td></tr>
         <tr><td><code>ocelli-*</code> crates</td><td><code>crates/</code></td><td>The Rust library, thirteen crates.</td></tr>
-        <tr><td><code>ocelli-wasm</code> output</td><td><code>crates/ocelli-wasm/pkg</code></td><td>Built by <code>wasm-pack</code>. A build artefact, not committed.</td></tr>
+        <tr><td><code>@ocelli/wasm</code></td><td><code>packages/wasm</code></td><td>The wasm module and the decode module, built by <code>wasm-pack</code> from <code>crates/ocelli-wasm</code> and packed with their third-party notices and a build id naming the HEAD they were built from, the tree of the staged index, and whether the working tree had unstaged tracked changes. <code>@ocelli/core</code> peer-depends on it at the same version.</td></tr>
       </tbody>
     </table></div>
     <p><code>dcmjs</code> 0.52.2 declares <code>adm-zip</code> 0.5.17 as a runtime dependency that nothing in <code>@ocelli/core</code> or in the published <code>dcmjs</code> files loads, and a consumer's own npm audit still reports it because npm reports what is installed.</p>
@@ -259,7 +263,7 @@ bin/ocelli.sh gate --floor      # what CI runs: no GPU, no corpus</code></pre>
 <pre><code>bin/ocelli.sh check ocelli-pixel     # cargo check -p ocelli-pixel --all-targets
 bin/ocelli.sh test  ocelli-pixel     # cargo test -p ocelli-pixel
 bin/ocelli.sh clippy ocelli-pixel</code></pre>
-    <p>The wasm module is built by <code>wasm-pack</code> with <code>--target web</code> into <code>crates/ocelli-wasm/pkg</code>. <code>bin/ocelli.sh gate wasm</code> checks the decode split, builds both packs and then checks the recorded size budget.</p>
+    <p>The wasm module is built by <code>wasm-pack</code> with <code>--target web</code> into <code>crates/ocelli-wasm/pkg</code>. The published module is <code>@ocelli/wasm</code>, staged from that build at pack time. <code>bin/ocelli.sh gate wasm</code> checks the decode split, builds both packs and then checks the recorded size budget.</p>
 <pre><code>bin/ocelli.sh wasm             # release wasm-pack build, no size check
 bin/ocelli.sh gate wasm        # the build plus the decode split and the size budget
 bin/ocelli.sh wasm --release
@@ -268,8 +272,8 @@ npm run dev                    # the example viewer on http://localhost:5173</co
     <p>The example viewer in <code>examples/viewer-react</code> is the showcase, and its header reads <code>core ready</code> only after its worker has loaded the built module. This folder viewer is separate.</p>
 <pre><code>cargo run --release -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
     <p><code>OCELLI_CACHE_MIB</code> sets the folder viewer's cache. Beside it, a multiframe in which any frame's window comes from a per-frame functional group keeps every frame's inspect reply, up to 16 MiB across every file and outside that cache, so a frame's window list is asked for by file id after the file's bytes are dropped. <code>GET /held</code> reports that pool as <code>kept</code>.</p>
-    <p>Its region window loads the built <code>packages/core/dist</code> from the local process, which serves it under <code>/lib/</code>, so run <code>npm run build -w @ocelli/core</code> before starting the folder viewer. Without that build the region window reads unavailable and says so.</p>
-    <p>The folder viewer keeps at most four request bodies at once, which is the coefficient of <code>S_max</code> in the resident set bound, and decodes on two threads, which is <code>P</code> in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term <code>P * N_max</code>, with <code>N_max</code> the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. <code>GET /held</code> reports <code>grey</code>, every grey byte under the cap, and <code>grey_replies</code>, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.</p>
+    <p>Its region window loads the built <code>packages/core/dist</code> from the local process, which serves it under <code>/lib/</code>, so run <code>npm run build -w @ocelli/core</code> before starting the folder viewer. Without that build the region window reads unavailable and says so. Save marks and Load marks need the same build, and say so when it is missing.</p>
+    <p>The folder viewer keeps at most four request bodies at once, which is the coefficient of <code>S_max</code> in the resident set bound, and decodes on two threads, which is <code>P</code> in that bound. Every preview decodes there, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. At most two automatic series windows are computed at once, each holding up to 4 MiB outside <code>OCELLI_CACHE_MIB</code> while it runs, which is the bound's term <code>P * 4 MiB</code>, and a third waits for one of them to finish. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term <code>P * N_max</code>, with <code>N_max</code> the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. <code>GET /held</code> reports <code>grey</code>, every grey byte under the cap, and <code>grey_replies</code>, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.</p>
     <p>Two other gate profiles exist. <code>bin/ocelli.sh gate --sprint</code> runs every gate with no exception, and <code>bin/ocelli.sh gate --all</code> adds the GPU and corpus tiers. <code>bin/ocelli.sh gate --list</code> prints what each gate covers.</p>
   </section>
 
@@ -278,8 +282,15 @@ npm run dev                    # the example viewer on http://localhost:5173</co
     <p>Everything in this chapter is exported from <code>packages/core/src/index.ts</code>. The wasm functions it talks to are the <code>wasm_bindgen</code> exports in <code>crates/ocelli-wasm/src/session.rs</code> and <code>canvas.rs</code>, and the panic record exports <code>install_panic_hook</code>, <code>panic_record_ptr</code> and <code>panic_record_len</code> in <code>lib.rs</code>.</p>
 
     <h3 id="js-load"><span class="num">5.1</span>Load the core in a worker</h3>
-    <p><code>loadCore</code> runs your initialiser once per realm. It resolves <code>true</code> only after the initialiser returns, and <code>coreAvailable()</code> stays <code>false</code> until then. A thrown initialiser rejects with <code>OcelliError</code> code <code>CoreLoadFailed</code>. <code>error.cause</code> is the value the initialiser threw, and the flag stays false.</p>
-<pre><span class="file">worker.js</span><code>import init, * as wasm from "./pkg/ocelli_wasm.js";
+    <p>An embedding page serves this policy on every response, including the worker script:</p>
+<!-- ocelli:csp -->
+<pre>
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'
+</pre>
+    <p>The worker's own response controls its wasm compilation. Construct workers from URLs. A blob worker inherits its creator's policy. Add a remote DICOMweb origin to <code>connect-src</code>, and a CDN serving the wasm glue also needs its origin in <code>script-src</code>. This local folder viewer decodes in its process and uses page hashes without <code>'wasm-unsafe-eval'</code>.</p>
+
+    <p><code>loadCore</code> runs your initialiser once per realm. The module the initialiser loads is the <code>@ocelli/wasm</code> package. Built from source, <code>bin/ocelli.sh wasm</code> writes the same module to <code>crates/ocelli-wasm/pkg</code>. <code>loadCore</code> resolves <code>true</code> only after the initialiser returns, and <code>coreAvailable()</code> stays <code>false</code> until then. A thrown initialiser rejects with <code>OcelliError</code> code <code>CoreLoadFailed</code>. <code>error.cause</code> is the value the initialiser threw, and the flag stays false.</p>
+<pre><span class="file">worker.js</span><code>import init, * as wasm from "@ocelli/wasm";
 import { coreAvailable, loadCore } from "@ocelli/core";
 
 let memory = null;
@@ -572,8 +583,14 @@ fn open(bytes: &amp;[u8]) -&gt; Result&lt;(), ParseError&gt; {
     let object = parsed.object();            // the dicom-rs DefaultDicomObject
     Ok(())
 }</code></pre>
-    <p><code>ParseError</code> is <code>#[non_exhaustive]</code> and carries no input bytes, values, UIDs or paths. Its variants name the failure class, from <code>TruncatedPart10</code> and <code>MissingDicmPrefix</code> to <code>UnknownTransferSyntax</code> and <code>InvalidDataSet</code>. A caller can log it without logging patient data.</p>
-    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9. <code>read_padding(&amp;metadata, photometric, signed)</code> reads the Pixel Padding Value range alone, without the window and flags that <code>open_frame</code> can refuse.</p>
+    <p><code>ParseError</code> is <code>#[non_exhaustive]</code> and carries no input bytes, values, UIDs or paths. Its variants name the failure class, from <code>TruncatedPart10</code> and <code>MissingDicmPrefix</code> to <code>UnknownTransferSyntax</code> and <code>InvalidDataSet</code>. A data set whose sequences nest deeper than <code>MAX_SEQUENCE_DEPTH</code> is refused as <code>SequenceTooDeep</code>, before any recursion. A caller can log a <code>ParseError</code> without logging patient data.</p>
+    <p>The data set projects into <code>MetadataSet::from_object(parsed.object())</code>, which <code>MultiframeMetadata::new</code> reads with per-frame, shared and top level precedence. <code>open_frame(&amp;parsed, frame)</code> turns one zero based frame into the inputs of the LUT chain, covered in chapter 9. <code>read_padding(&amp;metadata, photometric, signed)</code> reads the Pixel Padding Value range alone, without the window and flags that <code>open_frame</code> can refuse. <code>cine_timing(&amp;metadata)</code> reads one object's cine timing alone, Frame Time Vector, Frame Time, Recommended Display Frame Rate and then Cine Rate, and does not read Preferred Playback Sequencing, so a bad value there never hides a good Frame Time.</p>
+    <p>Encapsulated Pixel Data reads per PS3.5 A.4. A zero-length Basic Offset Table Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence item. <code>EncapsulatedFrameIndex::from_parsed(&amp;parsed, frame_count)</code> builds the frame index from the Extended Offset Table when it is present and from the Basic Offset Table otherwise. With an empty Basic table and more Fragments than frames, a JPEG, JPEG-LS, JPEG 2000 or HTJ2K frame is split at its codestream start and end markers, and a boundary the markers and the frame count do not prove is refused as <code>FrameIndexError::BoundaryUnavailable</code>. <code>index.frame_fragments(frame)</code> borrows that frame's Fragments in order.</p>
+<pre><code>use ocelli_dicom::{parse_part10, EncapsulatedFrameIndex, FrameIndexError};
+
+let parsed = parse_part10(bytes)?;
+let index = EncapsulatedFrameIndex::from_parsed(&amp;parsed, frame_count)?;
+let encoded: Vec&lt;u8&gt; = index.frame_fragments(0)?.concat();   // one frame's codestream</code></pre>
     <p>DICOMweb bodies parse through the same types. <code>DicomwebSource</code> implements <code>SeriesSource::consume</code>.</p>
 <pre><code>use ocelli_dicom::{DicomwebSource, SeriesSource, SourceBatch, SourceResponse, SourceResponseKind};
 
@@ -584,6 +601,36 @@ match DicomwebSource.consume(response)? {
     SourceBatch::Frames(frames) =&gt; { /* frames.parts(), frames.part_bytes(i) */ }
 }</code></pre>
     <p>A NIfTI-1.1 single file is read by <code>parse_nifti</code> into <code>ParsedNifti</code>, outside the DICOM path.</p>
+    <h3 id="conformance"><span class="num">7.1</span>Conformance report</h3>
+    <p><code>ocelli_dicom::check_conformance(&amp;parsed) -&gt; ConformanceReport</code> checks one parsed object against the rules it lists and nothing else. It never fails, changes nothing, and is never called by <code>parse_part10</code> or <code>open_frame</code>, so a finding never stops a frame from opening. <code>report.to_json()</code> writes the JSON the folder viewer serves, and <code>CONFORMANCE_SCOPE</code> is its first field: "This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM."</p>
+<pre><code>use ocelli_dicom::{check_conformance, parse_part10, ConformanceRule};
+
+let parsed = parse_part10(bytes)?;
+let report = check_conformance(&amp;parsed);
+for finding in report.findings() {
+    let rule: ConformanceRule = finding.rule;  // e.g. ConformanceRule::AsFormat
+    let id = rule.id();                        // "AS-FORMAT"
+    let section = rule.section();              // "PS3.5 6.2 Table 6.2-1"
+}
+let json: String = report.to_json();</code></pre>
+    <p>The value rules run on every element, inside sequences too: the length, repertoire and format of every VR in PS3.5 Table 6.2-1, with lengths in characters where the table says characters, and the last value of an element allowed its one pad character by section 6.4. Value multiplicity is checked for the attributes the presence rules name, from a table transcribed from PS3.6 Table 6-1, and for no other attribute. Presence of Type 1, 1C, 2 and 2C attributes is checked for seven PS3.3 modules, Patient, General Study, General Series, General Image, Image Plane, Image Pixel and SOP Common, on four SOP classes: CR Image Storage, which has no Image Plane module, and CT, MR and PET Image Storage. Any other SOP class reports <code>evaluated: false</code>, and its value rules still run. Attributes inside a sequence are not checked for presence.</p>
+    <p>Conditions the data set alone cannot decide are named in <code>modules.notChecked</code> and never checked: Laterality, ContentDate, ContentTime, AnatomicalOrientationType, PixelAspectRatio, PixelPaddingRangeLimit, PixelDataProviderURL, PatientAlternativeCalendar, PatientSpeciesDescription, PatientSpeciesCodeSequence, PatientBreedDescription, PatientBreedCodeSequence, BreedRegistrationSequence, ResponsiblePerson, ResponsiblePersonRole, ResponsibleOrganization, DeidentificationMethod, DeidentificationMethodCodeSequence, EncryptedAttributesSequence, HL7StructuredDocumentReferenceSequence, QueryRetrieveView and ConversionSourceAttributesSequence. Enumerated Values and Defined Terms are not checked.</p>
+    <p>A finding carries its tag, its dictionary keyword, its sequence path, its rule, a 1-based value number where the rule is per value, and a measure: a length against its limit, a value count against its multiplicity, or a 0-based character index with a class. It never carries a value, part of one or a character code. The one value the report repeats is a SOP Class UID under the DICOM root <code>1.2.840.10008.</code>, because it decides the module scope.</p>
+<pre><code>{"scope":"This report checks the rules it lists and nothing else. ...",
+ "edition":"2026d",
+ "rules":[{"id":"AS-FORMAT","section":"PS3.5 6.2 Table 6.2-1"}, ...],
+ "modules":{"evaluated":true,"sopClass":"1.2.840.10008.5.1.4.1.1.2","sopClassNote":null,
+            "iod":"CT Image","table":"PS3.3 A.3.3","modules":["Patient", ...],"notChecked":["Laterality", ...]},
+ "counts":{"elements":57,"notCheckedUn":0},
+ "findings":[{"tag":"(0010,1010)","keyword":"PatientAge","path":[],"rule":"AS-FORMAT","value":1,"measure":null}]}</code></pre>
+    <p>In JavaScript, <code>readConformanceReport(text)</code> from <code>@ocelli/core</code> reads that JSON. It answers <code>{ ok: true, report }</code>, or <code>{ ok: false, reason }</code> with <code>"json"</code>, <code>"scope"</code> when the scope sentence differs by any character, <code>"rule"</code> for a rule id outside <code>CONFORMANCE_RULES</code>, or <code>"shape"</code>. Each finding's <code>section</code> is filled from <code>CONFORMANCE_RULES</code>, which is generated from the Rust rules, and never taken from the wire.</p>
+<pre><code>import { readConformanceReport } from "@ocelli/core";
+
+const read = readConformanceReport(await response.text());
+if (read.ok) {
+  for (const finding of read.report.findings) console.log(finding.tag, finding.rule, finding.section);
+}</code></pre>
+    <p>The report is made in Rust, not in the browser. No wasm module links <code>ocelli-dicom</code> yet, so a browser build cannot produce one, and that waits for a wasm build that links the parser. This folder viewer answers <code>POST /conformance</code> with the report, by a held file's <code>X-Ocelli-File</code> id or with the file as the body, with the same error forms as <code>POST /headers</code>. The page reads it with <code>readConformanceReport</code> and shows it in Checks on the Headers sheet.</p>
   </section>
 
   <section class="chapter" id="rust-decode">
@@ -609,9 +656,11 @@ fn registry() -&gt; Result&lt;Registry, RegistryError&gt; {
 let registry = registry()?;
 assert_eq!(registry.capability("1.2.840.10008.1.2.4.90"), Capability::Available);
 
-let mut out = vec![0_u8; desc.output_len()];      // desc is a FrameDesc
+// desc is a FrameDesc, transfer_syntax_uid the transfer syntax to decode
+// and encoded the frame's compressed bytes.
+let mut out = vec![0_u8; registry.decoded_output_len(transfer_syntax_uid, &amp;desc)?];
 registry.decode(transfer_syntax_uid, encoded, &amp;desc, &amp;mut out)?;</code></pre>
-    <p><code>capability</code> answers <code>Available</code>, <code>KnownUnavailable</code> or <code>Unknown</code>. <code>decode</code> refuses a buffer whose length is not <code>FrameDesc::output_len</code>. <code>register</code> validates a decoder's whole declaration before changing the map and refuses a UID that is already owned, which is deviation D-19.</p>
+    <p><code>capability</code> answers <code>Available</code>, <code>KnownUnavailable</code> or <code>Unknown</code>. <code>decode</code> refuses a buffer whose length is not the decoder's own answer to <code>decoded_output_len</code>, which defaults to <code>FrameDesc::output_len</code> and is shorter for a native 4:2:2 frame. <code>register</code> validates a decoder's whole declaration before changing the map and refuses a UID that is already owned, which is deviation D-19.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>UID</th><th>Transfer syntax</th><th>Family</th></tr></thead>
       <tbody>
@@ -630,6 +679,7 @@ registry.decode(transfer_syntax_uid, encoded, &amp;desc, &amp;mut out)?;</code><
       </tbody>
     </table></div>
     <p>Seventeen are available. Deflated Explicit VR Little Endian deflates the whole data set rather than a frame, PS3.5 A.5, so it is handled by <code>parse_part10</code> under deviation D-18 and has no frame decoder. JPEG XL JPEG Recompression has no decoder either: <code>jxl-jbr</code> 0.2.1 panics in the DHT branch of JPEG reconstruction, which is jxl-oxide issue 512, so a <code>.111</code> frame is refused before any byte reaches <code>jxl-oxide</code>. <code>crates/ocelli-codec/tests/registry.rs</code> asserts the nineteen, the seventeen and which two are unavailable.</p>
+    <p>JPEG-LS frames decode to the same samples as CharLS 2.4.4, the decoder cornerstone3D uses, on every undamaged stream of a generated corpus that CharLS opens, 149 of 150, the other a hand-built stream both refuse. A scan that runs out of data, carries a prediction error no encoder writes, or leaves non-zero or more than 7 bits after its last sample is refused as <code>CodecError::DecoderFailure</code>, and 0xFF fill bytes before EOI are accepted. A damaged scan can read as a valid scan of another image, which no decoder can detect, so not every damaged scan is refused, and some damaged streams that CharLS draws, such as one with a 0x00 byte inserted before EOI, are refused here. An LSE preset other than the defaults is refused as <code>CodecError::UnsupportedPreset</code>, whose <code>JpegLsPreset</code> names the parameter: <code>MaxVal</code>, <code>Reset</code>, <code>PartialDefaultThresholds</code> or <code>ThresholdOrder</code>. A zero MAXVAL, a zero RESET and three zero thresholds select the defaults and decode.</p>
   </section>
 
   <section class="chapter" id="lut">
@@ -668,6 +718,33 @@ let chain = LutChain::new(
 let mut display = vec![Display(0.0); stored.len()];
 chain.map_into(&amp;stored, &amp;mut display)?;      // stored: Vec&lt;Stored&gt;
 let inverted = chain.inverts();</code></pre>
+    <p>When the file has no window the caller may choose the automatic window instead, and label it as its own choice. <code>AutoWindowPool</code> measures modality values, each frame through its own stage 1, leaves out stored zero and that frame's Pixel Padding Value range, and returns a <code>LINEAR_EXACT</code> window from the 1st to the 99th nearest-rank percentile. <code>series_sample(n)</code> names up to 16 images spread through a series of <code>n</code>, first and last included, and <code>auto_window(&amp;stored, modality, padding)</code> is a pool of one image. This is what the folder viewer does for a series whose images store no window.</p>
+<pre><code>use ocelli_core::Stored;
+use ocelli_dicom::{open_frame, parse_part10, WindowInput};
+use ocelli_pixel::{AutoWindowPool, PhotometricInterpretation, StoredRange, series_sample};
+
+// files: one series in display order. stored_of: that frame's unpacked samples.
+// exact: a US or SS padding value as the f32 it is.
+let picked = series_sample(files.len())?;
+let mut pool = AutoWindowPool::new(picked.len())?;
+for at in picked {
+    let parsed = parse_part10(&amp;files[at])?;
+    let opened = open_frame(&amp;parsed, 0)?;
+    if !matches!(opened.window(), WindowInput::Absent)
+        || !matches!(opened.photometric(), PhotometricInterpretation::Monochrome1
+            | PhotometricInterpretation::Monochrome2)
+    {
+        continue; // a window in the file is used as it is, and colour has no VOI stage
+    }
+    let padding = opened.padding().map(|range| StoredRange {
+        low: Stored(exact(range.value())),
+        high: Stored(exact(range.limit().unwrap_or(range.value()))),
+    });
+    // A refused frame leaves the pool as it was, so it is skipped.
+    let _ = pool.add_frame(&amp;stored_of(&amp;parsed)?, opened.modality(), padding);
+}
+let window = pool.finish()?;               // window.basis, window.counted
+let voi = window.transform(0.0, 255.0)?;   // into each image's own LutChain::new</code></pre>
     <p>The stages can be built by hand too. This is the README's example, a <code>LINEAR_EXACT</code> window of centre 100 and width 200 over an output range of 0 to 255.</p>
 <pre><code>use ocelli_pixel::{
     LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
@@ -683,7 +760,7 @@ let chain = LutChain::new(
 let mut grey = [Display(0.0)];
 chain.map_into(&amp;[Stored(50.0)], &amp;mut grey)?;</code></pre>
     <p>Every refusal is a <code>PixelError</code> variant. <code>MissingRescale</code>, <code>MismatchedWindowMultiplicity</code>, <code>WindowIndexOutOfRange</code>, <code>InvalidWindow</code> and <code>DestinationLength</code> are typical. A Presentation LUT Sequence is <code>PresentationLutSequenceUnsupported</code>, because applying a shape in its place would answer a different question.</p>
-    <p>Stage 4 is <code>ColorTransform::resolve</code> and <code>ColorTransform::map_into</code>, with <code>PaletteColorLut</code> for palette colour. It honours the decoder's reported output space, so a frame the codec already converted to RGB is not converted twice. Stages 3 and 4 partition the photometric interpretations exactly. <strong>ICC profiles are not implemented.</strong></p>
+    <p>Stage 4 is <code>ColorTransform::resolve</code> and <code>ColorTransform::map_into</code>, with <code>PaletteColorLut</code> for palette colour. It honours the decoder's reported output space, so a frame the codec already converted to RGB is not converted twice. The folder viewer uses <code>DisplayScale</code>, <code>ColourWindow</code> and <code>colour_bytes_into</code>. Its per-channel window and invert follow cornerstone3D 5.8.2, recorded as D-29. The ICC.1:2022 matrix and tone-curve subset parses in <code>IccProfile::parse</code> and attaches once per held frame with <code>ColorTransform::with_icc</code>, before that window. A profile outside the subset keeps device RGB and is named on the page, deviation D-30.</p>
     <p>On the GPU, <code>ocelli_render::VoiParams::from_chain</code> turns a chain into HLD section 18.4's uniform for <code>shaders/voi.wgsl</code>. A chain driven by a LUT Sequence has no such uniform, so that path reports unavailable and the CPU path through <code>map_into</code> remains.</p>
   </section>
 
@@ -845,7 +922,7 @@ let compute = ocelli_render::compute_available(&amp;resolution.caps);</code></pr
   <section class="chapter" id="sr">
     <h2><span class="num">14</span>Annotations as SR</h2>
     <p>Decision D13 says the annotation type <em>is</em> a DICOM SR content tree. A measurement is not drawn first and exported later. It is a tree of coded content items from the start, so it is interoperable by construction.</p>
-    <p>A content item is a plain object with a <code>relationship</code>, a coded <code>concept</code>, <code>children</code> and a <code>valueType</code> of <code>CONTAINER</code>, <code>TEXT</code>, <code>NUM</code>, <code>CODE</code>, <code>UIDREF</code>, <code>IMAGE</code>, <code>SCOORD</code> or <code>SCOORD3D</code>, PS3.3 C.17.3. <code>contentTree(root)</code> validates and copies a whole tree, and one bad node returns <code>null</code>.</p>
+    <p>A content item is a plain object with a <code>relationship</code>, a coded <code>concept</code>, <code>children</code> and a <code>valueType</code> of <code>CONTAINER</code>, <code>TEXT</code>, <code>NUM</code>, <code>CODE</code>, <code>UIDREF</code>, <code>IMAGE</code>, <code>SCOORD</code> or <code>SCOORD3D</code>, PS3.3 C.17.3. A coordinate's <code>graphic</code> is <code>POINT</code>, <code>POLYLINE</code>, <code>CIRCLE</code> or <code>ELLIPSE</code>, PS3.3 C.18.6.1.2, and an ellipse takes four points, the major axis then the minor. An <code>IMAGE</code> item may carry <code>frame</code>, its Referenced Frame Number counted from 1. <code>contentTree(root)</code> validates and copies a whole tree, and one bad node returns <code>null</code>.</p>
 <pre><code>import { contentTree, provenanceItems } from "@ocelli/core";
 
 const length = contentTree({
@@ -879,6 +956,8 @@ const bytes = writeTid1500([length], {
   sopInstance: imageUid,
 });
 const back = bytes === null ? null : readTid1500(bytes);</code></pre>
+    <p><code>writeTid1500Groups(groups, source)</code> writes a whole TID 1500 document of TID 1410 measurement groups. Each root is a <code>(125007, DCM, "Measurement Group")</code> container of any value type, such as an Image Region <code>SCOORD</code> with the <code>IMAGE</code> it was drawn on. <code>source</code> carries the patient and study attributes copied from the images, Content Date and Content Time, the evidence and the documents it replaces, which go in Predecessor Documents Sequence. <code>readTid1500Groups(bytes)</code> returns the groups, the predecessors and a count of groups it could not read. It decodes text in the file's own Specific Character Set: no value or ISO_IR 6, ISO_IR 100, 101, 109, 110, 126, 127, 138, 144, 148, 166, 192 and 203, GB18030 and GBK. It counts a group unread when that set uses code extensions or is another one. A file it cannot walk to that element, such as a deflated one, has its text decoded only when it carries no Specific Character Set, and otherwise every group is counted unread. <code>writeKeyObjects(references, source)</code> writes one Key Object Selection whose references are <code>IMAGE</code> items for an image, each with an optional frame, <code>WAVEFORM</code> items for a waveform and <code>COMPOSITE</code> items for any other object, and <code>readKeyObjects(bytes)</code> reads them back. Every reference must also be in <code>source.evidence</code>, or nothing is written. The folder viewer's Save marks is built on these four.</p>
+    <p>Save marks uses only the open folder and documents read into it with Load marks. Opening another folder clears its marks, key images and remembered documents.</p>
     <p>The SVG drawing layer is <code>createAnnotationLayer(svg, listener)</code>. It draws marks and does not own the tree. Key object selection and secondary capture are on the <a href="/more#documents">More</a> page.</p>
   </section>
 
@@ -916,6 +995,7 @@ bin/ocelli.sh compare produce --reference REF --candidate CANDIDATE --corpus ROO
 bin/ocelli.sh compare gate    --reference REF --candidate CANDIDATE --out OUT
 bin/ocelli.sh gate oracle        # render, check the event catalogue, then compare</code></pre>
     <p><code>compare produce</code> writes one Ocelli image per view from the real decode, a <code>LutChain</code> applied through <code>CpuRaster</code>, and <code>Volume::reslice_nearest</code>, and <code>compare gate</code> judges it against HLD section 25.1's tolerances. Colour, palette and YBR images are written and not scored yet. A declared mutation catalogue applied to real reference frames proves that the comparator catches the defects it is meant to catch.</p>
+    <p><code>bin/ocelli.sh bench --compare-cornerstone --pseudo &lt;local-root&gt;</code> measures this local folder viewer and a pinned cornerstone3D page on the same inputs. It checks actual CT canvas pixels before timing either side and records cold and warm conditions, defaults, and every product process. The native CPU canvas and browser WebGL paths do different work. The record describes those limits, and <code>docs/lld/benchmarks.md</code> documents the instrument. An equipped comparison remains required before making a cost claim.</p>
     <p>Ocelli claims a measured divergence, never bit exact reproduction, which is decision D14. The corpus lives outside git behind <code>corpus/manifest.tsv</code>, and no patient data enters the repository.</p>
   </section>
 

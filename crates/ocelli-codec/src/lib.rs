@@ -14,6 +14,7 @@ mod native;
 mod registry;
 mod rle;
 mod sample_convert;
+pub mod video;
 
 pub use htj2k::{Htj2kDecoder, register_htj2k_decoders};
 pub use jpeg::{JpegDecoder, register_jpeg_decoders};
@@ -25,7 +26,7 @@ pub use rle::RleDecoder;
 
 pub use registry::{
     Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
-    FrameDesc, FrameDescError, FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
+    FrameDesc, FrameDescError, FrameDescInput, JpegLsPreset, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
     PixelRepresentation, Registry, RegistryError,
 };
 

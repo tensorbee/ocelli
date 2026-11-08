@@ -48,6 +48,18 @@
 // four tiles at lung, grey 236 and 94, each labelled with its own frame's
 // B name, once each frame's list is known.
 //
+// F-214 review pass 1, D1 and D4. The mouse profile control. A choice made
+// on the control and then W must pick the W/L tool and keep the chosen
+// profile and its stored key. A tool key pressed while the control has the
+// focus belongs to the control, so P must not pick Pan there, and no option
+// starts with P. After a reload on Window on left the active tool button
+// must be W/L before any folder is opened.
+//
+// Review pass 2, S1. A choice after a key on the control is a keyboard
+// choice and keeps the focus there. A key, then a press on the control, then
+// a choice is a pointer choice, so the control is blurred and W picks W/L
+// with the profile and its stored key kept.
+//
 // The files are written by this script into a temporary folder, carry no
 // patient attributes, and are removed afterwards. It starts the viewer with
 // OCELLI_PORT=0, reads the URL it prints and stops it by its PID, through
@@ -544,6 +556,72 @@ export async function observeWindows(url, chromium, folder) {
   }
 }
 
+/** The profile control, then a key, then a reload on Window on left. */
+export async function observeProfileKeys(url, chromium) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    const read = () => page.evaluate(() => ({
+      profile: document.getElementById("mouse-profile").value,
+      stored: document.defaultView.localStorage.getItem("ocelli.mouse"),
+      tools: Array.from(document.querySelectorAll('button[id^="tool-"].active')).map((node) => node.id),
+      focused: document.activeElement === document.getElementById("mouse-profile"),
+    }));
+    const control = page.locator("#mouse-profile");
+    await control.focus();
+    await control.selectOption("scroll-left");
+    await page.keyboard.press("w");
+    const chosen = await read();
+    await control.focus();
+    await page.keyboard.press("p");
+    const focusedKey = await read();
+    await control.selectOption("window-left");
+    await page.reload();
+    const reloaded = await read();
+    await control.focus();
+    await control.dispatchEvent("keydown", { key: "ArrowUp" });
+    await control.selectOption("ocelli");
+    const keyboardChoice = await read();
+    await control.dispatchEvent("keydown", { key: "ArrowDown" });
+    await control.dispatchEvent("pointerdown");
+    await control.selectOption("scroll-left");
+    await page.keyboard.press("w");
+    const pressedChoice = await read();
+    return { chosen, focusedKey, reloaded, keyboardChoice, pressedChoice };
+  } finally {
+    await browser.close();
+  }
+}
+
+export function profileProblems(seen) {
+  const problems = [];
+  if (!seen || !seen.chosen || !seen.focusedKey || !seen.reloaded || !seen.keyboardChoice || !seen.pressedChoice) {
+    problems.push("the profile control was not observed");
+    return problems;
+  }
+  const { chosen, focusedKey, reloaded, keyboardChoice, pressedChoice } = seen;
+  if (chosen.profile !== "scroll-left" || chosen.stored !== "scroll-left") {
+    problems.push(`W after choosing Scroll on left left the profile ${chosen.profile}, stored ${chosen.stored}`);
+  }
+  if (chosen.focused || chosen.tools.join() !== "tool-wl") {
+    problems.push(`W after a choice did not reach the page: focus on the control ${chosen.focused}, active ${chosen.tools.join()}`);
+  }
+  if (focusedKey.tools.join() !== "tool-wl" || focusedKey.profile !== "scroll-left") {
+    problems.push(`P on the focused control ran a page key: active ${focusedKey.tools.join()}, profile ${focusedKey.profile}`);
+  }
+  if (reloaded.profile !== "window-left" || reloaded.tools.join() !== "tool-wl") {
+    problems.push(`after a reload on Window on left the profile was ${reloaded.profile} and the active tool ${reloaded.tools.join()}`);
+  }
+  if (keyboardChoice.profile !== "ocelli" || !keyboardChoice.focused) {
+    problems.push(`a choice after a key left the profile ${keyboardChoice.profile} and focus on the control ${keyboardChoice.focused}`);
+  }
+  if (pressedChoice.focused || pressedChoice.profile !== "scroll-left" || pressedChoice.stored !== "scroll-left" || pressedChoice.tools.join() !== "tool-wl") {
+    problems.push(`W after a key, a press and a choice: focus on the control ${pressedChoice.focused}, profile ${pressedChoice.profile}, stored ${pressedChoice.stored}, active ${pressedChoice.tools.join()}`);
+  }
+  return problems;
+}
+
 async function main() {
   const { chromium } = await loadPlaywright();
   const binary = await ensureViewerBinary("release", true);
@@ -566,6 +644,7 @@ async function main() {
   let tiles;
   let lateFrames;
   let delayed;
+  let profiles;
   try {
     writeFolder(folder);
     writeMultiframe(multi);
@@ -576,6 +655,7 @@ async function main() {
     tiles = await alone((url) => observeTiles(url, chromium, tiled));
     delayed = await alone((url) => observeTiles(url, chromium, tiled, 2500));
     lateFrames = await alone((url) => observeMultiframe(url, chromium, late, LATE));
+    profiles = await alone((url) => observeProfileKeys(url, chromium));
   } finally {
     rmSync(folder, { recursive: true, force: true });
     rmSync(multi, { recursive: true, force: true });
@@ -593,19 +673,21 @@ async function main() {
   console.log(`tiles: ${tiles.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
   console.log(`tiles, lists held back: ${delayed.interim.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
   console.log(`late: key 5 ${JSON.stringify(lateFrames.before.line)} grey ${lateFrames.before.soft} and ${lateFrames.before.lung}, ArrowDown ${JSON.stringify(lateFrames.after.line)} grey ${lateFrames.after.soft} and ${lateFrames.after.lung}, ${lateFrames.faults.length} faults seen, ${lateFrames.posts} file posts`);
+  console.log(`profile: W after a choice ${JSON.stringify(profiles.chosen)}, P on the control ${JSON.stringify(profiles.focusedKey)}, reload ${JSON.stringify(profiles.reloaded)}, keyboard choice ${JSON.stringify(profiles.keyboardChoice)}, key then press then choice ${JSON.stringify(profiles.pressedChoice)}`);
   const problems = windowProblems(seen).concat(
     multiframeProblems(frames),
     tileProblems(tiles),
     multiframeProblems(lateFrames, LATE),
     interimProblems(delayed.interim),
     tileProblems(delayed.settled),
+    profileProblems(profiles),
   );
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
     return;
   }
-  console.log("the window rows, the file window index and the region window draw what they name");
+  console.log("the window rows, the file window index and the region window draw what they name, and the profile control keeps the chosen profile");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1208,17 +1208,99 @@ def _walk_closure(data: dict, root_name: str) -> dict[str, dict]:
     return found
 
 
+# The platforms the native archive ships. F-238. The native half of the
+# closure is the union of these targets' shipped graphs, and each graph is
+# read with `cargo tree -p ocelli-native --no-default-features`, the exact
+# feature set `bin/ocelli.sh native` steps 5 and 6 check and link. A resolve
+# with no platform filter cannot serve here: wgpu-hal's `vulkan` feature
+# activates its apple-gated `raw-window-metal` dependency for the union
+# regardless of target, so a no-filter resolve names objc2 crates that no
+# single target's shipped graph compiles. Per-target walks name only what
+# each shipped binary really links.
+NATIVE_ARCHIVE_TARGETS = (
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+)
+
+# Path dependencies print with a ` (/path)` suffix and repeated subtrees with
+# a trailing ` (*)`. The name anchor ends at the space before `v`, so neither
+# suffix can reach the name. Normal plus build edges, matching
+# `_walk_closure`'s kinds, because a build-dependency crate and a proc-macro
+# crate stay in the list.
+NATIVE_TREE_COMMAND = (
+    "cargo", "tree", "--locked", "--offline", "-p", "ocelli-native",
+    "--no-default-features", "-e", "normal,build", "--prefix", "none",
+    "--format", "{p}",
+)
+
+NATIVE_PACKAGE = re.compile(r"^(?P<name>[A-Za-z0-9_-]+) v(?P<version>\S+)")
+
+
+def _native_tree_pairs(target: str) -> set[tuple[str, str]]:
+    """One shipped target's (name, version) pairs."""
+    completed = subprocess.run(
+        [*NATIVE_TREE_COMMAND, "--target", target], cwd=ROOT,
+        capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        detail = ""
+        for line in (completed.stderr or completed.stdout or "").splitlines():
+            if line.strip():
+                detail = line.strip()
+                break
+        raise ShippedClosureError(
+            f"cargo tree --locked --offline failed for {target}. "
+            f"Run `cargo fetch --locked` and retry. {detail}")
+    pairs: set[tuple[str, str]] = set()
+    for raw in completed.stdout.splitlines():
+        match = NATIVE_PACKAGE.match(raw.strip())
+        if match is not None:
+            pairs.add((match.group("name"), match.group("version")))
+    return pairs
+
+
+def _native_shipped(data: dict) -> dict[str, dict]:
+    """The union of the archive targets' shipped graphs, as id to record.
+
+    `data` is an unfiltered metadata document, which lists every package in
+    the lock, so it is also where the records come from. `cargo metadata`
+    cannot resolve one member's feature set alone, which is why the reach
+    half is a tree walk and only the records are metadata.
+    """
+    by_name_version: dict[tuple[str, str], str] = {}
+    by_id: dict[str, dict] = {}
+    for item in data.get("packages", []):
+        key = (str(item.get("name")), str(item.get("version")))
+        by_name_version.setdefault(key, str(item.get("id")))
+        by_id[str(item.get("id"))] = item
+    found: dict[str, dict] = {}
+    for target in NATIVE_ARCHIVE_TARGETS:
+        for name, version in _native_tree_pairs(target):
+            ident = by_name_version.get((name, version))
+            if ident is None:
+                raise ShippedClosureError(
+                    f"{name} v{version} is in the {target} shipped graph "
+                    f"and not in cargo metadata's package list")
+            package = by_id.get(ident)
+            if package is not None:
+                found[ident] = package
+    return found
+
+
 def _rust_shipped() -> tuple[dict[str, dict], set[str]]:
     """Records reachable from the two entry points, and the workspace ids.
 
     The wasm entry point is filtered to wasm32-unknown-unknown. The native
-    entry point has no platform filter, so the result is the same on every
-    host. Workspace members stay in the record map. Callers that want the
-    third-party set drop those ids. Dev edges are not followed.
+    entry point is the union of `NATIVE_ARCHIVE_TARGETS`' shipped graphs,
+    read from the feature set `bin/ocelli.sh native` steps 5 and 6 check and
+    link, so the result is the same on every host. Workspace members stay in
+    the record map. Callers that want the third-party set drop those ids.
+    Dev edges are not followed.
     """
     queries = (
         ("ocelli-wasm", ["--filter-platform", "wasm32-unknown-unknown"]),
-        ("ocelli-native", []),
     )
     found: dict[str, dict] = {}
     members: set[str] = set()
@@ -1227,6 +1309,12 @@ def _rust_shipped() -> tuple[dict[str, dict], set[str]]:
         found.update(_walk_closure(data, root_name))
         for ident in data.get("workspace_members", []):
             members.add(str(ident))
+    # The native half. An unfiltered document lists every package in the
+    # lock, so it is both the record source and the workspace member list.
+    data = _cargo_metadata([])
+    found.update(_native_shipped(data))
+    for ident in data.get("workspace_members", []):
+        members.add(str(ident))
     return found, members
 
 
@@ -2139,8 +2227,9 @@ def render_notices(
         "in rust-toolchain.toml.\n"
         f"{_CC_BY_ATTRIBUTION}\n"
         "Closure: third-party crates reachable on a normal or build edge from "
-        "the wasm entry point for wasm32-unknown-unknown, and from the native "
-        "entry point with no platform filter.\n"
+        "the wasm entry point for wasm32-unknown-unknown, and the union of "
+        "the shipped native graphs of the archive targets recorded in "
+        "scripts/licence_check.py.\n"
         "Workspace members are excluded.\n"
         "A build-dependency crate and a proc-macro crate stay in the list, "
         "because this is the closure the licence gate checks.\n"

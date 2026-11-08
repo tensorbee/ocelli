@@ -10,24 +10,27 @@ use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use ocelli_pixel::VoiFunction;
+use ocelli_pixel::{AutoWindowBasis, AutoWindowPool, VoiFunction};
 
 use crate::held::{
-    BodyPermit, CacheHandle, CachedFrame, FileId, GreyClaim, GreyGate, GreyHome, GreyWaiter,
-    KEPT_INSPECT_CAP, PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig, detach_grey,
-    retire_bytes, with_decode_workspace,
+    BodyPermit, CacheHandle, CachedFrame, FileId, Flight, GreyClaim, GreyGate, GreyHome,
+    GreyWaiter, KEPT_INSPECT_CAP, PageToken, PreviewSource, SharedBytes, Viewer, ViewerConfig,
+    Workspace, detach_grey, retire_bytes, with_decode_workspace,
 };
 use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_CHARS, link_json};
-use crate::measure::{FREEFORM_POINT_CAP, MeasureShape, measure_json, region_extent, region_json};
+use crate::measure::{
+    FREEFORM_POINT_CAP, MeasureShape, measure_json_with_scratch, region_extent, region_json,
+};
 use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
     decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup, note_write, phases,
     profiling, render_held, reset_phases, validate_frame_request,
 };
-use crate::value::value_json;
+use crate::series_window::{Folded, SeriesRefusal, fold, series_window};
+use crate::value::value_json_with_scratch;
 use crate::{
-    FrameRequest, ImagePoint, Preview, PreviewError, SLICES, headers_json, inspect_json,
-    preview_frame, slice, window_function_from_token, window_preset_from_token,
+    FrameRequest, ImagePoint, Preview, PreviewError, SLICES, conformance_json, headers_json,
+    inspect_json, preview_frame, slice, window_function_from_token, window_preset_from_token,
 };
 
 const HEADER_CAP: usize = 16 * 1024;
@@ -37,6 +40,10 @@ const BODY_CAP: usize = 1024 * 1024 * 1024;
 const PAGE: &str = include_str!("page.html");
 const MORE: &str = include_str!("more.html");
 const USE_PAGE: &str = include_str!("use.html");
+/// The page's document module, F-215. It imports `@ocelli/core`, which the
+/// page's import map sends to `/lib/`, and is loaded only by Save marks and
+/// by a folder or file that holds a document.
+const MARK_DOCUMENTS: &str = include_str!("mark-documents.mjs");
 const READ_TIMEOUT: Duration = Duration::from_secs(15);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Bytes read and discarded after a 503 so a raw client can finish the response.
@@ -106,7 +113,8 @@ struct Grey {
     width: u32,
     height: u32,
     frames: u32,
-    full_range: bool,
+    /// `X-Ocelli-Auto-Window`, F-227: `series`, `image` or `none`.
+    auto: &'static str,
     shown_frame: u32,
     window_center: f32,
     window_width: f32,
@@ -124,6 +132,26 @@ struct Grey {
     calibration_mm: Option<(f64, f64)>,
     window_index: Option<u32>,
     window_count: u32,
+    channels: u8,
+    palette_fallback: bool,
+    icc: bool,
+}
+
+#[derive(Clone, Copy)]
+enum HtmlPage {
+    Image,
+    Use,
+    More,
+}
+
+impl HtmlPage {
+    const fn source(self) -> &'static str {
+        match self {
+            Self::Image => PAGE,
+            Self::Use => USE_PAGE,
+            Self::More => MORE,
+        }
+    }
 }
 
 struct Reply {
@@ -135,6 +163,7 @@ struct Reply {
     source: Option<&'static str>,
     file_id: Option<String>,
     held_flag: Option<u8>,
+    html_page: Option<HtmlPage>,
 }
 
 enum ReadStop {
@@ -419,8 +448,18 @@ fn route(
             retire_request_body(charge, request.body);
             (reply, None)
         }
+        ("POST", "/conformance") => {
+            let reply = conformance_route(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
         ("POST", "/forget") => {
             let reply = forget_route(viewer, &request);
+            retire_request_body(charge, request.body);
+            (reply, None)
+        }
+        ("POST", "/series-window") => {
+            let reply = series_window_route(viewer, &request, stream);
             retire_request_body(charge, request.body);
             (reply, None)
         }
@@ -451,14 +490,21 @@ fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
         return page_reply();
     }
     if request.path == "/more" || request.path == "/more.html" {
-        return html_page(MORE);
+        return html_page(HtmlPage::More);
     }
     if request.path == "/use" || request.path == "/use.html" {
-        return html_page(USE_PAGE);
+        return html_page(HtmlPage::Use);
     }
     if request.path == "/synthetic" {
         let body = format!("{{\"slices\":{SLICES}}}");
         return bare(200, "application/json", body.into_bytes());
+    }
+    if request.path == "/mark-documents.mjs" {
+        return bare(
+            200,
+            "text/javascript; charset=utf-8",
+            MARK_DOCUMENTS.as_bytes().to_vec(),
+        );
     }
     if request.path.starts_with("/lib/") {
         return library_reply(&library_root(), &request.path);
@@ -485,6 +531,8 @@ const LIBRARY_FILES: &[&str] = &[
     "bulk",
     "capabilities",
     "commands",
+    "conformance",
+    "conformance.generated",
     "crop",
     "crosshair",
     "cursor",
@@ -591,11 +639,17 @@ fn held_reply(viewer: &Viewer) -> Reply {
 }
 
 fn page_reply() -> Reply {
-    html_page(PAGE)
+    html_page(HtmlPage::Image)
 }
 
-fn html_page(page: &str) -> Reply {
-    bare(200, "text/html; charset=utf-8", page.as_bytes().to_vec())
+fn html_page(page: HtmlPage) -> Reply {
+    let mut reply = bare(
+        200,
+        "text/html; charset=utf-8",
+        page.source().as_bytes().to_vec(),
+    );
+    reply.html_page = Some(page);
+    reply
 }
 
 fn preview_route(
@@ -796,7 +850,7 @@ fn pooled_body_preview(
                 sample_charge = capacity;
                 inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
             },
-            &mut |len| cache.claim_parked_buffer(len),
+            &mut |len, _| cache.claim_parked_buffer(len),
         )
     });
     drop(body);
@@ -953,11 +1007,11 @@ enum RenderInput {
 
 impl RenderInput {
     fn grey_len(&self) -> usize {
-        let (width, height) = match self {
-            Self::Hit(held) => (held.width, held.height),
-            Self::Decoded(held) => (held.width, held.height),
+        let (width, height, channels) = match self {
+            Self::Hit(held) => (held.width, held.height, held.channels()),
+            Self::Decoded(held) => (held.width, held.height, held.channels()),
         };
-        grey_bytes(width, height)
+        grey_bytes(width, height, channels)
     }
 }
 
@@ -990,11 +1044,12 @@ enum Capped {
     Full(GreyWaiter),
 }
 
-/// Grey bytes for one frame: one display byte per pixel.
-fn grey_bytes(width: u32, height: u32) -> usize {
+/// Display bytes for one frame, including all colour channels.
+fn grey_bytes(width: u32, height: u32, channels: usize) -> usize {
     usize::try_from(width)
         .unwrap_or(0)
         .saturating_mul(usize::try_from(height).unwrap_or(0))
+        .saturating_mul(channels)
 }
 
 /// Render `held` into this worker's grey buffer, under the cap.
@@ -1012,7 +1067,7 @@ fn render_capped(
     gate: &Arc<GreyGate>,
     claim: Option<GreyClaim>,
 ) -> Capped {
-    let len = grey_bytes(held.width, held.height);
+    let len = grey_bytes(held.width, held.height, held.channels());
     with_decode_workspace(|workspace| {
         if workspace.grey.capacity() > len.saturating_mul(2) {
             let oversized = std::mem::take(&mut workspace.grey);
@@ -1025,7 +1080,13 @@ fn render_capped(
             Ok(claim) => claim,
             Err(place) => return Capped::Full(place),
         };
-        let preview = render_held(held, request, &mut workspace.scratch, &mut workspace.grey);
+        let preview = render_held(
+            held,
+            request,
+            &mut workspace.scratch,
+            &mut workspace.colour,
+            &mut workspace.grey,
+        );
         let reply = grey_capacity(&preview);
         // A refused render can leave its buffer here. One larger than the cap
         // is never kept, so it is freed before the settle.
@@ -1286,7 +1347,7 @@ fn pooled_preview(
                         sample_charge = capacity;
                         inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
                     },
-                    &mut |len| cache.claim_sample_buffer(len),
+                    &mut |len, overhead| cache.claim_sample_buffer(len, overhead),
                 )
             });
             drop(bytes);
@@ -1367,9 +1428,13 @@ fn preview_held(
     let workspace = &mut loan.workspace;
     let preview = match found {
         PreviewSource::Gone => return (gone(), None),
-        PreviewSource::Hit(held) => {
-            render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
-        }
+        PreviewSource::Hit(held) => render_held(
+            &held,
+            request,
+            &mut workspace.scratch,
+            &mut workspace.colour,
+            &mut workspace.grey,
+        ),
         PreviewSource::Shared(mut bytes) => {
             // The posted file stays in the cache for the whole decode.
             // The sample buffer is inflight only until it is stored. The
@@ -1390,7 +1455,7 @@ fn preview_held(
                     #[cfg(test)]
                     viewer.trace_inflight("decoding");
                 },
-                &mut |len| cache.claim_sample_buffer(len),
+                &mut |len, overhead| cache.claim_sample_buffer(len, overhead),
             );
             drop(bytes);
             match decoded {
@@ -1401,7 +1466,13 @@ fn preview_held(
                     }
                     #[cfg(test)]
                     viewer.trace_inflight("frame");
-                    render_held(&held, request, &mut workspace.scratch, &mut workspace.grey)
+                    render_held(
+                        &held,
+                        request,
+                        &mut workspace.scratch,
+                        &mut workspace.colour,
+                        &mut workspace.grey,
+                    )
                 }
                 Err(error) => {
                     viewer.recycle_sample_buffer(std::mem::take(&mut samples));
@@ -1423,6 +1494,24 @@ fn preview_held(
         });
     }
     (reply, None)
+}
+
+/// Colour reads borrow reusable, counted conversion storage. Monochrome
+/// retains its existing route without acquiring an additional permit.
+fn with_colour_workspace(
+    viewer: &Viewer,
+    held: &crate::preview::HeldFrame,
+    stream: Option<&TcpStream>,
+    read: impl FnOnce(&mut crate::colour::ColourScratch) -> Result<String, PreviewError>,
+) -> Option<Result<String, PreviewError>> {
+    if held.channels() == 1 {
+        return Some(read(&mut crate::colour::ColourScratch::default()));
+    }
+    let mut live = || stream.is_none_or(peer_open);
+    let mut loan = viewer.loan_workspace(&mut live)?;
+    let result = read(&mut loan.workspace.colour);
+    loan.note_growth();
+    Some(result)
 }
 
 /// `POST /value`: the modality value at each point of one held frame.
@@ -1448,22 +1537,28 @@ fn value_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -
         None => return text_reply(400, Some("points"), "the point list is not usable"),
     };
     let frame = request.frame.frame;
+    let read = |held: &crate::preview::HeldFrame| {
+        with_colour_workspace(viewer, held, stream, |scratch| {
+            value_json_with_scratch(held, frame, &points, scratch)
+        })
+    };
     let (result, source) = match viewer.preview_source(id, frame) {
         PreviewSource::Gone => return gone(),
-        PreviewSource::Hit(held) => (value_json(&held, frame, &points), "held"),
+        PreviewSource::Hit(held) => (read(&held), "held"),
         PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
-            Ok(Some(held)) => (value_json(&held, frame, &points), "decoded"),
+            Ok(Some(held)) => (read(&held), "decoded"),
             Ok(None) => return busy_reply(),
             Err(error) => return error_reply(error),
         },
     };
     match result {
-        Ok(json) => {
+        Some(Ok(json)) => {
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
             reply.source = Some(source);
             reply
         }
-        Err(error) => error_reply(error),
+        Some(Err(error)) => error_reply(error),
+        None => busy_reply(),
     }
 }
 
@@ -1484,22 +1579,28 @@ fn measure_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>)
         _ => return text_reply(400, Some("points"), "the point list is not usable"),
     };
     let frame = request.frame.frame;
+    let read = |held: &crate::preview::HeldFrame| {
+        with_colour_workspace(viewer, held, stream, |scratch| {
+            measure_json_with_scratch(held, frame, shape, &points, scratch)
+        })
+    };
     let (result, source) = match viewer.preview_source(id, frame) {
         PreviewSource::Gone => return gone(),
-        PreviewSource::Hit(held) => (measure_json(&held, frame, shape, &points), "held"),
+        PreviewSource::Hit(held) => (read(&held), "held"),
         PreviewSource::Shared(bytes) => match decode_for_value(viewer, id, frame, bytes, stream) {
-            Ok(Some(held)) => (measure_json(&held, frame, shape, &points), "decoded"),
+            Ok(Some(held)) => (read(&held), "decoded"),
             Ok(None) => return busy_reply(),
             Err(error) => return error_reply(error),
         },
     };
     match result {
-        Ok(json) => {
+        Some(Ok(json)) => {
             let mut reply = bare(200, "application/json; charset=utf-8", json.into_bytes());
             reply.source = Some(source);
             reply
         }
-        Err(error) => error_reply(error),
+        Some(Err(error)) => error_reply(error),
+        None => busy_reply(),
     }
 }
 
@@ -1558,6 +1659,122 @@ fn parse_points(header: &PointsHeader) -> Option<Vec<ImagePoint>> {
     Some(points)
 }
 
+/// Fold one sampled image into the series pool.
+///
+/// The image is read where the cache holds it, or decoded from its held bytes
+/// with the buffer a body preview takes, a parked buffer of its length or a
+/// new one, never a cached frame's and never by evicting, on a decode worker
+/// for the process server and in place otherwise. The frame is unpacked into
+/// the permit's own scratch, which the permit keeps for its next job inside
+/// F-216's permit term. The decoded samples exist only inside the job, which
+/// parks them on the free list, inside `OCELLI_CACHE_MIB`, when cached and
+/// free bytes fit the budget, and frees them otherwise. Nothing is stored, and the in-flight
+/// charge is released in the job. The pool moves in and comes back, and is
+/// `None` only when the job did not run.
+fn fold_for_window(
+    viewer: &Viewer,
+    id: FileId,
+    frame: u32,
+    pool: AutoWindowPool,
+    stream: Option<&TcpStream>,
+) -> (Option<AutoWindowPool>, Folded) {
+    let (home, source) = match viewer.preview_source(id, frame) {
+        PreviewSource::Gone => return (Some(pool), Folded::Gone),
+        PreviewSource::Hit(held) => (held.worker(), WindowSource::Cached(held)),
+        PreviewSource::Shared(mut bytes) => {
+            let flight = bytes.take_flight();
+            (bytes.worker(), WindowSource::Bytes(bytes, flight))
+        }
+    };
+    let job = WindowJob {
+        source,
+        frame,
+        inflight: viewer.inflight_counter(),
+        cache: viewer.cache_handle(),
+    };
+    let mut live = || stream.is_none_or(peer_open);
+    if viewer.schedules() {
+        let Some(permit) = viewer.acquire_decode(home, &mut live) else {
+            return (Some(pool), Folded::Busy);
+        };
+        let ran = permit.call(move || {
+            let mut pool = pool;
+            let folded = with_decode_workspace(|workspace| job.run(&mut pool, workspace));
+            (pool, folded)
+        });
+        return match ran {
+            Some((pool, folded)) => (Some(pool), folded),
+            None => (None, Folded::Busy),
+        };
+    }
+    let Some(mut loan) = viewer.loan_workspace(&mut live) else {
+        return (Some(pool), Folded::Busy);
+    };
+    let mut pool = pool;
+    let folded = job.run(&mut pool, &mut loan.workspace);
+    loan.note_growth();
+    (Some(pool), folded)
+}
+
+/// Where a sampled image is read from inside its decode job.
+enum WindowSource {
+    /// A frame the cache holds. Read where it is.
+    Cached(Arc<CachedFrame>),
+    /// The posted bytes, decoded for the pool alone, and the decode's flight.
+    Bytes(SharedBytes, Option<Flight>),
+}
+
+/// One sampled image's work inside its decode permit.
+struct WindowJob {
+    source: WindowSource,
+    frame: u32,
+    inflight: Arc<std::sync::atomic::AtomicUsize>,
+    cache: CacheHandle,
+}
+
+impl WindowJob {
+    fn run(self, pool: &mut AutoWindowPool, workspace: &mut Workspace) -> Folded {
+        let Self {
+            source,
+            frame,
+            inflight,
+            cache,
+        } = self;
+        let (bytes, flight) = match source {
+            WindowSource::Cached(held) => return fold(pool, &held, &mut workspace.scratch),
+            WindowSource::Bytes(bytes, flight) => (bytes, flight),
+        };
+        let mut samples = Vec::new();
+        let mut sample_charge = 0_usize;
+        let decoded = decode_held(
+            bytes.as_slice(),
+            frame,
+            &mut workspace.native,
+            &mut samples,
+            &mut |capacity| {
+                sample_charge = capacity;
+                inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
+            },
+            &mut |len, _| cache.claim_parked_buffer(len),
+        );
+        drop(bytes);
+        let folded = match decoded {
+            Ok(held) => {
+                let folded = fold(pool, &held, &mut workspace.scratch);
+                samples = held.samples;
+                folded
+            }
+            Err(_) => Folded::Skipped,
+        };
+        cache.recycle_sample_buffer(std::mem::take(&mut samples));
+        if sample_charge > 0 {
+            Viewer::release_counter(&inflight, sample_charge);
+        }
+        drop(flight);
+        folded
+    }
+}
+
 /// Decode one frame of a held file for `/value` and `/measure`, and store it.
 ///
 /// The decode is the one `/preview` runs on a frame miss, with the same
@@ -1596,7 +1813,7 @@ fn decode_for_value(
                         sample_charge = capacity;
                         inflight.fetch_add(capacity, std::sync::atomic::Ordering::Relaxed);
                     },
-                    &mut |len| cache.claim_sample_buffer(len),
+                    &mut |len, overhead| cache.claim_sample_buffer(len, overhead),
                 )
             });
             drop(bytes);
@@ -1633,7 +1850,7 @@ fn decode_for_value(
             sample_charge = capacity;
             viewer.enter_inflight(capacity);
         },
-        &mut |len| cache.claim_sample_buffer(len),
+        &mut |len, overhead| cache.claim_sample_buffer(len, overhead),
     );
     drop(bytes);
     loan.note_growth();
@@ -1798,6 +2015,18 @@ fn parse_region(text: &str) -> Option<[f64; 4]> {
 }
 
 fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
+    held_or_body_json(viewer, request, headers_json)
+}
+
+/// One JSON reply over a held file's bytes or the posted body.
+///
+/// An id with a body is refused, an id the process no longer holds is 410,
+/// and `json`'s error is answered through [`json_or_error`].
+fn held_or_body_json(
+    viewer: &Viewer,
+    request: &Request,
+    json: fn(&[u8]) -> Result<String, PreviewError>,
+) -> Reply {
     if request.file_id.is_some() && !request.body.is_empty() {
         return text_reply(
             400,
@@ -1807,11 +2036,21 @@ fn headers_route(viewer: &Viewer, request: &Request) -> Reply {
     }
     if let Some(id) = request.file_id {
         return match viewer.file_bytes(id) {
-            Some(bytes) => json_or_error(headers_json(bytes.as_slice())),
+            Some(bytes) => json_or_error(json(bytes.as_slice())),
             None => gone(),
         };
     }
-    json_or_error(headers_json(&request.body))
+    json_or_error(json(&request.body))
+}
+
+/// `POST /conformance` by body, or by a held file's id with no body.
+///
+/// F-225. It has `/headers`' shape and error forms: an id with a body is
+/// refused, an id the process no longer holds is 410, and bytes that are not
+/// Part 10 get the same refusal `/headers` gives. One parse, no decode, and
+/// no held frame is touched.
+fn conformance_route(viewer: &Viewer, request: &Request) -> Reply {
+    held_or_body_json(viewer, request, conformance_json)
 }
 
 /// `POST /forget`: drop held files and every frame of them.
@@ -1850,6 +2089,107 @@ fn forget_route(viewer: &Viewer, request: &Request) -> Reply {
     bare(200, "application/json; charset=utf-8", body.into_bytes())
 }
 
+/// `POST /series-window`, F-227: one window for a series of held images.
+///
+/// The body is one `<file id> <frame>` line per image of the series, in the
+/// page's order, and nothing else. Every sampled id is checked before any is
+/// decoded, and a 410 names every one that is gone. Each sampled image is
+/// then read, unpacked and folded inside one decode permit by
+/// [`fold_for_window`], and nothing it decodes is stored.
+/// The reply's centre and width are the window's `f32` written by `Display`,
+/// the shortest text that parses back to the same `f32`, which the page
+/// sends back unchanged in `X-Ocelli-Series-Window`. This process keeps no
+/// series state.
+fn series_window_route(viewer: &Viewer, request: &Request, stream: Option<&TcpStream>) -> Reply {
+    if request.file_id.is_some() {
+        return text_reply(
+            400,
+            Some("header"),
+            "a series window request names its images in the body",
+        );
+    }
+    let Some(images) = parse_series_lines(&request.body) else {
+        return text_reply(400, Some("header"), "the series list is not usable");
+    };
+    // At most `SERIES_ROUNDS` rounds at once, so their pools are F-216's
+    // `P * 4 MiB` term. One beyond waits, and only a client that has gone
+    // is answered busy.
+    let mut live = || stream.is_none_or(peer_open);
+    let Some(_round) = viewer.acquire_round(&mut live) else {
+        return busy_reply();
+    };
+    let made = series_window(
+        &images,
+        |id, frame| !matches!(viewer.preview_source(id, frame), PreviewSource::Gone),
+        |id, frame, pool| fold_for_window(viewer, id, frame, pool, stream),
+    );
+    match made {
+        Ok(made) => {
+            let basis = match made.window.basis {
+                AutoWindowBasis::Percentile => "percentile",
+                AutoWindowBasis::Constant => "constant",
+                AutoWindowBasis::Background => "background",
+            };
+            let body = format!(
+                "{{\"center\":\"{}\",\"width\":\"{}\",\"function\":\"LINEAR_EXACT\",\"basis\":\"{basis}\",\"sampled\":{},\"skipped\":{},\"counted\":{}}}",
+                made.window.center,
+                made.window.width,
+                made.sampled,
+                made.skipped,
+                made.window.counted,
+            );
+            bare(200, "application/json; charset=utf-8", body.into_bytes())
+        }
+        Err(SeriesRefusal::Gone(ids)) => {
+            // Every gone id at once, so one round of posts covers them all.
+            let listed: Vec<String> = ids
+                .iter()
+                .map(|id| format!("\"{}\"", id.header_value()))
+                .collect();
+            let body = format!("{{\"gone\":[{}]}}", listed.join(","));
+            let mut reply = bare(410, "application/json; charset=utf-8", body.into_bytes());
+            reply.error = Some("file-gone");
+            reply
+        }
+        Err(SeriesRefusal::Busy) => busy_reply(),
+        Err(SeriesRefusal::Nothing) => text_reply(
+            400,
+            Some("window"),
+            "no sampled image of the series stores no window, so each uses its own",
+        ),
+    }
+}
+
+/// Every line of `body` as `<id> <frame>`, or `- <frame>` for an image the
+/// page cannot offer, such as a file changed on disk, which is skipped when
+/// sampled. `None` when the body is empty, a line is neither, or there are
+/// more than [`SERIES_LINES`]. One final LF is allowed.
+fn parse_series_lines(body: &[u8]) -> Option<Vec<(Option<FileId>, u32)>> {
+    let text = std::str::from_utf8(body).ok()?;
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    if text.is_empty() {
+        return None;
+    }
+    let mut images = Vec::new();
+    for line in text.split('\n') {
+        if images.len() == SERIES_LINES {
+            return None;
+        }
+        let (id, frame) = line.split_once(' ')?;
+        // Digits only. `parse` alone would also take a leading `+`.
+        if frame.is_empty() || !frame.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let id = if id == "-" {
+            None
+        } else {
+            Some(FileId::parse(id)?)
+        };
+        images.push((id, frame.parse::<u32>().ok()?));
+    }
+    Some(images)
+}
+
 /// Every line of `body` as an id, or `None` when one line is not an id or
 /// there are more than [`FORGET_LINES`]. An empty body names no id.
 fn parse_forget_ids(body: &[u8]) -> Option<Vec<FileId>> {
@@ -1877,7 +2217,7 @@ fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
                 width: preview.width,
                 height: preview.height,
                 frames: preview.frames,
-                full_range: preview.full_range,
+                auto: preview.auto.token(),
                 shown_frame: preview.frame,
                 window_center: preview.window_center,
                 window_width: preview.window_width,
@@ -1895,11 +2235,15 @@ fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
                 calibration_mm: preview.calibration_mm,
                 window_index: preview.window_index,
                 window_count: preview.window_count,
+                channels: preview.channels,
+                palette_fallback: preview.palette_fallback,
+                icc: preview.icc,
             })),
             body: preview.grey,
             source: None,
             file_id: None,
             held_flag: None,
+            html_page: None,
         },
         Err(error) => error_reply(error),
     }
@@ -1935,6 +2279,7 @@ fn bare(status: u16, content_type: &'static str, body: Vec<u8>) -> Reply {
         source: None,
         file_id: None,
         held_flag: None,
+        html_page: None,
     }
 }
 
@@ -2046,6 +2391,11 @@ fn write_reply_by(
         ctype = reply.content_type,
         len = reply.body.len(),
     );
+    if let Some(page) = reply.html_page {
+        head.push_str("Content-Security-Policy: ");
+        head.push_str(crate::csp::page_policy(page.source()));
+        head.push_str("\r\n");
+    }
     if let Some(code) = reply.error {
         head.push_str("X-Ocelli-Error: ");
         head.push_str(code);
@@ -2067,12 +2417,18 @@ fn write_reply_by(
         head.push_str("\r\n");
     }
     if let Some(grey) = reply.grey.as_deref() {
-        let range = u8::from(grey.full_range);
+        head.push_str(&format!(
+            "X-Ocelli-Channels: {}\r\nX-Ocelli-Palette-Fallback: {}\r\nX-Ocelli-ICC: {}\r\n",
+            grey.channels,
+            u8::from(grey.palette_fallback),
+            u8::from(grey.icc)
+        ));
+        let auto = grey.auto;
         let center = format_window(grey.window_center);
         let width = format_window(grey.window_width);
         let flag = u8::from(grey.inverted);
         head.push_str(&format!(
-            "X-Ocelli-Width: {width_px}\r\nX-Ocelli-Height: {height}\r\nX-Ocelli-Frames: {frames}\r\nX-Ocelli-Full-Range: {range}\r\nX-Ocelli-Frame: {frame}\r\nX-Ocelli-Window-Center: {center}\r\nX-Ocelli-Window-Width: {width}\r\nX-Ocelli-Window-Function: {function}\r\nX-Ocelli-Invert: {flag}\r\n",
+            "X-Ocelli-Width: {width_px}\r\nX-Ocelli-Height: {height}\r\nX-Ocelli-Frames: {frames}\r\nX-Ocelli-Auto-Window: {auto}\r\nX-Ocelli-Frame: {frame}\r\nX-Ocelli-Window-Center: {center}\r\nX-Ocelli-Window-Width: {width}\r\nX-Ocelli-Window-Function: {function}\r\nX-Ocelli-Invert: {flag}\r\n",
             width_px = grey.width,
             height = grey.height,
             frames = grey.frames,
@@ -2105,7 +2461,7 @@ fn write_reply_by(
         head.push_str("\r\nX-Ocelli-Calibration-Source: ");
         head.push_str(grey.calibration_source);
         head.push_str("\r\n");
-        // Empty for a preset, a numeric window or the full range.
+        // Empty for a preset, a numeric window or an automatic window.
         head.push_str("X-Ocelli-Window-Index: ");
         if let Some(index) = grey.window_index {
             head.push_str(&index.to_string());
@@ -2207,6 +2563,13 @@ fn read_request(
                 400,
                 Some("forget"),
                 "the forget list is too long",
+            )));
+        }
+        Some(value) if parsed.path == "/series-window" && value > SERIES_BODY_CAP => {
+            return Err(ReadStop::Reply(text_reply(
+                400,
+                Some("header"),
+                "the series list is too long",
             )));
         }
         Some(value) if parsed.path == "/measure" && value > MEASURE_BODY_CAP => {
@@ -2555,6 +2918,18 @@ const FORGET_BODY_CAP: usize = 4 * 1024 * 1024;
 const _: () = assert!(FORGET_LINES * FORGET_LINE_MAX <= FORGET_BODY_CAP);
 const _: () = assert!(FORGET_BODY_CAP < BODY_CAP);
 
+/// Most images one `/series-window` list may name, F-227.
+const SERIES_LINES: usize = 65_536;
+
+/// Longest series line: an id, a space, a `u32` frame in ten digits and the LF.
+const SERIES_LINE_MAX: usize = 16 + 1 + 16 + 1 + 10 + 1;
+
+/// Longest `/series-window` body. [`SERIES_LINES`] lines of the longest form
+/// fit inside it, so the line count is the cap a valid body meets.
+const SERIES_BODY_CAP: usize = 4 * 1024 * 1024;
+const _: () = assert!(SERIES_LINES * SERIES_LINE_MAX <= SERIES_BODY_CAP);
+const _: () = assert!(SERIES_BODY_CAP < BODY_CAP);
+
 /// Decimal digits of `value`.
 const fn digits(value: usize) -> usize {
     let mut count = 1;
@@ -2637,6 +3012,7 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
     let mut seen_shape = false;
     let mut seen_region = false;
     let mut seen_index = false;
+    let mut seen_series = false;
     let mut seen_page = false;
     let mut page = None;
     let mut shape = None;
@@ -2716,6 +3092,9 @@ fn parse_header(header: &str) -> Result<HeaderParts, Reply> {
         } else if name.eq_ignore_ascii_case("x-ocelli-window-index") {
             once(&mut seen_index)?;
             frame.window_index = Some(text.parse::<u32>().map_err(|_| window_unusable())?);
+        } else if name.eq_ignore_ascii_case("x-ocelli-series-window") {
+            once(&mut seen_series)?;
+            frame.series_window = Some(parse_series_window(text)?);
         } else if name.eq_ignore_ascii_case("x-ocelli-window-preset") {
             once(&mut seen_preset)?;
             frame.window_preset =
@@ -2764,6 +3143,14 @@ fn parse_finite(text: &str) -> Result<f32, Reply> {
         return Err(window_unusable());
     }
     Ok(value)
+}
+
+/// `X-Ocelli-Series-Window: <center> <width>`, F-227. Two finite numbers as
+/// `/series-window` wrote them. A width that is not positive is refused in
+/// `validate_frame_request`, with every other window conflict.
+fn parse_series_window(text: &str) -> Result<(f32, f32), Reply> {
+    let (center, width) = text.split_once(' ').ok_or_else(window_unusable)?;
+    Ok((parse_finite(center)?, parse_finite(width)?))
 }
 
 fn parse_function(text: &str) -> Result<VoiFunction, Reply> {
@@ -4244,6 +4631,17 @@ mod tests {
         columns: u16,
         stored: impl Fn(usize) -> u16,
     ) -> Result<Vec<u8>, String> {
+        grey_file_windowed(rows, columns, stored, true)
+    }
+
+    /// [`grey_file_with`], with no Window Center and Width when `window` is
+    /// false.
+    fn grey_file_windowed(
+        rows: u16,
+        columns: u16,
+        stored: impl Fn(usize) -> u16,
+        window: bool,
+    ) -> Result<Vec<u8>, String> {
         let short = |group: u16, element: u16, vr: [u8; 2], value: &[u8]| {
             let mut bytes = Vec::new();
             bytes.extend_from_slice(&group.to_le_bytes());
@@ -4294,8 +4692,10 @@ mod tests {
         data.extend(short(0x0028, 0x0101, *b"US", &16_u16.to_le_bytes()));
         data.extend(short(0x0028, 0x0102, *b"US", &15_u16.to_le_bytes()));
         data.extend(short(0x0028, 0x0103, *b"US", &0_u16.to_le_bytes()));
-        data.extend(short(0x0028, 0x1050, *b"DS", &pad(b"40")));
-        data.extend(short(0x0028, 0x1051, *b"DS", &pad(b"400")));
+        if window {
+            data.extend(short(0x0028, 0x1050, *b"DS", &pad(b"40")));
+            data.extend(short(0x0028, 0x1051, *b"DS", &pad(b"400")));
+        }
         data.extend(short(0x0028, 0x1052, *b"DS", &pad(b"0")));
         data.extend(short(0x0028, 0x1053, *b"DS", &pad(b"1")));
         data.extend(short(0x0028, 0x1056, *b"CS", &pad(b"LINEAR")));
@@ -5315,7 +5715,7 @@ mod tests {
             &mut native,
             &mut samples,
             &mut |_| {},
-            &mut |len| Vec::with_capacity(len),
+            &mut |len, _| Vec::with_capacity(len),
         )
         .map_err(|error| format!("the frame did not decode: {error}"))?;
         // Half the samples pass every check before the grey is sized, then
@@ -5346,6 +5746,362 @@ mod tests {
                 "the worker kept {left} bytes and the gate held {:?}",
                 gate.held()
             ));
+        }
+        Ok(())
+    }
+
+    /// F-227 AC14. A series window is pooled once per `/series-window`
+    /// request and never per `/preview`, which only reads the strings the
+    /// page sends back. Two files of stored 1 to 64 and 65 to 128, no window,
+    /// slope 1: n = 128, ranks ceil(1.28) = 2 and ceil(126.72) = 127, so the
+    /// window runs from 2 to 127, centre 64.5, width 125.
+    #[test]
+    fn the_series_window_is_not_recomputed_per_preview() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        }));
+        let serving = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, serving);
+        });
+        let mut ids = Vec::new();
+        for first in [1_u16, 65] {
+            let file =
+                grey_file_windowed(8, 8, |at| first + u16::try_from(at).unwrap_or(0), false)?;
+            let posted = post_bytes(addr, &file)?;
+            ids.push(header_value(&posted, "X-Ocelli-File").ok_or("the file id was missing")?);
+        }
+        let [first, second] = ids.as_slice() else {
+            return Err("two files were not posted".to_owned());
+        };
+        let body = format!("{first} 0\n{second} 0\n");
+        let request = format!(
+            "POST /series-window HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        // Counted where a pool is built, so a pool made on the preview path
+        // is seen. A delta, because the counter is the process's.
+        let generation = FileId::parse(first)
+            .ok_or("the file id did not parse")?
+            .generation;
+        let pools = || crate::series_window::pools_for(generation);
+        let before = pools();
+        let reply = read_http(addr, request.as_bytes())?;
+        if !status_is(&reply, 200) || pools() - before != 1 {
+            return Err(format!(
+                "one request made {} pools: {reply}",
+                pools() - before
+            ));
+        }
+        let json = reply.split("\r\n\r\n").nth(1).unwrap_or("");
+        let field = |key: &str| -> Option<String> {
+            let start = json.find(&format!("\"{key}\":\""))? + key.len() + 4;
+            let rest = json.get(start..)?;
+            Some(rest.get(..rest.find('"')?)?.to_owned())
+        };
+        let center = field("center").ok_or("no centre")?;
+        let width = field("width").ok_or("no width")?;
+        for _ in 0..3 {
+            let request = format!(
+                "POST /preview HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Ocelli-File: {second}\r\nX-Ocelli-Series-Window: {center} {width}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+            let reply = read_http(addr, request.as_bytes())?;
+            if header_value(&reply, "X-Ocelli-Auto-Window").as_deref() != Some("series") {
+                return Err(format!(
+                    "the series preview was not labelled series: {reply}"
+                ));
+            }
+        }
+        if pools() - before != 1 {
+            return Err(format!("three previews made {} pools", pools() - before));
+        }
+        Ok(())
+    }
+
+    /// `GET /held` as `(used, files, frames, inflight, free)`.
+    fn held_figures(addr: std::net::SocketAddr) -> Result<[usize; 5], String> {
+        let reply = read_http(
+            addr,
+            b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )?;
+        let json = reply.split("\r\n\r\n").nth(1).unwrap_or("");
+        let number = |key: &str| -> Result<usize, String> {
+            let start = json
+                .find(&format!("\"{key}\":"))
+                .ok_or_else(|| format!("no {key} in {json}"))?
+                + key.len()
+                + 3;
+            let rest = json.get(start..).unwrap_or("");
+            let end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
+            rest.get(..end)
+                .unwrap_or("")
+                .parse::<usize>()
+                .map_err(|_| format!("{key} is not a number in {json}"))
+        };
+        Ok([
+            number("used")?,
+            number("files")?,
+            number("frames")?,
+            number("inflight")?,
+            number("free")?,
+        ])
+    }
+
+    /// Review pass 18 S1 and S2. One `/series-window` round over held posted
+    /// files of a series that stores no window, on a scheduled and on an
+    /// unscheduled viewer. The round stores nothing and evicts nothing, so
+    /// `used`, `files` and `frames` are what they were and `inflight` is 0
+    /// after. With the budget full the decoded samples do not fit the free
+    /// list and are freed by the decode job, so `free` is 0. With room to
+    /// spare they are parked, and every sampled decode after the first takes
+    /// the parked buffer of its length, so one 64 by 64 frame of 16-bit
+    /// samples, 8,192 bytes, is parked after the round.
+    #[test]
+    fn a_series_window_round_leaves_the_cache_as_it_was() -> Result<(), String> {
+        for scheduled in [true, false] {
+            for full in [true, false] {
+                let config = ViewerConfig {
+                    cache_bytes: if full { 150 * 1024 } else { 8 * 1024 * 1024 },
+                };
+                let viewer = Arc::new(if scheduled {
+                    Viewer::server(config)
+                } else {
+                    Viewer::new(config)
+                });
+                let listener =
+                    TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+                let addr = listener.local_addr().map_err(|error| error.to_string())?;
+                let serving = Arc::clone(&viewer);
+                std::thread::spawn(move || {
+                    let _ = serve_on(listener, serving);
+                });
+                let name = format!("scheduled {scheduled}, full {full}");
+                let mut ids = Vec::new();
+                for first in 0_u16..24 {
+                    let file = grey_file_windowed(
+                        64,
+                        64,
+                        |at| 1 + first + u16::try_from(at % 200).unwrap_or(0),
+                        false,
+                    )?;
+                    let posted = post_bytes(addr, &file)?;
+                    ids.push(header_value(&posted, "X-Ocelli-File").ok_or("no file id")?);
+                }
+                // Only the ids the process still holds, so the measured round
+                // is one 200. A shorter list samples other images, so the
+                // gone ones are dropped until a request names none.
+                let ask = |ids: &[String]| {
+                    let body: String = ids.iter().map(|id| format!("{id} 0\n")).collect();
+                    read_http(
+                        addr,
+                        format!(
+                            "POST /series-window HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                };
+                for _ in 0..ids.len() {
+                    let probe = ask(&ids)?;
+                    if !status_is(&probe, 410) {
+                        break;
+                    }
+                    let gone = probe.split("\r\n\r\n").nth(1).unwrap_or("").to_owned();
+                    ids.retain(|id| !gone.contains(&format!("\"{id}\"")));
+                }
+                let before = held_figures(addr)?;
+                let budget = if full { 150 * 1024 } else { 8 * 1024 * 1024 };
+                let reply = ask(&ids)?;
+                if !status_is(&reply, 200) {
+                    return Err(format!("{name}: the round was not 200: {reply}"));
+                }
+                let after = held_figures(addr)?;
+                if after[..3] != before[..3] || after[3] != 0 {
+                    return Err(format!(
+                        "{name}: used, files, frames, inflight went from {before:?} to {after:?}"
+                    ));
+                }
+                let frame_bytes = 64 * 64 * 2;
+                let fits = before[0] + frame_bytes <= budget;
+                let parked = if fits { frame_bytes } else { 0 };
+                if after[4] != parked {
+                    return Err(format!(
+                        "{name}: {} bytes parked, wanted {parked}",
+                        after[4]
+                    ));
+                }
+                if full == fits {
+                    return Err(format!("{name}: the budget left room {fits}: {before:?}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// A scheduled viewer on a free port, and its address.
+    fn scheduled_viewer(cache_bytes: usize) -> Result<std::net::SocketAddr, String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig { cache_bytes }));
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, viewer);
+        });
+        Ok(addr)
+    }
+
+    /// Post `count` no-window files of `edge` square, stored values from
+    /// `first`, and return their ids.
+    fn post_series(
+        addr: std::net::SocketAddr,
+        count: u16,
+        edge: u16,
+        first: u16,
+    ) -> Result<Vec<String>, String> {
+        let mut ids = Vec::new();
+        for k in 0..count {
+            let file = grey_file_windowed(
+                edge,
+                edge,
+                |at| 1 + first + k + u16::try_from(at % 300).unwrap_or(0),
+                false,
+            )?;
+            let posted = post_bytes(addr, &file)?;
+            ids.push(header_value(&posted, "X-Ocelli-File").ok_or("no file id")?);
+        }
+        Ok(ids)
+    }
+
+    fn ask_series(addr: std::net::SocketAddr, ids: &[String]) -> Result<String, String> {
+        let body: String = ids.iter().map(|id| format!("{id} 0\n")).collect();
+        read_http(
+            addr,
+            format!(
+                "POST /series-window HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+    }
+
+    /// Review pass 19 S1. Four series window rounds asked for at once on a
+    /// scheduled viewer. Each answers 200, because a round beyond the limit
+    /// waits rather than being refused, and exactly `SERIES_ROUNDS` run at
+    /// once, so no more than that many pools of at most 4 MiB are reserved
+    /// together and as many as may run do. Counted inside the round,
+    /// whatever admitted it.
+    #[test]
+    fn at_most_p_series_window_rounds_run_at_once() -> Result<(), String> {
+        let addr = scheduled_viewer(64 * 1024 * 1024)?;
+        let mut lists = Vec::new();
+        for series in 0_u16..4 {
+            lists.push(post_series(addr, 16, 512, series * 7)?);
+        }
+        let generation = lists
+            .first()
+            .and_then(|ids| ids.first())
+            .and_then(|id| FileId::parse(id))
+            .ok_or("no id")?
+            .generation;
+        let start = Arc::new(std::sync::Barrier::new(lists.len()));
+        let mut rounds = Vec::new();
+        for ids in lists {
+            let start = Arc::clone(&start);
+            rounds.push(std::thread::spawn(move || {
+                start.wait();
+                ask_series(addr, &ids)
+            }));
+        }
+        for round in rounds {
+            let reply = round
+                .join()
+                .map_err(|_| "a round thread panicked".to_owned())??;
+            if !status_is(&reply, 200) {
+                return Err(format!("a waiting round was not served: {reply}"));
+            }
+        }
+        // Exactly `P`: more is the limit failing, fewer means rounds that
+        // could have run together were held back.
+        // F-216's P, the folder viewer's two decode permits, stated here
+        // rather than read from the constant under test.
+        let p = 2;
+        let peak = crate::series_window::rounds_peak(generation);
+        if peak != p {
+            return Err(format!("{peak} rounds ran at once, the limit is {p}"));
+        }
+        Ok(())
+    }
+
+    /// Review pass 20 S1. The fold unpacks into the permit's own scratch,
+    /// which keeps the length of the last frame that permit read, and
+    /// `unpack` refuses a destination of any other length. A 128 square
+    /// series and then a 32 square series on one scheduled viewer: the
+    /// smaller series must still pool every sampled image, 16 files of 1,024
+    /// stored values from 1 up, none of them zero, so `counted` is 16,384.
+    #[test]
+    fn a_smaller_series_after_a_larger_one_pools_every_image() -> Result<(), String> {
+        let addr = scheduled_viewer(64 * 1024 * 1024)?;
+        let large = post_series(addr, 16, 128, 0)?;
+        let first = ask_series(addr, &large)?;
+        if !status_is(&first, 200) {
+            return Err(format!("the 128 square series was not 200: {first}"));
+        }
+        let small = post_series(addr, 16, 32, 5)?;
+        let reply = ask_series(addr, &small)?;
+        let json = reply.split("\r\n\r\n").nth(1).unwrap_or("");
+        if !status_is(&reply, 200) || !json.contains("\"skipped\":0,\"counted\":16384") {
+            return Err(format!("the 32 square series after it was {reply}"));
+        }
+        Ok(())
+    }
+
+    /// Review pass 19 N2. The first round on a fresh scheduled viewer whose
+    /// budget is its posted files' `used` plus less than one frame. A round
+    /// whose buffer claim made room would evict a sampled file it has not
+    /// read yet and answer 410. This one answers 200 and leaves `used`,
+    /// `files` and `frames` as they were, with `inflight` 0.
+    #[test]
+    fn a_first_round_on_a_full_budget_evicts_nothing() -> Result<(), String> {
+        let sizing = scheduled_viewer(64 * 1024 * 1024)?;
+        post_series(sizing, 16, 64, 0)?;
+        let used = held_figures(sizing)?[0];
+        let addr = scheduled_viewer(used + 4096)?;
+        let ids = post_series(addr, 16, 64, 0)?;
+        let before = held_figures(addr)?;
+        if before[1] != 16 {
+            return Err(format!("a file was evicted at post: {before:?}"));
+        }
+        let reply = ask_series(addr, &ids)?;
+        if !status_is(&reply, 200) {
+            return Err(format!("the first round was not 200: {reply}"));
+        }
+        let after = held_figures(addr)?;
+        if after[..3] != before[..3] || after[3] != 0 {
+            return Err(format!(
+                "the round moved the cache from {before:?} to {after:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Review pass 18 S2. An id the cache no longer holds when its job is
+    /// set up is gone, not skipped, so the round names it in its 410.
+    #[test]
+    fn a_fold_of_a_gone_id_is_gone() -> Result<(), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 1024 * 1024,
+        });
+        let gone = FileId {
+            generation: 1,
+            serial: 9,
+        };
+        let pool = AutoWindowPool::new(1).map_err(|_| "the pool was refused".to_owned())?;
+        let (back, folded) = fold_for_window(&viewer, gone, 0, pool, None);
+        if back.is_none() || folded != Folded::Gone {
+            return Err(format!("a gone id folded as {folded:?}"));
         }
         Ok(())
     }
@@ -5433,6 +6189,106 @@ mod tests {
         if took > Duration::from_secs(4) {
             return Err(format!("the write ended {took:?} after it started"));
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+// Permanent regression adapted from independent Codex reviewer f244_review.
+mod f239_palette_admission {
+    use super::*;
+    #[test]
+    fn palette_admission_preserves_a_read_held_frame() -> Result<(), String> {
+        let mut a = crate::colour::palette_admission_fixture(true)?;
+        a.shrink_to_fit();
+        let mut b = a.clone();
+        b.shrink_to_fit();
+        let probe = Viewer::new(crate::ViewerConfig {
+            cache_bytes: 64 * 1024 * 1024,
+        });
+        let probeid = probe.insert_file(a.clone()).ok_or("probe post refused")?;
+        let (first, _) = preview_held(&probe, probeid, FrameRequest::default(), None);
+        assert_eq!(first.status, 200);
+        let frame = probe.pressure().used;
+        let budget = frame
+            .saturating_mul(2)
+            .saturating_add(b.capacity())
+            .saturating_sub(1);
+        let viewer = Viewer::new(crate::ViewerConfig {
+            cache_bytes: budget,
+        });
+        let aid = viewer.insert_file(a).ok_or("A post refused")?;
+        assert_eq!(
+            preview_held(&viewer, aid, FrameRequest::default(), None)
+                .0
+                .status,
+            200
+        );
+        let reading = match viewer.preview_source(aid, 0) {
+            PreviewSource::Hit(held) => held,
+            _ => return Err("A not held".to_owned()),
+        };
+        let bid = viewer.insert_file(b).ok_or("B post refused")?;
+        let (second, _) = preview_held(&viewer, bid, FrameRequest::default(), None);
+        assert_eq!(second.status, 200);
+        let (again, _) = preview_held(&viewer, aid, FrameRequest::default(), None);
+        assert_eq!(
+            (again.status, again.source),
+            (200, Some("held")),
+            "active A was lost when a palette B was admitted"
+        );
+        drop(reading);
+        Ok(())
+    }
+    #[test]
+    fn missing_palette_keeps_its_refusal_and_independent_calibrated_length() -> Result<(), String> {
+        // Independent review's public missing-palette regression: valid
+        // unsigned samples and 1 mm spacing still support a length. Palette
+        // drawing refuses by name, without making geometry unavailable.
+        let bytes = crate::colour::palette_admission_fixture(false)?;
+        let points = [ImagePoint { x: 0.5, y: 0.5 }, ImagePoint { x: 1.5, y: 0.5 }];
+        let json = crate::measure_frame(&bytes, 0, MeasureShape::Length, &points)
+            .map_err(|error| error.to_string())?;
+        assert!(
+            json.contains("\"length\":{\"value\":1,\"unit\":\"mm\""),
+            "{json}"
+        );
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 64 * 1024,
+        });
+        let id = viewer
+            .insert_file(bytes)
+            .ok_or("missing-palette file was not held")?;
+        let (first, _) = preview_held(&viewer, id, FrameRequest::default(), None);
+        assert_eq!(
+            (first.status, first.error),
+            (400, Some("colour-unavailable"))
+        );
+        let after = decode_ticks();
+        let held = match viewer.preview_source(id, 0) {
+            PreviewSource::Hit(held) => held,
+            _ => return Err("refused colour recipe was not cached".to_owned()),
+        };
+        assert!(held.recipe.is_err());
+        let result = measure_json_with_scratch(
+            &held,
+            0,
+            MeasureShape::Length,
+            &points,
+            &mut crate::colour::ColourScratch::default(),
+        )
+        .map_err(|error| error.to_string())?;
+        assert_eq!(result, json);
+        let (again, _) = preview_held(&viewer, id, FrameRequest::default(), None);
+        assert_eq!(
+            (again.status, again.error),
+            (400, Some("colour-unavailable"))
+        );
+        assert_eq!(
+            decode_ticks(),
+            after,
+            "repeated palette refusal must reuse its held preparation"
+        );
         Ok(())
     }
 }

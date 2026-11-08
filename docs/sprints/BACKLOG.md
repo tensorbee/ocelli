@@ -63,8 +63,8 @@ print('sprints', len({x['sprint'] for x in s if x['sprint']}),
 
 _Counting rule. Each F-ID is counted exactly once, in the milestone it
 occupies. Phase 2 and Phase 3 rows carry no milestone and no sprint, they are
-tracked but unscheduled. F-202 is Phase 1 and has the same empty milestone
-and sprint. The one-liner counts it with the other unscheduled rows._
+tracked but unscheduled. F-202 to F-205 are Phase 1 and are now allocated to the M21
+showcase completion waves. Only Phase 2 and Phase 3 rows remain unscheduled._
 
 _HLD section 38 states Phase 1 grows from 382 to 397 engineer-weeks to carry
 the five Part III hooks, which are F-008 (E1.8), F-015 (E2.7), F-036 (E5.6),
@@ -388,6 +388,45 @@ beside F-119.
 | F-243 | E4.13 | S46 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | F-028 | pending |
 | F-244 | E3.10 | S46 | Encapsulated Pixel Data with an empty Basic Offset Table opens per PS3.5 A.4: dicom-object 0.10.0 vendored with its collector patched so the zero-length first Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence, for every encapsulated syntax the registry decodes, single-frame and multi-frame, with frames that span Fragments delimited by their codestream start and end markers where A.4 lets a frame span Fragments, a present Extended Offset Table applied through EncapsulatedFrameIndex::from_extended, and an empty-table corpus row per decodable syntax | Rust | 2w | F-019 | pending |
 
+### M21, One showcase viewer and usable feature completion
+
+Authorized by the operator on 2026-11-08. Every developed user-facing feature
+must be usable in one viewer. F-202 to F-205 are reused and split explicitly,
+with no duplicate delivery claim. S47 to S50 are the next four implementation
+waves. Estimates are provisional lead engineering estimates, not measured
+capacity or calendar duration. Subsequent scheduled work moves four sprints,
+while F-235, F-237, F-238, F-241 and F-242 keep their existing allocations.
+Future user-facing AI, whole-slide, streaming and other features must include
+their actual viewer workflow and matrix evidence before completion.
+
+| F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
+|------|----------|--------|-------|-------|-----|------------|--------|
+| F-202 | E38.12 | S47 | Worker decode and owned frame render in the single showcase viewer | All | 6w | F-245, F-198, F-231, F-236 | pending |
+| F-203 | E38.13 | S49 | Orthographic and oblique MPR in the single showcase viewer | All | 6w | F-202, F-245, F-197, F-052, F-053, F-X004 | pending |
+| F-204 | E38.14 | S47 | One stored pixel per device pixel in the single showcase viewer | All | 2w | F-245, F-207 | pending |
+| F-205 | E38.15 | S47 | Validated shared preferences in the single showcase viewer | All | 3w | F-245, F-214 | pending |
+| F-245 | E38.40 | S47 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | F-207, F-228, F-231, F-021 | pending |
+| F-246 | E38.41 | S48 | Nearest and linear display interpolation controls in the showcase | All | 3w | F-202, F-245, F-194 | pending |
+| F-247 | E38.42 | S48 | DICOM overlay planes and display shutters drawn in the showcase | All | 4w | F-202, F-245, F-193 | pending |
+| F-248 | E38.43 | S48 | Image and region histograms in the showcase | All | 3w | F-202, F-245, F-075, F-211 | pending |
+| F-249 | E38.44 | S48 | Searchable recursive metadata browser in the showcase | All | 4w | F-202, F-245, F-225 | pending |
+| F-250 | E38.45 | S48 | Metadata comparison and copy in the showcase | All | 2w | F-249 | pending |
+| F-251 | E38.46 | S49 | Labelmap, contour and surface segmentation displays in the showcase | All | 5w | F-203, F-202, F-245, F-064, F-065, F-066 | pending |
+| F-252 | E38.47 | S49 | Patient-space linked cursor in the showcase | All | 3w | F-203, F-209, F-088 | pending |
+| F-253 | E38.48 | S49 | MIP, MinIP and average slab controls in the showcase | All | 4w | F-203, F-054 | pending |
+| F-254 | E38.49 | S49 | Patient-space multi-volume fusion in the showcase | All | 5w | F-203, F-056 | pending |
+| F-255 | E38.50 | S50 | Actual 3D volume viewport in the showcase | All | 6w | F-203, F-059, F-057 | pending |
+| F-256 | E38.51 | S50 | Volume transfer functions, shading and clipping in the showcase | All | 3w | F-255, F-060, F-061, F-062 | pending |
+| F-257 | E38.52 | S50 | Prior-study search and side-by-side reading in the showcase | All | 4w | F-245, F-202, F-209, F-021 | pending |
+| F-258 | E38.53 | S50 | Rendered exports, document workflows and planned GSPS read/apply in the showcase | All | 5w | F-245, F-215, F-196, F-205 | pending |
+| F-259 | E38.54 | S50 | Safe JPEG XL JPEG Recompression decoding and showcase workflow | All | 5w | F-229, F-239, F-244, F-245 | pending |
+| F-260 | E38.55 | S50 | Browser-owned DICOM conformance checks in the showcase | All | 4w | F-202, F-225, F-234 | pending |
+| F-261 | E38.56 | S49 | Fractional between-slice stack sampling in the showcase | All | 3w | F-203, F-246, F-051 | pending |
+| F-262 | E38.57 | S50 | One-viewer feature inventory, parity matrix and standing workflow gate | All | 3w | F-202, F-203, F-204, F-205, F-245, F-246, F-247, F-248, F-249, F-250, F-251, F-252, F-253, F-254, F-255, F-256, F-257, F-258, F-259, F-260, F-261, F-263, F-264, F-241, F-242, F-265 | pending |
+| F-263 | E38.58 | S48 | Remaining annotation and manipulation tools in the showcase | All | 6w | F-245, F-202, F-211, F-215 | pending |
+| F-264 | E38.59 | S49 | Segmentation editing and DICOM interchange in the showcase | All | 5w | F-251, F-263, F-080, F-095, F-096 | pending |
+| F-265 | E38.60 | S48 | Bounded ECG waveform reading and display in the single showcase viewer | All | 6w | F-245, F-202, F-017 | pending |
+
 ### M14, Out-of-core volume streaming
 
 Bounded GPU residency on unbounded data. The first of the three checkable claims in HLD C.7.
@@ -395,11 +434,11 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | done |
-| F-120 | E30.2 | S47 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
-| F-121 | E30.3 | S48 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
-| F-122 | E30.4 | S48 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
-| F-123 | E30.5 | S49 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
-| F-124 | E30.6 | S49 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
+| F-120 | E30.2 | S51 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
+| F-121 | E30.3 | S52 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
+| F-122 | E30.4 | S52 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
+| F-123 | E30.5 | S53 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
+| F-124 | E30.6 | S53 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
 | F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | done |
 
 ### M15, The WebGPU compute subsystem
@@ -408,13 +447,13 @@ Kernels sharing the renderer's device, every tier-A kernel carrying a declared f
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-125 | E31.1 | S50 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w | F-008 | pending |
-| F-126 | E31.2 | S51 | Region growing and interactive segmentation kernels | Rust | 12w | F-125 | pending |
-| F-127 | E31.3 | S52 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w | F-125 | pending |
-| F-128 | E31.4 | S53 | Per-frame histogram and ROI statistics on GPU | Rust | 8w | F-125 | pending |
-| F-129 | E31.5 | S54 | Full-resolution MPR and oblique resampling on compute | Rust | 10w | F-125 | pending |
-| F-130 | E31.6 | S55 | Registration refinement kernels | Rust | 10w | F-127 | pending |
-| F-131 | E31.7 | S53 | Tier-B fallback path for every kernel | Rust | 8w | F-126 | pending |
+| F-125 | E31.1 | S54 | ocelli-compute: dispatch, buffer pools, device sharing with the renderer | Rust | 10w | F-008 | pending |
+| F-126 | E31.2 | S55 | Region growing and interactive segmentation kernels | Rust | 12w | F-125 | pending |
+| F-127 | E31.3 | S56 | Filtering: denoise, smooth, sharpen, gradient | Rust | 10w | F-125 | pending |
+| F-128 | E31.4 | S57 | Per-frame histogram and ROI statistics on GPU | Rust | 8w | F-125 | pending |
+| F-129 | E31.5 | S58 | Full-resolution MPR and oblique resampling on compute | Rust | 10w | F-125 | pending |
+| F-130 | E31.6 | S59 | Registration refinement kernels | Rust | 10w | F-127 | pending |
+| F-131 | E31.7 | S57 | Tier-B fallback path for every kernel | Rust | 8w | F-126 | pending |
 
 ### M16, Prompted segmentation and standards-native annotations
 
@@ -422,14 +461,14 @@ SAM2-class prompting against GPU-resident tensors, and GSPS write with coded con
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-132 | E32.1 | S56 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w | F-125 | pending |
-| F-133 | E32.2 | S57 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w | F-132 | pending |
-| F-134 | E32.3 | S58 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w | F-133 | pending |
-| F-135 | E32.4 | S60 | Result to DICOM SEG with model and prompt provenance | Rust+TS | 6w | F-142 | pending |
-| F-139 | E34.1 | S56 | GSPS write | Rust | 6w | F-094 | pending |
-| F-140 | E34.2 | S57 | SNOMED CT and UCUM coded concept library | Rust | 6w | F-095 | pending |
-| F-141 | E34.3 | S58 | Bulk annotations tier for very large object counts | Rust | 8w | F-140 | pending |
-| F-142 | E34.4 | S59 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w | F-094 | pending |
+| F-132 | E32.1 | S60 | ONNX Runtime Web on WebGPU with GPU-resident tensors | Rust+TS | 10w | F-125 | pending |
+| F-133 | E32.2 | S61 | Zero-copy bridge from volume textures to model input | Rust+TS | 8w | F-132 | pending |
+| F-134 | E32.3 | S62 | Prompt surface: point, box, and 3D propagation | Rust+TS | 8w | F-133 | pending |
+| F-135 | E32.4 | S64 | Result to DICOM SEG with model and prompt provenance | Rust+TS | 6w | F-142 | pending |
+| F-139 | E34.1 | S60 | GSPS write | Rust | 6w | F-094 | pending |
+| F-140 | E34.2 | S61 | SNOMED CT and UCUM coded concept library | Rust | 6w | F-095 | pending |
+| F-141 | E34.3 | S62 | Bulk annotations tier for very large object counts | Rust | 8w | F-140 | pending |
+| F-142 | E34.4 | S63 | Annotation provenance: tool, version, algorithm, operator | Rust | 5w | F-094 | pending |
 
 ### M17, Multi-monitor, attestation and live sessions
 
@@ -437,17 +476,17 @@ Real multi-monitor, a published divergence bound, and a CRDT over state that is 
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-136 | E33.1 | S61 | Window Management API: enumeration, placement, persistence | TS | 8w | F-102 | pending |
-| F-137 | E33.2 | S62 | Multi-window session state sync across displays | TS | 7w | F-136 | pending |
-| F-138 | E33.3 | S62 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w | F-136 | pending |
-| F-150 | E36.1 | S63 | Deterministic pipeline audit: pin every source of variance | Rust | 10w | F-037 | pending |
-| F-151 | E36.2 | S61 | Render attestation: presentation state plus output hash | Rust | 8w | F-015 | pending |
-| F-152 | E36.3 | S64 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w | F-169 | pending |
-| F-153 | E36.4 | S65 | Divergence measurement and reporting | Rust | 6w | F-152 | pending |
-| F-154 | E37.1 | S66 | CRDT over viewport presentation state | Rust+TS | 12w | F-050 | pending |
-| F-155 | E37.2 | S67 | Shared annotation editing with conflict resolution | Rust+TS | 14w | F-154 | pending |
-| F-156 | E37.3 | S68 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w | F-154 | pending |
-| F-157 | E37.4 | S69 | Transport, auth and session lifecycle | Rust+TS | 11w | F-154 | pending |
+| F-136 | E33.1 | S65 | Window Management API: enumeration, placement, persistence | TS | 8w | F-102 | pending |
+| F-137 | E33.2 | S66 | Multi-window session state sync across displays | TS | 7w | F-136 | pending |
+| F-138 | E33.3 | S66 | Per-display calibration probe and DICOM Part 14 reporting | TS | 8w | F-136 | pending |
+| F-150 | E36.1 | S67 | Deterministic pipeline audit: pin every source of variance | Rust | 10w | F-037 | pending |
+| F-151 | E36.2 | S65 | Render attestation: presentation state plus output hash | Rust | 8w | F-015 | pending |
+| F-152 | E36.3 | S68 | Cross-target reproducibility harness: browser, desktop, server | Rust | 10w | F-169 | pending |
+| F-153 | E36.4 | S69 | Divergence measurement and reporting | Rust | 6w | F-152 | pending |
+| F-154 | E37.1 | S70 | CRDT over viewport presentation state | Rust+TS | 12w | F-050 | pending |
+| F-155 | E37.2 | S71 | Shared annotation editing with conflict resolution | Rust+TS | 14w | F-154 | pending |
+| F-156 | E37.3 | S72 | Presence: cursors, viewport follow, participant list | Rust+TS | 10w | F-154 | pending |
+| F-157 | E37.4 | S73 | Transport, auth and session lifecycle | Rust+TS | 11w | F-154 | pending |
 
 ### M18, Whole-slide imaging and the unified scene graph
 
@@ -455,29 +494,26 @@ Radiology and pathology in one scene graph, sharing one annotation coordinate mo
 
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
-| F-143 | E35.1 | S70 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w | F-119 | pending |
-| F-144 | E35.2 | S71 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w | F-143 | pending |
-| F-145 | E35.3 | S72 | ICC colour management pipeline | Rust | 10w | E4.9 (UNRESOLVED) | pending |
-| F-146 | E35.4 | S73 | Additive multi-channel blending for immunofluorescence | Rust | 10w | F-145 | pending |
-| F-147 | E35.5 | S74 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w | F-144 | pending |
-| F-148 | E35.6 | S75 | Cross-modality annotation correlation | Rust | 12w | F-147 | pending |
-| F-149 | E35.7 | S76 | Multi-server data sources within one study | Rust | 8w | F-144 | pending |
+| F-143 | E35.1 | S74 | Runtime pyramid discovery from VL Whole Slide Microscopy metadata | Rust | 10w | F-119 | pending |
+| F-144 | E35.2 | S75 | Frame-level DICOMweb tile retrieval and tile cache | Rust | 10w | F-143 | pending |
+| F-145 | E35.3 | S76 | ICC colour management pipeline | Rust | 10w | E4.9 (UNRESOLVED) | pending |
+| F-146 | E35.4 | S77 | Additive multi-channel blending for immunofluorescence | Rust | 10w | F-145 | pending |
+| F-147 | E35.5 | S78 | Unified viewport model: WSI and volume in one scene graph | Rust | 14w | F-144 | pending |
+| F-148 | E35.6 | S79 | Cross-modality annotation correlation | Rust | 12w | F-147 | pending |
+| F-149 | E35.7 | S80 | Multi-server data sources within one study | Rust | 8w | F-144 | pending |
 
 ### Roadmap, Phase 2 and Phase 3
 
 Tracked, unscheduled. No sprint is assigned and no milestone claims
 them. They exist here so a Phase 1 design that would make one of them
 expensive is visible at design time, which is the whole point of HLD
-section 13. F-202, F-203, F-204 and F-205 are Phase 1 rows in this table.
-They have no sprint. F-202 is worker decode of a posted WADO-RS envelope.
-F-203, F-204 and F-205 are the example controls S44 does not invent.
+section 13. F-202 to F-205 are now scheduled under M21 above, with their remaining
+viewer work split into F-245 to F-265. Phase 2 and Phase 3 rows below retain
+their existing later scope and acquire a real workflow in the single viewer
+when their implementation is delivered.
 
 | F-ID | Epic ref | Phase | Epic | Story | Layer | Est | Status |
 |------|----------|-------|------|-------|-------|-----|--------|
-| F-202 | E38.12 | P1 | E38 Series open | Worker decode of a posted WADO-RS envelope, the frame cache, and a render of that frame | TS | 4w | pending |
-| F-203 | E38.13 | P1 | E38 Series open | Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion | TS | 4w | pending |
-| F-204 | E38.14 | P1 | E38 Series open | Example one to one, histogram, four corners, and a shutter beyond the overlay panel | TS | 4w | pending |
-| F-205 | E38.15 | P1 | E38 Series open | Example metadata browser with compare and copy, export beyond the document panel, and preferences | TS | 4w | pending |
 | F-158 | E20.1 | P2 | E20 DICOM gateway (adopt, do not build) | Deploy and harden Orthanc or dcm4che as the DIMSE edge | Server | 6w | pending |
 | F-159 | E20.2 | P2 | E20 DICOM gateway (adopt, do not build) | C-STORE, C-FIND, C-MOVE and C-ECHO configuration with TLS | Server | 5w | pending |
 | F-160 | E20.3 | P2 | E20 DICOM gateway (adopt, do not build) | Autorouting rules and always-on listener operations | Server | 5w | pending |

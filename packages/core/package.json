@@ -28,5 +28,8 @@
   },
   "dependencies": {
     "dcmjs": "0.52.2"
+  },
+  "peerDependencies": {
+    "@ocelli/wasm": "0.1.0"
   }
 }

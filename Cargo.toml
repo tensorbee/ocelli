@@ -1,7 +1,11 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "tools/oracle", "examples/folder-viewer", "examples/example-server"]
-exclude = ["vendor/ritk-codecs-0.6.0", "vendor/openjph-core-0.1.0"]
+exclude = [
+    "vendor/ritk-codecs-0.6.0",
+    "vendor/openjph-core-0.1.0",
+    "vendor/dicom-object-0.10.0",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -99,7 +103,12 @@ wasm-bindgen = "=0.2.127"
 # erased adapter does not, so mandatory A.5 padding can be validated. Pixel
 # codecs remain for F-023 onward.
 dicom-core = { version = "0.10", default-features = false }
-dicom-object = { version = "0.10", default-features = false, features = ["deflate"] }
+# F-244 and D-18. Exact published dicom-object 0.10.0 is vendored with one
+# recorded source patch. Its collector read the first Fragment after a
+# zero-length Basic Offset Table Item as the table, which PS3.5 A.4 forbids.
+# The patch, inventory and upstream licences live with the package and are
+# enforced by the pins gate. A release carrying the fix replaces this path.
+dicom-object = { version = "=0.10.0", path = "vendor/dicom-object-0.10.0", default-features = false, features = ["deflate"] }
 dicom-encoding = { version = "0.10", default-features = false }
 dicom-parser = { version = "0.10", default-features = false }
 dicom-transfer-syntax-registry = { version = "0.10", default-features = false, features = ["deflate"] }

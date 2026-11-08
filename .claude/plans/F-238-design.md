@@ -145,3 +145,37 @@ Made by the sprint lead on 2026-11-07 under the operator's answer of 2026-11-06 
 - **Q2.** The story measures which `objc2` crates `gles` on Apple pulls in. If any reaches the shipped Apple graph, `gles` is dropped from the shipped Apple build too and that build resolves tier C, which reports unavailable for GPU features rather than producing a different result. The measurement and the outcome are recorded.
 - **Q3.** If the shipped macOS build resolves a lower tier than development, a new deviation row beside D-27 is written in this story with that fact, numbered when written.
 - **Order.** This story depends on F-233, which is not integrated. It is built on F-233's branch, which carries F-229 and F-232, and integrates after them.
+
+### Lead ruling after review pass 3
+
+- **D1.** The `bin/ocelli.sh` comment says cargo resolves a relative target dir against the current directory, which is `ROOT` after the `cd` at the top, or the clause goes.
+- **D2.** The catalogue comment names the "Step 6 of the native arm" section rather than a position.
+- **S1.** `runner.step6-exits-without-a-report` uses the honest Apple report with a non-zero exit, so it goes red when the `exit 1` after the non-zero-exit refusal is removed, and stays red for its stated reason on the intact step.
+- **Nitpicks taken.** N1, `decode_graph_check` and D-33 say the shipped set is a floor. N2, D-33's backend cfg list includes `webgl`, or says it lists examples. N4, the repeated phrase goes. N3 is not taken.
+- **Owed acceptance, carried to sprint close.** AC3 on this host with a GPU job allowed. AC4's Linux half on an observed `ubuntu-latest` CI run of step 6, and its Windows half on a Windows host or named as a gap. AC1 for `x86_64-apple-darwin` beyond `cargo tree`, or named as a gap.
+
+### Lead ruling after review pass 4
+
+- **D1.** The clause about how cargo resolves a relative target dir is deleted, as pass 3's ruling allowed, by the lead. The step reads `target_directory` from `cargo metadata`, which is right for each.
+- The stray `/tmp/f238-*` files from earlier rounds are removed.
+
+### Lead ruling after review pass 5
+
+- **D1.** The lead's sentence about where a configured `build.target-dir` resolves is deleted from the pass 4 ruling.
+- **S1.** Step 6 runs the binary the build it just ran produced, read from that build's `--message-format=json-render-diagnostics` output, the `executable` of the `compiler-artifact` named `ocelli-desktop`, rather than a path built from `target_directory`. A guard probe sets `CARGO_BUILD_TARGET` over a stale `release/ocelli-desktop` stub and requires step 6 to run the fresh binary or refuse, never the stale one. The comment above the step says only what the step now does.
+
+### Lead ruling after review pass 6
+
+- **S1.** Step 6's parser collects every `compiler-artifact` executable named `ocelli-desktop` and prints one only when there is exactly one. With none, the step keeps today's refusal, "the shipped build named no ocelli-desktop executable". With two or more, it refuses naming the count, and runs nothing. A guard probe whose stub build names two desktop executables requires that refusal, and goes red under today's first-match `break`.
+- **N1 taken.** The `stale_report` docstring says what happens with `build_names_desktop=False` as well, or drops the clause that is false there.
+
+### Lead ruling after review pass 7
+
+- **D1.** The probe note says the probe reports HARNESS, not red, under the first-match break and over a stale-path parse, by the lead.
+- **N1 taken,** by the lead: the note says a multi-target stream names one executable under each target's directory.
+
+### AC3 record, 2026-11-08
+
+`bin/ocelli.sh gate gpu` at `2f90ce0f` on the operator's M4 Max: ALL GREEN, 79 tests passed and none failed, including `a_device_opens_and_agrees_with_the_resolved_tier` and `tier_b_margin_or_a_recorded_miss`. The development `ocelli-desktop`, built with the development features at the same tree and run with `OCELLI_TIER` unset, reports "Tier A, decided by Benchmark", one adapter seen, a device created, measured tier A, and candidate "Apple M4 Max" on Metal. Development is unchanged. The shipped build's tier C report is AC4's macOS half, already shown by step 6.
+
+Still owed: AC4's Linux half on an observed `ubuntu-latest` run of step 6 after the sprint push, and AC4's Windows half and AC1 for `x86_64-apple-darwin` beyond `cargo tree`, named as gaps at completion for want of a host.

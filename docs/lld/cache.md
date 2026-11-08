@@ -193,6 +193,19 @@ buffer handed out is owned by that decode. Its old bytes are overwritten
 before they are read. `GET /held` reports `free`, the bytes of sample buffers
 on the free list, beside `used`.
 
+F-227's series window pools are a named term of the same bound, `P * 4 MiB`.
+Each `/series-window` round reserves one `AutoWindowPool` of at most 2^20
+`f32` values, 4 MiB, when it starts and holds it until it ends, outside
+`OCELLI_CACHE_MIB` and not reported by `GET /held`. At most `P` rounds run at
+once through `Viewer::acquire_round`, and a round beyond them waits for one to
+end. Four rounds asked for at once held 8,388,608 bytes of pool, measured.
+The resident bound is therefore `B + 4 S_max + P (2 S_max + 5 N_max) +
+P * 4 MiB + 24 MiB`. The operator kept F-216's total, 528,194,192 bytes at its
+named budget, on 2026-11-07, so the fixed constant for the binary, thread
+stacks and allocator slack is 24 MiB rather than F-216's 32 MiB, and the pool
+term fits inside the same total. `viewer.resident_memory` opens the
+`pet_no_window` workload, so the run includes three series window rounds.
+
 One more pool sits outside the budget. A multiframe in which any frame's
 window comes from a per-frame functional group keeps every frame's inspect
 reply in `CacheState::kept`, so `POST /inspect` by id answers a frame's window
