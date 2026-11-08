@@ -167,7 +167,7 @@ Re-read by the lead on 2026-11-07 on `sprint/s46` at `eb0f81b3`, after F-231 int
 |----|-------------------------------|--------------------|-------------------------------|------------------------|
 | AC7 | Both keys and `content` current. Through `sessionBulkSink` over a mock, `commit_cached_frame` receives the seven numbers and the bigint. On the built module with a budget set, the transferred frame commits and `frame_resident` for that index, epoch, content and extent answers 1 | `bulk.test.ts` and `boundary.wasm.test.ts`, "a transferred frame with content is committed and cached" | Forwarding the two stack keys and dropping `content`, which commits and leaves the cache empty | Implementation |
 | AC8 | Size, under "Size and speed" below | `bin/ocelli.sh gate wasm` on base and tip | A budget edited to make room | Implementation |
-| AC9 | Speed, under "Size and speed" below | `bulk.test.ts`, one `alloc` and one copy per call | A second copy or a second allocation | Implementation |
+| AC9 | Speed, under "Size and speed" below | `bulk.test.ts`, one `alloc` and one copy per call | A second copy by `set` or `slice` through any typed-array view or of the transferred buffer, or a second allocation | Implementation |
 
 AC6's old-source RED covers AC7 as well as AC1 and AC5.
 
@@ -201,3 +201,33 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward into S46 
 - **`content` is forwarded too**, by amendment 2. Forwarding only the two stack keys would leave an accepted key silently dropped, which is the defect this story exists to remove and the rule F-230 wrote at `bulk.ts:497` to `:499`. It adds AC7 and stays within the 1w estimate, because the route already exists in `commitAllocated`.
 - **Write set.** `packages/core/src/bulk.ts`, `packages/core/src/bulk.test.ts`, `packages/core/src/boundary.wasm.test.ts`, and at completion `docs/lld/typescript-packaging.md` and `CHANGELOG.md`. No Rust file, no `options.ts` change. `bulk.ts` is shared with any concurrent `packages/core` story, so the story starts from the sprint head and integrates through a three-way merge.
 - **Design readiness.** The normative source is transcribed, the API is unchanged, every acceptance row from AC1 to AC9 has an observation and a stage, the write set is feasible on the sprint head, and no question is open. Status is approved.
+
+### Lead ruling after review pass 2
+
+- **D1, AC5's pixel comparison.** After `bindCpuCanvas`, the case submits a `Fit` to the canvas size and a narrow `SetWindow` so that the committed value changes the blit. A control commit of a different value is asserted to change the pixels, so the comparison is shown able to fail. The refusal case must then go red at the pixel comparison under a mutant whose refusal branch commits the refused frame anyway.
+- **D2, AC9's one copy.** AC9 keeps its wording. The test counts copies, not views: it spies on `Uint8Array.prototype.set` for calls whose target buffer is the wasm memory's buffer, and on `Uint8Array.prototype.slice`, restores both, and asserts one copy in total. It must go red on a second `set` through the same view, two `set` calls through one saved buffer, a defensive `slice`, and a duplicated `set` line. The `countingMemory` doc and the AC9 comment then claim only what the counter counts.
+- **Still owed at completion.** AC8's and AC9's base and tip sizes and AC6's RED go in the handoff. The `typescript-packaging.md` order and the CHANGELOG entry are the lead's completion edits.
+
+### Lead ruling after review pass 3
+
+AC9's copy half has been raised three passes running, narrower each time, so this ruling closes its scope.
+
+- **S1.** The counter takes pass 3's scratch-tested form: spies on the shared typed-array prototype's `set` and `slice`, counting a `set` whose target is wasm memory or whose source is the transferred buffer, and on `ArrayBuffer.prototype.slice` for `this === buffer` only, all restored in `finally`. It is red on the four ruled forms and on `buffer.slice(0)`, a staging copy and an `Int8Array` copy, and green on the tip.
+- **AC9's wording.** The rejected implementation reads "a second copy by `set` or `slice` through any typed-array view or of the transferred buffer". The test comment says once that a constructor copy, `Uint8Array.from` and `structuredClone` are outside what a prototype spy sees. No further copy form reopens AC9.
+- **N1 taken.**
+
+## Acceptance evidence at preparation
+
+Measured on 2026-11-08 under `/complete-feature F-236 --prepare`, base `282b9e8206ed33b33d78406da8a50c61ade80c82` and reviewed tip `24bc7d9b`, each extracted by `git archive` into the session scratchpad with the worktree's `node_modules` linked and its own `CARGO_TARGET_DIR`. The lead's ruling after pass 2 puts these in the handoff, which cites this section.
+
+| AC | Command | Base | Tip | Delta |
+|----|---------|------|-----|-------|
+| AC8, render module | `bin/ocelli.sh gate wasm`, which runs `bin/ocelli.sh wasm`, `bin/ocelli.sh wasm-decode` and `pin_and_size_check.py --with-size` | `pkg/ocelli_wasm_bg.wasm` 2,202,907 bytes, md5 `f9175feef941cee02e56a7b7b21f071b` | 2,202,907 bytes, same md5 | 0 |
+| AC8, decode module | same run | `pkg-decode/ocelli_wasm_bg.wasm` 16,455 bytes, md5 `d5973dd09bf264f6a3056a65654dc10c` | 16,455 bytes, same md5 | 0 |
+| AC9, package | `tsc --build` in `packages/core` | `dist/bulk.js` 15,592 bytes | 15,672 bytes | +80 |
+
+AC8. Both gate runs exit 0, ALL GREEN, against baseline 2,151,196 and ceiling 2,258,755 for the render module and baseline and ceiling 16,455 and 17,277 for the decode module. `ci/wasm-size-budget.json` and `ci/wasm-decode-size.json` are unchanged between base and tip by `git diff --quiet`, and `--accept-size` was not run. No Rust file, `Cargo.toml` or `Cargo.lock` changed in the range, which is why both modules are byte identical.
+
+AC9, the +80 bytes line by line. `dist/bulk.js` line 245, the doc comment of `acceptTransferredFrame`, grows from 49 to 265 bytes, +216, because the source comment gained the three lines saying the validated target fields are forwarded. Lines 257 to 263, the five-field `committed` literal of 188 bytes, become the single 52-byte line `const committed = { handoff: meta, ...fields };`, -136. Nothing else in the file differs. The executable code is 136 bytes smaller and the growth is comment only.
+
+AC6, the old-source RED, reproduced now. The tip tree with `packages/core/src/bulk.ts` replaced by `git show 282b9e82:packages/core/src/bulk.ts`. `npx vitest run packages/core/src/bulk.test.ts` exits 1 with 6 failed and 29 passed: "forwards stackIndex and stackEpoch to the selected-frame export", "refuses a stale selection through the selected-frame route and leaves no ticket", the two `release_bulk` cases for a missing selected-frame and cached-frame export, "keeps one reservation and one copy per transferred call on every route" and "a transferred frame with content is committed and cached". `npx vitest run --config vitest.boundary.config.ts` against the dev build at md5 `3403130f30cd947409532638b5118463`, the module passes 3 and 4 reviewed, exits 1 with 2 failed and 17 passed: "commits a transferred frame at the current selection and refuses a stale one" and "a transferred frame with content is committed and cached", which are AC5 and AC7. With the tip `bulk.ts` restored in the same tree both files are green, 35 of 35 and 19 of 19. This matches pass 2's receipt row, 6 unit and 2 boundary red.

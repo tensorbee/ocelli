@@ -14,6 +14,7 @@ import {
   type DicomwebResponseKind,
   type DicomwebResponseSink,
   type HandoffMeta,
+  type SessionBulkExports,
   type WasmMemory,
 } from "./bulk.js";
 import { OcelliError } from "./ocelli-error.js";
@@ -516,6 +517,144 @@ function exactBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer;
 }
 
+/** The session state the transferred-frame fixtures model. */
+const MOCK_EPOCH = 9;
+const MOCK_INDEX = 2;
+const MOCK_TICKET = 21;
+const MOCK_PTR = 1024;
+
+/** One export call, with the bytes at `[ptr, ptr + len)` at the handover. */
+interface RecordedCommit {
+  readonly args: unknown[];
+  readonly code: number;
+  readonly seen: Uint8Array;
+}
+
+/** The one recorded commit on a route, or a failure naming the route. */
+function one(calls: readonly RecordedCommit[], route: string): RecordedCommit {
+  if (calls.length !== 1) {
+    throw new Error(`expected one ${route} call, saw ${calls.length}`);
+  }
+  const call = calls[0];
+  if (call === undefined) {
+    throw new Error(`expected a ${route} call, saw none`);
+  }
+  return call;
+}
+
+/**
+ * A `SessionBulkExports` stub for the transferred-frame routes through
+ * `sessionBulkSink`, over one page of memory.
+ *
+ * The modelled session has the stack epoch `MOCK_EPOCH` installed with the
+ * selected slice `MOCK_INDEX`, and `commit_frame` refuses while `stacked`
+ * holds, which is the state the stack keys exist for. A selection refusal
+ * releases the slot inside the export, so `bulkTicket()` falls to 0
+ * without a `release_bulk` call. That is the refusal behaviour of
+ * `crates/ocelli-wasm/src/session.rs` on both commit exports, which the
+ * plan's amendment 8 names.
+ */
+function transferredMock(stacked: boolean): {
+  readonly wasm: SessionBulkExports;
+  readonly asked: number[];
+  readonly released: number[];
+  readonly generation: RecordedCommit[];
+  readonly selected: RecordedCommit[];
+  readonly cached: RecordedCommit[];
+  bulkTicket(): number;
+} {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let outstanding = false;
+  const asked: number[] = [];
+  const released: number[] = [];
+  const generation: RecordedCommit[] = [];
+  const selected: RecordedCommit[] = [];
+  const cached: RecordedCommit[] = [];
+  const seen = (len: number): Uint8Array =>
+    new Uint8Array(memory.buffer.slice(MOCK_PTR, MOCK_PTR + len));
+  const attempt = (
+    route: RecordedCommit[],
+    args: unknown[],
+    len: number,
+    code: number,
+  ): number => {
+    route.push({ args, code, seen: seen(len) });
+    outstanding = false;
+    return code;
+  };
+  const current = (args: readonly unknown[]): boolean =>
+    args[5] === MOCK_INDEX && args[6] === MOCK_EPOCH;
+  return {
+    wasm: {
+      memory,
+      alloc(len: number): number {
+        asked.push(len);
+        outstanding = true;
+        return MOCK_PTR;
+      },
+      bulk_ticket(): number {
+        return outstanding ? MOCK_TICKET : 0;
+      },
+      release_bulk(ticket: number): number {
+        released.push(ticket);
+        outstanding = false;
+        return 1;
+      },
+      commit_frame(ticket, len, viewport, columns, rows, gen): number {
+        if (stacked) {
+          outstanding = false;
+          return 0;
+        }
+        return attempt(generation, [ticket, len, viewport, columns, rows, gen], len, 1);
+      },
+      commit_selected_frame(ticket, len, viewport, columns, rows, index, epoch): number {
+        const args = [ticket, len, viewport, columns, rows, index, epoch];
+        return attempt(selected, args, len, current(args) ? 1 : 0);
+      },
+      commit_cached_frame(ticket, len, viewport, columns, rows, index, epoch, content): number {
+        const args = [ticket, len, viewport, columns, rows, index, epoch, content];
+        return attempt(cached, args, len, current(args) ? 1 : 0);
+      },
+    },
+    asked,
+    released,
+    generation,
+    selected,
+    cached,
+    bulkTicket(): number {
+      return outstanding ? MOCK_TICKET : 0;
+    },
+  };
+}
+
+/**
+ * A `WasmMemory` whose `memory` getter counts reads, over a mock's exports.
+ *
+ * `acceptTransferredFrame` takes the memory and the sink separately and
+ * builds its one view from `wasm.memory.buffer`, so the read count is the
+ * view count: one per call on the specified path. The read count observes
+ * the view, not the copy: the copy is counted by the prototype spies in
+ * the one-copy test. The sink keeps the raw mock, so
+ * nothing the sink does is counted.
+ */
+function countingMemory(wasm: SessionBulkExports): {
+  readonly observed: WasmMemory;
+  reads(): number;
+} {
+  let reads = 0;
+  return {
+    observed: {
+      get memory(): WebAssembly.Memory {
+        reads += 1;
+        return wasm.memory;
+      },
+    },
+    reads(): number {
+      return reads;
+    },
+  };
+}
+
 /**
  * HLD section 24's copy out of the decode instance, and section 17.2's trap.
  *
@@ -699,6 +838,350 @@ group("acceptTransferredFrame, HLD 17.2", () => {
       }),
     ).toThrow("viewport is not a u32");
     expect(allocs).toBe(0);
+  });
+
+  it("forwards stackIndex and stackEpoch to the selected-frame export", () => {
+    // AC1. Both keys current. The ticketed sink routes the commit to
+    // `commit_selected_frame`, which receives the ticket, the length and
+    // the five fields, after the copy, which `seen` records at the
+    // handover. Without the forwarding the routed export would be
+    // `commit_frame`, which refuses with a stack installed, so the call
+    // throws `CommitRefused` and none of the expectations run.
+    const mock = transferredMock(true);
+    const bytes = pattern(16);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+
+    acceptTransferredFrame(
+      mock.wasm,
+      sessionBulkSink(mock.wasm),
+      exactBuffer(bytes),
+      meta,
+      { viewport: 1, columns: 4, rows: 5, generation: 6, stackIndex: MOCK_INDEX, stackEpoch: MOCK_EPOCH },
+    );
+
+    const call = one(mock.selected, "selected-frame");
+    expect(call.args).toEqual([MOCK_TICKET, 16, 1, 4, 5, MOCK_INDEX, MOCK_EPOCH]);
+    expect(call.code).toBe(1);
+    expect(Array.from(call.seen)).toEqual(Array.from(bytes));
+    expect(mock.generation).toHaveLength(0);
+    expect(mock.cached).toHaveLength(0);
+    expect(mock.bulkTicket()).toBe(0);
+    expect(mock.released).toEqual([]);
+  });
+
+  it("refuses a stale selection through the selected-frame route and leaves no ticket", () => {
+    // AC2. A stale epoch and a different index each throw the coded
+    // refusal, and the refusal is the selected-frame export's own answer
+    // of 0, not the plain route refusing with a stack installed, which is
+    // what dropping the keys produces. The slot is released by the
+    // session inside the refused export, so the ticket answers 0 and the
+    // sink's release path never runs.
+    const mock = transferredMock(true);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+    const sink = sessionBulkSink(mock.wasm);
+    const staleEpoch = () =>
+      acceptTransferredFrame(
+        mock.wasm,
+        sink,
+        exactBuffer(pattern(16)),
+        meta,
+        { viewport: 1, columns: 4, rows: 5, generation: 6, stackIndex: MOCK_INDEX, stackEpoch: MOCK_EPOCH - 1 },
+      );
+
+    expect(codeOf(staleEpoch)).toBe("CommitRefused");
+    const epochCall = one(mock.selected, "selected-frame");
+    expect(epochCall.args).toEqual([MOCK_TICKET, 16, 1, 4, 5, MOCK_INDEX, MOCK_EPOCH - 1]);
+    expect(epochCall.code).toBe(0);
+    expect(mock.generation).toHaveLength(0);
+    expect(mock.bulkTicket()).toBe(0);
+    expect(mock.released).toEqual([]);
+
+    const staleIndex = () =>
+      acceptTransferredFrame(
+        mock.wasm,
+        sink,
+        exactBuffer(pattern(16)),
+        meta,
+        { viewport: 1, columns: 4, rows: 5, generation: 6, stackIndex: MOCK_INDEX + 1, stackEpoch: MOCK_EPOCH },
+      );
+
+    expect(codeOf(staleIndex)).toBe("CommitRefused");
+    expect(mock.selected.map((call) => call.args[5])).toEqual([MOCK_INDEX, MOCK_INDEX + 1]);
+    expect(mock.selected.map((call) => call.code)).toEqual([0, 0]);
+    // A repeated call after a stale refusal allocates again.
+    expect(mock.asked).toEqual([16, 16]);
+    expect(mock.bulkTicket()).toBe(0);
+    expect(mock.released).toEqual([]);
+  });
+
+  it("refuses a lone key before any allocation", () => {
+    // AC3, restated by the plan's re-read. `frameCommitMeta` refuses a
+    // lone stackIndex or stackEpoch with `InvalidValue` at its u32 check,
+    // and a content id without both stack keys with its own message, and
+    // both refusals come before `alloc`. The buffer length matches
+    // meta.bytes here, so the length check passes and the refusal is the
+    // metadata one in the order the plan names, not the earlier
+    // LengthMismatch.
+    const mock = transferredMock(true);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+    const sink = sessionBulkSink(mock.wasm);
+    const buffer = exactBuffer(pattern(16));
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(mock.wasm, sink, buffer, meta, {
+          viewport: 1,
+          columns: 4,
+          rows: 5,
+          generation: 6,
+          stackIndex: MOCK_INDEX,
+        }),
+      ),
+    ).toBe("InvalidValue");
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(mock.wasm, sink, buffer, meta, {
+          viewport: 1,
+          columns: 4,
+          rows: 5,
+          generation: 6,
+          stackEpoch: MOCK_EPOCH,
+        }),
+      ),
+    ).toBe("InvalidValue");
+    expect(() =>
+      acceptTransferredFrame(mock.wasm, sink, buffer, meta, {
+        viewport: 1,
+        columns: 4,
+        rows: 5,
+        generation: 6,
+        content: 0x1_0000_0001n,
+      }),
+    ).toThrow("content needs both stackIndex and stackEpoch");
+    expect(mock.asked).toEqual([]);
+    expect(mock.bulkTicket()).toBe(0);
+  });
+
+  it("releases the captured ticket through release_bulk when the selected-frame export is missing", () => {
+    // The state table's export-missing row, amendment 9. A sink over a mock
+    // without `commit_selected_frame` throws the export's own refusal from
+    // `commitAllocated`, which leaves before the ticket clears, so this is
+    // the one refusal the transferred path releases on the TypeScript side:
+    // the catch calls `releaseAllocated`, which calls `release_bulk` with
+    // the captured ticket, and both the session's ticket and the sink's
+    // answer 0. Deleting the release in `acceptTransferredFrame`'s catch
+    // leaves `released` empty and the ticket outstanding, which is red.
+    const mock = transferredMock(true);
+    const { commit_selected_frame: _missing, ...withoutSelected } = mock.wasm;
+    void _missing;
+    const sink = sessionBulkSink(withoutSelected);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+
+    let thrown: unknown;
+    try {
+      acceptTransferredFrame(
+        mock.wasm,
+        sink,
+        exactBuffer(pattern(16)),
+        meta,
+        { viewport: 1, columns: 4, rows: 5, generation: 6, stackIndex: MOCK_INDEX, stackEpoch: MOCK_EPOCH },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    if (!(thrown instanceof OcelliError)) {
+      throw new Error(`expected ExportUnavailable, saw ${String(thrown)}`);
+    }
+    expect(thrown.code).toBe("ExportUnavailable");
+    expect(thrown.message).toBe("selected-frame export is unavailable");
+    expect(mock.released).toEqual([MOCK_TICKET]);
+    expect(mock.bulkTicket()).toBe(0);
+    expect(sink.allocationTicket?.()).toBe(0);
+  });
+
+  it("releases the captured ticket through release_bulk when the cached-frame export is missing", () => {
+    // The same row for the cached route. A target carrying `content`
+    // routes to `commit_cached_frame`, and a mock without it refuses the
+    // same way before any commit, so the release must fire here too: one
+    // `release_bulk` call with the captured ticket and no outstanding
+    // ticket on either side afterwards.
+    const mock = transferredMock(true);
+    const { commit_cached_frame: _missing, ...withoutCached } = mock.wasm;
+    void _missing;
+    const sink = sessionBulkSink(withoutCached);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+
+    let thrown: unknown;
+    try {
+      acceptTransferredFrame(
+        mock.wasm,
+        sink,
+        exactBuffer(pattern(16)),
+        meta,
+        {
+          viewport: 1,
+          columns: 4,
+          rows: 5,
+          generation: 6,
+          stackIndex: MOCK_INDEX,
+          stackEpoch: MOCK_EPOCH,
+          content: 0x1_0000_0001n,
+        },
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    if (!(thrown instanceof OcelliError)) {
+      throw new Error(`expected ExportUnavailable, saw ${String(thrown)}`);
+    }
+    expect(thrown.code).toBe("ExportUnavailable");
+    expect(thrown.message).toBe("cached-frame export is unavailable");
+    expect(mock.released).toEqual([MOCK_TICKET]);
+    expect(mock.bulkTicket()).toBe(0);
+    expect(sink.allocationTicket?.()).toBe(0);
+  });
+
+  it("keeps one reservation and one copy per transferred call on every route", () => {
+    // AC9. The transferred path reserves len bytes once and copies them
+    // once, on the generation route, the selected route and the cached
+    // route. `asked` is the reservation count. The copy is counted
+    // directly: a spy on the shared `%TypedArray%` prototype counts a
+    // `set` whose target buffer is the wasm memory's buffer or whose
+    // source is a view over the transferred buffer, and a `slice`
+    // through any typed-array view, and a spy on
+    // `ArrayBuffer.prototype.slice` counts a slice of the transferred
+    // buffer itself and no other buffer. All three are installed around
+    // the call and restored after it, and the sum answers 1. A second
+    // `set` through the same view, two `set` calls through one saved
+    // buffer, a duplicated `set` line, a defensive `Uint8Array` `slice`,
+    // `buffer.slice(0)`, a staging copy out of a view over the
+    // transferred buffer and a second copy through an `Int8Array` view
+    // each answer 2 on the copy count and are red. A constructor copy,
+    // `Uint8Array.from` and `structuredClone` are outside what a
+    // prototype spy sees. `reads` observes the view, not the copy: the
+    // call takes the sink separately from the memory and reads
+    // `wasm.memory` exactly once, to build the one view it sets through,
+    // so a second view is red on `reads`, and a second reservation is
+    // red on `asked`.
+    const routes = [
+      {
+        stacked: false,
+        target: { viewport: 1, columns: 4, rows: 5, generation: 6 },
+      },
+      {
+        stacked: true,
+        target: { viewport: 1, columns: 4, rows: 5, generation: 6, stackIndex: MOCK_INDEX, stackEpoch: MOCK_EPOCH },
+      },
+      {
+        stacked: true,
+        target: {
+          viewport: 1,
+          columns: 4,
+          rows: 5,
+          generation: 6,
+          stackIndex: MOCK_INDEX,
+          stackEpoch: MOCK_EPOCH,
+          content: 0x1_0000_0001n,
+        },
+      },
+    ];
+    const bytes = pattern(16);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+    for (const route of routes) {
+      const mock = transferredMock(route.stacked);
+      const counted = countingMemory(mock.wasm);
+      const buffer = exactBuffer(bytes);
+      const sink = sessionBulkSink(mock.wasm);
+      // The copy count, installed around the one call and restored after
+      // it: a `set` into the wasm memory or out of the transferred
+      // buffer, a `slice` through any typed-array view, and an
+      // `ArrayBuffer` `slice` of the transferred buffer itself.
+      let copies = 0;
+      const typedProto = Object.getPrototypeOf(Uint8Array.prototype) as typeof Uint8Array.prototype;
+      const set = typedProto.set;
+      const slice = typedProto.slice;
+      const bufferSlice = ArrayBuffer.prototype.slice;
+      const countingSet = function (this: Uint8Array, ...args: Parameters<typeof set>) {
+        const source = args[0];
+        if (
+          this.buffer === mock.wasm.memory.buffer ||
+          (typeof source === "object" && source !== null && "buffer" in source && source.buffer === buffer)
+        ) {
+          copies += 1;
+        }
+        return set.apply(this, args);
+      };
+      const countingSlice = function (this: Uint8Array, ...args: Parameters<typeof slice>) {
+        copies += 1;
+        return slice.apply(this, args);
+      };
+      const countingBufferSlice = function (
+        this: ArrayBuffer,
+        ...args: Parameters<typeof bufferSlice>
+      ): ArrayBuffer {
+        if (this === buffer) {
+          copies += 1;
+        }
+        return bufferSlice.apply(this, args);
+      };
+      typedProto.set = countingSet;
+      typedProto.slice = countingSlice;
+      ArrayBuffer.prototype.slice = countingBufferSlice;
+      try {
+        acceptTransferredFrame(counted.observed, sink, buffer, meta, route.target);
+      } finally {
+        typedProto.set = set;
+        typedProto.slice = slice;
+        ArrayBuffer.prototype.slice = bufferSlice;
+      }
+      expect(mock.asked).toEqual([16]);
+      expect(counted.reads()).toBe(1);
+      expect(copies).toBe(1);
+      const calls =
+        route.target.content !== undefined
+          ? mock.cached
+          : route.target.stackIndex !== undefined
+            ? mock.selected
+            : mock.generation;
+      expect(calls).toHaveLength(1);
+      expect(Array.from(one(calls, "route").seen)).toEqual(Array.from(bytes));
+    }
+  });
+
+  it("a transferred frame with content is committed and cached", () => {
+    // AC7's mock half, through the ticketed sink. Both stack keys and the
+    // content id route to `commit_cached_frame`, which receives the seven
+    // numbers and the bigint after the copy. Forwarding the two stack
+    // keys and dropping the content would commit through
+    // `commit_selected_frame` and leave this route unobserved, which is
+    // the wrong implementation the plan names for this row.
+    const mock = transferredMock(true);
+    const bytes = pattern(16);
+    const meta: HandoffMeta = { series: 7, instance: 3, frame: 2, bytes: 16 };
+
+    acceptTransferredFrame(
+      mock.wasm,
+      sessionBulkSink(mock.wasm),
+      exactBuffer(bytes),
+      meta,
+      {
+        viewport: 1,
+        columns: 4,
+        rows: 5,
+        generation: 6,
+        stackIndex: MOCK_INDEX,
+        stackEpoch: MOCK_EPOCH,
+        content: 0x1_0000_0001n,
+      },
+    );
+
+    const call = one(mock.cached, "cached-frame");
+    expect(call.args).toEqual([MOCK_TICKET, 16, 1, 4, 5, MOCK_INDEX, MOCK_EPOCH, 0x1_0000_0001n]);
+    expect(call.code).toBe(1);
+    expect(Array.from(call.seen)).toEqual(Array.from(bytes));
+    expect(mock.selected).toHaveLength(0);
+    expect(mock.generation).toHaveLength(0);
+    expect(mock.bulkTicket()).toBe(0);
   });
 });
 

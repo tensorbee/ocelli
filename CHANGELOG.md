@@ -717,3 +717,12 @@ Repository bootstrap. Nothing is published.
   `ocelli_wasm.js`. Without the pkg the worker now keeps a runtime import and
   reports the core as not built, and with it the wasm is still bundled as its
   own files. A checkout under a path with a space builds too.
+- `acceptTransferredFrame` honours `stackIndex`, `stackEpoch` and `content`.
+  The three keys were accepted and then dropped, so a transferred frame into
+  a session with an installed stack was always refused with `CommitRefused`,
+  and a content id never reached the session's frame cache. The validated
+  target is now forwarded beside the handoff, so a frame carrying both stack
+  keys commits through the selected-frame export at the current index and
+  epoch and is refused with `CommitRefused` for a stale one, and a frame
+  that also carries `content` is cached as a `writeFrame` commit is. A
+  caller that sets none of the keys sees the earlier behaviour.

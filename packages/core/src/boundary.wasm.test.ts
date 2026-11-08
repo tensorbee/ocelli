@@ -128,10 +128,11 @@ const META = { viewport: 1, columns: 1, rows: 1, generation: 1 };
  * Node has no `OffscreenCanvas` or `ImageData`. `publishCpuCanvas` needs both
  * to retain and blit a frame, so this test supplies the smallest objects the
  * wasm side reads: a canvas with width, height and a 2d context, and an
- * `ImageData` with a clamped array. `putImageData` is a no-op because the
- * observation is the event, not the pixels. The globals are installed once
- * for the file and do not affect the other tests, which never call the CPU
- * canvas exports.
+ * `ImageData` with a clamped array. `putImageData` records the blitted image
+ * and counts the blits, which is how the transferred-frame test observes the
+ * kept frame's pixels across its refusals. The globals are installed by the
+ * tests that call the CPU canvas exports, and the recording changes nothing
+ * they observe: those tests read the drained ring, never the recording.
  */
 class StubImageData {
   readonly data: Uint8ClampedArray;
@@ -142,8 +143,15 @@ class StubImageData {
 }
 
 class StubContext {
-  putImageData(...args: unknown[]): void {
-    void args;
+  /** The image of the latest blit, null before the first. */
+  lastImage: StubImageData | null = null;
+  /** How many times the wasm side blitted. */
+  blits = 0;
+
+  putImageData(image: unknown, ...rest: unknown[]): void {
+    void rest;
+    this.blits += 1;
+    this.lastImage = image instanceof StubImageData ? image : null;
   }
 }
 
@@ -155,6 +163,20 @@ class StubCanvas {
   getContext(kind: string): StubContext | null {
     return kind === "2d" ? this.context : null;
   }
+
+  /** The blit recording, for the kept-frame comparison in the transferred-frame test. */
+  get recording(): StubContext {
+    return this.context;
+  }
+}
+
+/** The blitted pixels of a stub canvas, failing the test if nothing blitted. */
+function blittedPixels(canvas: StubCanvas): number[] {
+  const image = canvas.recording.lastImage;
+  if (image === null) {
+    throw new Error("the publish did not blit");
+  }
+  return Array.from(image.data);
 }
 
 function installCanvasStubs(): void {
@@ -225,6 +247,19 @@ function f64(value: number): number[] {
   return [...new Uint8Array(buffer)];
 }
 
+/** The refusal code of one drive, or a marker when nothing was refused. */
+function codeOf(drive: () => unknown): string {
+  try {
+    drive();
+  } catch (error) {
+    if (error instanceof OcelliError) {
+      return error.code;
+    }
+    throw error;
+  }
+  return "no refusal";
+}
+
 const EVERY_KIND: readonly PackedCommand[] = [
   { kind: "Fit", width: 800, height: 600, columns: 512, rows: 512 },
   { kind: "Pan", x: 1, y: 2 },
@@ -269,6 +304,107 @@ describe("wasm session boundary", () => {
     expect(() => writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: epoch })).toThrow(/commit refused/);
     expect(() => writeFrame(wasm, sink, frame, META)).toThrow(/commit refused/);
     writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: next });
+  });
+  it("commits a transferred frame at the current selection and refuses a stale one", async () => {
+    // AC5, the built module over the public helpers. The transferred-frame
+    // copy of the writeStack test above. With the epoch writeStack
+    // returned and the current index the frame commits, and a stale epoch
+    // or a different index is the coded refusal. The slot is released by
+    // the session inside the refused export, so bulk_ticket() answers 0.
+    // The committed frame is kept: an interaction publish before the
+    // refusals and one after hand the stub canvas the same image, each
+    // observation counting its blit, so a refusal that cleared the
+    // retained frame fails the blit count and one that replaced it fails
+    // the pixel comparison. That comparison can only fail if the blit
+    // answers the committed value. A 1 by 1 Float32 frame under the Fit
+    // alone does not answer it: without a window 40, 41, 42 and 43 blit
+    // byte-identical images. So the case submits a Fit to the canvas
+    // size and a narrow window after binding the canvas, and the final
+    // transfer is the control: its publish asserts a different value
+    // changes the blit.
+    installCanvasStubs();
+    const wasm = await loadModule();
+    const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    const sink = sessionBulkSink(wasm);
+    const meta = { series: 5, instance: 0, frame: 0, bytes: 4 };
+    const target = { viewport: 1, columns: 1, rows: 1, generation: 1 };
+    const sliceIndex = () => readViewportState(wasm.copy_state())?.sliceIndex;
+    const canvas = new StubCanvas();
+    wasm.bindCpuCanvas(canvas, 80, 40, 1);
+    // The window is what makes the blit answer the committed value, so
+    // the kept-frame comparison below compares two images that can
+    // differ, not two constants.
+    expect(
+      submit(
+        wasm,
+        packCommands(1, [
+          { kind: "Fit", width: 80, height: 40, columns: 1, rows: 1 },
+          { kind: "SetWindow", centre: 41, width: 10, function: "linear" },
+        ]),
+      ),
+    ).toBe(2);
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([40]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(1);
+    const kept = blittedPixels(canvas);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([41]).buffer,
+          meta,
+          { ...target, stackIndex: 0, stackEpoch: epoch - 1 },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([42]).buffer,
+          meta,
+          { ...target, stackIndex: 1, stackEpoch: epoch },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(2);
+    expect(blittedPixels(canvas)).toEqual(kept);
+
+    // The refusals leave the slot free, so the next current transfer
+    // commits through the same caller.
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([43]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    // Control for the kept-frame comparison: a different value at the
+    // current selection changes the blit, so that comparison can fail.
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(3);
+    expect(blittedPixels(canvas)).not.toEqual(kept);
   });
   it("refuses address 0, reuses an address only with a new ticket, and commits through writeFrame", async () => {
     const wasm = await loadModule();
@@ -862,6 +998,42 @@ describe("wasm session boundary", () => {
     expect(payload?.series).toBe(series);
     expect(payload?.frames).toBe(3);
     expect(payload?.bytes).toBe(3_145_728n);
+  });
+
+  it("a transferred frame with content is committed and cached", async () => {
+    // AC7's built-module half, beside F-231's cache test. A transfer
+    // carrying both stack keys and a content id commits through
+    // `commit_cached_frame`, so the frame is resident for its identity
+    // and extent once the budget is set and the committed length is a
+    // multiple of four, which a four-byte frame is.
+    const wasm = await loadModule();
+    const keys = [{ series: 7n, instance: 0, frame: 0 }];
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 1_048_576);
+    // The budget change is setup, not the observation.
+    drainRing(wasm.drain_events());
+    const sink = sessionBulkSink(wasm);
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Uint8Array([1, 2, 3, 4]).buffer,
+      { series: 7, instance: 0, frame: 0, bytes: 4 },
+      {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 1,
+        stackIndex: 0,
+        stackEpoch: epoch,
+        content: 0x1_0000_0001n,
+      },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(
+      frameResident(wasm, { index: 0, epoch, content: 0x1_0000_0001n, columns: 1, rows: 1 }),
+    ).toBe(true);
   });
 
   it("showResident throws the coded CommitRefused for an unselected index and answers false only for a miss", async () => {

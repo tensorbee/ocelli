@@ -416,7 +416,10 @@ export function exportDecodedFrame(
  *
  * A length that disagrees with `meta.bytes` is refused before `alloc`, so a
  * mismatch does not grow linear memory and does not copy. The view is built
- * after `alloc` and is unreachable after `set`.
+ * after `alloc` and is unreachable after `set`. The validated `target`
+ * fields are forwarded beside the handoff, so a stack position and a
+ * content id select the selected-frame and cached-frame routes through the
+ * ticketed sink, as `writeFrame`'s meta does.
  */
 export function acceptTransferredFrame(
   wasm: WasmMemory,
@@ -437,13 +440,7 @@ export function acceptTransferredFrame(
     );
   }
   const fields = frameCommitMeta(target);
-  const committed = {
-    handoff: meta,
-    viewport: fields.viewport,
-    columns: fields.columns,
-    rows: fields.rows,
-    generation: fields.generation,
-  };
+  const committed = { handoff: meta, ...fields };
 
   const len = buffer.byteLength;
   const ptr = session.alloc(len);

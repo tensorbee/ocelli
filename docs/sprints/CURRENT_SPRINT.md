@@ -85,7 +85,7 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
 
 ## Pulled forward from S47
 
-The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, and is implemented from the sprint head. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. Their backlog rows keep sprint S47 until they integrate.
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, implemented from the sprint head, and integrated on 2026-11-08. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. F-237's and F-238's backlog rows keep sprint S47 until they integrate, and F-236's moved to S46 when it integrated.
 
 ## Questions for the operator
 

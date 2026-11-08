@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-230
-**Last updated:** 2026-11-07
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-230, F-236
+**Last updated:** 2026-11-08
 
 What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
 
@@ -115,9 +115,19 @@ ownership back. F-035 keeps the handoff in this file. `exportDecodedFrame`
 copies one decoded range out into a fresh `ArrayBuffer` for section 24's
 worker transfer, and the view exists only for that copy.
 `acceptTransferredFrame` is the render-worker side of the same hop. It uses
-`writeFrame`'s order, which is `alloc`, then a view, then `set`, then
-`commit_frame`. A buffer length that disagrees with `meta.bytes` throws
-`OcelliError` code `LengthMismatch` before that copy. `transferredFrameMessage` returns the section 24 frame
+`writeFrame`'s order, which is `alloc`, then a view, then one `set`, then the
+ticketed sink's commit. The validated target fields travel beside the
+handoff, so the sink picks the export exactly as it does for `writeFrame`.
+`commit_cached_frame` takes a target carrying `stackIndex`, `stackEpoch` and
+`content`, `commit_selected_frame` takes the two stack keys without
+`content`, and `commit_frame` takes the generation otherwise. A stale index
+or epoch comes back as `OcelliError` code `CommitRefused` with the slot
+already released by the session, and a missing selected-frame or
+cached-frame export throws `ExportUnavailable` and is released through
+`releaseAllocated`. A buffer length that disagrees with `meta.bytes` throws
+`LengthMismatch`, and a lone stack key or a `content` without both stack keys
+throws `InvalidValue`, each before `alloc`, so a refused call neither grows
+linear memory nor copies. `transferredFrameMessage` returns the section 24 frame
 message and the transfer list `[buffer]`. It does not call `postMessage` and
 it does not build a view. A third production file is still not granted, so
 none of these moved out of `bulk.ts`.
