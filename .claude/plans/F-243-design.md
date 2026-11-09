@@ -431,3 +431,13 @@ Erratum to the AC14 record: A.1 is on printed page 16 of T.87 (06/1998), not pag
 - **D1 to D4.** Corrected as pass 7 gives them. `read_golomb`'s comment names both callers' limits, LIMIT from A.2.1 for a regular sample and glimit from A.7.2 item 8 for a run-interruption sample, and loses the upstream em-dash and semicolon. `compute_k` states code segment A.10's rule, the smallest k with `N * 2^k >= A`, and loses the floor invariant. RANGE's comment gives the A.2.1 step 1 rule for NEAR > 0 as well. `ContextState::default` is not called the standard's initial state. Pass 7's N1, N2 and N3 are taken too, and the `Predictor::None` comment says what the code returns.
 - **The cap on k.** `compute_k` caps k at qbpp, and A.10 has no cap. The implementer establishes whether the cap can bind on any stream, by an argument from A.2.1 and A.6's bounds on A and N, checked by counting in a scratch build across the generated corpus and the damaged sweep. If it can bind, it is reported, and no code changes until the lead rules.
 - **Where the sweep stops.** Pass 7 confirms every clause citation in the five patched files agrees with T.87, which is what `PATCH-PROVENANCE.md` claims. After this round, a further false upstream comment that is not a citation and not on a line F-243 changed is recorded in a backlog story at sprint close, an audit of the vendored JPEG-LS comments against T.87, and does not block F-243. A wrong line F-243 wrote or rewrote still blocks.
+
+### Operator disposition for AC13, 2026-11-09
+
+This later disposition changes only AC13's completion dependency. It supersedes the pass 5 statement that F-243 cannot complete until that timing run is recorded. The historical text and measurements remain. All other acceptance criteria, verification requirements, baselines, bands, host labels and gates stay unchanged.
+
+The operator has approved F-243 formal completion with a named outstanding AC13 external host and instrument gap. The available Darwin 27 host and actual instrument differ from the recorded Darwin 25.5 host and instrument. The registered comparison verdict remains incomparable, not a pass. A matching host and instrument run, with the idle-host qualification, remains owed after completion.
+
+This disposition permits completion with that gap. It does not itself record the story as completed, does not claim the owed run happened, and does not satisfy F-239's dependency on F-243 by this text. F-239's own acceptance checks stand unchanged.
+
+The 2026-11-09 read-only source binding stays a dated inspection, not a current equivalence claim. Nothing here revises the earlier ramp observations or the historical benchmark record. Evidence remains under the existing F-243 acceptance handoff.

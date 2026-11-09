@@ -507,3 +507,11 @@ Made by the sprint lead on 2026-11-05 under the operator's delegation of the qua
 ### Lead ruling after viewer review pass 2, 2026-11-08
 
 A null result from an older folder generation continues the request loop, so an aborted old file repost cannot strand the new folder's due report. A null result in the current generation still ends that attempt. The permanent browser regression waits for the new folder to be due while the old check is busy before releasing the held library import.
+
+### Lead evidence-stage amendment for AC35, 2026-11-09
+
+The original pre-code empty-checker progress record was not recovered by the bounded handoff search. Its historical chronology remains unverified. For AC35 only, the lead accepts the fresh independent counterfactual replay below in place of that unavailable historical record. It proves the same fixture-discrimination intent and does not claim the original pre-code event or test-first ordering occurred.
+
+The replay uses commit `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf`, checker SHA256 `6ee2d61dea53791065ede025c6de191ad735feba2be6f301a8b6185f56a9ad44` and fixture SHA256 `4a5f56fd8a863f9551961bf3dabc852c9aa7850c6f1f469cab1f70a8c4c80e2b`. The original 42 conformance tests pass. A private empty-checker variant makes AC2, AC3, AC5, AC9 and AC12 each exit 101 at the specified missing-finding assertion. Each of AC35's four after-GREEN faults also exits 101 on its intended test: LO byte counting, the four-year leap rule, dropping the last-value pad exception and a synthetic value echoed in finding JSON. No compiler or setup failure counts as RED.
+
+All private mutations are restored. The unchanged 42-test suite then exits 0. The accompanying independent acceptance record retains every command, mutant hash, direct exit and restoration check. This changes only the evidence stage for AC35. No expected finding, fixture, algorithm, tolerance or other acceptance requirement changes. It supplies no CI result or feature-completion decision.

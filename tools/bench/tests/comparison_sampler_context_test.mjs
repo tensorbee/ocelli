@@ -12,7 +12,7 @@ const block = (pid,footprint=10,peak=20) => `fixture [${pid}]: 64-bit Footprint:
 function foreign(code) {
   return Object.assign(new Error(POISON), {code,stdout:POISON,stderr:POISON,path:POISON,pid:778899});
 }
-async function fixture(mode='success') {
+async function fixture(mode='success',platform='darwin') {
   const dir = await mkdtemp(join(tmpdir(),'comparison-sampler-context-'));
   const key = '__samplerContext'+dir.replace(/\W/g,'');
   const state = {mode,calls:[],actors:[],active:null,productCalls:0,infraCalls:0};
@@ -70,6 +70,11 @@ async function fixture(mode='success') {
   let source=await readFile(sourceUrl,'utf8');
   assert.equal(source.split('const exec = promisify(execFile);').length,2);
   source=source.replace('const exec = promisify(execFile);',`const exec=globalThis[${JSON.stringify(key)}].exec;`);
+  // The fake footprint transport models Darwin, independently of the host
+  // running this control. Substitute only its consumer's platform decision.
+  const guard = 'if (process.platform !== "darwin") return { state: "unavailable", reason: `no collector for ${process.platform}`, native_budget_bytes: actor.nativeBudgetBytes };';
+  assert.equal(source.split(guard).length,2);
+  source=source.replace(guard,guard.replaceAll('process.platform',JSON.stringify(platform)));
   for(const name of ['launchSide','openFolder','windowStep']) {
     const declaration='export async function '+name+'(';
     assert.equal(source.split(declaration).length,2);
@@ -127,6 +132,16 @@ test('actual colour consumer propagates sampler stage and closes its actor',asyn
     await assert.rejects(f.module.measureColourMemorySession('ocelli',{directory:'fixture-only',caseSpec:{serverCacheMiB:512},context}),error=>{safe(error,'product-tool','output-limit');return true;});
     assert.equal(f.state.actors.length,1);assert(f.state.actors[0].closed);assert.equal(context.actors.size,0);
     assert.equal(f.state.productCalls,1,'finally stop is not a second sample attempt');
+  } finally {await f.close();}
+});
+
+test('non-Darwin colour memory remains unavailable and closes without sampling',async()=>{
+  const f=await fixture('success','linux');const context={actors:new Set()};
+  try {
+    const result=await f.module.measureColourMemorySession('ocelli',{directory:'fixture-only',caseSpec:{serverCacheMiB:512},context});
+    assert.deepEqual(result,{state:'unavailable',reason:'no collector for linux',native_budget_bytes:512*1024*1024});
+    assert.equal(f.state.calls.length,0);assert.equal(f.state.productCalls,0);
+    assert.equal(f.state.actors.length,1);assert(f.state.actors[0].closed);assert.equal(context.actors.size,0);
   } finally {await f.close();}
 });
 

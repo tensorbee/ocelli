@@ -93,20 +93,22 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
 
 ## Questions for the operator
 
-- **F-238 known host gaps, proposed for this close and not yet approved.**
-  AC4's Windows native execution and tier report were not observed because
-  no Windows host is available. AC1's `x86_64-apple-darwin` evidence is
-  limited to the resolved dependency graph. Native build and runtime
-  validation on an Intel Mac were not observed because no Intel-Mac host
-  is available. These host observations remain unverified, not passed.
-  AC4's Linux execution and tier report still require an observed
-  `ubuntu-latest` CI run of native step 6 after the sprint push. This Linux
-  run is owed evidence, not a proposed known gap or a pass.
+- **F-238 recorded host gaps and owed Linux proof.**
+  AC4's Windows execution and tier report and AC1's Intel Mac build and
+  runtime observation remain unverified for want of those hosts, as the
+  approved plan records. The resolved Intel Mac dependency graph is observed.
+  Linux still requires an actual `ubuntu-latest` native step 6 build and run.
+  The lead's acceptance-stage clarification permits that observation on an
+  authorized qualification ref before completion. Run `42576164087` at
+  `8fdee914` failed before that step, which was skipped. It supplies no Linux
+  acceptance.
 
-- **F-237 post-push CI remains owed.** Its AC4 `frontend` job on
-  `ubuntu-latest` remains to be observed after integration and push.
-  Release-time AC3 and AC5 remain release obligations. Moving the allocation
-  does not supply those observations or mark the story done.
+- **F-237 qualification CI observation.** The TypeScript job, including
+  `gate packages`, passed in that same exact-head run. The overall workflow
+  failed. The plan's acceptance-stage clarification preserves this bounded
+  job observation without claiming the entire run or a later tree passed.
+  Formal integration and completion remain open. AC3 and AC5 remain release
+  obligations under the approved plan.
 
 - **Non-finite F32 samples in the pyramid, before F-120.** F-119's plan does
   not say what a NaN, an infinity or a negative zero does to a coarser level.

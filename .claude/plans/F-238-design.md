@@ -179,3 +179,11 @@ Made by the sprint lead on 2026-11-07 under the operator's answer of 2026-11-06 
 `bin/ocelli.sh gate gpu` at `2f90ce0f` on the operator's M4 Max: ALL GREEN, 79 tests passed and none failed, including `a_device_opens_and_agrees_with_the_resolved_tier` and `tier_b_margin_or_a_recorded_miss`. The development `ocelli-desktop`, built with the development features at the same tree and run with `OCELLI_TIER` unset, reports "Tier A, decided by Benchmark", one adapter seen, a device created, measured tier A, and candidate "Apple M4 Max" on Metal. Development is unchanged. The shipped build's tier C report is AC4's macOS half, already shown by step 6.
 
 Still owed: AC4's Linux half on an observed `ubuntu-latest` run of step 6 after the sprint push, and AC4's Windows half and AC1 for `x86_64-apple-darwin` beyond `cargo tree`, named as gaps at completion for want of a host.
+
+### Lead acceptance-stage clarification, 2026-11-09
+
+The same reviewed executable and build inputs may supply AC4's Linux proof through the existing CI workflow on an explicitly authorized qualification ref before formal feature completion. The accepted observation remains an actual `ubuntu-latest` native step 6 build and execution, using the fresh `compiler-artifact` executable and its reported tier. The ref name and its position before the final sprint push change no platform, command, required observation or verdict.
+
+This resolves the completion and post-push ordering dependency. It does not waive Linux execution. Record the actual commit, job, build inputs and output. A later documentation or status tree is not itself tested by that earlier run. Executable or build-input changes require fresh relevant CI evidence.
+
+The operator authorized publication of exact `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` on `verify/s46-linux-8fdee91`. CI run `42576164087` failed before Cross-target proof, so native step 6 was skipped and supplies no Linux acceptance. The Windows execution and Intel Mac build and runtime gaps remain named and unverified under the earlier approved scope. No host gap is a pass.

@@ -174,3 +174,9 @@ Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-237-working-pass-
 
 - **D1.** The "(F-210)" attribution is deleted from both notes, identically on `sprint/s46` and here, so the blocks stay byte-identical. `held.rs` came with F-216.
 - **N1 taken.** The `compare_problems` docstring says the tree of that commit.
+
+### Lead acceptance-stage clarification, 2026-11-09
+
+The same reviewed packaging sources may supply AC4's CI observation through the existing workflow on an explicitly authorized qualification ref before formal feature completion. This changes only the observation's order relative to the final sprint push. It retains the actual `frontend` job on `ubuntu-latest`, including its `gate packages` consumer proof, exact source identity and outcome. A later metadata tree is not thereby claimed tested, and packaging or relevant build-input changes require fresh evidence.
+
+CI run `42576164087`, on the operator-authorized qualification ref at exact `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf`, observed the TypeScript job and `gate packages` succeeding. This is a successful job within a failed workflow, not a green whole CI run. Formal feature integration, completion records and final feature verification remain separate. AC3's real-release comparison and AC5's registry observation remain release obligations as previously approved.

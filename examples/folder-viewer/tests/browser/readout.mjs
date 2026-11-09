@@ -49,6 +49,20 @@ const SYNTHETIC_STATUS = "Synthetic study, not a patient. 1 series.";
 const VALUE_SHOWN = /^C \d+ {2}R \d+ {2}\S/;
 
 /**
+ * Await the exact original page.waitForFunction call. When it fails, throw
+ * a new Error carrying only the closed stage label, so a timeout names its
+ * predicate and case instead of being one anonymous wait among many. The
+ * original error text is dropped, never forwarded.
+ */
+async function waitForStage(page, stage, ...wait) {
+  try {
+    return await page.waitForFunction(...wait);
+  } catch {
+    throw new Error(`readout wait failed: ${stage}`);
+  }
+}
+
+/**
  * Each observation is `{ name, before, after, moved, shown, again }`.
  * `before`, `after` and `moved` are `{ read, readHidden, crossHidden,
  * magHidden }`. `shown` names what was showing before the change and
@@ -177,25 +191,25 @@ export function faultProblems(empty, thrown) {
   return problems;
 }
 
-async function openSynthetic(page, url) {
+async function openSynthetic(page, url, caseName) {
   await page.goto(url);
   await page.locator("#source-synthetic").click();
-  await page.waitForFunction(
+  await waitForStage(page, `${caseName}: synthetic status`,
     (text) => (document.getElementById("status").textContent || "").startsWith(text),
     SYNTHETIC_STATUS,
   );
-  await page.waitForFunction(() => {
+  await waitForStage(page, `${caseName}: cell 0 stage visible`, () => {
     const stage = document.querySelector('.cell[data-cell="0"] .stage');
     return stage && !stage.hidden;
   });
 }
 
 async function emptyTileCase(page, url) {
-  await openSynthetic(page, url);
+  await openSynthetic(page, url, "emptyTileCase");
   await page.keyboard.press("m");
   await page.keyboard.press("Shift+G");
   const tile = page.locator('.cell[data-cell="0"] canvas[data-tile="3"]');
-  await page.waitForFunction(() => {
+  await waitForStage(page, "emptyTileCase: tile 4 canvas drawn", () => {
     const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="3"]');
     return node && node.width > 1;
   });
@@ -203,7 +217,8 @@ async function emptyTileCase(page, url) {
   const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await page.mouse.move(point.x + 3, point.y);
   await page.mouse.move(point.x, point.y);
-  await page.waitForFunction(() => !document.getElementById("mag").hidden);
+  await waitForStage(page, "emptyTileCase: magnifier shown over tile 4",
+    () => !document.getElementById("mag").hidden);
   await page.waitForTimeout(300);
   const before = await magHash(page);
   await page.evaluate(() => {
@@ -218,11 +233,11 @@ async function emptyTileCase(page, url) {
 }
 
 async function thrownLayoutCase(page, url) {
-  await openSynthetic(page, url);
+  await openSynthetic(page, url, "thrownLayoutCase");
   await page.keyboard.press("c");
   await page.keyboard.press("m");
   const start = await centreOf(page, 0);
-  await pointAt(page, start, ["readout", "magnifier"]);
+  await pointAt(page, start, ["readout", "magnifier"], "thrownLayoutCase: initial readout+magnifier");
   await page.evaluate(() => {
     const original = paintSelection;
     window.__threw = false;
@@ -253,17 +268,17 @@ async function thrownLayoutCase(page, url) {
 }
 
 async function faultedCellCase(page, url) {
-  await openSynthetic(page, url);
+  await openSynthetic(page, url, "faultedCellCase");
   await page.keyboard.press("c");
   await page.keyboard.press("m");
   const start = await centreOf(page, 0);
-  await pointAt(page, start, ["readout", "magnifier"]);
+  await pointAt(page, start, ["readout", "magnifier"], "faultedCellCase: initial readout+magnifier");
   await page.evaluate(() => {
     window.requestGrey = () => Promise.reject(new Error("injected main failure"));
     dropCache();
   });
   await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(() => {
+  await waitForStage(page, "faultedCellCase: fault visible in cell 0", () => {
     const fault = document.querySelector('.cell[data-cell="0"] .fault');
     return fault && !fault.hidden;
   });
@@ -291,10 +306,10 @@ async function faultedCellCase(page, url) {
 }
 
 async function tileGapCase(page, url) {
-  await openSynthetic(page, url);
+  await openSynthetic(page, url, "tileGapCase");
   await page.keyboard.press("m");
   await page.keyboard.press("Shift+G");
-  await page.waitForFunction(() => {
+  await waitForStage(page, "tileGapCase: tile 1 canvas drawn", () => {
     const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="0"]');
     return node && node.width > 1;
   });
@@ -341,7 +356,7 @@ function magHash(page) {
 
 async function dragCase(page, name, button) {
   const start = await centreOf(page, 0);
-  await pointAt(page, start, ["readout", "magnifier"]);
+  await pointAt(page, start, ["readout", "magnifier"], `dragCase ${name}: initial readout+magnifier`);
   let posts = 0;
   const count = (request) => { if (request.url().endsWith("/value")) posts += 1; };
   page.on("request", count);
@@ -370,7 +385,7 @@ const RING_EDGE = { x: 104.5, y: 49.5 };
 
 async function stepCase(page, name, change) {
   const point = await page.evaluate((at) => imageToClient(activeViewport(), at), RING_EDGE);
-  await pointAt(page, point, ["magnifier"]);
+  await pointAt(page, point, ["magnifier"], `stepCase ${name}: initial magnifier`);
   await page.waitForTimeout(300);
   const before = await magHash(page);
   await change();
@@ -402,10 +417,10 @@ async function centreOf(page, cell) {
   return { x: box.x + box.width / 2 + 7, y: box.y + box.height / 2 + 5 };
 }
 
-async function pointAt(page, point, expect) {
+async function pointAt(page, point, expect, stage) {
   await page.mouse.move(point.x, point.y);
   await page.mouse.move(point.x + 1, point.y);
-  await page.waitForFunction(({ wantsReadout, wantsMag, pattern }) => {
+  await waitForStage(page, stage, ({ wantsReadout, wantsMag, pattern }) => {
     const read = document.getElementById("cross-read");
     const shown = !read.hidden && new RegExp(pattern).test(read.textContent || "");
     const mag = !document.getElementById("mag").hidden;
@@ -424,7 +439,7 @@ async function observe(page, name, shown, again, change, where = centreOf) {
   const cell = 0;
   const point = await where(page, cell);
   try {
-    await pointAt(page, point, shown);
+    await pointAt(page, point, shown, `observe ${name}: before-change readout/magnifier`);
   } catch (error) {
     throw new Error(`${name}: the readout was not shown before the change, ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -435,7 +450,7 @@ async function observe(page, name, shown, again, change, where = centreOf) {
   const next = await where(page, cell);
   let moved;
   try {
-    await pointAt(page, { x: next.x + 3, y: next.y + 2 }, again);
+    await pointAt(page, { x: next.x + 3, y: next.y + 2 }, again, `observe ${name}: after-move readout/magnifier`);
   } catch {
     // The problem list says what did not come back.
   }
@@ -453,11 +468,11 @@ export async function observeReadout(url, chromium) {
     page.setDefaultTimeout(30000);
     await page.goto(url);
     await page.locator("#source-synthetic").click();
-    await page.waitForFunction(
+    await waitForStage(page, "observeReadout: synthetic status",
       (text) => (document.getElementById("status").textContent || "").startsWith(text),
       SYNTHETIC_STATUS,
     );
-    await page.waitForFunction(() => {
+    await waitForStage(page, "observeReadout: cell 0 stage visible", () => {
       const stage = document.querySelector('.cell[data-cell="0"] .stage');
       return stage && !stage.hidden;
     });
