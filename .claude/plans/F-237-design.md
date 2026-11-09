@@ -2,7 +2,7 @@
 
 **Status**: approved
 **Epic ref**: E19.6
-**Sprint**: S47
+**Sprint**: S46
 **Estimate**: 1w
 
 Story row, `docs/sprints/BACKLOG.md`: "The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place". Layer Build, depends on F-220 and F-228, milestone M20.

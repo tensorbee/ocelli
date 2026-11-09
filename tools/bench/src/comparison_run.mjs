@@ -478,6 +478,52 @@ async function metadata(actor) {
   return { version: actor.browser.version(), renderer, defaults: { serverCacheBytes: held.budget, pageGreyCacheBytes: pageBudget, decodePermits: SERVER_PERMITS } };
 }
 
+/** Decode the comparator's closed seven-field process protocol. A valid
+ * exit-1 verdict is a pixel refusal, never a foreign exception or a pass. */
+export function readPairVerdict(result, pixelCount) {
+  let verdict = null;
+  try {
+    const fields = ["within_one_lsb_fraction", "count_over_max", "max_abs_diff",
+      "signed_mean_bias_informative", "informative_fraction", "low_information", "passes"];
+    const { code, signal, killed, stdout, stderr } = result;
+    if ((code === 0 || code === 1) && signal == null && killed !== true &&
+        typeof stdout === "string" && stdout.length <= 4096 && stderr === "" &&
+        Number.isSafeInteger(pixelCount) && pixelCount > 0) {
+      const parsed = JSON.parse(stdout);
+      // Values are numeric, boolean or null, so exactly seven property
+      // tokens also reject duplicate keys, including escaped spellings.
+      const keys = [...stdout.matchAll(/("(?:\\.|[^"\\])*")\s*:/g)].map((match) => JSON.parse(match[1]));
+      const fraction = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+      const bias = parsed?.signed_mean_bias_informative;
+      if (parsed && !Array.isArray(parsed) && typeof parsed === "object" &&
+          Object.keys(parsed).length === fields.length && keys.length === fields.length &&
+          new Set(keys).size === fields.length && fields.every((field) => Object.hasOwn(parsed, field)) &&
+          fraction(parsed.within_one_lsb_fraction) && fraction(parsed.informative_fraction) &&
+          Number.isSafeInteger(parsed.count_over_max) && parsed.count_over_max >= 0 && parsed.count_over_max <= pixelCount &&
+          Number.isInteger(parsed.max_abs_diff) && parsed.max_abs_diff >= 0 && parsed.max_abs_diff <= 255 &&
+          (bias === null || (typeof bias === "number" && Number.isFinite(bias) && bias >= -255 && bias <= 255)) &&
+          typeof parsed.low_information === "boolean" && typeof parsed.passes === "boolean" &&
+          (code === 0 ? parsed.passes && !parsed.low_information : !parsed.passes)) verdict = parsed;
+    }
+  } catch { /* Foreign output and parse errors are never forwarded. */ }
+  if (!verdict) throw new Error("the pixel comparator did not produce a valid verdict", { cause: comparisonFailure(1) });
+  return verdict;
+}
+
+/** Normalize expected exit 1 without exposing child-process diagnostics. */
+export async function runPairComparator(comparator, reference, candidate, width, height) {
+  let result;
+  try {
+    const { stdout, stderr } = await exec(comparator, ["pair", "--reference", reference, "--candidate", candidate,
+      "--width", String(width), "--height", String(height)], { maxBuffer: 4096 });
+    result = { code: 0, signal: null, killed: false, stdout, stderr };
+  } catch (error) {
+    result = { code: error?.code, signal: error?.signal, killed: error?.killed,
+      stdout: error?.stdout, stderr: error?.stderr };
+  }
+  return readPairVerdict(result, width * height);
+}
+
 export async function pixelPrecheck(context, inputs, temp) {
   if (!inputs.directories["pseudo-ct"]) throw new Error("the pixel precondition has no qualifying pseudo CT series", { cause: comparisonFailure(2) });
   let sides = [];
@@ -496,8 +542,8 @@ export async function pixelPrecheck(context, inputs, temp) {
       if (bytes.length !== frames[i].width * frames[i].height * 4) throw new Error("the pixel-check capture has the wrong byte length", { cause: comparisonFailure(1) });
       await writeFile(raw[i], bytes);
     }
-    const result = await exec(context.comparator, ["pair", "--reference", raw[1], "--candidate", raw[0], "--width", String(frames[0].width), "--height", String(frames[0].height)]);
-    return { verdict: JSON.parse(result.stdout), metadata: meta };
+    const verdict = await runPairComparator(context.comparator, raw[1], raw[0], frames[0].width, frames[0].height);
+    return { verdict, metadata: meta };
   } finally { for (const actor of sides) await actor.close().catch(() => {}); }
 }
 

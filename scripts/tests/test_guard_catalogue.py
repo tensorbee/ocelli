@@ -5,7 +5,8 @@
 
 Needs nothing but the standard library. One close-state regression builds a
 real disposable sandbox to distinguish inherited fixture handoffs from a
-handoff planted after setup. The sandbox's own refusals are covered by
+handoff planted after setup. A launcher regression observes actual child PID
+and URL propagation in a disposable fixture. The sandbox's own refusals are covered by
 `scripts/guard_probe.py --self-test`, which the `guards` gate runs.
 
 **These are assertions about the DECLARATION.** That every entry is well
@@ -23,6 +24,7 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -30,7 +32,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS, _close_preflight, _write_close_state,
+                              GUARDS, _close_preflight,
+                              _example_dev_reaches_a_url, _write_close_state,
                               _workspace_manifest_with_exclusion)
 
 
@@ -211,6 +214,33 @@ class WorkspaceExcludeProbeBuilder(unittest.TestCase):
             ["vendor/ritk-codecs-0.6.0", "tools/oracle"],
         )
         self.assertEqual(updated.count("\nexclude = "), 1)
+
+
+class ExampleDevControlKeepsBackgroundChild(unittest.TestCase):
+    def test_the_control_observes_its_background_pid_and_exported_url(self) -> None:
+        launcher = (ROOT / "bin/example-dev.sh").read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            box = sandbox.Sandbox(path=Path(directory))
+            target = box.write("bin/example-dev.sh", launcher)
+            target.chmod(0o755)
+            original_run = box.run
+
+            def observed_run(argv, **kwargs):
+                # The witness follows both assertions. An EXIT trap may mask a
+                # shell failure's status, so status alone cannot prove these ran.
+                box.append(
+                    "bin/example-dev.sh",
+                    '\ntest -n "${pid-}" || exit 71\n'
+                    'test "${VITE_EXAMPLE_SERVER-}" = http://127.0.0.1:9 || exit 72\n'
+                    'printf "%s\\n" "fixture: child PID and URL observed"\n')
+                return original_run(argv, **kwargs)
+
+            with mock.patch.object(box, "run", side_effect=observed_run):
+                done = _example_dev_reaches_a_url(box)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("example helper http://127.0.0.1:9", done.stderr)
+            self.assertIn("fixture: child PID and URL observed", done.stdout)
+        self.assertEqual((ROOT / "bin/example-dev.sh").read_bytes(), launcher)
 
 
 class CatalogueIsWellFormed(unittest.TestCase):

@@ -5795,3 +5795,195 @@ this branch had not touched since the base.
 **Deviations from the design plan.** Approved review amendments added cross-Fragment marker inspection, early impossible-count refusal and fallible reservation. A later oracle metadata-prefix amendment restores EOT metadata without a generic OV parser or partial-error dataset. The approved HTJ2K split policy is lenient interoperability, not standard conformance.
 
 **Notes for future sessions.** D-18 prohibits publishing `ocelli-dicom` until an upstream release carries the collector fix and the vendor is removed, since cargo publish discards the path patch. No upstream issue publication is claimed. Exact F244 feature-only `5efae178` to `3aec4ae5` release pairs measure render 2,202,907/decode 16,455 bytes unchanged, independently of later aggregate wasm sizes. The repaired oracle/reference and native candidate retain 74 pass, 59 unmeasured, 0 fail, 0 absent. Weak content and software SwiftShader reference are not scored parity or hardware-tier proof. JPEG XL reference rows remain declared `unsupported_source`, with native synthetic-byte evidence separate. The `0 absent` count refers to candidate-census coverage. Claude implemented the parser, root repaired critical marker/count paths and independent Codex reviews challenged them. Total effort was not measured.
+
+## F-234, Bounded sequence depth in parse_part10, completed 2026-11-09
+
+**What was built.** The non-recursive structural preflight counts open Sequences and returns the fixed patient-safe Copy variant ParseError::SequenceTooDeep before dicom-rs recurses. MAX_SEQUENCE_DEPTH is 64. Depth 64 is accepted and 65 refused, including after Deflate adaptation. Items add no separate depth and sibling Sequences do not accumulate depth. The folder viewer returns 400 not-part10 and serves the next request.
+
+**HLD sections implemented.** HLD 23, docs/hld/20-errors-and-panics.md. DICOM PS3.5 sections 7.5 and 7.1 govern Sequence nesting and tag order.
+
+**Deviations.** None.
+
+**Crates / packages modified.** crates/ocelli-dicom, folder-viewer integration tests and documentation. No new dependency or pixel arithmetic.
+
+**Tests added.** At-limit parsing and MetadataSet projection on a 2 MiB debug thread, one-past refusal, 100000 levels on a 256 KiB thread stack, defined/undefined lengths, implicit little endian, Deflate, mixed-form proptest, fixed Copy message, sibling reset and measured fixture depth. Independent F-234-working-pass-4.md reports 0 defects, 0 smells and 3 nonblocking nits. Parser blob 7ce07c0c63c6c7cb396a3659f30042269264e0e7 is unchanged through 9a4456b6.
+
+**Fixture provenance.** No pixel arithmetic or new corpus file. The known SR shape follows PS3.16 TID 1500 to 1501 to 300 to 301 row 11 to 315 row 2, with PS3.3's Measured Value, Measurement Units and optional Equivalent Code Sequences. It measures 8 open Sequences and 10 inside the de-identification wrapper. 64 satisfies the approved four-times margin. These Extensible templates do not define a universal maximum.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated Ocelli-Verify receipt. Earlier source evidence includes source 752/b889's 29-gate floor, exit 0/501.193643459s, with native Step 6. Canonical 9a4456b6/tree ee761522 passed 29-gate floor 0/595.748784834s and corpus 0/3.851860542s after the prior three completion records. Neither earlier checkpoint verifies this appended entry.
+
+**Corpus.** No additions. Review 4's dated observation covered 100 files at deepest 2. The recorded TID 1500 writer depth 5, KOS 2 and SC 0 are historical measurements of known inputs, not current global maxima.
+
+**Tier coverage.** A, B and C are n/a for this pre-render parser bound. Native consumer behavior was observed, without claiming new GPU-tier proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md lists F-234 and describes the 64 limit, measured known shape and refusals.
+
+**User-facing documentation.** The Use book lists SequenceTooDeep and MAX_SEQUENCE_DEPTH. README and More do not enumerate parser variants and require no change for this story. The changelog records the bounded refusal.
+
+**Deviations from the design plan.** Approved lead amendments expanded the measured writer/template inputs and made AC10 the actual 400 not-part10 response followed by a served request. The final known shape is 10 wrapped and the constant remains 64.
+
+**Notes for future sessions.** AC7 uses retained historical reviews. Review 1 quotes the original implementer's old one-past parser Ok record. Reviews 2/3 observed guard-removed AC3 and deep HTTP stack overflows. The original scratch handoff is unavailable in the known locations, so no original raw receipt or fresh pre-code execution is claimed. Implementation was by GLM with independent Claude reviews. Closure metadata was drafted through GLM and corrected by Codex. Effort was not measured. Historical parallel coding preceded dependency closure, while F-225 and F-229 are now formally complete.
+
+## F-228, The Content Security Policy Ocelli needs, completed 2026-11-09
+
+**What was built.** The embedding policy has four directives, defined once and quoted in the documentation, with DICOMweb origins added only to connect-src. Browser probes prove the every-response rule, worker policy, named minimality refusals and blob-worker failure. The native folder viewer derives and caches strict script and style hashes from each compiled page, including its import map, without unsafe-inline, unsafe-eval, blob or wasm-unsafe-eval. No library API changed.
+
+**HLD sections implemented.** The operator-added CSP scope builds on docs/hld/07-concurrency-and-typescript.md sections 9 and 10, docs/hld/21-worker-protocol.md section 24, and docs/hld/11-decision-log.md D5. These provide worker and transfer context, not a new claim that this story proves the entire worker protocol.
+
+**Deviations.** none.
+
+**Crates / packages modified.** examples/viewer-react, examples/folder-viewer, their browser and policy tests, Cargo dependency wiring, README and the TypeScript packaging LLD.
+
+**Tests added.** 13 policy unit tests in examples/viewer-react/src/csp-policy.test.ts, 15 native policy unit tests in examples/folder-viewer/src/csp.rs, one native HTTP policy contract in tests/preview.rs, and explicit React and folder browser probes. The latter include positive behavior and named negative controls.
+
+**Fixture provenance.** No new pixel arithmetic. The folder probe compares seven synthetic lossless compressed rows with the same page's uncompressed reference. This is decode identity over existing F-206 and F-216 arithmetic fixtures, not independent absolute pixel gold. CSP hash and base64 vectors cite RFC 4648 and FIPS 180-4.
+
+**Verification.** Final feature verification is bound to this completion commit's exact-tree hook-generated Ocelli-Verify receipt. The dated 9a4456b6a027d2fb1755a2f8bcccb5d64c8853f2 source proof supplies current explicit acceptance, not verification of later completion metadata. React passed 13 cases with zero failed or not run. The folder probe passed six groups, including seven compressed pairs. Both used Chromium 151.0.7922.34 and preserved 165 source and artifact hashes.
+
+**Corpus.** F-228 adds no manifest rows. Seven lossless syntax rows and their uncompressed reference were present and observed. Final completion-tree corpus results remain bound to the completion receipt.
+
+**Tier coverage.** A (WebGPU) not observed. B (WebGL2 downlevel) not observed. C (CPU) worker compilation and canvas publication observed under the embedding policy, with native folder drawing under its separate policy. No all-tier rendering or physical-display calibration claim.
+
+**LLD updated.** docs/lld/typescript-packaging.md describes the embedding policy, worker response requirement, blob refusal, decode-gap guard and distinct cached folder-page hash policy.
+
+**User-facing documentation.** README.md, Start the example viewer, gives the marked policy blocks and probe commands. use.html chapter 5.1 covers worker loading, DICOMweb and CDN origins. more.html #worker distinguishes embedding from native folder policy.
+
+**Deviations from the design plan.** Approved AC2 amendments replace free-prose matching with exact marked blocks and extend the check to the Use page. Runtime wiring uses a typed page identity and target gating matching serve. No policy, tolerance or acceptance gate was weakened.
+
+**Notes for future sessions.** F-215's integrated capability and actual SR save/reload flow were exercised under CSP. Its separate human Chrome AC18 remains open. The current proof is f228-current-canonical-probe-proof.json. The initial combined snapshot failed before writing because it included a not-yet-built folder binary. Its first React pass remains preserved, and the final bound-input repeat supplies the valid source proof. F-266 retains the arbitrary-static-host build-path follow-up. No Firefox, WebKit, isolated wasm-size cost, CI, publication or sprint-close acceptance is claimed. Claude, GLM and Codex contributed without an isolated total effort measurement.
+
+## F-237, The wasm module ships outside the @ocelli/core tarball, completed 2026-11-09
+
+**What was built.** The `@ocelli/wasm` package carries the full module, JS glue and types, its decode split, and both third-party notice files. `@ocelli/core` declares the matching exact-version peer. `loadCore` keeps its caller-supplied initialization API. Release preflight cold-builds the revision in a fresh checkout/target, compares packed identity and digests before any tag, push or publication, and publishes the checked tarball. npm order is wasm, core, react after crates.io. Build identity records HEAD, staged tree and unstaged tracked status. Packaging refuses unstaged tracked work, while release requires the clean tag revision.
+
+**HLD sections implemented.** Published packages use the `@ocelli` scope. TypeScript shell/core and the sole wasm-bindgen crate retain their existing boundary. The HLD did not specify the distribution route, which the approved package decision supplies.
+
+**Deviations.** None.
+
+**Crates / packages modified.** `packages/wasm`, the matching core peer, package/release tooling including `bin/ocelli.sh`, and release documentation.
+
+**Tests added.** Synthetic package notices, identity, version, cold-comparison and release-wiring controls, plus the external packed consumer proof. Latest feature pass 5 reran 69 unit tests and two lint-policy probes. This suite total is not a count of new tests.
+
+**Fixture provenance.** Synthetic packaging/identity fixtures, no DICOM fixture or pixel arithmetic.
+
+**Verification.** `F-237-working-pass-5.md` records 0 defects, 0 smells and 1 nonblocking nit. The later close-fixture sandbox repair independently retained the real outstanding-handoff refusal. Authorized CI run 42576164087 at 8fdee9143dc09891f5540619dc0ee4cee9d7bbdf passed Ubuntu TypeScript job 129024252656 including packages, within a failed workflow. The same packaging sources also passed TypeScript job 129070985616 in run 42590597505 at b88932771f17026f634046629f85315af31941bf, within the completed failed workflow. Rust, Viewer browser and Guards failed, while that TypeScript job and the wasm-size, verification-evidence and corpus-tooling jobs passed. The final CI snapshot retains those results, not an in-progress Rust assumption. Neither job is a green whole-CI claim. Canonical 9a4456b6/tree ee761522 supplied earlier 29-gate feature-floor and corpus exits 0. Final feature verification and corpus bind to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt, not an earlier checkpoint.
+
+**Corpus.** No additions or pixel-path changes.
+
+**Tier coverage.** A, B and C are n/a for packaging, no new rendering proof.
+
+**LLD updated.** `docs/lld/typescript-packaging.md` and `docs/lld/release-policy.md` describe the package and release rules. Contributor headers include F-237, with current completion dates.
+
+**User-facing documentation.** README, Use and More describe module distribution and matching versions. `docs/RELEASE.md` and the release command agree on preflight and order.
+
+**Deviations from the design plan.** Approved rulings record staged-tree identity, make cold comparison a pre-publication precondition and accept the authorized qualification CI observation before formal completion. Current allocation is S46, preserving historical S47 intake quotes.
+
+**Notes for future sessions.** AC3's actual real-release end-to-end comparison and AC5's registry installation remain owed release-time observations under the approved evidence stages. Packed consumer tests are not registry publication. F-220 is complete. F-228 closes in this same atomic batch, with its current explicit CSP observations. Final metadata verification binds this completion tree. Effort was not measured. Source work and its independent Claude reviews precede this GLM-drafted, Codex-corrected completion record.
+
+## F-239, Folder viewer colour frames through the library's colour stage, completed 2026-11-09
+
+**What was built.**
+
+Native folder viewer draws supported RGB, YBR and PALETTE COLOR through the ocelli-pixel colour stage and byte rule on the decoder's reported output space: per-channel window and invert, ROI statistics, named layout/depth/palette controls, JPEG 2000 and HTJ2K component transforms before level shift and clamp, refusals by name for unsupported shapes, mixed-kind window links.
+
+**HLD sections implemented.**
+
+Section 18 colour stage, section 25 fixture/oracle evidence, native viewer consumer, reviewed codec extensions.
+
+**Deviations.**
+
+D-29: colour window parity after stage 4. D-30: unapplied profiles named, narrowed by F-240. D-31: codec vendor patches. No colour parity or new colour tolerance claimed.
+
+**Crates / packages modified.**
+
+ocelli-pixel, ocelli-render, ocelli-codec, ocelli-dicom, folder viewer, codec vendor sources, synthetic corpus tooling, oracle and benchmark instruments, documentation and guards.
+
+**Tests added.**
+
+Hand RGB/YBR/palette/depth/window fixtures, compressed output/refusal cases, raw-value and one-walk ROI controls, held-cache admission/refusal/reuse, mixed-kind links, browser canvas/readout/statistics and corrupted-reply controls, named mutants, unmeasured lossy JPEG aggregates, hand-checked statistic controls.
+
+**Fixture provenance.**
+
+Own synthetic inputs from PS3.3 C.7.6.3, PS3.5 JPEG 2000 and accessible T.800 Annex G, DICOM 2026d and retired 2017b YBR text, takeover timing explicit, bare fixtures distinct from the ignored corpus.
+
+**Verification.**
+
+Reviews are source-bound, not a whole-feature approval. Matched Node 24 five-subject values (967 ms open, 11.3 ms first, 108.774 fps scroll, 2.2 ms window, 464125952 bytes resident) pass unchanged bands and absolute budgets after the required repair, not otherwise idle. Four largest native cases (raw sha256 6f32db8e4cc0b525a28c95bb973747973ae9bed1a774440300d13bcfaeabd3c4): first decoded, nine held windows each valid, positive RSS, RGB/palette first+window 2171.469/2699.735 and 2503.991/3087.126 ms, ICC8 6080.290/6567.662, ICC16 6369.414/6748.776. Five colour comparisons complete (raw SHA identities in LLD, controlled synthetic, unscored), 22 numerically higher latency medians (19 separated, 3 overlap), target misses NOT PASSED, open cause unisolated. They do not satisfy F-223's actual operator root AC18/19/decision 12. The completion receipt is the exact final staged-tree feature record read by the commit-msg hook. Prior measurements do not certify this metadata tree.
+
+**Corpus.**
+
+Manifest/digest and candidate evidence retained, comparison at 133 views: 74 pass, 0 fail, 59 unmeasured, 0 absent, colour statistics unscored.
+
+**Tier coverage.**
+
+Native folder display is the CPU consumer: A/B acquire no device, no GPU colour-window entry point, no wasm pixel crossing, native HTTP replies carry display bytes.
+
+**LLD updated.**
+
+Reviewed pixel-pipeline, render-graph, codecs, frame-open, oracle, corpus, build-targets and benchmarks text covers the consumer and measured limits.
+
+**User-facing documentation.**
+
+README, Use and More's matrix describe drawing, controls, refusals and profile notices.
+
+**Deviations from the design plan.**
+
+Bounded scratch, palette admission, one-draw validation, exact final-byte storage, nearest inverse coefficients, AC20 instrument, colour census and unmeasured JPEG fixtures ruled, first-image regression fixed within bands, not waived.
+
+**Notes for future sessions.**
+
+No idle-host, universal JPEG bound or colour-pixel pass claimed.
+
+## F-240, Matrix and tone-curve ICC profiles in stage 4, completed 2026-11-09
+
+**What was built.**
+
+The supported RGB matrix/TRC subset applies in the native CPU colour path after device-code normalization: held frames retain the resolved transform and device tables charged before cache admission, unsupported kinds stay named and unapplied with device RGB drawn, applied profiles remove the warning, GPU callers report ICC unavailable.
+
+**HLD sections implemented.**
+
+Section 18 stage 4 and the colour-management requirement, scoped to the approved matrix/TRC subset.
+
+**Deviations.**
+
+D-30 narrows to unsupported kinds, approved printed matrix, clipping and D14 divergence remain, F-271 comparison separate, no full ICC or display-calibration claim.
+
+**Crates / packages modified.**
+
+ocelli-pixel, native render/viewer integration and reader fields, synthetic profile/corpus tooling, benchmark extension, documentation and guards.
+
+**Tests added.**
+
+Counted gamma, table, parametric, matrix-column and stored-depth fixtures, classification/fallback and untagged-identity controls, table capacity/admission, GPU unavailability, applied/refused profile browser cases, named mutants.
+
+**Fixture provenance.**
+
+Reviewed basis is ICC.1:2022-05 and the ICC April 2015 sRGB note. IEC publisher text was not read. The source-basis limitation is explicit. Six own profiles form the comparison.
+
+**Verification.**
+
+Component remediations have bounded clean reviews. In the four largest native cases (raw sha256 shared with F-239), ICC16 uses the 512MiB cache only. CMM: six profiles, 132 native, 264 reference observations, bounded maximum 0.3534772098 on 0..255, six unbounded above-one flags investigated as existing clipping, no discarded data, no numerical waiver. Large untagged literal-base reductions: accepted non-regression lead, NOT within noise, normalized control diagnostic, no baseline change, no isolated ICC cost. Render 2205614 and decode 16455 release bytes, budgets unchanged, nonzero STACK attribution not ICC-only. The completion receipt is the exact final staged-tree feature record read by the commit-msg hook. Prior measurements do not certify this metadata tree.
+
+**Corpus.**
+
+Synthetic profile rows and classification under the existing manifest/digest, colour reference rows unscored.
+
+**Tier coverage.**
+
+Native CPU supports the declared subset, A/B ICC explicitly unavailable, outside-subset application named and omitted, not a whole-image refusal.
+
+**LLD updated.**
+
+Reviewed pixel-pipeline, frame-open, corpus, feature-availability, build-targets, benchmarks and render-graph text describes the native subset and measured limits.
+
+**User-facing documentation.**
+
+README, Use and More's matrix distinguish applied profiles from named unsupported kinds, no display-calibration claim.
+
+**Deviations from the design plan.**
+
+Approved source matrix and clipping stand, AC14 lead accepted non-regression, ICC16 alone 512MiB.
+
+**Notes for future sessions.**
+
+Runtime source 0fad to b889 to 9a445 unchanged, ICC vs reference device RGB different semantics, misses retained.

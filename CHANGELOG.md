@@ -10,6 +10,10 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The embedding Content Security Policy is documented and browser-proven, and the local folder viewer serves strict page-specific script and style hashes.
+- Release tooling packages the wasm module and its notice files separately as `@ocelli/wasm`, alongside the matching `@ocelli/core` version.
+- Folder viewer colour frames draw through the library colour stage with per-channel window and invert and named refusals.
+- Matrix and tone-curve ICC profiles apply in the native CPU colour path. Unsupported kinds stay named and unapplied.
 - The local viewer shows scoped DICOM conformance findings without exposing file values in findings or stopping display.
 - Compressed DICOM files with an empty Basic Offset Table open, including frames spanning fragments when their JPEG or JPEG 2000 markers prove the boundaries.
 
@@ -715,6 +719,7 @@ Repository bootstrap. Nothing is published.
 
 ### Fixed
 
+- Files whose sequence nesting exceeds this build's supported depth are refused before recursive parsing, keeping the local viewer process available for the next request.
 - The example viewer builds again from a clean clone with no
   `crates/ocelli-wasm/pkg`. Under Vite 7 `npm run build` failed with ENOENT on
   `ocelli_wasm.js`. Without the pkg the worker now keeps a runtime import and

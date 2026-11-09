@@ -87,10 +87,21 @@ fn note_pool(images: &[(Option<FileId>, u32)]) {
     }
 }
 
-/// Rounds running now and the most seen at once, by viewer generation,
-/// counted inside the round whatever admitted it.
+/// Test-only occupancy state is isolated by the real viewer generation.
 #[cfg(test)]
-static ROUNDS: std::sync::Mutex<Vec<(u64, usize, usize)>> = std::sync::Mutex::new(Vec::new());
+#[derive(Default)]
+struct RoundState {
+    active: usize,
+    peak: usize,
+    waiting: usize,
+    held: bool,
+}
+
+#[cfg(test)]
+static ROUNDS: std::sync::Mutex<std::collections::BTreeMap<u64, RoundState>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+#[cfg(test)]
+static ROUNDS_CHANGED: std::sync::Condvar = std::sync::Condvar::new();
 
 #[cfg(test)]
 struct RoundCount(Option<u64>);
@@ -103,12 +114,14 @@ impl RoundCount {
             let mut rounds = ROUNDS
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match rounds.iter_mut().find(|(seen, _, _)| *seen == generation) {
-                Some((_, now, peak)) => {
-                    *now = now.saturating_add(1);
-                    *peak = (*peak).max(*now);
-                }
-                None => rounds.push((generation, 1, 1)),
+            let state = rounds.entry(generation).or_default();
+            state.active = state.active.saturating_add(1);
+            state.peak = state.peak.max(state.active);
+            ROUNDS_CHANGED.notify_all();
+            while rounds.get(&generation).is_some_and(|state| state.held) {
+                rounds = ROUNDS_CHANGED
+                    .wait(rounds)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
             }
         }
         Self(generation)
@@ -124,9 +137,96 @@ impl Drop for RoundCount {
         let mut rounds = ROUNDS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some((_, now, _)) = rounds.iter_mut().find(|(seen, _, _)| *seen == generation) {
-            *now = now.saturating_sub(1);
+        if let Some(state) = rounds.get_mut(&generation) {
+            state.active = state.active.saturating_sub(1);
         }
+        drop(rounds);
+        ROUNDS_CHANGED.notify_all();
+    }
+}
+
+/// A request that has reached the actual full-round admission wait.
+#[cfg(test)]
+pub(crate) struct WaitingRound(u64);
+
+#[cfg(test)]
+impl WaitingRound {
+    pub(crate) fn enter(generation: u64) -> Self {
+        let mut rounds = ROUNDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = rounds.entry(generation).or_default();
+        state.waiting = state.waiting.saturating_add(1);
+        drop(rounds);
+        ROUNDS_CHANGED.notify_all();
+        Self(generation)
+    }
+}
+
+#[cfg(test)]
+impl Drop for WaitingRound {
+    fn drop(&mut self) {
+        let mut rounds = ROUNDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(state) = rounds.get_mut(&self.0) {
+            state.waiting = state.waiting.saturating_sub(1);
+        }
+        drop(rounds);
+        ROUNDS_CHANGED.notify_all();
+    }
+}
+
+/// Keeps admitted rounds parked until the test observes every admission attempt.
+#[cfg(test)]
+pub(crate) struct HeldRounds(u64);
+
+#[cfg(test)]
+pub(crate) fn hold_rounds(generation: u64) -> HeldRounds {
+    let mut rounds = ROUNDS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    rounds.entry(generation).or_default().held = true;
+    HeldRounds(generation)
+}
+
+#[cfg(test)]
+impl HeldRounds {
+    pub(crate) fn wait_for_attempts(&self, expected: usize) -> Option<(usize, usize)> {
+        // Leave cleanup time inside the unchanged five-second HTTP bound.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut rounds = ROUNDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            if let Some(state) = rounds.get(&self.0)
+                && state.active.saturating_add(state.waiting) >= expected
+            {
+                return Some((state.active, state.waiting));
+            }
+            let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+            let (next, timeout) = ROUNDS_CHANGED
+                .wait_timeout(rounds, remaining)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            rounds = next;
+            if timeout.timed_out() {
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for HeldRounds {
+    fn drop(&mut self) {
+        let mut rounds = ROUNDS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(state) = rounds.get_mut(&self.0) {
+            state.held = false;
+        }
+        drop(rounds);
+        ROUNDS_CHANGED.notify_all();
     }
 }
 
@@ -136,10 +236,7 @@ pub(crate) fn rounds_peak(generation: u64) -> usize {
     let rounds = ROUNDS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    rounds
-        .iter()
-        .find(|(seen, _, _)| *seen == generation)
-        .map_or(0, |(_, _, peak)| *peak)
+    rounds.get(&generation).map_or(0, |state| state.peak)
 }
 
 /// Pools made for lists of ids of viewer `generation`.

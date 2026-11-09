@@ -7334,7 +7334,7 @@ def _example_dev_reaches_a_url(
     box.substitute(
         "bin/example-dev.sh",
         '"$root/target/debug/ocelli-example-server" >"$url_file" &',
-        "printf '%s\\n' 'http://127.0.0.1:9' >\"$url_file\"")
+        "printf '%s\\n' 'http://127.0.0.1:9' >\"$url_file\" &")
     box.substitute(
         "bin/example-dev.sh",
         "npm run dev -w @ocelli/example-viewer",
@@ -13443,6 +13443,7 @@ GUARDS: tuple[Guard, ...] = (
                 control=Invoke(
                     "example-dev reaches a printed URL",
                     _example_dev_reaches_a_url),
+                control_expect="example helper http://127.0.0.1:9",
                 note="The plan requires the helper's base URL before Vite. "
                      "The probe stubs the build and the binary so the sandbox "
                      "can reach the wait, and shortens that wait. The control "
@@ -16130,7 +16131,8 @@ GUARDS: tuple[Guard, ...] = (
         gate="bench",
         spec="F-223 equipped comparison lifecycle, clocks and privacy",
         refuses="Missing inputs or pinned tools, invalid observed clocks, "
-                "unobserved pixels or process inventories, different browser "
+                "unobserved pixels or process inventories, malformed comparator "
+                "verdicts or incoherent process exit/output channels, different browser "
                 "identities, failed trials, source changes, private output, "
                 "invalid publication and incomplete resource cleanup.",
         claims=("*",),
@@ -16140,6 +16142,14 @@ GUARDS: tuple[Guard, ...] = (
               "counts, privacy, failed CT preconditions, signal cleanup, "
               "retained environment and invalid-publication refusals, and "
               "setup-only CPU coherence retries through actual orchestration. "
+              "Three permanent pair-process controls reject malformed, unknown "
+              "or duplicate verdict fields, invalid scalar domains, contradictory "
+              "exit/passes/low-information status and foreign stdout, stderr or "
+              "signal channels. The actual precheck/controller retains a valid "
+              "exit-1 refusal report with zero timing trials and completed cleanup "
+              "using controlled synthetic process fixtures. Tiny RGBA observations "
+              "through the real release comparator are separately recorded "
+              "explicit checks outside the floor, not default fixture execution. "
               "The opted-in browser control exercises the real metadata "
               "provider and retained refusal after both browsers close. "
               "Installed Chromium and macOS footprint "

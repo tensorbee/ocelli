@@ -1,7 +1,7 @@
 # TypeScript packaging
 
 **F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-228, F-230, F-236, F-237
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-09
 
 What `@ocelli/core`, `@ocelli/wasm` and `@ocelli/react` publish, and what proves it.
 

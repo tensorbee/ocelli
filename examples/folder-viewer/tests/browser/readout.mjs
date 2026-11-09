@@ -204,15 +204,48 @@ async function openSynthetic(page, url, caseName) {
   });
 }
 
+// Fresh tile canvases have a 300 by 150 backing store before any image is
+// drawn. Wait for opaque image pixels and the fitted picture before pointing.
+export function tilePainted(selector) {
+  const node = document.querySelector(selector);
+  if (!node || node.width <= 1 || node.height <= 1) return false;
+  const box = node.getBoundingClientRect();
+  return box.width > 0 && box.height > 0 &&
+    Number.parseFloat(node.style.width) > 0 && Number.parseFloat(node.style.height) > 0 &&
+    node.getContext("2d").getImageData(0, 0, 1, 1).data[3] === 255;
+}
+
 async function emptyTileCase(page, url) {
   await openSynthetic(page, url, "emptyTileCase");
-  await page.keyboard.press("m");
-  await page.keyboard.press("Shift+G");
-  const tile = page.locator('.cell[data-cell="0"] canvas[data-tile="3"]');
-  await waitForStage(page, "emptyTileCase: tile 4 canvas drawn", () => {
-    const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="3"]');
-    return node && node.width > 1;
+  const selector = '.cell[data-cell="0"] canvas[data-tile="3"]';
+  // Hold the actual painter so the default backing size cannot stand in for
+  // an image. This control is independent of how quickly the server decodes.
+  await page.evaluate(() => {
+    const original = paintTiles;
+    let release;
+    const ready = new Promise((resolve) => { release = resolve; });
+    globalThis.readoutTileGate = {
+      entered: false,
+      restore() { paintTiles = original; release(); delete globalThis.readoutTileGate; },
+    };
+    paintTiles = async function (...args) {
+      globalThis.readoutTileGate.entered = true;
+      await ready;
+      return original(...args);
+    };
   });
+  try {
+    await page.keyboard.press("m");
+    await page.keyboard.press("Shift+G");
+    await waitForStage(page, "emptyTileCase: first tile paint held", () => globalThis.readoutTileGate.entered);
+    if (await page.evaluate(tilePainted, selector)) {
+      throw new Error("an unpainted tile was accepted as a displayed image");
+    }
+  } finally {
+    await page.evaluate(() => globalThis.readoutTileGate.restore());
+  }
+  const tile = page.locator(selector);
+  await waitForStage(page, "emptyTileCase: tile 4 canvas drawn", tilePainted, selector);
   const box = await tile.boundingBox();
   const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   await page.mouse.move(point.x + 3, point.y);
@@ -309,10 +342,8 @@ async function tileGapCase(page, url) {
   await openSynthetic(page, url, "tileGapCase");
   await page.keyboard.press("m");
   await page.keyboard.press("Shift+G");
-  await waitForStage(page, "tileGapCase: tile 1 canvas drawn", () => {
-    const node = document.querySelector('.cell[data-cell="0"] canvas[data-tile="0"]');
-    return node && node.width > 1;
-  });
+  await waitForStage(page, "tileGapCase: tile 1 canvas drawn", tilePainted,
+    '.cell[data-cell="0"] canvas[data-tile="0"]');
   const spot = await page.evaluate(() => {
     const tile = document.querySelector('.cell[data-cell="0"] .tile');
     const picture = tile.querySelector("canvas").getBoundingClientRect();

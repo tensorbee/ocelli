@@ -47,7 +47,7 @@ pub enum RasterError {
     /// A settled draw named a generation that is no longer current.
     #[error("cpu raster generation is stale")]
     Stale,
-    /// ICC or another space [`ColorTransform`] does not implement.
+    /// The selected colour input has no available display conversion.
     #[error("cpu raster colour space is unavailable")]
     Unavailable,
     /// CSS size or the device pixel ratio was refused.
@@ -109,7 +109,7 @@ pub struct AcceptedColor<'a> {
 pub enum RasterColor<'a> {
     /// Decoder-reported space [`AcceptedColor`] already accepted.
     Supported(AcceptedColor<'a>),
-    /// ICC and any other unsupported space. The call draws nothing.
+    /// A colour source explicitly marked unavailable. The call draws nothing.
     Unsupported,
 }
 
@@ -356,8 +356,8 @@ impl CpuRaster {
 
     /// Draw palette or RGB through [`ColorTransform`].
     ///
-    /// [`RasterColor::Unsupported`] is ICC and any space the transform does
-    /// not implement. Nothing is written and no threshold is applied.
+    /// [`RasterColor::Unsupported`] draws nothing and returns unavailable.
+    /// No threshold is applied.
     /// A supported transform accepts its source length before a settled idle
     /// return. That check does not allocate colour scratch.
     ///

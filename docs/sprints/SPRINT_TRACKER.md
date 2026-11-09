@@ -217,3 +217,8 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-243 | JPEG-LS run mode decoded per T.87 | S46 | 3w | not measured, implemented and reviewed in a parallel worktree, so no isolated duration was captured | 2026-11-09 |
 | F-225 | DICOM conformance report and Checks section | S46 | 4w | not measured | 2026-11-09 |
 | F-244 | Encapsulated Pixel Data with an empty Basic Offset Table | S46 | 2w | not measured | 2026-11-09 |
+| F-234 | Bounded sequence depth in parse_part10 | S46 | 1w | not measured | 2026-11-09 |
+| F-228 | The Content Security Policy Ocelli needs | S46 | 2w | not measured | 2026-11-09 |
+| F-237 | @ocelli/wasm npm packaging with release preflight tooling | S46 | 1w | not measured | 2026-11-09 |
+| F-239 | Folder viewer colour frames through the library's colour stage | S46 | 12w | not measured | 2026-11-09 |
+| F-240 | Matrix and tone-curve ICC profiles in stage 4 | S46 | 5w | not measured | 2026-11-09 |

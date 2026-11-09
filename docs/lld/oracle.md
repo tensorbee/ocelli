@@ -1,7 +1,6 @@
 # The oracle, reference half
 
-**F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229, F-239, F-240, F-244
+**F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008, F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229, F-239, F-240, F-244
 **Last updated:** 2026-11-09
 
 HLD section 11 names cornerstone3D as the reference the differential harness

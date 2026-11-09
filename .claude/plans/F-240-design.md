@@ -213,6 +213,7 @@ None of its own. D-30, raised by F-239, already records that a profile outside t
 
 - `docs/lld/pixel-pipeline.md`: stage 4's ICC half for the subset, its place and its refusals.
 - `docs/lld/frame-open.md`: `icc_profile`.
+- `docs/lld/render-graph.md`: the native CPU colour consumer and its ICC subset.
 - `docs/lld/corpus.md`: the profile rows.
 - `docs/lld/feature-availability.md`: ICC on tier C for the subset, unavailable on A and B.
 - `docs/lld/build-targets.md`: AC13's deltas and reachability.
@@ -343,3 +344,7 @@ The original literal phrase "within its noise" is not met by the large observed 
 > AC14's untagged colour non-regression clause accepts the measured reductions against the literal F-239 base as non-regression. Record the actual observations as reductions, without calling them within noise. Preserve all original and normalized-control data and their distinct roles. All monochrome limits, registered baseline bands, budgets, sample counts, gates and pixel tolerances remain unchanged. This disposition supplies no colour pixel parity, isolated ICC cost, other acceptance row, operator check or sprint closure.
 
 Current RGB8 first request and window median are 2171.469/2699.735 ms against literal-base 4955.386/4728.307 ms. Palette16 is 2503.991/3087.126 ms against 19287.031/19257.557 ms. These combined-stack observations include the palette-validation and exact-byte-store changes and do not isolate ICC cost. Their shared fixture and measurement helper hashes agree. The original raw SHA-256 is `61c638f921c418c6a19dbe3207c2930ec28ad6f7d81e6b7c33d21897c576f4fd`, current `6f32db8e4cc0b525a28c95bb973747973ae9bed1a774440300d13bcfaeabd3c4`. Independent factual and authority review is retained with the feature evidence. The earlier proposal's extra operator-condition wrapper was not adopted. This ruling applies only to untagged reductions against the literal base, with no substitution by the normalized control. Genuine Cornerstone target misses and the separate incompatible JPEG-LS host remain separately qualified.
+
+### Lead AC12 source-basis reconciliation, 2026-11-09
+
+AC12's accepted transcription basis is ICC.1:2022-05 and the ICC's published April 2015 note, "How to interpret the sRGB color space (specified in IEC 61966-2-1) for ICC profiles", as actually reviewed and adopted by the post-pass-1 D1/D2 rulings. This explicitly reconciles the literal direct-IEC source wording with that approved source basis. IEC 61966-2-1's publisher text was not obtained or read, and no direct review of it is claimed. The independent comparison limb remains the recorded current six-profile Little CMS observation, including all investigated clipping-policy flags. No matrix, transfer formula, clipping policy, numerical threshold, fixture expectation or caller behavior changes. Root adopts this source-basis reconciliation after independent review in `.claude/reviews/F-240-source-basis-and-availability-pass-1.md`. The original source disclosure and review chronology remain unchanged.

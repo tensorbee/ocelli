@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdtemp, rm, writeFile, readFile, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readyDuration, writePair, runComparison, collectTrialSamples, readHeaders, safeColourOutputs, publishComparison, prepareInputs } from "../src/comparison_run.mjs";
+import { readyDuration, writePair, runComparison, collectTrialSamples, readHeaders, safeColourOutputs, publishComparison, prepareInputs, readPairVerdict, runPairComparator } from "../src/comparison_run.mjs";
 
 test("page-ready joins clock origins rather than subtracting cross-context now", () => {
   // Controller origin 1000 + now 30 starts at1030. Browser origin2000 +
@@ -501,4 +501,132 @@ test("actual orchestration shares the workload start side across cold and warm",
     delete globalThis.__workloadOrderFixture;
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+
+const PAIR_PASS = { within_one_lsb_fraction: 1, count_over_max: 0, max_abs_diff: 0,
+  signed_mean_bias_informative: 0, informative_fraction: 1, low_information: false, passes: true };
+const PAIR_REFUSE = { within_one_lsb_fraction: 1, count_over_max: 0, max_abs_diff: 1,
+  signed_mean_bias_informative: 1, informative_fraction: 1, low_information: false, passes: false };
+const PAIR_LOW = { within_one_lsb_fraction: 1, count_over_max: 0, max_abs_diff: 0,
+  signed_mean_bias_informative: null, informative_fraction: 0, low_information: true, passes: false };
+const pairResult = (verdict, code = verdict.passes ? 0 : 1) =>
+  ({ code, signal: null, killed: false, stdout: JSON.stringify(verdict), stderr: "" });
+const PAIR_CLOSED_ERROR = "the pixel comparator did not produce a valid verdict";
+
+// Only owned synthetic constants are written. The child is a process-channel
+// fixture, not the numeric oracle. The real comparator has a separate explicit
+// synthetic acceptance observation, without a new default build prerequisite.
+async function pairChannelFixture(directory, name, verdict, { code = verdict.passes ? 0 : 1,
+  stderr = "", prefix = "", suffix = "", signal = false } = {}) {
+  const path = join(directory, name);
+  const source = `#!${process.execPath}\n` +
+    `process.stdout.write(${JSON.stringify(prefix + JSON.stringify(verdict) + suffix)});\n` +
+    `process.stderr.write(${JSON.stringify(stderr)});\n` +
+    (signal ? 'process.kill(process.pid, "SIGTERM");\n' : `process.exit(${code});\n`);
+  await writeFile(path, source, { mode: 0o755 });
+  return path;
+}
+
+test("pair process accepts only the closed seven-field verdict and exit contract", () => {
+  for (const verdict of [PAIR_PASS, PAIR_REFUSE, PAIR_LOW]) {
+    assert.deepEqual(readPairVerdict(pairResult(verdict), 4), verdict);
+  }
+  const refused = { ...PAIR_REFUSE, within_one_lsb_fraction: 0, count_over_max: 4,
+    max_abs_diff: 255, signed_mean_bias_informative: -255 };
+  assert.deepEqual(readPairVerdict(pairResult(refused), 4), refused);
+  const malformed = [
+    ...[0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1].map((pixels) => [pairResult(PAIR_PASS), pixels]),
+    ...[null, [], true, 4, "SYNTHETIC-CANARY"].map((value) => [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(value) }, 4]),
+    ...["within_one_lsb_fraction", "informative_fraction"].flatMap((field) =>
+      [-0.01, 1.01, null, "1"].map((value) => [pairResult({ ...PAIR_PASS, [field]: value }), 4])),
+    ...[-1, 4.5, 5, Number.MAX_SAFE_INTEGER + 1].map((count_over_max) => [pairResult({ ...PAIR_PASS, count_over_max }), 4]),
+    ...[-1, 1.5, 256, "0"].map((max_abs_diff) => [pairResult({ ...PAIR_PASS, max_abs_diff }), 4]),
+    ...[-256, 256, "0", {}].map((signed_mean_bias_informative) => [pairResult({ ...PAIR_PASS, signed_mean_bias_informative }), 4]),
+    [pairResult({ ...PAIR_PASS, low_information: 0 }), 4],
+    [pairResult({ ...PAIR_PASS, passes: "true" }), 4],
+    [pairResult(PAIR_REFUSE, 0), 4], [pairResult(PAIR_PASS, 1), 4],
+    [pairResult({ ...PAIR_PASS, low_information: true }, 0), 4],
+    [{ ...pairResult(PAIR_PASS), code: 2 }, 4], [{ ...pairResult(PAIR_REFUSE), code: "1" }, 4],
+    [{ ...pairResult(PAIR_REFUSE), signal: "SIGTERM" }, 4], [{ ...pairResult(PAIR_PASS), killed: true }, 4],
+    [{ ...pairResult(PAIR_PASS), stderr: "SYNTHETIC-CANARY" }, 4], [{ ...pairResult(PAIR_PASS), stderr: "\n" }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: "SYNTHETIC-CANARY" + JSON.stringify(PAIR_PASS) }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS) + "SYNTHETIC-CANARY" }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS) + " ".repeat(4096) }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS).replace('"passes":true', '"passes":true,"passes":true') }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS).replace('"passes":true', '"passes":true,"pa\\u0073ses":true') }, 4],
+    [pairResult({ ...PAIR_PASS, unexpected: "SYNTHETIC-CANARY" }), 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS).replace('"max_abs_diff":0,', "") }, 4],
+    [{ ...pairResult(PAIR_PASS), stdout: JSON.stringify(PAIR_PASS).replace('"informative_fraction":1', '"informative_fraction":1e999') }, 4],
+  ];
+  for (const [result, pixels] of malformed) {
+    assert.throws(() => readPairVerdict(result, pixels), (error) => {
+      assert.equal(error.message, PAIR_CLOSED_ERROR);
+      assert.equal(String(error).includes("SYNTHETIC-CANARY"), false);
+      return true;
+    });
+  }
+});
+
+test("pair process preserves expected exit one and closes foreign child channels", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "comparison-pair-channel-"));
+  try {
+    for (const [name, verdict] of [["pass", PAIR_PASS], ["refuse", PAIR_REFUSE], ["low", PAIR_LOW]]) {
+      const comparator = await pairChannelFixture(directory, name, verdict);
+      assert.deepEqual(await runPairComparator(comparator, "synthetic-reference", "synthetic-candidate", 2, 2), verdict);
+    }
+    for (const [name, options] of [["stderr", { stderr: "SYNTHETIC-CANARY" }],
+      ["stdout", { prefix: "SYNTHETIC-CANARY" }], ["signal", { signal: true }],
+      ["code-two", { code: 2 }], ["contradiction", { code: 0 }]]) {
+      const comparator = await pairChannelFixture(directory, name, PAIR_REFUSE, options);
+      await assert.rejects(runPairComparator(comparator, "synthetic-reference", "synthetic-candidate", 2, 2),
+        (error) => error.message === PAIR_CLOSED_ERROR && !String(error).includes("SYNTHETIC-CANARY"));
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+// A disposable module substitutes only the four browser/transport providers.
+// Actual pixelPrecheck -> real child comparator -> executeComparison -> cleanup
+// -> runComparison stays intact. This is a synthetic unit, not browser proof.
+async function pairControllerFixture(directory) {
+  const sourceUrl = new URL("../src/comparison_run.mjs", import.meta.url);
+  let source = await readFile(sourceUrl, "utf8");
+  for (const [declaration, name] of [["export async function ", "launchSide"],
+    ["export async function ", "openFolder"], ["async function ", "metadata"], ["async function ", "capture"]]) {
+    const old = declaration + name + "(";
+    assert.equal(source.split(old).length, 2, `one actual ${name} provider`);
+    source = source.replace(old, declaration + "unusedPairProvider_" + name + "(");
+  }
+  source = source.replace(/from "(\.[^"]+)"/g,
+    (_match, name) => 'from "' + new URL(name, sourceUrl).href + '"');
+  source += `\nexport const pairFixtureState = { closed: [], opened: [] };\n` +
+    `async function launchSide(side, context) { const actor = { side, close: async () => { pairFixtureState.closed.push(side); context.actors.delete(actor); } }; context.actors.add(actor); return actor; }\n` +
+    `async function openFolder(actor) { pairFixtureState.opened.push(actor.side); }\n` +
+    `async function metadata() { return { version: "synthetic-browser", renderer: "synthetic-renderer", defaults: {} }; }\n` +
+    `async function capture(actor) { const values = actor.side === "ocelli" ? [65,97,129,161] : [64,96,128,160]; return { width: 2, height: 2, name: "SYNTHETIC", size: 16, rgba_base64: Buffer.from(values.flatMap(value => [value,value,value,255])).toString("base64") }; }\n`;
+  const path = join(directory, "comparison-pair-controller.mjs"); await writeFile(path, source);
+  return import(pathToFileURL(path).href);
+}
+
+test("pair process actual controller retains refusal report, no timings, and cleanup", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "comparison-pair-controller-"));
+  try {
+    const comparator = await pairChannelFixture(directory, "comparator", PAIR_REFUSE);
+    const controller = await pairControllerFixture(directory);
+    let trials = 0, infrastructureClosed = 0;
+    const result = await controller.runComparison({ pseudo: directory, out: join(directory, "out"), build: false }, {
+      prepare: async () => ({ denySet: {}, selections: {}, directories: { "pseudo-ct": directory }, identity: "a".repeat(64) }),
+      build: async () => ({ comparator, close: async () => { infrastructureClosed += 1; } }),
+      exclusive: async () => {}, measure: async () => { trials += 1; throw new Error("timings must not start"); },
+    });
+    assert.equal(result.state, "refused_pixels"); assert.deepEqual(result.record.pair_verdict, PAIR_REFUSE);
+    assert.deepEqual(result.record.metrics, {}); assert.equal(trials, 0); assert.equal(infrastructureClosed, 1);
+    assert.deepEqual(controller.pairFixtureState.closed.sort(), ["cornerstone", "ocelli"]);
+    assert.deepEqual(controller.pairFixtureState.opened, ["ocelli", "cornerstone"]);
+    const record = JSON.parse(await readFile(join(directory, "out", "comparison.json"), "utf8"));
+    assert.equal(record.state, "refused_pixels"); assert.deepEqual(record.pair_verdict, PAIR_REFUSE);
+    assert.equal(Object.keys(record.metrics).length, 0);
+    assert.match(await readFile(join(directory, "out", "comparison.txt"), "utf8"), /refused_pixels/);
+    await assert.rejects(readFile(join(directory, "out", "lock")), { code: "ENOENT" });
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

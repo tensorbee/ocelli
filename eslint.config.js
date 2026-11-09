@@ -524,9 +524,9 @@ const config = tseslint.config(
   {
     // F-208's browser checks of the folder viewer, the displayed aspect and
     // the pointer readout. They run under node and hand Playwright callbacks
-    // that read the page's DOM and call four of the page's own top-level
-    // functions by name. The readout check wraps `paintSelection` to inject
-    // a throw and replaces `requestGrey` to make the main preview fail. The
+    // that read the page's DOM and call the page's own top-level functions
+    // by name. The readout check wraps `paintSelection` to inject a throw,
+    // holds `paintTiles` at entry, and replaces `requestGrey` to fail a preview. The
     // changed-file check reads the id the page holds for a file through
     // `seriesByKey` and `filePosts`, before it rewrites that file, and counts
     // that file's grey keys through `fileSerials` and `cache`.
@@ -541,6 +541,7 @@ const config = tseslint.config(
         imageToClient: "readonly",
         activeViewport: "readonly",
         paintSelection: "readonly",
+        paintTiles: "writable",
         dropCache: "readonly",
         seriesByKey: "readonly",
         filePosts: "readonly",

@@ -5998,7 +5998,7 @@ mod tests {
         let addr = scheduled_viewer(64 * 1024 * 1024)?;
         let mut lists = Vec::new();
         for series in 0_u16..4 {
-            lists.push(post_series(addr, 16, 512, series * 7)?);
+            lists.push(post_series(addr, 16, 16, series * 7)?);
         }
         let generation = lists
             .first()
@@ -6006,6 +6006,7 @@ mod tests {
             .and_then(|id| FileId::parse(id))
             .ok_or("no id")?
             .generation;
+        let held_rounds = crate::series_window::hold_rounds(generation);
         let start = Arc::new(std::sync::Barrier::new(lists.len()));
         let mut rounds = Vec::new();
         for ids in lists {
@@ -6015,6 +6016,10 @@ mod tests {
                 ask_series(addr, &ids)
             }));
         }
+        // All four requests must reach actual admission before release.
+        // Releasing on just the first two entries would miss an oversized cap.
+        let occupancy = held_rounds.wait_for_attempts(4);
+        drop(held_rounds);
         for round in rounds {
             let reply = round
                 .join()
@@ -6031,6 +6036,12 @@ mod tests {
         let peak = crate::series_window::rounds_peak(generation);
         if peak != p {
             return Err(format!("{peak} rounds ran at once, the limit is {p}"));
+        }
+        let occupancy = occupancy.ok_or("four rounds did not reach admission")?;
+        if occupancy != (2, 2) {
+            return Err(format!(
+                "round occupancy was {occupancy:?}, expected (2, 2)"
+            ));
         }
         Ok(())
     }

@@ -1256,9 +1256,15 @@ impl Viewer {
     /// never refused for being one too many.
     pub(crate) fn acquire_round(&self, live: &mut dyn FnMut() -> bool) -> Option<RoundPermit<'_>> {
         let mut rounds = lock_mutex(&self.rounds);
+        #[cfg(test)]
+        let mut waiting = None;
         while *rounds >= SERIES_ROUNDS {
             if !live() {
                 return None;
+            }
+            #[cfg(test)]
+            if waiting.is_none() {
+                waiting = Some(crate::series_window::WaitingRound::enter(self.generation));
             }
             rounds = match self
                 .rounds_free

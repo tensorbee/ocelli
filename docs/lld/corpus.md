@@ -1,6 +1,6 @@
 # The golden corpus
 
-**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013, F-217, F-229, F-239, F-244, F-243
+**F-IDs that contributed:** F-009, F-013, F-014, F-016, F-026, F-030, F-X006, F-X007, F-X012, F-X013, F-217, F-229, F-239, F-244, F-243, F-240
 **Last updated:** 2026-11-09
 
 The corpus is the input every later correctness claim is measured on. It lives

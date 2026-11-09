@@ -1,7 +1,7 @@
 # Release policy
 
 **F-IDs that contributed:** F-117, F-217, F-220, F-237
-**Last updated:** 2026-11-07
+**Last updated:** 2026-11-09
 
 `/release` is the only command that publishes. This page does not publish
 and it does not create a `v` tag. The workspace version stays 0.1.0.
