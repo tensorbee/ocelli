@@ -109,9 +109,10 @@ RITK_ADDITIONS = {
 }
 RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f71da0cb351"
 # The reviewed patch record, rewritten when a patch changes. F-239 added the
-# three-component colour decode to the published decoder and F-243 the
-# JPEG-LS run-mode, end-of-scan and default-threshold patch.
-RITK_PROVENANCE_SHA256 = "0d589a00f49f8e387bceb316af58e1a5dca537ee32101661a7eacaf82aa78acf"
+# three-component colour decode to the published decoder, F-243 the
+# JPEG-LS run-mode, end-of-scan and default-threshold patch, and F-269 a
+# comment-only audit of three jpeg_ls files.
+RITK_PROVENANCE_SHA256 = "f18b6fc2c01ec0a2cae93195d7dc40adbebb5bbee70a854d93b7dcfce7873bbf"
 # Every published source file this repository has patched, with the exact
 # bytes of the reviewed patch. Anything else must stay byte-identical to the
 # archive.
@@ -127,10 +128,11 @@ RITK_PATCHED_HASHES = {
     # encoder's code segment A.16 mirror and one published test edited by the
     # lead's ruling.
     "src/jpeg_ls/bitstream.rs": "49367ccb7467dd91b267a2dfe5a1f70f70d872bf28243fdbbf817e9a34a68cbb",
-    "src/jpeg_ls/context/mod.rs": "7a39478fed96333a1654ce3f8ad4029866abe2e28db26262fc8618e54d586a95",
+    "src/jpeg_ls/context/mod.rs": "9b9bd622bdcb56472ac0df37aca951eccbd1818aa98548e5d979cd3026e65b0b",
+    "src/jpeg_ls/context/tests.rs": "ebddb6af603ff88822636f2e43cb6923b21084b49f0236a52160e588aa8b14e5",
     "src/jpeg_ls/decoder.rs": "d898917107a8d2575a04cc47ba53748785f04c1b661235f283ede6744f8a4b11",
     "src/jpeg_ls/encoder.rs": "be209fabf20a8b54b53c6156eb4de9922464c5192e600f3a6b88da6d5aa4b988",
-    "src/jpeg_ls/scan.rs": "5fa6512032ced5ec593394d65111ae296ecb3702dbdc1dfe178a27dacdd2c559",
+    "src/jpeg_ls/scan.rs": "3b6760bbb2bfac24ac843c738cec7824d7befb9e6b35196c4216468bb691036a",
     "src/jpeg_ls/tests/conformance.rs": "aee89d4a0a49b21d8f6ebc4229e4458cc4c037300dad36babcb17f08f4acc512",
 }
 # The manifest-only patch D-20 records, checked as TOML as well as by hash.

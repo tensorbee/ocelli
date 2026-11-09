@@ -203,13 +203,11 @@ fn update_context_bias_positive_decrements_b() {
         c: 0,
         n: 4,
     };
-    // b > 0 → b -= n → b = 5 - 4 = 1 → clamp to min(1, 0) = 0 in the code?
-    // Actually: b = (b - n).min(0) = (1).min(0) = 0. Wait let me re-check the code.
-    // After errval=0: ctx.b += 0*(2*0+1) = 0, so b stays 5.
-    // Then: b > 0 → b -= n (=4) → b = 1 → b.min(0) = 0? No: `b -= n` then `b = b.min(0)`.
-    // Hmm, actually: b = b - n = 5 - 5 (n=5 after += 1) → b = 0.
+    // Bias correction branch, A.6.1 Code segment A.12: with errval 0 the B
+    // update adds 0, so b stays 5, N rises 4 then 5, and the `b > 0` branch
+    // subtracts the new N, giving 5 - 5 = 0, which is not above 0 and stays.
     update_context(&mut ctx, 0, 0);
     assert_eq!(ctx.n, 5);
-    // b=5, n becomes 5: b -= n → b = 0 → min(0,0) = 0
+    // b = 5, N becomes 5: b -= 5 → 0 → the `b > 0` re-check is false, so b = 0
     assert_eq!(ctx.b, 0);
 }
