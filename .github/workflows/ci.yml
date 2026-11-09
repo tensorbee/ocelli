@@ -73,6 +73,12 @@ jobs:
       - name: Vendored decoders' library tests, offline and locked
         run: bin/ocelli.sh gate vendor-tests
 
+      # F-238 resolves both Apple graphs offline, including on Linux.
+      # Host tests do not populate those target dependencies. Fetch the
+      # locked workspace dependencies for all targets before that proof.
+      - name: Dependencies for offline cross-target resolution
+        run: cargo fetch --locked
+
       # Story E1.7, the cross-target build proof. This is what keeps decision
       # D2 honest over time: if the core stopped being WebAssembly-agnostic,
       # it shows up here first.

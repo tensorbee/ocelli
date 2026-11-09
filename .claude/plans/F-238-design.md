@@ -187,3 +187,9 @@ The same reviewed executable and build inputs may supply AC4's Linux proof throu
 This resolves the completion and post-push ordering dependency. It does not waive Linux execution. Record the actual commit, job, build inputs and output. A later documentation or status tree is not itself tested by that earlier run. Executable or build-input changes require fresh relevant CI evidence.
 
 The operator authorized publication of exact `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` on `verify/s46-linux-8fdee91`. CI run `42576164087` failed before Cross-target proof, so native step 6 was skipped and supplies no Linux acceptance. The Windows execution and Intel Mac build and runtime gaps remain named and unverified under the earlier approved scope. No host gap is a pass.
+
+### Linux qualification provisioning, 2026-11-09
+
+The separately authorized c27 qualification run `42607216734` passed the repaired workspace test stage. Its Rust job `129126141139` then failed at native step 5 because the offline Apple graph could not download locked `block2 v0.6.2`. Step 6 did not run. This is missing dependency provisioning, not a Linux execution observation or evidence that objc2 reached the shipped graph.
+
+The Rust CI job fetches locked workspace dependencies before Cross-target proof. With no target filter, [Cargo fetch](https://doc.rust-lang.org/cargo/commands/cargo-fetch.html) fetches dependencies for all targets. The existing locked, offline Apple graph check and every native proof step remain unchanged. An unavailable download still fails the job. A new observed Linux run is required after this repair, and the failed c27 run remains recorded.
