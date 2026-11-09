@@ -37,6 +37,20 @@ function runDriver(args, cwd) {
   });
 }
 
+// Match the driver's failed-row record, not an evaluation error or console
+// line carrying the same words. This is the internal fault's declared target.
+function matchesInternalFailure(fault, output) {
+  if (!fault.expect) return false;
+  const prefix = `  internal: ${fault.row} (`;
+  const marker = ") failed and unsupported.json does not account for it: ";
+  return output.split(/\r?\n/).some((line) => {
+    if (!line.startsWith(prefix)) return false;
+    const markerAt = line.indexOf(marker, prefix.length);
+    return markerAt > prefix.length &&
+      line.slice(markerAt + marker.length).includes(fault.expect);
+  });
+}
+
 /**
  * @param {string|null} only run just this fault
  * @returns {Promise<{ok: boolean, problems: string[], observed: object[]}>}
@@ -79,10 +93,15 @@ export async function runSelfTest(only = null) {
         );
         continue;
       }
-      if (!output.includes(fault.expect)) {
+      const matched = fault.boundary === "internal"
+        ? matchesInternalFailure(fault, output) : output.includes(fault.expect);
+      if (!matched) {
+        const missing = fault.boundary === "internal"
+          ? `no failed-row record for ${JSON.stringify(fault.row)} contains ${JSON.stringify(fault.expect)}`
+          : `nothing in the output contains ${JSON.stringify(fault.expect)}`;
         problems.push(
           `fault ${name} failed, but not at the ${fault.boundary} boundary: ` +
-            `nothing in the output contains ${JSON.stringify(fault.expect)}. ` +
+            `${missing}. ` +
             `A run that failed for another reason proves nothing about this ` +
             `guard.\n    output tail: ${output.trim().split("\n").slice(-4).join(" | ")}`,
         );

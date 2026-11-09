@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { changedProblems } from "../../../examples/folder-viewer/tests/browser/changed.mjs";
 
 import {
   assertCanvasCheck,
@@ -292,4 +293,20 @@ test("the pet_no_window workload stores no window, signed samples and a slope pe
   assert.equal(pixels.length, PET_EDGE * PET_EDGE * 2);
   assert.equal(pixels.readInt16LE(0), 0);
   assert.equal(pixels.readInt16LE((64 * PET_EDGE + 64) * 2), 513);
+});
+
+// The concurrency amendment chooses one worker while retaining the independent
+// ceiling of four. These exercise the actual browser-result validator.
+test("changed-file probe permits serial reads within the independent ceiling", () => {
+  for (const peak of [1, 4]) {
+    const problems = changedProblems({ probe: { files: 1693, reads: 1693, bytes: 1693, peak, ms: 500 } });
+    assert.deepEqual(problems.filter((line) => line.startsWith("the probe ") && line.includes("reads in flight")), []);
+  }
+});
+
+test("changed-file probe still refuses five in flight and invalid observed peaks", () => {
+  for (const peak of [0, 2.5, 5, Number.NaN]) {
+    const problems = changedProblems({ probe: { files: 1693, reads: 1693, bytes: 1693, peak, ms: 500 } });
+    assert(problems.some((line) => line.startsWith("the probe ") && line.includes("reads in flight")));
+  }
 });

@@ -36,6 +36,8 @@
 | F-233 | E38.36 | SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build | Build | 1w | done |
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | pending |
 | F-236 | E16.7 | acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels | TS | 1w | done |
+| F-237 | E19.6 | The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place | Build | 1w | pending |
+| F-238 | E19.7 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | Build | 2w | pending |
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | in-progress |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | in-progress |
 | F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | pending |
@@ -82,14 +84,29 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   done, and its follow-up AS_BUILT entry records the three open items for a
   separate story: the built `dist` hard-codes the build machine's `/@fs` path,
   the viewer stays `core not built` in Chromium even with the pkg, and dev mode
-  answers 403 because `server.fs.allow` is percent-encoded. No story is filed
-  for them yet.
+  answers 403 because `server.fs.allow` is percent-encoded. F-266 is the
+  draft follow-up filed for S47.
 
 ## Pulled forward from S47
 
-The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, implemented from the sprint head, and integrated on 2026-11-08. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. F-237's and F-238's backlog rows keep sprint S47 until they integrate, and F-236's moved to S46 when it integrated.
+The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, implemented from the sprint head, and integrated on 2026-11-08. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. This close proposal moves the allocation of F-237 and F-238 from S47 to S46 beside F-236. It does not mark either story done or supply CI or host acceptance. F-241's full video story remains S47.
 
 ## Questions for the operator
+
+- **F-238 known host gaps, proposed for this close and not yet approved.**
+  AC4's Windows native execution and tier report were not observed because
+  no Windows host is available. AC1's `x86_64-apple-darwin` evidence is
+  limited to the resolved dependency graph. Native build and runtime
+  validation on an Intel Mac were not observed because no Intel-Mac host
+  is available. These host observations remain unverified, not passed.
+  AC4's Linux execution and tier report still require an observed
+  `ubuntu-latest` CI run of native step 6 after the sprint push. This Linux
+  run is owed evidence, not a proposed known gap or a pass.
+
+- **F-237 post-push CI remains owed.** Its AC4 `frontend` job on
+  `ubuntu-latest` remains to be observed after integration and push.
+  Release-time AC3 and AC5 remain release obligations. Moving the allocation
+  does not supply those observations or mark the story done.
 
 - **Non-finite F32 samples in the pyramid, before F-120.** F-119's plan does
   not say what a NaN, an infinity or a negative zero does to a coarser level.

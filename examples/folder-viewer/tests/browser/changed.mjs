@@ -56,7 +56,7 @@ export const CHANGED_STATUS = "1 file of this series changed on disk after the f
 export const PROBE_FILES = 1693;
 /** The longest a probe of PROBE_FILES may take, in milliseconds. */
 export const PROBE_LIMIT_MS = 1000;
-/** Reads a probe may have in flight at once. */
+/** Independent AC17 concurrency ceiling, not the chosen worker count. */
 export const PROBE_WIDTH = 4;
 const SMALL_FILES = 3;
 const EDGE = 8;
@@ -230,8 +230,8 @@ export function changedProblems(seen) {
     if (probe.bytes !== probe.files) {
       problems.push(`a series selection read ${probe.bytes} bytes for ${probe.files} files, not one each`);
     }
-    if (probe.peak !== PROBE_WIDTH) {
-      problems.push(`the probe had at most ${probe.peak} reads in flight, not ${PROBE_WIDTH}`);
+    if (!Number.isInteger(probe.peak) || probe.peak < 1 || probe.peak > PROBE_WIDTH) {
+      problems.push(`the probe peak ${probe.peak} reads in flight is outside 1 to ${PROBE_WIDTH}`);
     }
     if (!(probe.ms < PROBE_LIMIT_MS)) {
       problems.push(`the probe of ${probe.files} files took ${probe.ms} ms, not under ${PROBE_LIMIT_MS}`);
@@ -334,14 +334,14 @@ function rewriteFirst(set, stamp) {
   rewriteFile(set, 0, stamp);
 }
 
-/** Two series of `count` files each in one folder, `a` then `b`. */
-function writeTwoSeries(root, name, tagA, tagB, count) {
+/** Two series in one folder, with optionally different file counts. */
+function writeTwoSeries(root, name, tagA, tagB, count, bCount = count) {
   const folder = join(root, name);
   mkdirSync(folder);
   const series = [];
-  for (const [prefix, tag] of [["a", tagA], ["b", tagB]]) {
+  for (const [prefix, tag, size] of [["a", tagA, count], ["b", tagB, bCount]]) {
     const paths = [];
-    for (let k = 0; k < count; k += 1) {
+    for (let k = 0; k < size; k += 1) {
       const path = join(folder, `${prefix}-${k}.dcm`);
       writeFileSync(path, slice(`${tag}.${k + 1}`, `${tag}.0`, k + 1, false));
       utimesSync(path, STAMP, STAMP);
@@ -349,7 +349,7 @@ function writeTwoSeries(root, name, tagA, tagB, count) {
     }
     series.push({ folder, paths, tag });
   }
-  return { folder, a: series[0], b: series[1], count: 2 * count };
+  return { folder, a: series[0], b: series[1], count: count + bCount };
 }
 
 /**
@@ -488,9 +488,17 @@ async function openAndDraw(page, sink, set, before) {
 /** Counts every `Blob.prototype.arrayBuffer` call the page makes. */
 function countReads() {
   const original = window.Blob.prototype.arrayBuffer;
-  const state = { reads: 0, bytes: 0, inFlight: 0, peak: 0, first: 0, last: 0 };
+  const slice = window.File.prototype.slice;
+  const names = new WeakMap();
+  window.File.prototype.slice = function observedSlice(...args) {
+    const part = slice.apply(this, args);
+    names.set(part, this.name);
+    return part;
+  };
+  const state = { names: [], reads: 0, bytes: 0, inFlight: 0, peak: 0, first: 0, last: 0 };
   window.__f224Reads = state;
   window.Blob.prototype.arrayBuffer = function countedArrayBuffer() {
+    state.names.push(names.get(this) || "");
     state.reads += 1;
     state.bytes += this.size;
     state.inFlight += 1;
@@ -506,6 +514,7 @@ function countReads() {
 async function resetReads(page) {
   await page.evaluate(() => {
     const state = window.__f224Reads;
+    state.names = [];
     state.reads = 0;
     state.bytes = 0;
     state.peak = 0;
@@ -631,6 +640,236 @@ export async function observeProbe(url, chromium, set) {
     };
   } finally {
     await browser.close();
+  }
+}
+
+/** A running large sweep must service the final active series once. */
+export async function observeQueuedProbe(url, chromium, set) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.addInitScript(countReads);
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(set.folder);
+    await page.waitForFunction((count) => window.__f224Reads.reads > 0 && window.__f224Reads.reads < count && window.__f224Reads.inFlight > 0, PROBE_FILES, { polling: 1 });
+    rewriteFirst(set.b, STAMP + 5);
+    await page.evaluate((key) => {
+      const state = window.__f224Reads;
+      window.__f224Queue = { selected: performance.now(), readsBefore: state.reads, inFlightBefore: state.inFlight };
+      document.querySelector(`#series-list button[data-key="${key}"]`).click();
+      window.dispatchEvent(new Event("focus"));
+    }, `uid:${set.b.tag}.0`);
+    await page.waitForFunction((count) => window.__f224Reads.reads >= count && window.__f224Reads.inFlight === 0, set.count, { polling: 10, timeout: PROBE_LIMIT_MS }).catch(() => {});
+    await quiet(page);
+    const state = await readCounts(page);
+    const queue = await page.evaluate(() => window.__f224Queue);
+    return { readsBefore: queue.readsBefore, inFlightBefore: queue.inFlightBefore,
+      reads: state.reads, bytes: state.bytes, peak: state.peak,
+      aReads: state.names.filter((name) => name.startsWith("a-")).length,
+      bReads: state.names.filter((name) => name.startsWith("b-")).length,
+      selectedToCompleteMs: state.last - queue.selected, fault: await faultText(page), status: await statusText(page) };
+  } finally { await browser.close(); }
+}
+
+export function queuedProbeProblems(seen) {
+  const problems = [];
+  if (!(seen.readsBefore > 0 && seen.readsBefore < PROBE_FILES && seen.inFlightBefore > 0)) problems.push("queued probe: no large sweep was in flight at the switch");
+  if (seen.aReads !== PROBE_FILES || seen.bReads !== SMALL_FILES || seen.reads !== PROBE_FILES + SMALL_FILES || seen.bytes !== PROBE_FILES + SMALL_FILES) problems.push("queued probe: final active series did not receive exactly one complete sweep");
+  if (!(seen.selectedToCompleteMs < PROBE_LIMIT_MS)) problems.push("queued probe: final active series was not checked within one second of selection");
+  if (seen.fault !== CHANGED_SENTENCE || !String(seen.status).endsWith(CHANGED_STATUS)) problems.push("queued probe: the changed file of the final active series was not refused and counted");
+  if (!Number.isInteger(seen.peak) || seen.peak < 1 || seen.peak > PROBE_WIDTH) problems.push("queued probe: observed concurrency exceeds the independent ceiling");
+  return problems;
+}
+
+/** F-224 AC20 to AC22 observe publication order and probe liveness. */
+export function probePriorityProblems(seen) {
+  const problems = [];
+  for (const name of ["fast", "held", "held-scroll", "frames-held", "refused", "focused", "replaced", "reselected", "generation", "activated", "activated-return"]) {
+    const item = seen[name];
+    const bytes = name === "activated-return" ? 2 * SMALL_FILES : SMALL_FILES;
+    if (!item || item.reads !== bytes || item.bytes !== bytes || item.peak > PROBE_WIDTH) {
+      problems.push(`${name}: a selection must make exactly one one-byte sweep`);
+      continue;
+    }
+    if (!(item.last - item.selected < PROBE_LIMIT_MS)) problems.push(`${name}: selection-to-probe completion exceeds one second`);
+  }
+  const fast = seen.fast;
+  if (!fast || !(fast.published > 0 && fast.paintOpportunity > fast.published && fast.first >= fast.paintOpportunity)) {
+    problems.push("fast: the probe began before the first publication had a paint opportunity");
+  }
+  for (const name of ["held", "held-scroll"]) {
+    if (!seen[name] || !seen[name].probedWhileHeld || !seen[name].publishedAfterRelease) problems.push(`${name}: a stalled draw must be probed before release and still publish afterwards`);
+  }
+  if (!seen["held-scroll"] || seen["held-scroll"].viewIndex !== 1) problems.push("held-scroll: the pending draw did not move to image 2");
+  if (!seen["activated-return"] || seen["activated-return"].names.filter((name) => name.startsWith("a-")).length !== SMALL_FILES || seen["activated-return"].names.filter((name) => name.startsWith("b-")).length !== SMALL_FILES) problems.push("activated-return: each actual activation must own exactly one sweep");
+  if (!seen["frames-held"] || !seen["frames-held"].probedWithoutFrames) problems.push("frames-held: a settled draw must still be probed while animation callbacks are withheld");
+  if (!seen.activated || seen.activated.activeCell !== 1 || !seen["activated-return"] || seen["activated-return"].activeCell !== 0) problems.push("activation: the intended cells were not activated");
+  if (!seen.refused || !seen.refused.fault) problems.push("refused: the refused draw was not observed");
+  for (const name of ["replaced", "reselected", "generation", "activated"]) {
+    if (!seen[name] || seen[name].abandonedReads !== 0) problems.push(`${name}: an abandoned series was probed`);
+  }
+  if (!seen.generation || !(seen.generation.retiredGeneration < seen.generation.replacementGeneration)) problems.push("generation: the replacement did not retire an open folder");
+  return problems;
+}
+
+function countPublication() {
+  const state = { selected: 0, published: 0, paintOpportunity: 0 };
+  window.__f224Publication = state;
+  const original = CanvasRenderingContext2D.prototype.putImageData;
+  CanvasRenderingContext2D.prototype.putImageData = function observedPublication(...args) {
+    const result = original.apply(this, args);
+    if (state.selected && !state.published && this.canvas.matches('.cell[data-cell="0"] canvas.view')) {
+      state.published = performance.now();
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => { state.paintOpportunity = performance.now(); }));
+    }
+    return result;
+  };
+}
+
+/** Real browser/Blob/canvas observations, no scheduling helper substitution. */
+export async function observeProbePriority(url, chromium) {
+  const browser = await chromium.launch({ headless: true });
+  const root = mkdtempSync(join(tmpdir(), "ocelli-f224-priority-"));
+  const seen = {};
+  try {
+    for (const [index, name] of ["fast", "held", "held-scroll", "frames-held", "refused", "focused", "replaced", "reselected", "generation", "activated", "activated-return"].entries()) {
+      const switching = name === "replaced" || name === "reselected" || name.startsWith("activated");
+      const set = switching
+        ? writeTwoSeries(root, name, "2.25.2249.8", "2.25.2249.9", SMALL_FILES)
+        : writeFolder(root, name, `2.25.2249.${index + 1}`, SMALL_FILES);
+      const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+      const held = [];
+      let holding = name.startsWith("held");
+      try {
+        await page.addInitScript(countReads);
+        await page.addInitScript(countPublication);
+        if (holding || name === "refused") {
+          await page.route("**/preview", async (route) => {
+            if (name === "refused") {
+              await route.fulfill({ status: 422, contentType: "text/plain", body: "synthetic preview refusal" });
+            } else if (holding) {
+              const response = await route.fetch();
+              if (holding) held.push({ route, response });
+              else await route.fulfill({ response });
+            } else await route.continue();
+          });
+        }
+        await page.goto(url);
+        if (name === "frames-held") await page.evaluate(() => {
+          const request = window.requestAnimationFrame.bind(window);
+          const cancel = window.cancelAnimationFrame.bind(window);
+          const queued = new Map();
+          let held = true;
+          let next = 1000000000;
+          window.requestAnimationFrame = (callback) => {
+            if (!held) return request(callback);
+            const id = ++next; queued.set(id, callback); return id;
+          };
+          window.cancelAnimationFrame = (id) => { if (!queued.delete(id)) cancel(id); };
+          window.__f224ReleaseFrames = () => {
+            held = false;
+            for (const callback of queued.values()) request(callback);
+            queued.clear();
+          };
+        });
+        if (name === "generation") {
+          // The next real picked folder repeats the Series UID and reuses the
+          // viewport object, so only folder ownership distinguishes them.
+          const replacement = writeFolder(root, "generation-new", `2.25.2249.${index + 1}`, SMALL_FILES);
+          await page.evaluate(() => {
+            const input = document.createElement("input");
+            input.type = "file"; input.id = "replacement-input";
+            input.setAttribute("webkitdirectory", "");
+            document.body.append(input);
+          });
+          await page.locator("#replacement-input").setInputFiles(replacement.folder);
+          await page.evaluate(() => {
+            const observer = new window.MutationObserver(() => {
+              if (!seriesByKey.size) return;
+              observer.disconnect();
+              const state = window.__f224Publication;
+              state.retiredGeneration = currentGeneration;
+              const input = document.getElementById("folder");
+              input.files = document.getElementById("replacement-input").files;
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+              state.replacementGeneration = currentGeneration;
+            });
+            observer.observe(document.getElementById("series-list"), { childList: true });
+          });
+        }
+        await page.evaluate(() => { window.__f224Publication.selected = performance.now(); });
+        await page.locator("#folder").setInputFiles(set.folder);
+        await page.waitForFunction((count) => seriesByKey.size === count, switching ? 2 : 1, { polling: 10 });
+        if (name === "generation") await page.waitForFunction(() => window.__f224Publication.replacementGeneration > 0 && seriesByKey.size === 1);
+        if (name === "held-scroll") await page.keyboard.press("ArrowDown");
+        let abandonedReads = 0;
+        if (name === "focused") {
+          await quiet(page);
+          await resetReads(page);
+          await page.evaluate(() => {
+            Object.assign(window.__f224Publication, { selected: performance.now(), published: 0, paintOpportunity: 0 });
+            document.querySelector("#series-list button").click();
+            window.dispatchEvent(new Event("focus"));
+          });
+        }
+        if (switching) {
+          if (name.startsWith("activated")) {
+            await page.locator("#layout").click();
+            await page.locator('#layout-picker [data-columns="2"][data-rows="1"]').click();
+            await page.waitForFunction(() => document.querySelector('.cell[data-cell="1"] canvas.view').width === 8);
+          }
+          await quiet(page);
+          await resetReads(page);
+          await page.evaluate((action) => {
+            Object.assign(window.__f224Publication, { selected: performance.now(), published: 0, paintOpportunity: 0 });
+            // Actual series-row actions in one task, before either deferred
+            // selection probe can run. B owns the remaining sweep.
+            const buttons = document.querySelectorAll("#series-list button");
+            buttons[0].click();
+            if (action.startsWith("activated")) {
+              const cell = document.querySelector('.cell[data-cell="1"]');
+              const rect = cell.getBoundingClientRect();
+              const point = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+              cell.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...point }));
+              cell.dispatchEvent(new window.PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0, ...point }));
+              if (action === "activated-return") {
+                const first = document.querySelector('.cell[data-cell="0"]');
+                const rect = first.getBoundingClientRect();
+                const point = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+                first.dispatchEvent(new window.PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0, buttons: 1, ...point }));
+                first.dispatchEvent(new window.PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0, ...point }));
+              }
+            } else {
+              buttons[1].click();
+              if (action === "reselected") buttons[0].click();
+            }
+          }, name);
+        }
+        await page.waitForFunction((count) => window.__f224Reads.reads >= count && window.__f224Reads.inFlight === 0, SMALL_FILES, { timeout: PROBE_LIMIT_MS, polling: 10 }).catch(() => {});
+        const probedWhileHeld = holding && await page.evaluate(() => window.__f224Reads.reads > 0 && window.__f224Publication.published === 0);
+        const probedWithoutFrames = name === "frames-held" && await page.evaluate(() => window.__f224Reads.reads > 0 && window.__f224Publication.published > 0 && window.__f224Publication.paintOpportunity === 0);
+        if (name === "frames-held") await page.evaluate(() => window.__f224ReleaseFrames());
+        if (holding) {
+          holding = false;
+          for (const entry of held) await entry.route.fulfill({ response: entry.response });
+        }
+        if (name !== "refused") await page.waitForFunction(() => window.__f224Publication.paintOpportunity > 0);
+        else await page.waitForFunction(() => Boolean(document.querySelector('.cell[data-cell="0"] .fault').textContent));
+        await quiet(page);
+        if (switching) abandonedReads = (await readCounts(page)).names.filter((file) => file.startsWith(name === "reselected" ? "b-" : "a-")).length;
+        if (name === "generation") abandonedReads = (await readCounts(page)).names.filter((file) => file.startsWith("generation-") && !file.startsWith("generation-new-")).length;
+        seen[name] = await page.evaluate(() => ({ ...window.__f224Reads, ...window.__f224Publication, viewIndex: activeViewport().viewIndex, activeCell: activeViewport().cell,
+          fault: document.querySelector('.cell[data-cell="0"] .fault').textContent }));
+        Object.assign(seen[name], { probedWhileHeld, probedWithoutFrames, publishedAfterRelease: name.startsWith("held") && seen[name].published > seen[name].last, abandonedReads });
+      } finally {
+        holding = false;
+        await page.close();
+      }
+    }
+    return seen;
+  } finally {
+    await browser.close();
+    rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -817,6 +1056,7 @@ async function main() {
     const thumbSet = writeFolder(root, "thumb", "2.25.2245", SMALL_FILES);
     const tileSet = writeFolder(root, "tiles", "2.25.2246", 5);
     const cellSet = writeTwoSeries(root, "cells", "2.25.2247", "2.25.2248", 2);
+    const queueSet = writeTwoSeries(root, "queue", "2.25.22491", "2.25.22492", PROBE_FILES, SMALL_FILES);
     seen.changed = await withViewer(binary, (url) => observeChanged(url, chromium, changedSet));
     const kept = seen.changed.focusCanvas.filter((value, index) => value === seen.changed.oldGrey[index]).length;
     console.log(`changed: viewport "${seen.changed.fault}", the canvas after the focus held the old grey at ${kept} of ${POINTS.length} points, status "${seen.changed.focusStatus}", held ${seen.changed.heldBefore} then ${seen.changed.heldAfter} files and frames, old id ${seen.changed.oldStatus}, image 2 "${seen.changed.otherFault}", chosen again "${seen.changed.reopenFault}"`);
@@ -832,10 +1072,14 @@ async function main() {
     console.log(`cells: A "${seen.cells.aStatus}", empty "${seen.cells.emptyStatus}", B active "${seen.cells.bQuiet}", B changed "${seen.cells.bFault}"`);
     seen.probe = await withViewer(binary, (url) => observeProbe(url, chromium, probeSet));
     console.log(`probe: ${seen.probe.reads} reads of ${seen.probe.bytes} bytes for ${seen.probe.files} files, at most ${seen.probe.peak} in flight, ${seen.probe.ms} ms`);
+    seen.queuedProbe = await withViewer(binary, (url) => observeQueuedProbe(url, chromium, queueSet));
+    console.log(`queued probe: ${JSON.stringify(seen.queuedProbe)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-  const problems = changedProblems(seen);
+  const priority = await withViewer(binary, (url) => observeProbePriority(url, chromium));
+  console.log(`probe priority: ${JSON.stringify(priority)}`);
+  const problems = [...changedProblems(seen), ...probePriorityProblems(priority), ...queuedProbeProblems(seen.queuedProbe)];
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;

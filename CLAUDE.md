@@ -205,10 +205,12 @@ What exists, in the order it matters:
 - **The pixel pipeline**, all four stages of DICOM PS3.3 C.11 in `ocelli-pixel`,
   with the section 18.3 fixtures behind them, inversion resolved exactly once,
   and the colour transform applied exactly once against the decoder's own
-  reported output space. **ICC, the other half of stage 4's row, is not
-  implemented.** This line said "stages 1 to 3" and "palette and ICC are not
-  implemented" until F-030, which is the shape the paragraph below this list
-  keeps having to correct.
+  reported output space. F-240 applies the matrix and tone-curve ICC subset
+  in `ocelli-pixel` and the native folder viewer: RGB display or input profiles
+  with XYZ PCS and matrix colourants, using `curv` tone curves or `para`
+  function types 0 to 4, convert to sRGB. The folder viewer keeps device RGB
+  with a named notice for profiles outside the subset. GPU ICC remains
+  explicitly unavailable.
 - **Derived DICOM geometry**, per-frame plane, stack shear measured from the
   geometry rather than read from the gantry tilt tag, and calibrated against
   uncalibrated spacing kept distinct.
@@ -225,9 +227,9 @@ What exists, in the order it matters:
   F-037. `ocelli-render` is still the only crate that may create a device.
 - **A budgeted LRU**, HLD section 20's `Budgeted` and `Lru<K, V>` with the
   three tiers of section 8 as a discriminant and a pressure signal. S11's F-031.
-  The value types are `DecodedFrame` and `Brick` in `ocelli-cache`, and
-  `Volume` in `ocelli-volume`. An encoded byte run and a GPU texture are not
-  among them.
+  The public value types are `DecodedFrame`, `CommittedFrame` and `Brick` in
+  `ocelli-cache`, and `Volume` in `ocelli-volume`. An encoded byte run and a
+  GPU texture are not among them.
 - **The LUT chain's shader.** `crates/ocelli-render/shaders/voi.wgsl`, HLD
   section 18.4's uniform and the three window functions, agreeing with
   `LutChain::map_into` on a real adapter to two `f32` ULP at 255. S11's F-041.

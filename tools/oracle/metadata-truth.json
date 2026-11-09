@@ -207,7 +207,7 @@
       }
     },
     "syntax/j2k_lossless_ybr_rct.dcm": {
-      "citation": "PS3.5 8.2.4 and PS3.3 C.7.6.3, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.4, F-239 declared saturated 64 by 96 RGB8 fixtures",
       "fields": {
         "/attributes/photometricInterpretation": {
           "scope": "top-level",
@@ -244,7 +244,7 @@
       }
     },
     "syntax/j2k_lossy_ybr_ict.dcm": {
-      "citation": "PS3.5 8.2.4 and PS3.3 C.7.6.3, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.4, F-239 declared saturated 64 by 96 RGB8 fixtures",
       "fields": {
         "/attributes/photometricInterpretation": {
           "scope": "top-level",
@@ -281,7 +281,7 @@
       }
     },
     "syntax/htj2k_lossless_ybr_rct.dcm": {
-      "citation": "PS3.5 8.2.4 and PS3.3 C.7.6.3, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.14, F-239 declared saturated 64 by 96 RGB8 fixtures",
       "fields": {
         "/attributes/photometricInterpretation": {
           "scope": "top-level",
@@ -318,7 +318,7 @@
       }
     },
     "syntax/htj2k_lossy_ybr_ict.dcm": {
-      "citation": "PS3.5 8.2.4 and PS3.3 C.7.6.3, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.14, F-239 declared saturated 64 by 96 RGB8 fixtures",
       "fields": {
         "/attributes/photometricInterpretation": {
           "scope": "top-level",

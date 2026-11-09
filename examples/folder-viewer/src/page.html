@@ -1088,7 +1088,7 @@ const FILE_GONE = "the file is no longer held by this process";
 // folder is chosen again.
 const FILE_CHANGED = "This file changed or was removed on disk after the folder was opened. Open the folder again to see it.";
 // Reads the change probe keeps in flight.
-const PROBE_WIDTH = 4;
+const PROBE_WIDTH = 1;
 // Most ids one /forget names. The process refuses a longer list.
 const FORGET_LINES = 65536;
 // This page load's token, 32 lowercase hex digits, sent with every /file
@@ -1181,6 +1181,7 @@ let nextFileSerial = 0;
 // Files whose one-byte read failed after the folder was opened.
 const changedFiles = new WeakSet();
 const probe = { busy: false, again: false };
+let cancelSelectionProbe = null;
 let changedNote = "";
 // The ids the process gave the current open's files, and those files. Both
 // are replaced on every open, after the previous open's ids are forgotten.
@@ -2329,8 +2330,8 @@ function loadSeries(vp, key) {
   syncSeriesRows();
   clearLine(vp);
   const remembered = positions.get(key);
-  showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
-  if (vp.cell === activeCell) probeActive();
+  const drawing = showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
+  if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);
   // A new series in any shown cell needs its line, and a new source moves
   // the others. One coalesced request covers both.
   if (cellShown(vp)) scheduleLink();
@@ -2763,6 +2764,43 @@ function seriesFiles(series) {
   return files;
 }
 
+// A selected series gets its first publication ahead of the background
+// file sweep. Only one active selection owns a pending sweep. An immediate
+// focus/activation probe consumes it too, including activation of an empty cell.
+function probeAfterSeriesDraw(vp, drawing) {
+  if (cancelSelectionProbe) cancelSelectionProbe();
+  const generation = currentGeneration;
+  const key = vp.seriesKey;
+  let done = false;
+  let firstFrame = 0;
+  let secondFrame = 0;
+  function cancel() {
+    done = true;
+    clearTimeout(fallback);
+    cancelAnimationFrame(firstFrame);
+    cancelAnimationFrame(secondFrame);
+    if (cancelSelectionProbe === cancel) cancelSelectionProbe = null;
+  }
+  function finish() {
+    if (done) return;
+    cancel();
+    if (generation !== currentGeneration || vp !== activeViewport() || key !== vp.seriesKey) return;
+    probeActive();
+  }
+  // A requested fallback delay, not a deadline guarantee from the browser.
+  // Failed or stalled draws and suspended animation callbacks still get a sweep.
+  const fallback = setTimeout(finish, 100);
+  cancelSelectionProbe = cancel;
+  function afterDraw() {
+    if (done) return;
+    firstFrame = requestAnimationFrame(() => {
+      if (done) return;
+      secondFrame = requestAnimationFrame(finish);
+    });
+  }
+  Promise.resolve(drawing).then(afterDraw, afterDraw);
+}
+
 // Reads one byte of each file of the active series, PROBE_WIDTH at a time.
 // It runs on focus, on a return to a visible page, on a series selection in
 // the active viewport and when another viewport becomes active.
@@ -2771,6 +2809,7 @@ function seriesFiles(series) {
 // A rewrite that keeps the modification time reads without error and is not
 // found.
 function probeActive() {
+  if (cancelSelectionProbe) cancelSelectionProbe();
   const series = seriesOf(activeViewport());
   if (!series) return;
   probeFiles(seriesFiles(series), currentGeneration);

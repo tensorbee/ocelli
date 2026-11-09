@@ -5140,7 +5140,9 @@ fn the_page_keys_pixels_by_file_and_probes_for_changes() -> Result<(), String> {
     }
     // A series selection in the active viewport probes, and so do focus and
     // a return to a visible page.
-    if !function_body(page, "loadSeries")?.contains("if (vp.cell === activeCell) probeActive();") {
+    if !function_body(page, "loadSeries")?
+        .contains("if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);")
+    {
         return Err("a series selection does not probe".to_owned());
     }
     // Activating another viewport counts and probes its series, as a series

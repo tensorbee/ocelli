@@ -1063,3 +1063,79 @@ movement flags remain separate.
 
 Normalized raw run SHA-256:
 `3bd1c59366540291875e78a5f8bb0b3a0cbd6f2cc2573c80677842631b418913`.
+
+
+## S46 first-image and background file-probe remediation
+
+The operator required the first-image movement fixed before sprint close.
+The assembled run measured 12.7 ms against the recorded 9.7 ms baseline and
+its unchanged 25 percent band. Deferring the active-series probe until after
+the first draw's paint opportunity restored first-image time to 10.3 ms,
+but its first full run and a focused repeat measured a 3.2 ms window step,
+above the recorded 2.4 ms plus 25 percent band. Those observations are
+retained, not accepted as a baseline or removed from the record.
+
+A private four-arm diagnostic used the original registered consumer bodies
+with transparent probe observations. Both old and new natural arms measured
+3.2 ms, with file reads overlapping window requests. Settled-probe arms
+measured 2.5 and 2.4 ms. This supports investigating overlap, not an isolated
+claim that the new scheduler caused the movement. Its extra observer work
+can affect timing. Its 36 samples are diagnostic only and never substitute
+for registered acceptance samples. Input binding used the owned synthetic
+file count and stamp, not a full per-file digest.
+
+The measured implementation gives the first draw a paint opportunity before
+constructing the probe list, and keeps a requested 100 ms fallback for a
+failed or stalled draw or withheld animation callbacks. One pending owner
+cancels an abandoned selection. Focus, visibility and viewport activation
+consume that owner before their existing immediate probe. The background
+sweep uses one read worker. This explicitly amends F-224's original four-worker
+choice and exact-four observation policy. The independent ceiling of four,
+every-file/one-byte checks and original one-second limit remain. No new
+pause timer, pixel rule or cache identity is introduced.
+
+On the F-216 host, Node 24.13.0, Playwright 1.62.1 and Chromium
+151.0.7922.34, the complete registered release run on the private remediation
+source measured:
+
+| Subject | Fresh pre-ICC base | Prior assembled tip | Remediation | Existing baseline | Existing band |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| viewer.open, ms | 930 | 972 | 967 | 1018 | 6 percent |
+| viewer.first_image, ms | 8.7 | 12.7 | 11.3 | 9.7 | 25 percent |
+| viewer.window_step, ms | 2.2 | 2.5 | 2.2 | 2.4 | 25 percent |
+| viewer.scroll_rate, frames per second | 108.998 | 109.035 | 108.774 | 109.083 | 25 percent |
+| viewer.resident_memory, bytes | 469434368 | 444497920 | 464125952 | 445956096 | 12 percent |
+
+Every remediation row is within its existing recorded band, and all absolute
+budgets pass. DX first image is 30.3 ms and DX window step is 18.1 ms, within
+the existing 250 and 70 ms budgets. Release and debug scroll each observed
+zero blank frames. The process restart recovered. The source remains slower
+than the fresh pre-ICC base on first image, so this is a restored recorded
+band, not a claim of equal pre-feature performance or an isolated ICC cost.
+Host load and free-memory conditions are retained in each raw record, not
+described as an otherwise idle desktop.
+
+The full changed-file browser suite passed. It measured all 1693 one-byte
+reads with peak one in 284.9 ms. Switching while that sweep was running,
+rewriting a picked B file and coalescing selection with focus produced exactly
+1693 A and three B reads. The B fault and count were observed, with completion
+276.5 ms after selection. Eleven scheduling and lifecycle cases cover fast,
+held, refused and animation-starved draws, focus, repeated selection, same-UID
+folder replacement and viewport activation. Missing immediate cancellation,
+missing fallback and dropped probe.again mutants fail semantically. The
+upper-bound validator still rejects five reads in flight. Every accepted
+source restoration was checked exactly.
+
+The complete run is retained locally as
+`first-image-serial-worker-five-subjects-node24/run.json`, SHA256
+`5b7fc8cf2385f32e03059f82e3bed816ae6d949b5f953dd21c9b24c4fe71ba04`.
+
+Its direct command receipt records exit zero and 102.558 seconds. The
+implementation tree was `1294d421c041f6bd36fc600dc83cf4cd4baac507`, with
+page source SHA256
+`8de74678523d68b8ee32671229e34de0c57ad1a689bc9ece4ef03904c69107d7`.
+The generic registered record does not self-report a product binary hash.
+Build receipts, staged source identity and separate post-run artifact hashes
+provide the qualified binding. Subsequent README, Use and evidence text edits
+do not change this measured JavaScript. Final composed-tree verification,
+colour comparisons and operator click-throughs remain separate obligations.

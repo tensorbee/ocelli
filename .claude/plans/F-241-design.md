@@ -438,3 +438,26 @@ None. Questions 1 to 9 are answered above. AC20's reviewer check of the cited st
 - **The other direction of the sweep.** The implementer runs the reverse-direction mutants, each field read where its condition says absent, over the same clauses as the pass 5 sweep, pass 6's 33 included. Rows are added for every survivor that is not equivalent, and the list with verdicts goes in the report.
 - **Taken from outside the range, because they are cheap and the parser is under review.** A test for the 41 to 44 access unit starter rule of 7.4.2.4.4 at layer 0 and above, red under pass 6's two surviving mutants, and a `pps_seq_parameter_set_id` row at 15 accepted and 16 refused.
 - **Nitpicks taken.** N1, the `!reserved_vcl(kind)` that cannot change anything goes. N2, both segments of the TRAIL_R picture carry the same slice_pic_order_cnt_lsb, per 7.4.7.1.
+
+### Draft close handoff, S46 close, four carried notes for the next part
+
+Appended at the S46 close from the recovered close-backlog draft, item 9.
+These are notes on the existing F-241 scope for its next part, not a new
+story. F-241's row, estimate, status and dependencies are unchanged. The code
+lines were read on `work/f-241-demux` at `3223ae7c` and re-read in this tree
+at 31323a79, where they sit at the positions named. The plan keeps both
+readings as source observations, without claiming commit ancestry for a
+tree object.
+
+- **Random access in MP4 from `stss` includes an open-GOP non-IDR I picture, where TS and Annex B mark only IDR or IRAP. The bridge decides what WebCodecs may start from.** Source: the pass 2 ruling "Outside this range, carried to the bridge part" above, from the demux slice's review pass 2 N5.
+- **`P7-starter-unspec-dropped` survives. The UNSPEC48 to UNSPEC55 access unit starters of H.265 7.4.2.4.4 have no test.** A case for 48 and 55 in the 7.4.2.4.4 starter test closes it. `crates/ocelli-codec/src/video/h265.rs:752` here and on the branch. Source: `.claude/reviews/F-241-demux-working-pass-7.md`, "Limitations and handoff".
+- **`P7-sps-id-bound-16` survives. An SPS with id 16 is accepted and then dropped by `get_mut`, where 7.4.3.2.1 makes it a refusal.** `crates/ocelli-codec/src/video/h265.rs:328`, `ue_max(15, "sps_seq_parameter_set_id over 15")`, with a row at 15 and none at 16. Source: the same pass 7 section. The id-16 issue is a surviving mutant and a test gap, not a claim that unchanged production accepts id 16.
+- **N1. "Operation 5 has no field of its own, Table 7-9" at `crates/ocelli-codec/src/video/h264.rs:2918` should cite 7.3.3.3, the dec_ref_pic_marking syntax.** Source: pass 7, "Nitpicks".
+
+Not carried, recorded so the next part does not re-litigate them. Pass 7's
+third survivor `P7-after-vcl-layer0-only` is argued equivalent and is not
+carried. The MPEG-2 range taken from `colr` when there is no sequence display
+extension is the pass 2 ruling above, a decision rather than a carried item.
+Pass 7's correction to pass 6's mutant count, 25 killed and 8 surviving
+rather than 26 and 7, is a record fix in the review file and is not carried.
+No video test ran for this filing.

@@ -49,7 +49,7 @@ The tier: Ocelli tier C on the CPU, cornerstone3D on ANGLE (Apple, ANGLE Metal R
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
-| session/cold | 273.4233 | 271.5259 to 277.2151 | 136.6970 | 135.6563 to 138.7402 | 2.00 | 9 |
+| session/cold | 270.9998 | 269.6875 to 271.4170 | 137.2510 | 135.5940 to 141.8579 | 1.97 | 9 |
 | session/warm | unavailable | unavailable | unavailable | unavailable | - | 0 |
 
 - session/warm: a warm page load measures the browser cache, not either library
@@ -59,32 +59,32 @@ The tier: Ocelli tier C on the CPU, cornerstone3D on ANGLE (Apple, ANGLE Metal R
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
-| synthetic-ct/cold | 999.9000 | 991.6000 to 1008.8000 | 730.5000 | 719.3000 to 732.9000 | 1.37 | 9 |
-| synthetic-ct/warm | 1015.3000 | 1014.7000 to 1018.0000 | 718.2000 | 712.2000 to 719.4000 | 1.41 | 9 |
-| pseudo-full/cold | 146.3000 | 145.7000 to 148.9000 | 107.8000 | 105.6000 to 109.8000 | 1.36 | 9 |
-| pseudo-full/warm | 147.6000 | 145.7000 to 148.4000 | 110.9000 | 110.0000 to 111.4000 | 1.33 | 9 |
+| synthetic-ct/cold | 998.8000 | 995.2000 to 1004.6000 | 716.8000 | 711.9000 to 718.1000 | 1.39 | 9 |
+| synthetic-ct/warm | 1010.4000 | 1006.6000 to 1016.6000 | 718.7000 | 710.1000 to 720.6000 | 1.41 | 9 |
+| pseudo-full/cold | 147.0000 | 144.8000 to 148.7000 | 106.7000 | 105.6000 to 107.8000 | 1.38 | 9 |
+| pseudo-full/warm | 147.9000 | 147.5000 to 148.3000 | 110.0000 | 109.2000 to 111.0000 | 1.34 | 9 |
 
 ### first image, milliseconds
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
-| synthetic-ct/cold | 8.6000 | 7.2000 to 9.2000 | 24.5000 | 24.1000 to 25.2000 | 0.351 | 9 |
-| synthetic-ct/warm | 8.8000 | 7.4000 to 10.1000 | 24.0000 | 23.7000 to 24.5000 | 0.367 | 9 |
-| synthetic-dx/cold | 32.7000 | 31.9000 to 33.7000 | 53.4000 | 52.0000 to 54.8000 | 0.612 | 9 |
-| synthetic-dx/warm | 29.0000 | 28.8000 to 29.2000 | 52.2000 | 51.4000 to 52.8000 | 0.556 | 9 |
-| pseudo-ct/cold | 10.3000 | 9.2000 to 11.1000 | 24.6000 | 24.3000 to 25.9000 | 0.419 | 9 |
-| pseudo-ct/warm | 9.0000 | 8.7000 to 10.2000 | 25.6000 | 23.9000 to 27.4000 | 0.352 | 9 |
-| pseudo-dx/cold | 33.1000 | 32.4000 to 33.9000 | 52.6000 | 52.4000 to 53.3000 | 0.629 | 9 |
-| pseudo-dx/warm | 28.4000 | 27.9000 to 29.4000 | 51.6000 | 51.1000 to 52.1000 | 0.550 | 9 |
+| synthetic-ct/cold | 8.8000 | 8.5000 to 9.5000 | 25.3000 | 23.8000 to 26.2000 | 0.348 | 9 |
+| synthetic-ct/warm | 8.8000 | 8.7000 to 10.9000 | 24.4000 | 24.1000 to 25.0000 | 0.361 | 9 |
+| synthetic-dx/cold | 33.2000 | 32.9000 to 33.8000 | 52.9000 | 52.6000 to 53.6000 | 0.628 | 9 |
+| synthetic-dx/warm | 30.0000 | 29.2000 to 32.3000 | 52.6000 | 52.0000 to 54.2000 | 0.570 | 9 |
+| pseudo-ct/cold | 9.2000 | 9.1000 to 11.3000 | 25.1000 | 24.6000 to 25.6000 | 0.367 | 9 |
+| pseudo-ct/warm | 9.3000 | 8.8000 to 10.5000 | 24.8000 | 24.3000 to 26.0000 | 0.375 | 9 |
+| pseudo-dx/cold | 32.9000 | 32.2000 to 33.8000 | 52.9000 | 52.2000 to 54.2000 | 0.622 | 9 |
+| pseudo-dx/warm | 29.1000 | 28.4000 to 29.8000 | 51.9000 | 51.8000 to 52.1000 | 0.561 | 9 |
 
 ### scroll, presented frames per second
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
 | synthetic-ct/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| synthetic-ct/warm | 96.16 | 96.14 to 96.74 | 48.37 | 48.36 to 48.39 | 1.99 | 5 |
+| synthetic-ct/warm | 96.64 | 96.13 to 96.76 | 48.37 | 48.37 to 48.38 | 2.00 | 5 |
 | pseudo-ct/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| pseudo-ct/warm | 96.73 | 96.69 to 96.75 | 48.38 | 48.37 to 48.38 | 2.00 | 5 |
+| pseudo-ct/warm | 96.65 | 96.64 to 96.76 | 48.38 | 48.38 to 48.38 | 2.00 | 5 |
 
 - synthetic-ct/cold: scroll is measured after the first image
 - synthetic-ct/cold: scroll is measured after the first image
@@ -96,13 +96,13 @@ The tier: Ocelli tier C on the CPU, cornerstone3D on ANGLE (Apple, ANGLE Metal R
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
 | synthetic-ct/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| synthetic-ct/warm | 9.3000 | 7.7000 to 9.6000 | 13.9000 | 13.7000 to 15.6000 | 0.669 | 9 |
+| synthetic-ct/warm | 7.7000 | 7.6000 to 8.4000 | 14.6000 | 11.0000 to 16.1000 | 0.527 | 9 |
 | synthetic-dx/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| synthetic-dx/warm | 18.1000 | 17.4000 to 20.1000 | 14.1000 | 12.6000 to 14.9000 | 1.28 | 9 |
+| synthetic-dx/warm | 18.1000 | 17.1000 to 19.1000 | 13.2000 | 10.9000 to 14.2000 | 1.37 | 9 |
 | pseudo-ct/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| pseudo-ct/warm | 7.6000 | 7.6000 to 7.8000 | 16.1000 | 16.0000 to 16.2000 | 0.472 | 9 |
+| pseudo-ct/warm | 7.6000 | 7.6000 to 7.7000 | 16.1000 | 16.1000 to 16.1000 | 0.472 | 9 |
 | pseudo-dx/cold | unavailable | unavailable | unavailable | unavailable | - | 0 |
-| pseudo-dx/warm | 19.4000 | 18.4000 to 20.1000 | 13.1000 | 12.5000 to 13.6000 | 1.48 | 9 |
+| pseudo-dx/warm | 18.7000 | 18.1000 to 19.0000 | 13.6000 | 13.0000 to 14.0000 | 1.38 | 9 |
 
 - synthetic-ct/cold: a window change needs a drawn image
 - synthetic-ct/cold: a window change needs a drawn image
@@ -119,8 +119,8 @@ Memory sampling pauses at least 250 ms between completed collection rounds. Actu
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
-| session/cold, sampled concurrent footprint lower bound | 1044.7 | 1041.7 to 1048.8 | 1275.5 | 1266.2 to 1277.5 | 0.819 | 3 |
-| session/cold, sum of per-process peaks upper bound | 1082.1 | 1080.0 to 1085.5 | 1369.9 | 1368.7 to 1375.0 | 0.790 | 3 |
+| session/cold, sampled concurrent footprint lower bound | 1046.8 | 1044.5 to 1048.2 | 1280.1 | 1279.2 to 1283.2 | 0.818 | 3 |
+| session/cold, sum of per-process peaks upper bound | 1084.8 | 1084.7 to 1085.7 | 1337.6 | 1336.5 to 1344.9 | 0.811 | 3 |
 | session/warm, sampled concurrent footprint lower bound | unavailable | unavailable | unavailable | unavailable | - | 0 |
 
 - session/warm: this condition is not applicable
@@ -130,7 +130,7 @@ Memory sampling pauses at least 250 ms between completed collection rounds. Actu
 
 | workload | Ocelli median | Ocelli p25 to p75 | cornerstone3D median | cornerstone3D p25 to p75 | ratio | trials |
 | --- | --- | --- | --- | --- | --- | --- |
-| session/cold | 3.38 | 3.37 to 3.38 | 1.94 | 1.92 to 1.97 | 1.74 | 3 |
+| session/cold | 3.35 | 3.33 to 3.35 | 1.90 | 1.90 to 1.91 | 1.76 | 3 |
 | session/warm | unavailable | unavailable | unavailable | unavailable | - | 0 |
 
 - session/warm: this condition is not applicable

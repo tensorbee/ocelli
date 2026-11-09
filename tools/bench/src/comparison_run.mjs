@@ -200,17 +200,39 @@ export function startProcessSampler(browser, nativePid = null, infrastructurePid
   const started = performance.now();
   const running = (async () => {
     while (!stopped) {
+      let stage = "inventory";
       try {
         const pids = await processInventory(browser, nativePid);
         const args = ["-f", "bytes", ...[...pids].flatMap((pid) => ["-p", String(pid)])];
+        stage = "product-tool";
         const { stdout } = await exec("/usr/bin/footprint", args, { maxBuffer: 16 * 1024 * 1024 });
+        stage = "product-parse";
         const figures = parseFootprint(stdout);
+        stage = "product-coverage";
         if ([...pids].some((pid) => !figures.has(pid))) throw new Error("a footprint sample omitted a product process", { cause: comparisonFailure(1) });
+        stage = "product-values";
         if ([...figures.values()].some(({ footprint, peak }) => !Number.isFinite(footprint) || footprint <= 0 || !Number.isFinite(peak) || peak < footprint)) throw new Error("a footprint sample did not observe positive product memory and its peak", { cause: comparisonFailure(1) });
         samples.push(figures); sampleTimes.push(performance.now() - started);
+        stage = "infrastructure-tool";
         const infra = await exec("/usr/bin/footprint", ["-f", "bytes", "-p", String(infrastructurePid)], { maxBuffer: 4 * 1024 * 1024 });
+        stage = "infrastructure-parse";
         infrastructure.push([...parseFootprint(infra.stdout)]);
-      } catch { failure = "process memory collection failed"; break; }
+      } catch (error) {
+        const categories = {
+          EPERM: "permission", EACCES: "permission", ENOENT: "tool-missing",
+          ERR_CHILD_PROCESS_STDIO_MAXBUFFER: "output-limit",
+        };
+        const code = error?.code;
+        const category = typeof code === "string" && Object.hasOwn(categories, code)
+          ? categories[code] : Number.isInteger(code) ? "numeric-code"
+            : error?.killed === true ? "killed"
+              : error?.cause?.marker === COMPARISON_FAILURE ? "comparison-refusal"
+                : "unclassified";
+        // Foreign tool errors can carry command arguments and stderr. Only
+        // these closed labels cross the existing comparison-error boundary.
+        failure = `process memory collection failed [stage=${stage},category=${category}]`;
+        break;
+      }
       await pause(FOOTPRINT_PERIOD);
     }
   })();
