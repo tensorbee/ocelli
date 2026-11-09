@@ -26,7 +26,7 @@ import {
 import dicomImageLoader from "@cornerstonejs/dicom-image-loader";
 import dicomParser from "dicom-parser";
 
-import { resolveVoi } from "../src/voi.mjs";
+import { resolveVoi, viewportProperties } from "../src/voi.mjs";
 import { metadataSourcesFor } from "../src/metadata-sources.mjs";
 
 const RENDERING_ENGINE_ID = "ocelliOracle";
@@ -119,7 +119,12 @@ function firstOrNull(values) {
 function readAttributes(bytes) {
   let dataSet;
   try {
-    dataSet = dicomParser.parseDicom(bytes);
+    // Only metadata below (7FE0,0001), including 5200 functional groups,
+    // is queried here. PS3.5 7.1 orders those tags before the EOT. The pinned
+    // parser misreads OV's long length, so stop at that exact bulk-data tag.
+    // Its sentinel value is unused. Files without EOT retain the full parse,
+    // and earlier parse errors still refuse below, without partial recovery.
+    dataSet = dicomParser.parseDicom(bytes, { untilTag: "x7fe00001" });
   } catch (error) {
     return { attributes: null, error: String(error?.message ?? error) };
   }
@@ -566,25 +571,11 @@ async function renderRow(request) {
         `${interpolationNames.join(", ")}`,
     };
   }
-  const properties = {
-    interpolationType: Enums.InterpolationType[params.interpolation],
-  };
-  // ALWAYS set, even where there is no window. `setStack` resets `voiRange`,
-  // `interpolationType`, `invert` and both flips for each new image, and it
-  // does NOT reset `VOILUTFunction`. Leaving it unset would let a colour row
-  // inherit the previous monochrome row's function. That is harmless while
-  // every corpus row resolves LINEAR, and it is the shape of a defect the day
-  // one does not.
-  properties.VOILUTFunction = voi.voiLutFunction ?? "LINEAR";
-  if (voi.source !== "none") {
-    // cornerstone3D's own centre and width to range conversion, so no
-    // arithmetic of ours enters the reference.
-    properties.voiRange = utilities.windowLevel.toLowHighRange(
-      voi.windowWidth,
-      voi.windowCenter,
-      voi.voiLutFunction,
-    );
-  }
+  // The shared builder preserves loader photometric inversion by default.
+  // Only an explicit colour observation replaces it. The pinned reference
+  // utility owns window-to-range conversion and the builder records no formula.
+  const properties = viewportProperties(voi,
+    Enums.InterpolationType[params.interpolation], utilities.windowLevel.toLowHighRange);
   viewport.setProperties(properties);
   viewport.resetCamera();
 

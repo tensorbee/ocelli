@@ -1,7 +1,7 @@
 # Render graph
 
-**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067, F-194
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-038, F-039, F-040, F-042, F-043, F-044, F-045, F-048, F-X003, F-057, F-059, F-054, F-056, F-060, F-061, F-062, F-063, F-064, F-065, F-066, F-067, F-194, F-239, F-240
+**Last updated:** 2026-11-08
 
 HLD section 22's graph and scheduler, made into `crates/ocelli-render::graph`.
 
@@ -387,6 +387,76 @@ A lost device is `Unavailable` and is not a frame mismatch. The sample
 planes use the preserving float format a slab upload would choose. When
 that format or the `Rgba16Float` window target cannot be bound, the bind
 returns `FusionError::Unavailable` and writes no CPU image.
+
+## Tier C colour bytes, F-239
+
+`colour_bytes_into` in `cpu.rs` turns one band of colour samples into three
+display bytes per pixel, `R G B` row major, for a caller that draws without a
+view, such as a local reply. It takes a `RasterColor`, a `ColourWindow`, the
+band's stored samples, the column count, a caller-owned `Vec<Rgb>` scratch
+and the output. A band is `out.len() / 3` pixels and must be whole rows. The
+scratch grows to the band when it is smaller and is never shrunk, so a frame
+drawn band by band allocates once.
+
+It runs the same steps as `CpuRaster::raster_color_into` and no others:
+`ColorTransform::accept_source`, the stored display byte check after the
+transform's sample scale, `map_colour`, which is stage 4 and then the colour
+window, and `rgb_bytes`, the channel byte rule. `raster_color_into` passes
+`ColourWindow::initial`, which is skipped, so its frames are unchanged.
+`colour_bytes_agree_with_the_raster_at_an_identity_grid` asserts the two
+entries give the same RGB at an identity view. Every refusal writes nothing:
+`Unavailable` for `RasterColor::Unsupported` or a sample that is not a
+display byte, `OutputLength` for a ragged output, `Extent` for an empty band,
+zero columns or a part row, and `Length` for a band of the wrong length.
+
+The folder viewer is a production consumer. It holds the resolved transform,
+including the accepted ICC subset, and converts whole-row bands into its
+three-byte RGB reply. The window and invert run after ICC. Both readout paths
+share the same pre-window conversion, rather than measuring rounded replies.
+GPU routes continue to report unavailable for accepted profiles they cannot
+apply. The native folder viewer uses the CPU route.
+
+### The channel byte rule rounds a tie to even
+
+`byte_from_channel` is the nearest code in `0 ..= 255`, and since F-239 a tie
+goes to the even code, the operator's decision of 2026-11-07. That is
+`Uint8ClampedArray`'s rule, so it is cornerstone3D 5.8.2's for every colour
+channel its CPU path windows. It was a tie up until then. The rule governs
+colour bytes. The search compares with the
+exact half, `value >= code - 0.5`, and an exact tie between an odd and an even
+code gives way to the even one. `a_tie_rounds_to_the_even_channel_byte` holds
+eight ties of both parities and the float either side of each.
+
+**Tier C monochrome reaches the rule only with whole codes.** A preset draw
+reads its byte from the table `display_index` or `reference_ramp_index`
+addresses, so the monochrome tie decision is that address. By the lead's
+ruling R2 after F-239's library review pass 1 it keeps its rounding:
+`display_index` rounds a tie up, which tiers A and B share through WGSL
+`table_index` and which matches the reference's `Math.floor(x * 255 + 0.5)`
+table quantisation, and the grey LINEAR ramp already rounds to even. So
+monochrome bytes are unchanged, and that is measured. On 2026-11-07, the tier C
+candidate producer, `ocelli-compare produce`, over the corpus rows the
+reference run holds, built once at F-239's tip and once at the same tip with
+only the tie line reverted: 102 views written, 0 bytes differ. That is 86
+monochrome stack views, 90,177,536 bytes, the 9 volume views and the 7 colour
+and palette views. The reverted build turns
+`a_tie_rounds_to_the_even_channel_byte` and
+`a_colour_window_tie_rounds_half_to_even` red, so the two builds did differ.
+
+**Tiers A and B, measured on a real adapter**, Apple M4 Max under Metal, with
+the ignored tests in `crates/ocelli-render/tests/byte_ties.rs`. The grey ramp's
+byte is WGSL `round_half_even_byte`, and it agrees with tier C at all 255 exact
+ties and the float either side of each, 765 values, asserted. The render
+target's own float to `unorm8` store, which `present_display` reaches with no
+colour table bound, is measured and not asserted, because the conversion
+belongs to the driver. For display `k + 0.5` written as `(k + 0.5) / 255`, it
+stored the upper code at all 255 ties, so 128 of them, every tie whose lower
+code is even, differ from tier C by one code. `(k + 0.5) / 255` is not exact in
+`f32`, so that count describes this adapter's store of those floats and not a
+tie rule the hardware states. No tier C path is the counterpart of that store,
+because tier C always draws monochrome through a table, and no colour route on
+any tier reaches it. By the lead's ruling R3 the store is recorded as measured
+and not changed.
 
 ## Tiers
 

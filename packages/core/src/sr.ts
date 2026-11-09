@@ -19,7 +19,11 @@ export type Relationship =
   | "INFERRED_FROM"
   | "SELECTED_FROM";
 
-export type GraphicType = "POINT" | "POLYLINE" | "CIRCLE";
+/**
+ * PS3.3 C.18.6.1.2. POINT is one (column,row) pair, POLYLINE at least two,
+ * CIRCLE two and ELLIPSE four, the major axis endpoints then the minor.
+ */
+export type GraphicType = "POINT" | "POLYLINE" | "CIRCLE" | "ELLIPSE";
 
 type ItemBase = {
   relationship: Relationship | null;
@@ -30,10 +34,23 @@ type ItemBase = {
 export type ContentItem =
   | (ItemBase & { valueType: "CONTAINER" })
   | (ItemBase & { valueType: "TEXT"; text: string })
-  | (ItemBase & { valueType: "NUM"; number: number; unit: string })
+  | (ItemBase & {
+      valueType: "NUM";
+      number: number;
+      /** The UCUM code, also its meaning unless `unitMeaning` is given. */
+      unit: string;
+      /** The UCUM code meaning, such as CID 7460's "millimeter". */
+      unitMeaning?: string;
+    })
   | (ItemBase & { valueType: "CODE"; code: Concept })
   | (ItemBase & { valueType: "UIDREF"; uid: string })
-  | (ItemBase & { valueType: "IMAGE"; sopClass: string; sopInstance: string })
+  | (ItemBase & {
+      valueType: "IMAGE";
+      sopClass: string;
+      sopInstance: string;
+      /** Referenced Frame Number, counted from 1, PS3.3 C.18.4. Absent for the whole object. */
+      frame?: number;
+    })
   | (ItemBase & { valueType: "SCOORD"; graphic: GraphicType; points: readonly (readonly number[])[] })
   | (ItemBase & {
       valueType: "SCOORD3D";
@@ -81,6 +98,9 @@ function graphicCount(graphic: GraphicType, count: number): boolean {
   }
   if (graphic === "POLYLINE") {
     return count >= 2;
+  }
+  if (graphic === "ELLIPSE") {
+    return count === 4;
   }
   return count === 2;
 }
@@ -152,7 +172,7 @@ function copyItem(item: ContentItem, root: boolean): ContentItem | null {
     if (!Number.isFinite(item.number) || text(item.unit) === null) {
       return null;
     }
-    return {
+    const num: ContentItem = {
       relationship,
       valueType: "NUM",
       concept: coded,
@@ -160,6 +180,10 @@ function copyItem(item: ContentItem, root: boolean): ContentItem | null {
       unit: item.unit,
       children: nested,
     };
+    if (item.unitMeaning === undefined) {
+      return num;
+    }
+    return text(item.unitMeaning) === null ? null : { ...num, unitMeaning: item.unitMeaning };
   }
   if (item.valueType === "CODE") {
     const code = concept(item.code);
@@ -181,7 +205,7 @@ function copyItem(item: ContentItem, root: boolean): ContentItem | null {
     if (sopClass === null || sopInstance === null) {
       return null;
     }
-    return {
+    const image: ContentItem = {
       relationship,
       valueType: "IMAGE",
       concept: coded,
@@ -189,6 +213,13 @@ function copyItem(item: ContentItem, root: boolean): ContentItem | null {
       sopInstance,
       children: nested,
     };
+    if (item.frame === undefined) {
+      return image;
+    }
+    if (!Number.isSafeInteger(item.frame) || item.frame < 1) {
+      return null;
+    }
+    return { ...image, frame: item.frame };
   }
   if (item.valueType === "SCOORD") {
     const copied = points(item.points, 2, item.graphic);

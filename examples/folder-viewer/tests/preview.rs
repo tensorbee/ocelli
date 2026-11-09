@@ -9,10 +9,11 @@ use std::time::Duration;
 use ocelli_core::{Index, Pt};
 use ocelli_dicom::{FrameGeometry, MetadataSet, MultiframeMetadata, parse_part10};
 use ocelli_folder_viewer::{
-    FRAME_LIST_CAP, FrameRequest, ImagePoint, MeasureShape, Preview, PreviewError, SLICES, Viewer,
-    ViewerConfig, age_text, dicom_date_text, dicom_time_text, exposure_mas, handle_connection,
-    headers_json, inspect_json, measure_frame, patient_orientation_letters, person_name_text,
-    plane_from_token, plane_token, preview_first_frame, preview_frame, serve_on, slice,
+    AutoSource, FRAME_LIST_CAP, FrameRequest, ImagePoint, MeasureShape, Preview, PreviewError,
+    SLICES, Viewer, ViewerConfig, age_text, dicom_date_text, dicom_time_text, exposure_mas,
+    handle_connection, headers_json, inspect_json, measure_frame, patient_orientation_letters,
+    person_name_text, plane_from_token, plane_token, preview_first_frame, preview_frame, serve_on,
+    slice,
 };
 use ocelli_pixel::VoiFunction;
 use ocelli_viewport::presentation::WindowPreset;
@@ -24,12 +25,12 @@ fn an_enhanced_frame_uses_its_functional_group_window() -> Result<(), String> {
     // Frame 1 has LINEAR_EXACT center 50 width 1. Both frames store 50.
     // Frame 0: ((50 - 100) / 200 + 0.5) * 255 = 63.75, which addresses grey 64.
     // Frame 1: ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
-    // Ignoring the groups would full-range both frames to grey 128.
+    // Ignoring the groups would draw both frames at the automatic window.
     let file = enhanced_frames()?;
     let first = preview_frame(&file, FrameRequest::default())
         .map_err(|_| "the first enhanced frame was refused".to_owned())?;
-    if first.full_range {
-        return Err("the enhanced frame was labelled full range".to_owned());
+    if first.auto != AutoSource::None {
+        return Err("the enhanced frame was labelled auto".to_owned());
     }
     if only_byte(&first)? != 64 {
         return Err("the first enhanced frame was not grey 64".to_owned());
@@ -59,22 +60,22 @@ fn a_linear_exact_window_maps_stored_50_to_grey_64() -> Result<(), String> {
     assert_eq!(preview.width, 1);
     assert_eq!(preview.height, 1);
     assert_eq!(preview.frames, 1);
-    assert!(!preview.full_range);
+    assert_eq!(preview.auto, AutoSource::None);
     assert_eq!(only_byte(&preview)?, 64);
     Ok(())
 }
 
 #[test]
-fn a_zero_length_window_is_full_range() -> Result<(), String> {
-    // Stored 50. Slope 1 and intercept 0 are present. Window Center and
-    // Window Width are present with length 0, so they carry no number.
-    // That is the same as an absent window. One modality value gives
-    // LINEAR_EXACT center 50 and width 1.
+fn a_zero_length_window_is_auto() -> Result<(), String> {
+    // F-227 AC10. Stored 50. Slope 1 and intercept 0 are present. Window
+    // Center and Window Width are present with length 0, so they carry no
+    // number. That is the same as an absent window. One counted modality
+    // value is the constant automatic window, LINEAR_EXACT center 50, width 1.
     // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
     let preview = preview_first_frame(&mono_zero_window()?)
         .map_err(|_| "a zero-length window was refused".to_owned())?;
-    if !preview.full_range {
-        return Err("a zero-length window was not full range".to_owned());
+    if preview.auto != AutoSource::Image {
+        return Err("a zero-length window was not the image's automatic window".to_owned());
     }
     if only_byte(&preview)? != 128 {
         return Err("a zero-length window was not grey 128".to_owned());
@@ -90,8 +91,8 @@ fn a_zero_length_rescale_keeps_the_explicit_window() -> Result<(), String> {
     // ((50 - 100) / 200 + 0.5) * 255 = 63.75, which addresses grey 64.
     let preview = preview_first_frame(&mono_zero_rescale()?)
         .map_err(|_| "a zero-length rescale was refused".to_owned())?;
-    if preview.full_range {
-        return Err("a zero-length rescale was labelled full range".to_owned());
+    if preview.auto != AutoSource::None {
+        return Err("a zero-length rescale was labelled auto".to_owned());
     }
     if only_byte(&preview)? != 64 {
         return Err("a zero-length rescale was not grey 64".to_owned());
@@ -103,11 +104,11 @@ fn a_zero_length_rescale_keeps_the_explicit_window() -> Result<(), String> {
 fn a_zero_length_voi_function_uses_linear() -> Result<(), String> {
     // Window Center 100 and Window Width 200 are present. VOI LUT Function
     // is present with length 0, so it carries no token. An absent function
-    // is LINEAR. The frame is not full range.
+    // is LINEAR. The frame is not drawn at an automatic window.
     let preview = preview_first_frame(&mono_zero_function()?)
         .map_err(|_| "a zero-length function was refused".to_owned())?;
-    if preview.full_range {
-        return Err("a zero-length function was labelled full range".to_owned());
+    if preview.auto != AutoSource::None {
+        return Err("a zero-length function was labelled auto".to_owned());
     }
     if preview.window_function != "LINEAR" {
         return Err("a zero-length function was not LINEAR".to_owned());
@@ -116,14 +117,14 @@ fn a_zero_length_voi_function_uses_linear() -> Result<(), String> {
 }
 
 #[test]
-fn a_missing_window_is_labelled_full_range() -> Result<(), String> {
-    // One stored sample 50. Absent rescale is slope 1 and intercept 0.
-    // Absent center and width use LINEAR_EXACT over that single modality
-    // value, so the width is 1 and the center is 50.
+fn a_missing_window_is_labelled_auto() -> Result<(), String> {
+    // F-227 AC10. One stored sample 50. Absent rescale is slope 1 and
+    // intercept 0. Absent center and width take the automatic window of that
+    // one counted value, the constant window, LINEAR_EXACT center 50 width 1.
     // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
     let preview = preview_first_frame(&mono_frame(false)?)
-        .map_err(|_| "the synthetic full-range frame was refused".to_owned())?;
-    assert!(preview.full_range);
+        .map_err(|_| "the synthetic frame with no window was refused".to_owned())?;
+    assert_eq!(preview.auto, AutoSource::Image);
     assert_eq!(only_byte(&preview)?, 128);
     Ok(())
 }
@@ -150,8 +151,8 @@ fn the_page_posts_a_frame_and_returns_its_grey_byte() -> Result<(), String> {
     if !header.contains("X-Ocelli-Width: 1") || !header.contains("X-Ocelli-Height: 1") {
         return Err("the preview response omitted the frame size".to_owned());
     }
-    if !header.contains("X-Ocelli-Full-Range: 0") {
-        return Err("a windowed frame was labelled full range".to_owned());
+    if !header.contains("X-Ocelli-Auto-Window: none") {
+        return Err("a windowed frame was labelled auto".to_owned());
     }
     if body.len() != 1 {
         return Err("the preview response was not one byte".to_owned());
@@ -198,8 +199,37 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     if !page.contains("if (Math.abs(wheelAcc) >= 40) {\n    wheelAcc = 0;\n    queueSlice(sign);") {
         return Err("a swipe still steps once per event".to_owned());
     }
-    if !page.contains("not DICOM SR") || !page.contains("gone when you reload") {
-        return Err("the page does not say what a mark is".to_owned());
+    // F-215 AC16 and AC17. Marks are saved as documents, and the retired
+    // sentences are gone. Lead amendment 2 keeps "It is not saved." on the
+    // kinds this story does not save, so that phrase is refused only in the
+    // marks note and the key image sentence, and the tool sentences are
+    // pinned one by one below.
+    for needle in [
+        "TID 1500",
+        "Key Object Selection",
+        ">Save marks<",
+        "Nothing is written into the opened folder",
+        "type=\"importmap\"",
+        "\"@ocelli/core\":\"/lib/ocelli-core/index.js\"",
+        "import(\"/mark-documents.mjs\")",
+    ] {
+        if !page.contains(needle) {
+            return Err(format!(
+                "the page does not say how marks are saved: {needle}"
+            ));
+        }
+    }
+    for retired in [
+        "not DICOM SR",
+        "gone when you reload",
+        "does not write a Key Object Selection",
+        "for this session. It is not saved",
+    ] {
+        if page.contains(retired) {
+            return Err(format!(
+                "the page does not say how marks are saved: {retired}"
+            ));
+        }
     }
     let wrap_at = page
         .find("id=\"wrap\"")
@@ -278,11 +308,20 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
             "the measure call is not by id with the points: {measure_call}"
         ));
     }
+    // F-215 AC17. The five kinds Save marks writes say so. Lead amendment 2:
+    // the kinds it does not write keep "not saved".
     for sentence in [
-        "\"tool-rect\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
-        "\"tool-ellipse\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. It is not saved.\"",
-        "\"tool-contour\": \"A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. It is not saved.\"",
-        "\"tool-length\": \"The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. It is not saved.\"",
+        "\"tool-rect\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. Save marks writes it as TID 1500.\"",
+        "\"tool-ellipse\": \"A region. The local process reports its area and the mean, SD, minimum and maximum of the modality values whose pixel centres are inside it. Save marks writes it as TID 1500.\"",
+        "\"tool-contour\": \"A freehand region with at least three points. The local process reports its area and statistics. An outline that crosses itself is not measured. Save marks writes it as TID 1500.\"",
+        "\"tool-length\": \"The distance between the two points, from the local process. Millimetres from Pixel Spacing, or from Imager Pixel Spacing with a magnification factor, millimetres at the detector from Imager Pixel Spacing alone, and pixels when the file gives no spacing. Save marks writes it as TID 1500.\"",
+        "\"tool-text\": \"A note on this image. Size and colour can be changed. Save marks writes it as TID 1500.\"",
+        "\"tool-angle\": \"Drag the first arm to the vertex, then click the end of the second arm. The local process reports the angle at the vertex. It is not saved.\"",
+        "\"tool-cobb\": \"Drag one line, then drag a second line. The local process reports the acute angle between them. It is not saved.\"",
+        "\"tool-bidirectional\": \"Drag the long axis. A short axis is placed across its middle at half its length. The local process reports both lengths as drawn. It is not saved.\"",
+        "\"tool-arrow\": \"Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.\"",
+        "\"tool-probe\": \"Click a pixel. The local process reports its modality value with its unit. It is not saved.\"",
+        "\"key-image\": \"Marks this image in the series list. Save marks writes the key images as a Key Object Selection.\"",
     ] {
         if !page.contains(sentence) {
             return Err(format!("the page lacks the sentence {sentence}"));
@@ -389,8 +428,11 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     // F-213 AC12. The window rows come from the inspect reply, so the page
     // holds no preset token, no preset number and no modality test of its
     // own. Bare 1 to 9 choose a row and never the layout.
+    // F-215 names the template, TID 1500, which is not a window, so the
+    // number is looked for with every "TID 1500" taken out first.
+    let windowless = page.replace("TID 1500", "TID");
     for held in ["data-preset", "-600", "1500", "\"CT\"", "soft_tissue"] {
-        if page.contains(held) {
+        if windowless.contains(held) {
             return Err(format!("the page keeps a window of its own: {held}"));
         }
     }
@@ -427,7 +469,7 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
         return Err("an index is sent before the frame's list is known".to_owned());
     }
     if !page.contains(
-        "const index = effectiveIndex(image, view);\n    if (index != null && index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
+        "const index = effectiveIndex(image, window);\n    if (index != null && index > 0) headers[\"X-Ocelli-Window-Index\"] = String(index);",
     ) {
         return Err("the file window index is not sent".to_owned());
     }
@@ -657,8 +699,290 @@ fn more_and_use_are_static_pages() -> Result<(), String> {
         if page.contains("<canvas") {
             return Err(format!("{path} contains a viewer"));
         }
+        // F-215 AC17. The key image flag now writes a Key Object Selection.
+        if page.contains("It does not write a Key Object Selection and it is not saved") {
+            return Err(format!("{path} still says the key image is not saved"));
+        }
     }
     Ok(())
+}
+
+/// The quoted UIDs between `start` and the next `]` of `text`.
+fn quoted_uids(text: &str, start: &str) -> Result<Vec<String>, String> {
+    let at = text.find(start).ok_or_else(|| format!("no {start}"))?;
+    let rest = text.get(at + start.len()..).unwrap_or_default();
+    let end = rest
+        .find(']')
+        .ok_or_else(|| format!("{start} does not close"))?;
+    Ok(rest
+        .get(..end)
+        .unwrap_or_default()
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect())
+}
+
+#[test]
+fn the_page_and_the_module_read_the_same_document_classes() -> Result<(), String> {
+    // F-215. The page leaves these classes out of the series list before
+    // the module loads, so its own copy must be the module's list: Enhanced
+    // SR, Comprehensive SR, Comprehensive 3D SR, Key Object Selection, PS3.4
+    // B.5.
+    let page = served_page("/")?;
+    let module = include_str!("../src/mark-documents.mjs");
+    let want = [
+        "1.2.840.10008.5.1.4.1.1.88.22",
+        "1.2.840.10008.5.1.4.1.1.88.33",
+        "1.2.840.10008.5.1.4.1.1.88.34",
+        "1.2.840.10008.5.1.4.1.1.88.59",
+    ];
+    for (name, text, start) in [
+        ("the page", page.as_str(), "const DOCUMENT_CLASSES = ["),
+        (
+            "the module",
+            module,
+            "export const DOCUMENT_CLASSES = Object.freeze([",
+        ),
+    ] {
+        let found = quoted_uids(text, start)?;
+        if found != want {
+            return Err(format!("{name} reads {found:?} as documents"));
+        }
+    }
+    if !page.contains("const documents = found.filter((row) => DOCUMENT_CLASSES.includes((row.info || {}).sopClassUid));")
+        || !page.contains("groupSeries(found.filter((row) => !documents.includes(row)));")
+    {
+        return Err("the page does not take documents out of the series list".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn the_mark_documents_module_is_served() -> Result<(), String> {
+    // F-215 AC16. The page imports `/mark-documents.mjs`, which is served as
+    // JavaScript byte for byte from the tracked file and names its one bare
+    // import, `@ocelli/core`, which the page's import map resolves. Its stem
+    // is not `marks`, so it cannot be mistaken for `packages/core/src/marks.ts`.
+    let response = one_exchange(b"GET /mark-documents.mjs HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200")
+        || header_line(header, "Content-Type") != Some("text/javascript; charset=utf-8")
+    {
+        return Err(format!("the module answered {header}"));
+    }
+    let tracked = include_str!("../src/mark-documents.mjs");
+    if body != tracked.as_bytes() {
+        return Err("the served module is not the tracked file".to_owned());
+    }
+    let imports: Vec<&str> = tracked
+        .lines()
+        .filter(|line| line.starts_with("import "))
+        .collect();
+    if imports.len() != 1
+        || imports
+            .first()
+            .is_none_or(|line| !line.ends_with("from \"@ocelli/core\";"))
+    {
+        return Err(format!("the module imports {imports:?}"));
+    }
+    Ok(())
+}
+
+fn served_page(path: &str) -> Result<String, String> {
+    let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    let response = one_exchange(request.as_bytes())?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err(format!("{path} was not 200"));
+    }
+    std::str::from_utf8(body)
+        .map(str::to_owned)
+        .map_err(|_| format!("{path} is not utf-8"))
+}
+
+fn require(page: &str, needles: &[&str], what: &str) -> Result<(), String> {
+    for needle in needles {
+        if !page.contains(needle) {
+            return Err(format!("{what}: the page lacks {needle}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_page_offers_mouse_profiles() -> Result<(), String> {
+    let page = served_page("/")?;
+    // AC1. The three profiles of the F-214 plan, by id and by name.
+    require(
+        &page,
+        &[
+            "<select id=\"mouse-profile\"",
+            "<option value=\"ocelli\">Ocelli</option>",
+            "<option value=\"scroll-left\">Scroll on left</option>",
+            "<option value=\"window-left\">Window on left</option>",
+            "id=\"mouse-keys\"",
+        ],
+        "AC1",
+    )?;
+    // AC2. The plan's table. Left is the chosen tool in every profile, and
+    // a profile names where left starts, middle and right.
+    require(
+        &page,
+        &[
+            "const PROFILES = Object.freeze({\n  \"ocelli\": Object.freeze({ name: \"Ocelli\", start: \"scroll\", middle: \"zoom\", right: \"pan\" }),\n  \"scroll-left\": Object.freeze({ name: \"Scroll on left\", start: \"scroll\", middle: \"wl\", right: \"zoom\" }),\n  \"window-left\": Object.freeze({ name: \"Window on left\", start: \"wl\", middle: \"pan\", right: \"zoom\" })\n});",
+            // Ctrl with left pans before any profile is read, so a trackpad
+            // with one button keeps pan.
+            "function pointerMode(event) {\n  if (event.button === 0 && event.ctrlKey) return \"pan\";\n  const profile = PROFILES[activeProfile];\n  if (event.button === 1) return profile.middle;\n  if (event.button === 2) return profile.right;\n  return tool;\n}",
+            "setTool(PROFILES[id].start);",
+            "let tool = PROFILES[activeProfile].start;",
+        ],
+        "AC2",
+    )?;
+    // AC4. A stored value is used only when it is one of the allowed ids, so
+    // `radiant` or `constructor` gives `ocelli` and is never used as a key.
+    require(
+        &page,
+        &[
+            "let activeProfile = readPreference(MOUSE_KEY, PROFILE_IDS, \"ocelli\");",
+            "return allowed.includes(stored) ? stored : fallback;",
+            "const MOUSE_KEY = \"ocelli.mouse\";",
+            "const FPS_KEY = \"ocelli.fps\";",
+            "fpsInput.value = readPreference(FPS_KEY, FPS_VALUES, \"10\");",
+            "This browser did not keep the choice. It applies until you reload.",
+        ],
+        "AC4",
+    )?;
+    // F-214 amendment 5. A window drag on any button commits by the drag's
+    // mode, which clears the preset and the file window index as a left
+    // button drag does.
+    require(
+        &page,
+        &["if (mode === \"wl\" && vp.draftWindow) {\n    vp.overrideWindow = {"],
+        "amendment 5",
+    )?;
+    // Review pass 1, D1. Page keys do not run on the focused control, and a
+    // pointer choice gives the focus back. D4. The active tool button is
+    // synced from `tool` at start, so the markup marks no tool active.
+    require(
+        &page,
+        &[
+            "if (node.tagName === \"TEXTAREA\" || node.tagName === \"SELECT\") return true;",
+            "  if (!profileKeyed) profileSelect.blur();",
+            // Review pass 2, S1. A key on the control marks the next choice
+            // as a keyboard one, and a press on it marks a pointer one.
+            "profileSelect.addEventListener(\"keydown\", () => { profileKeyed = true; });",
+            "profileSelect.addEventListener(\"pointerdown\", () => { profileKeyed = false; });",
+            "setLayout(1, 1);\n// The kept profile may start left on W/L, so the active tool button comes\n// from `tool` and not from the markup.\nsyncToolButtons();",
+            "<button type=\"button\" class=\"icon\" id=\"tool-scroll\"",
+        ],
+        "D1 and D4",
+    )?;
+    if page.contains(
+        "if (event.button === 2 || (event.button === 0 && event.ctrlKey)) return \"pan\";",
+    ) {
+        return Err("pointerMode still has the one fixed binding".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn every_storage_access_is_guarded() -> Result<(), String> {
+    // AC3. A private window or blocked site data can make the accessor
+    // throw, so each line that touches storage is inside `try`.
+    let page = served_page("/")?;
+    let lines: Vec<&str> = page.lines().collect();
+    let mut seen = 0_usize;
+    for (at, line) in lines.iter().enumerate() {
+        if !line.contains("localStorage.") {
+            continue;
+        }
+        seen += 1;
+        let above = at.checked_sub(1).and_then(|before| lines.get(before));
+        let guarded = line.contains("try {")
+            || above.is_some_and(|before| before.trim_end().ends_with("try {"));
+        if !guarded {
+            return Err(format!(
+                "page line {} reads storage outside try: {}",
+                at + 1,
+                line.trim()
+            ));
+        }
+    }
+    // One read and one write, both in the two helpers.
+    if seen != 2 {
+        return Err(format!(
+            "the page touches storage on {seen} lines, not the two helpers"
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn play_uses_the_file_frame_time() -> Result<(), String> {
+    let page = served_page("/")?;
+    // AC10 and F-214 amendment 1. PS3.3 C.7.6.5.1.1 gives Frame Time as the
+    // interval between frames of one multi-frame object, so the file's
+    // milliseconds apply only between two frames of the same file, and are
+    // read before the slider. They are not turned into a whole slider rate.
+    require(
+        &page,
+        &[
+            "function fileInterval(from, to) {\n  if (useSlider || !sameFileNext(from, to)) return null;\n  const info = from.info;\n  if (!info || info.cine !== \"frame-time\") return null;\n  const ms = Number(info.frameTimeMs);\n  return Number.isFinite(ms) && ms > 0 ? ms : null;\n}",
+            "function stepInterval(from, to) {\n  const fromFile = fileInterval(from, to);\n  if (fromFile !== null) return fromFile;\n  return 1000 / (Number(fpsInput.value) || 10);\n}",
+            "const interval = stepInterval(currentImage(vp), upcomingImage(vp));",
+            "const remain = interval - spent;",
+            ">Use the slider</button>",
+            "This file gives a Frame Time Vector, which this page does not play. The rate is the slider.",
+            "This file gives a frame rate and no Frame Time. The rate is the slider.",
+            "This file gives no Frame Time. The rate is the slider.",
+            // Review pass 1, D3. A refusal that is not about the timing
+            // makes no claim about Frame Time.
+            "if (cine === \"unreadable\") return \"This page could not read the frames of this file. The rate is the slider.\";",
+            // Review pass 1, S2. A file listed as one image, and the last
+            // frame before another file, have no frame of the same file
+            // next, so the line and the slider follow the next step.
+            "function sameFileNext(from, to) {\n  return Boolean(from && to && from !== to && from.file === to.file);\n}",
+            "const offered = Boolean(sameFileNext(image, next) && image.info && image.info.cine === \"frame-time\" && Number(image.info.frameTimeMs) > 0);",
+            "if (!sameFileNext(image, next)) return \"Frame Time applies between frames of one file. The rate is the slider.\";",
+            // Review pass 2, D2. A Cine refusal can be any timing attribute,
+            // so the line names the cine timing and not Frame Time.
+            "if (cine === \"unusable\") return \"The cine timing in this file is not usable. The rate is the slider.\";",
+        ],
+        "AC10",
+    )?;
+    // The per-second figure is display text, 1000 / 40 = 25.0 shown as 25.
+    require(
+        &page,
+        &["(1000 / ms).toFixed(1).replace(/\\.0$/, \"\")"],
+        "the per-second label",
+    )?;
+    if page.contains("const fps = Number(fpsInput.value) || 10;\n      const remain = 1000 / fps") {
+        return Err("Play still reads the slider alone".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn more_says_the_page_keeps_four_choices() -> Result<(), String> {
+    // AC11 keeps four choices. The operator now defines status by the viewer,
+    // so those persisted settings make Preferences partial.
+    let more = served_page("/more")?;
+    require(
+        &more,
+        &[
+            "The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages.",
+            "<li><a href=\"#preferences\">Preferences</a><span class=\"mark\">partial</span></li>",
+        ],
+        "AC11",
+    )?;
+    let use_book = served_page("/use")?;
+    require(
+        &use_book,
+        &["<code>cine_timing(&amp;metadata)</code>"],
+        "the Rust parse chapter",
+    )
 }
 
 #[test]
@@ -679,8 +1003,9 @@ fn a_jpegxl_lossless_frame_draws() -> Result<(), String> {
     // fragment carries the one trailing NULL pad of an odd item value. Its
     // stored values are measured from the fixture's reference ramp
     // jpegxl_reference_mono12_u16le.raw: 64 by 96 samples, minimum 0 first and
-    // maximum 4095 last. No window is declared, so the full-range rule maps
-    // the minimum to grey 0 and the maximum to 255.
+    // maximum 4095 last. No window is declared, so the automatic window
+    // draws the minimum, stored 0 and left out, at grey 0 and the maximum,
+    // above the 99th percentile, at 255.
     let file = jpegxl_frame(
         "jpegxl_lossless_12.jxl",
         "1.2.840.10008.1.2.4.110",
@@ -699,10 +1024,10 @@ fn a_jpegxl_lossless_frame_draws() -> Result<(), String> {
 }
 
 #[test]
-fn a_jpegxl_colour_frame_refuses_not_monochrome() -> Result<(), String> {
-    // The colour fixture is three samples of eight bits. Samples per Pixel 3
-    // is refused before any decode, the same refusal every colour frame gets,
-    // because this preview draws monochrome frames only.
+fn a_jpegxl_colour_frame_draws_rgb_and_mismatched_sample_shapes_refuse() -> Result<(), String> {
+    // The codec fixture's original RGB bytes are the independent source
+    // encoded by generate_jpegxl.py. A decoder reporting RGB must not enter
+    // a second colour conversion. PS3.3 C.7.6.3.1.2.
     let file = jpegxl_frame(
         "jpegxl_lossless_rgb8.jxl",
         "1.2.840.10008.1.2.4.110",
@@ -710,50 +1035,31 @@ fn a_jpegxl_colour_frame_refuses_not_monochrome() -> Result<(), String> {
         "RGB",
         8,
     )?;
-    match preview_first_frame(&file) {
-        Err(PreviewError::NotMonochrome) => Ok(()),
-        Ok(_) => Err("a JPEG XL colour frame was drawn".to_owned()),
-        Err(error) => Err(format!("a JPEG XL colour frame was refused as {error}")),
-    }?;
-    // The same codestream under MONOCHROME2 pins the Samples per Pixel gate
-    // itself. The sample-layout check accepts one sample of MONOCHROME2, so
-    // with the Samples per Pixel gate gone this file reaches decode and comes
-    // back as a decode refusal instead of NotMonochrome.
-    let file = jpegxl_frame(
-        "jpegxl_lossless_rgb8.jxl",
-        "1.2.840.10008.1.2.4.110",
-        3,
-        "MONOCHROME2",
-        8,
-    )?;
-    match preview_first_frame(&file) {
-        Err(PreviewError::NotMonochrome) => Ok(()),
-        Ok(_) => Err("a three-sample MONOCHROME2 frame was drawn".to_owned()),
-        Err(error) => Err(format!(
-            "a three-sample MONOCHROME2 frame was refused as {error}"
-        )),
+    let preview = preview_first_frame(&file).map_err(|error| error.to_string())?;
+    assert_eq!(preview.channels, 3);
+    assert_eq!(
+        preview.grey.as_slice(),
+        include_bytes!("../../../crates/ocelli-codec/tests/fixtures/jpegxl_reference_rgb8.raw")
+            .as_slice()
+    );
+    for (samples, space) in [(3, "MONOCHROME2"), (1, "RGB")] {
+        let file = jpegxl_frame(
+            "jpegxl_lossless_rgb8.jxl",
+            "1.2.840.10008.1.2.4.110",
+            samples,
+            space,
+            8,
+        )?;
+        match preview_first_frame(&file) {
+            Err(PreviewError::ColourUnavailable(_)) => {}
+            other => {
+                return Err(format!(
+                    "mismatched {samples}-sample {space} shape: {other:?}"
+                ));
+            }
+        }
     }
-}
-
-#[test]
-fn a_single_sample_colour_photometric_refuses_not_monochrome() -> Result<(), String> {
-    // One sample carrying a three-sample Photometric Interpretation. The
-    // Photometric Interpretation gate refuses every term but the two
-    // monochrome ones before the codestream is read, so this refusal is that
-    // gate's alone: the Samples per Pixel gate sees one sample and passes
-    // the file.
-    let file = jpegxl_frame(
-        "jpegxl_lossless_rgb8.jxl",
-        "1.2.840.10008.1.2.4.110",
-        1,
-        "RGB",
-        8,
-    )?;
-    match preview_first_frame(&file) {
-        Err(PreviewError::NotMonochrome) => Ok(()),
-        Ok(_) => Err("a single-sample RGB frame was drawn".to_owned()),
-        Err(error) => Err(format!("a single-sample RGB frame was refused as {error}")),
-    }
+    Ok(())
 }
 
 #[test]
@@ -766,8 +1072,9 @@ fn every_registration_in_codecs_decodes_a_monochrome_frame() -> Result<(), Strin
     //
     // RLE Lossless, PS3.5 G.2 and G.3.1: a 64 byte header naming one segment
     // at offset 64, then one literal run of count 3 carrying the samples
-    // 10, 20, 30 and 40, padded to even length with one zero byte. Full range
-    // over 10 to 40 maps them to grey 0, 85, 170 and 255.
+    // 10, 20, 30 and 40, padded to even length with one zero byte. The
+    // automatic window's nearest ranks of four values are the first and the
+    // fourth, 10 and 40, so they map to grey 0, 85, 170 and 255.
     let mut rle = Vec::new();
     rle.extend_from_slice(&1_u32.to_le_bytes());
     rle.extend_from_slice(&64_u32.to_le_bytes());
@@ -787,8 +1094,9 @@ fn every_registration_in_codecs_decodes_a_monochrome_frame() -> Result<(), Strin
 
     // JPEG lossless process 14, UID .57. The codec suite hand-computes this
     // fixture's four samples as 0, 2047, 2048 and 4095 from PS3.5 Annex F,
-    // so they come from the standard and not from the decoder. Full range
-    // maps the first to grey 0 and the last to grey 255.
+    // so they come from the standard and not from the decoder. The automatic
+    // window leaves the stored 0 out and runs from 2047 to 4095, so the first
+    // is grey 0 and the last grey 255.
     let preview = preview_first_frame(&encapsulated_frame(
         include_bytes!(
             "../../../crates/ocelli-codec/tests/fixtures/jpeg_lossless_process14_12bit.jpg"
@@ -824,7 +1132,8 @@ fn every_registration_in_codecs_decodes_a_monochrome_frame() -> Result<(), Strin
     // JPEG-LS lossless and HTJ2K lossless, UIDs .80 and .201. The codec suite
     // reproduces the uncompressed corpus ramp from both fixtures byte for
     // byte, a 64 by 96 unsigned 16-bit ramp whose first sample is 0 and whose
-    // last is 65535. Full range maps those to grey 0 and 255.
+    // last is 65535. The automatic window leaves the stored 0 out and draws it
+    // at grey 0, and 65535 is above the 99th percentile, grey 255.
     for (uid, codestream, name) in [
         (
             "1.2.840.10008.1.2.4.80",
@@ -1128,6 +1437,54 @@ fn jpegxl_frame(
 
 /// One encapsulated frame around a codestream, in the wrapper shape described
 /// on `jpegxl_frame`.
+#[test]
+fn an_empty_table_rle_frame_draws() -> Result<(), String> {
+    // F-244 AC7. The hand RLE frame of the test above, PS3.5 G.2 and G.3.1:
+    // a 64 byte header naming one segment at offset 64, one literal run of
+    // count 3 carrying 10, 20, 30 and 40, and one pad byte, 70 bytes in all.
+    // PS3.5 A.4 lets the Basic Offset Table Item be empty, length zero, and
+    // decoders "need to accept" it. Full range over 10 to 40 maps the
+    // samples to grey 0, 85, 170 and 255, PS3.3 C.11.2.1.3.2.
+    let mut rle = Vec::new();
+    rle.extend_from_slice(&1_u32.to_le_bytes());
+    rle.extend_from_slice(&64_u32.to_le_bytes());
+    rle.resize(64, 0);
+    rle.extend_from_slice(&[3, 10, 20, 30, 40, 0]);
+    let file = with_empty_basic_offset_table(encapsulated_frame(
+        &rle,
+        "1.2.840.10008.1.2.5",
+        1,
+        4,
+        1,
+        "MONOCHROME2",
+        8,
+    )?)?;
+    let preview = preview_first_frame(&file)
+        .map_err(|error| format!("the empty-table RLE frame was refused: {error}"))?;
+    assert_eq!(preview.grey, vec![0, 85, 170, 255]);
+    Ok(())
+}
+
+/// Rewrite the one-value Basic Offset Table `[0]` that `encapsulated_frame`
+/// writes as the empty table PS3.5 A.4 Table A.4-1 shows, Item Tag
+/// `FE FF 00 E0` and length `00 00 00 00` with no value. Pixel Data has
+/// undefined length, so no enclosing length changes.
+fn with_empty_basic_offset_table(file: Vec<u8>) -> Result<Vec<u8>, String> {
+    let populated: [u8; 24] = [
+        0xE0, 0x7F, 0x10, 0x00, b'O', b'B', 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0x00, 0xE0,
+        4, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    let at = file
+        .windows(populated.len())
+        .position(|window| window == populated)
+        .ok_or("no one-value Basic Offset Table to empty")?;
+    let mut out = Vec::with_capacity(file.len());
+    out.extend_from_slice(file.get(..at + 16).ok_or("short file")?);
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    out.extend_from_slice(file.get(at + populated.len()..).ok_or("short file")?);
+    Ok(out)
+}
+
 fn encapsulated_frame(
     codestream: &[u8],
     uid: &str,
@@ -1382,11 +1739,12 @@ fn a_window_override_maps_stored_50_to_grey_128() -> Result<(), String> {
             window_function: Some(VoiFunction::LinearExact),
             window_preset: None,
             window_index: None,
+            series_window: None,
         },
     )
     .map_err(|_| "the window override was refused".to_owned())?;
-    if preview.full_range {
-        return Err("a window override was labelled full range".to_owned());
+    if preview.auto != AutoSource::None {
+        return Err("a window override was labelled auto".to_owned());
     }
     if only_byte(&preview)? != 128 {
         return Err("the window override was not grey 128".to_owned());
@@ -1461,6 +1819,58 @@ fn inspect_json_reports_the_series_fields() -> Result<(), String> {
 }
 
 #[test]
+fn inspect_reports_sop_class_and_study() -> Result<(), String> {
+    // F-215 AC14. SOP Class UID (0008,0016), PS3.3 C.12.1, and Study
+    // Instance UID (0020,000D), PS3.3 C.7.2.1, so the page recognises an SR
+    // or Key Object Selection by its class and files it under its study,
+    // never by its file name. A study UID that is not a UID is sent empty.
+    let study = short_le((0x0020, 0x000D), *b"UI", &ui(b"1.2.3.4.5"))?;
+    for (extra, want) in [
+        (vec![study], "\"studyUid\":\"1.2.3.4.5\""),
+        (Vec::new(), "\"studyUid\":\"\""),
+        (
+            vec![short_le((0x0020, 0x000D), *b"UI", &ui(b"1.2.x"))?],
+            "\"studyUid\":\"\"",
+        ),
+    ] {
+        let file = tagged_frame_with(1, &50_u16.to_le_bytes(), &extra)?;
+        let json =
+            inspect_json(&file, 0).map_err(|_| "inspect_json refused the file".to_owned())?;
+        if !json.contains("\"sopClassUid\":\"1.2.840.10008.5.1.4.1.1.2\"") {
+            return Err(format!("inspect did not name the SOP class: {json}"));
+        }
+        if !json.contains(want) {
+            return Err(format!("inspect did not give {want}: {json}"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn inspect_reports_the_stored_study_time() -> Result<(), String> {
+    // F-215 review pass 1, D3. Study Time (0008,0030) is an attribute of the
+    // study, PS3.3 C.7.2.1, so a document about the study copies the stored
+    // TM, PS3.5 6.2, fraction included. `studyTime` stays F-212's display
+    // text, which drops the fraction.
+    let file = corner_object(&every_corner_attribute())?;
+    let json = inspect_json(&file, 0).map_err(|_| "inspect refused the CT".to_owned())?;
+    for needle in [
+        "\"studyTimeValue\":\"143012.5\"",
+        "\"studyTime\":\"14:30:12\"",
+    ] {
+        if !json.contains(needle) {
+            return Err(format!("inspect lacks {needle}: {json}"));
+        }
+    }
+    let bare = tagged_frame(1, &50_u16.to_le_bytes())?;
+    let json = inspect_json(&bare, 0).map_err(|_| "inspect refused the file".to_owned())?;
+    if !json.contains("\"studyTimeValue\":\"\"") {
+        return Err(format!("an absent Study Time is not empty: {json}"));
+    }
+    Ok(())
+}
+
+#[test]
 fn headers_json_lists_the_window_and_hides_pixels() -> Result<(), String> {
     let file = tagged_frame(1, &50_u16.to_le_bytes())?;
     let json = headers_json(&file).map_err(|_| "headers_json refused the file".to_owned())?;
@@ -1521,8 +1931,8 @@ fn a_window_override_does_not_replace_a_modality_lut() -> Result<(), String> {
 
 #[test]
 fn a_voi_lut_sequence_without_an_override_is_refused() -> Result<(), String> {
-    // No Window Center, and a VOI LUT Sequence is present. Full-range
-    // LINEAR_EXACT would address grey 128 for stored 50. PS3.3 C.11.2 says
+    // No Window Center, and a VOI LUT Sequence is present. The automatic
+    // window would address grey 128 for stored 50. PS3.3 C.11.2 says
     // the sequence is the VOI transform. This preview refuses it.
     let file = mono_with(false, &[(0x0028, 0x3010)])?;
     match preview_first_frame(&file) {
@@ -1560,8 +1970,8 @@ fn a_window_override_replaces_a_voi_lut_sequence() -> Result<(), String> {
         },
     )
     .map_err(|_| "a window override did not replace the VOI LUT sequence".to_owned())?;
-    if preview.full_range {
-        return Err("a window override was labelled full range".to_owned());
+    if preview.auto != AutoSource::None {
+        return Err("a window override was labelled auto".to_owned());
     }
     if only_byte(&preview)? != 128 {
         return Err("the VOI LUT override was not grey 128".to_owned());
@@ -1592,8 +2002,8 @@ fn a_window_override_ignores_an_unusable_file_window() -> Result<(), String> {
         },
     )
     .map_err(|_| "a window override still read the unusable file window".to_owned())?;
-    if preview.full_range {
-        return Err("a window override was labelled full range".to_owned());
+    if preview.auto != AutoSource::None {
+        return Err("a window override was labelled auto".to_owned());
     }
     if only_byte(&preview)? != 128 {
         return Err("the override of an unusable window was not grey 128".to_owned());
@@ -2150,6 +2560,13 @@ fn http_post_to(path: &str, extra: &str, body: &[u8]) -> Vec<u8> {
 }
 
 fn tagged_frame(frames: u16, pixels: &[u8]) -> Result<Vec<u8>, String> {
+    tagged_frame_with(frames, pixels, &[])
+}
+
+/// [`tagged_frame`] with `extra` encoded elements placed after Series
+/// Description `(0008,103E)` and before Series Instance UID `(0020,000E)`,
+/// which keeps the data set in tag order for every cine attribute.
+fn tagged_frame_with(frames: u16, pixels: &[u8], extra: &[Vec<u8>]) -> Result<Vec<u8>, String> {
     let mut data = Vec::new();
     data.extend(short_le(
         (0x0008, 0x0016),
@@ -2162,6 +2579,9 @@ fn tagged_frame(frames: u16, pixels: &[u8]) -> Result<Vec<u8>, String> {
     data.extend(short_le((0x0008, 0x0060), *b"CS", &text_pad("CT"))?);
     data.extend(short_le((0x0008, 0x1030), *b"LO", &text_pad("SYNTH"))?);
     data.extend(short_le((0x0008, 0x103E), *b"LO", &text_pad("SYNTH"))?);
+    for element in extra {
+        data.extend_from_slice(element);
+    }
     data.extend(short_le((0x0020, 0x000E), *b"UI", &ui(b"2.25.9"))?);
     data.extend(short_le((0x0020, 0x0011), *b"IS", &text_pad("3"))?);
     data.extend(short_le((0x0020, 0x0013), *b"IS", &text_pad("2"))?);
@@ -2199,6 +2619,186 @@ fn tagged_frame(frames: u16, pixels: &[u8]) -> Result<Vec<u8>, String> {
     bytes.extend(file_meta("1.2.840.10008.1.2.1")?);
     bytes.extend(data);
     Ok(bytes)
+}
+
+/// Two frames of one 1 by 1 sample each, with `extra` cine elements.
+fn cine_frames(frames: u16, extra: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    let pixels: Vec<u8> = (0..frames).flat_map(|_| 50_u16.to_le_bytes()).collect();
+    tagged_frame_with(frames, &pixels, extra)
+}
+
+fn ds_element(tag: (u16, u16), text: &str) -> Result<Vec<u8>, String> {
+    short_le(tag, *b"DS", &text_pad(text))
+}
+
+fn is_element(tag: (u16, u16), text: &str) -> Result<Vec<u8>, String> {
+    short_le(tag, *b"IS", &text_pad(text))
+}
+
+const FRAME_TIME: (u16, u16) = (0x0018, 0x1063);
+const FRAME_TIME_VECTOR: (u16, u16) = (0x0018, 0x1065);
+const RECOMMENDED_RATE: (u16, u16) = (0x0008, 0x2144);
+const CINE_RATE: (u16, u16) = (0x0018, 0x0040);
+const PLAYBACK: (u16, u16) = (0x0018, 0x1244);
+
+fn cine_fields(file: &[u8]) -> Result<String, String> {
+    inspect_json(file, 0).map_err(|_| "inspect_json refused the file".to_owned())
+}
+
+fn expect_cine(json: &str, cine: &str, frame_time: &str, case: &str) -> Result<(), String> {
+    let wanted = format!("\"cine\":\"{cine}\",\"frameTimeMs\":{frame_time}");
+    if json.contains(&wanted) {
+        Ok(())
+    } else {
+        Err(format!("{case}: inspect did not report {wanted}"))
+    }
+}
+
+#[test]
+fn inspect_reports_frame_time() -> Result<(), String> {
+    // AC5. PS3.3 C.7.6.5 gives Frame Time (0018,1063) as DS in milliseconds,
+    // so DS 40 is 40 ms, which is 1000 / 40 = 25 frames per second. The
+    // reply carries the milliseconds, not seconds and not a rate.
+    let forty = cine_frames(
+        2,
+        &[is_element(CINE_RATE, "30")?, ds_element(FRAME_TIME, "40")?],
+    )?;
+    let request = http_post_to("/inspect", "", &forty);
+    let response = one_exchange(&request)?;
+    let (header, body) = split_http(&response)?;
+    if !header.contains("200") {
+        return Err("inspect was refused".to_owned());
+    }
+    let json = std::str::from_utf8(body).map_err(|_| "inspect is not utf-8".to_owned())?;
+    expect_cine(json, "frame-time", "40", "Frame Time 40")?;
+    if cine_fields(&forty)? != json {
+        return Err("inspect_json and the page disagree".to_owned());
+    }
+    // AC6. No timing attribute gives none and null, never 0.
+    expect_cine(
+        &cine_fields(&cine_frames(2, &[])?)?,
+        "none",
+        "null",
+        "no timing",
+    )?;
+    // AC7. PS3.3 C.7.6.5.1.1 gives Frame Time as the interval between frames
+    // of a multi-frame image, so 0 on two frames is not usable, and it is not
+    // replaced by the Recommended Display Frame Rate (0008,2144) of 10.
+    let zero = cine_frames(
+        2,
+        &[
+            is_element(RECOMMENDED_RATE, "10")?,
+            ds_element(FRAME_TIME, "0")?,
+        ],
+    )?;
+    expect_cine(
+        &cine_fields(&zero)?,
+        "unusable",
+        "null",
+        "Frame Time 0 on two frames",
+    )?;
+    // F-214 amendment 4. One frame has no interval, so Frame Time 0 there is
+    // legal and reports none.
+    let single = cine_frames(1, &[ds_element(FRAME_TIME, "0")?])?;
+    expect_cine(
+        &cine_fields(&single)?,
+        "none",
+        "null",
+        "Frame Time 0 on one frame",
+    )?;
+    // AC8. PS3.3 C.7.6.5.1.2. A Frame Time Vector (0018,1065) of one value per
+    // frame comes before Frame Time. Its second value, 40, is not reported as
+    // one interval.
+    let vector = cine_frames(
+        2,
+        &[
+            ds_element(FRAME_TIME, "100")?,
+            ds_element(FRAME_TIME_VECTOR, "0\\40")?,
+        ],
+    )?;
+    expect_cine(
+        &cine_fields(&vector)?,
+        "vector",
+        "null",
+        "a matching vector",
+    )?;
+    // A rate and no Frame Time is a rate, which Play does not use.
+    let rate = cine_frames(2, &[is_element(RECOMMENDED_RATE, "25")?])?;
+    expect_cine(&cine_fields(&rate)?, "rate", "null", "a recommended rate")?;
+    let cine = cine_frames(2, &[is_element(CINE_RATE, "30")?])?;
+    expect_cine(&cine_fields(&cine)?, "rate", "null", "a cine rate")?;
+    // Review pass 2, D2. Cine Rate (0018,0040) is IS in frames per second,
+    // PS3.3 C.7.6.5, so 0 is not a rate. With no Frame Time the refusal is
+    // still the cine timing's, and the reply says unusable.
+    let zero_rate = cine_frames(2, &[is_element(CINE_RATE, "0")?])?;
+    expect_cine(
+        &cine_fields(&zero_rate)?,
+        "unusable",
+        "null",
+        "Cine Rate 0 and no Frame Time",
+    )?;
+    // F-214 amendment 2. Preferred Playback Sequencing (0018,1244) is US 0 or
+    // 1, PS3.3 C.7.6.5. A value of 2 does not hide a good Frame Time of 40.
+    let playback = cine_frames(
+        2,
+        &[
+            ds_element(FRAME_TIME, "40")?,
+            short_le(PLAYBACK, *b"US", &2_u16.to_le_bytes())?,
+        ],
+    )?;
+    expect_cine(
+        &cine_fields(&playback)?,
+        "frame-time",
+        "40",
+        "a bad playback value",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_frame_declaration_refusal_makes_no_frame_time_claim() -> Result<(), String> {
+    // F-214 review pass 1, D3. Two frames, no timing attribute, and a
+    // Per-frame Functional Groups Sequence (5200,9230) of one item, where
+    // PS3.3 C.7.6.16 asks for one item per frame. The refusal is about the
+    // frame declaration, so the reply must not say the Frame Time is not
+    // usable, because the file has none.
+    let plain = cine_frames(2, &[])?;
+    let pixel_at = plain
+        .windows(4)
+        .rposition(|window| window == [0xE0, 0x7F, 0x10, 0x00])
+        .ok_or_else(|| "the fixture has no pixel data".to_owned())?;
+    let one_item = long_le((0x5200, 0x9230), *b"SQ", &item(&[])?)?;
+    let mut file = plain
+        .get(..pixel_at)
+        .ok_or_else(|| "the fixture is short".to_owned())?
+        .to_vec();
+    file.extend(one_item);
+    file.extend_from_slice(plain.get(pixel_at..).unwrap_or_default());
+    expect_cine(
+        &cine_fields(&file)?,
+        "unreadable",
+        "null",
+        "a bad frame declaration",
+    )
+}
+
+#[test]
+fn each_file_reports_its_own_frame_time() -> Result<(), String> {
+    // F-214 amendment 1. Frame Time is a property of one multi-frame object,
+    // PS3.3 C.7.6.5.1.1, so two files of one series report their own. DS 33.3
+    // is 33.3 ms, 1000 / 33.3 = 30.03 per second, and DS 40 is 40 ms.
+    let first = cine_frames(2, &[ds_element(FRAME_TIME, "40")?])?;
+    let second = cine_frames(3, &[ds_element(FRAME_TIME, "33.3")?])?;
+    expect_cine(&cine_fields(&first)?, "frame-time", "40", "the first file")?;
+    expect_cine(
+        &cine_fields(&second)?,
+        "frame-time",
+        "33.3",
+        "the second file",
+    )?;
+    // Every frame of one file carries the same object timing.
+    let later = inspect_json(&second, 2).map_err(|_| "inspect_json refused frame 3".to_owned())?;
+    expect_cine(&later, "frame-time", "33.3", "the third frame")
 }
 
 fn viewer_on(bytes: usize) -> Result<SocketAddr, String> {
@@ -2391,11 +2991,11 @@ fn held_frames_keep_the_hand_computed_grey() -> Result<(), String> {
 }
 
 #[test]
-fn a_held_missing_window_stays_full_range() -> Result<(), String> {
+fn a_held_missing_window_stays_auto() -> Result<(), String> {
     // Stored 50. Absent rescale is slope 1 and intercept 0. Absent center
-    // and width are LINEAR_EXACT center 50 width 1.
-    // ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
-    // A later request with no window must keep that range. The first
+    // and width are the constant automatic window, LINEAR_EXACT center 50
+    // width 1. ((50 - 50) / 1 + 0.5) * 255 = 127.5, which addresses grey 128.
+    // A later request with no window must keep that window. The first
     // request's center 100 width 200 must not stick.
     // ((50 - 100) / 200 + 0.5) * 255 = 63.75, which addresses grey 64.
     let file = mono_frame(false)?;
@@ -2412,16 +3012,16 @@ fn a_held_missing_window_stays_full_range() -> Result<(), String> {
         ),
     )?;
     let (over_header, over_body) = split_http(&overridden)?;
-    if over_header.contains("X-Ocelli-Full-Range: 1") || over_body != [64] {
+    if !over_header.contains("X-Ocelli-Auto-Window: none") || over_body != [64] {
         return Err("the first held window was not grey 64".to_owned());
     }
     let plain = exchange(addr, &preview_id(id, ""))?;
     let (plain_header, plain_body) = split_http(&plain)?;
-    if !plain_header.contains("X-Ocelli-Full-Range: 1") || plain_body != [128] {
-        return Err("the held file lost its full range".to_owned());
+    if !plain_header.contains("X-Ocelli-Auto-Window: image") || plain_body != [128] {
+        return Err("the held file lost its automatic window".to_owned());
     }
     if !plain_header.contains("X-Ocelli-Source: held") {
-        return Err("the full range preview decoded again".to_owned());
+        return Err("the automatic window preview decoded again".to_owned());
     }
     Ok(())
 }
@@ -3098,11 +3698,11 @@ fn a_connection_over_the_cap_is_busy() -> Result<(), String> {
 }
 
 fn span_frame() -> Result<Vec<u8>, String> {
-    // 1 by 4, stored 0, 27, 34 and 200. No Window Center, Window Width or function.
+    // 1 by 4, stored 0, 27, 199 and 200. No Window Center, Window Width or function.
     let mut pixels = Vec::new();
     pixels.extend_from_slice(&0_u16.to_le_bytes());
     pixels.extend_from_slice(&27_u16.to_le_bytes());
-    pixels.extend_from_slice(&34_u16.to_le_bytes());
+    pixels.extend_from_slice(&199_u16.to_le_bytes());
     pixels.extend_from_slice(&200_u16.to_le_bytes());
     let mut data = Vec::new();
     data.extend(short_le(
@@ -3133,26 +3733,20 @@ fn span_frame() -> Result<Vec<u8>, String> {
 }
 
 #[test]
-fn a_function_sent_alone_selects_the_full_range_window() -> Result<(), String> {
-    // Stored 0, 27, 34 and 200. Rescale slope 1, intercept 0. The full range
-    // is center 100 and width 200.
-    // PS3.3 C.11.2.1.2 LINEAR uses adjusted center 99.5 and adjusted width 199.
-    // Stored 27: ((27 - 99.5) / 199 + 0.5) * 255 = 34.59799 in f32.
-    // display_index adds 0.5, getting 35.09799, and keeps the greatest
-    // integer at or below that sum, which is grey 35.
-    // PS3.3 C.11.2.1.3.2 LINEAR_EXACT uses center 100 and width 200.
-    // Stored 27: ((27 - 100) / 200 + 0.5) * 255 = 34.425 in f32.
-    // display_index adds 0.5, getting 34.925, and the greatest integer at or
-    // below that sum is grey 34.
-    // Stored 34, LINEAR: ((34 - 99.5) / 199 + 0.5) * 255 = 43.56784 in f32.
-    // display_index adds 0.5, getting 44.06784, and the grey is 44.
-    // Stored 34, LINEAR_EXACT: ((34 - 100) / 200 + 0.5) * 255 = 43.35 in f32.
-    // display_index adds 0.5, getting 43.85, and the grey is 43.
-    // Stored 0 is on the lower edge, so both functions give grey 0.
-    // LINEAR's upper edge is 199, so stored 200 is grey 255.
-    // LINEAR_EXACT's upper edge is 200. Stored 200 is not above it.
-    // ((200 - 100) / 200 + 0.5) * 255 = 255, so grey 255.
-    // Stored 50 at this same window is grey 64 for both functions.
+fn a_function_sent_alone_replaces_the_automatic_default() -> Result<(), String> {
+    // Stored 0, 27, 199 and 200. Rescale slope 1, intercept 0. F-227 leaves
+    // stored 0 out, so the counted values are 27, 199 and 200, n = 3, and the
+    // nearest ranks ceil(3 / 100) = 1 and ceil(297 / 100) = 3 are 27 and 200.
+    // The automatic window is center 113.5 and width 173, moved inside by at
+    // most 16 f32 units at each edge.
+    // PS3.3 C.11.2.1.3.2 LINEAR_EXACT, the default. Stored 0 and 27 are at or
+    // below the lower edge 27, grey 0. Stored 199:
+    // ((199 - 113.5) / 173 + 0.5) * 255 = 253.53, grey 254. Stored 200 is the
+    // upper edge, grey 255.
+    // PS3.3 C.11.2.1.2 LINEAR, sent alone, uses c' = 113 and w' = 172, so its
+    // upper edge is c' + w' / 2 = 199. Stored 199 is not above it, and
+    // ((199 - 113) / 172 + 0.5) * 255 = 255, grey 255. Its lower edge is
+    // c' - w' / 2 = 27, so stored 27 is grey 0.
     let file = span_frame()?;
     let addr = viewer_on(8 * 1024 * 1024)?;
     let posted = exchange(addr, &http_post_to("/file", "", &file))?;
@@ -3164,32 +3758,28 @@ fn a_function_sent_alone_selects_the_full_range_window() -> Result<(), String> {
         &preview_id(id, "X-Ocelli-Window-Function: LINEAR\r\n"),
     )?;
     let (linear_header, linear_body) = split_http(&linear)?;
-    if !linear_header.contains("X-Ocelli-Window-Function: LINEAR")
-        || !linear_header.contains("X-Ocelli-Full-Range: 1")
-        || !linear_header.contains("X-Ocelli-Window-Center: 100")
-        || !linear_header.contains("X-Ocelli-Window-Width: 200")
-        || linear_body != [0, 35, 44, 255]
+    if header_line(linear_header, "X-Ocelli-Window-Function") != Some("LINEAR")
+        || header_line(linear_header, "X-Ocelli-Auto-Window") != Some("image")
+        || linear_body != [0, 0, 255, 255]
     {
         return Err(format!(
-            "LINEAR alone was not grey 0, 35, 44, 255: {linear_header} body {linear_body:?}"
+            "LINEAR alone was not grey 0, 0, 255, 255: {linear_header} body {linear_body:?}"
         ));
     }
     let exact = exchange(addr, &preview_id(id, ""))?;
     let (exact_header, exact_body) = split_http(&exact)?;
-    if !exact_header.contains("X-Ocelli-Window-Function: LINEAR_EXACT")
-        || !exact_header.contains("X-Ocelli-Full-Range: 1")
-        || !exact_header.contains("X-Ocelli-Window-Center: 100")
-        || !exact_header.contains("X-Ocelli-Window-Width: 200")
-        || exact_body != [0, 34, 43, 255]
+    if header_line(exact_header, "X-Ocelli-Window-Function") != Some("LINEAR_EXACT")
+        || header_line(exact_header, "X-Ocelli-Auto-Window") != Some("image")
+        || exact_body != [0, 0, 254, 255]
     {
         return Err(format!(
-            "the default full range was not grey 0, 34, 43, 255: {exact_header} body {exact_body:?}"
+            "the automatic default was not grey 0, 0, 254, 255: {exact_header} body {exact_body:?}"
         ));
     }
-    if linear_body == exact_body {
-        return Err(format!(
-            "LINEAR and LINEAR_EXACT returned the same body: {linear_body:?}"
-        ));
+    for (name, want) in [("Center", 113.5), ("Width", 173.0)] {
+        let text = header_line(exact_header, &format!("X-Ocelli-Window-{name}"))
+            .ok_or_else(|| format!("no window {name}"))?;
+        close_to(text, want)?;
     }
     Ok(())
 }
@@ -4007,7 +4597,7 @@ fn the_page_links_viewports() -> Result<(), String> {
         "id=\"toggle-reference\"",
         "class=\"ref-lines\"",
         "Window not applicable",
-        "This image is not monochrome, so it has no window to set.",
+        "This image is colour, so the file's windows and the presets do not apply. Drag to window each channel.",
     ] {
         if !page.contains(needle) {
             return Err(format!("the page does not link viewports: {needle}"));
@@ -4550,7 +5140,9 @@ fn the_page_keys_pixels_by_file_and_probes_for_changes() -> Result<(), String> {
     }
     // A series selection in the active viewport probes, and so do focus and
     // a return to a visible page.
-    if !function_body(page, "loadSeries")?.contains("if (vp.cell === activeCell) probeActive();") {
+    if !function_body(page, "loadSeries")?
+        .contains("if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);")
+    {
         return Err("a series selection does not probe".to_owned());
     }
     // Activating another viewport counts and probes its series, as a series
@@ -5534,8 +6126,8 @@ fn a_file_window_index_selects_that_pair() -> Result<(), String> {
 
 #[test]
 fn a_file_window_index_is_refused_outside_the_pairs() -> Result<(), String> {
-    // AC2. Clamping index 2 to the last pair, or falling to full range,
-    // would draw. Each is the window error before a grey byte.
+    // AC2. Clamping index 2 to the last pair, or falling to the automatic
+    // window, would draw. Each is the window error before a grey byte.
     let file = two_windows("CT")?;
     refused_as(
         preview_frame(&file, indexed(2)),
@@ -6383,6 +6975,1248 @@ fn a_middle_frame_alone_with_its_own_window_is_per_frame() -> Result<(), String>
     .contains("\"TOPB\"")
     {
         return Err("frame 3 lost the top-level list".to_owned());
+    }
+    Ok(())
+}
+
+/// F-225's reproducer. The CT base data set of the plan's acceptance table,
+/// every Type 1 and Type 2 attribute of the seven PS3.3 modules present,
+/// with four changes: Patient's Age `040 `, Institution Name of 170 `A`,
+/// SOP Instance UID and Modality present with zero length.
+fn conformance_reproducer(rows: u16, columns: u16) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0008, 0x0018), *b"UI", &[])?);
+    data.extend(short_le((0x0008, 0x0020), *b"DA", &text_pad("19991231"))?);
+    data.extend(short_le((0x0008, 0x0030), *b"TM", &text_pad("153045"))?);
+    data.extend(short_le((0x0008, 0x0050), *b"SH", &text_pad("A1"))?);
+    data.extend(short_le((0x0008, 0x0060), *b"CS", &[])?);
+    data.extend(short_le(
+        (0x0008, 0x0080),
+        *b"LO",
+        &text_pad(&"A".repeat(170)),
+    )?);
+    data.extend(short_le((0x0008, 0x0090), *b"PN", &text_pad("N"))?);
+    data.extend(short_le(
+        (0x0010, 0x0010),
+        *b"PN",
+        &text_pad("SECRET^NAME"),
+    )?);
+    data.extend(short_le((0x0010, 0x0020), *b"LO", &text_pad("P1"))?);
+    data.extend(short_le((0x0010, 0x0030), *b"DA", &text_pad("19991231"))?);
+    data.extend(short_le((0x0010, 0x0040), *b"CS", &text_pad("O"))?);
+    data.extend(short_le((0x0010, 0x1010), *b"AS", b"040 ")?);
+    data.extend(short_le((0x0018, 0x0050), *b"DS", &text_pad("5"))?);
+    data.extend(short_le((0x0018, 0x5100), *b"CS", &text_pad("HFS"))?);
+    data.extend(short_le((0x0020, 0x000D), *b"UI", &ui(b"9.8.7"))?);
+    data.extend(short_le((0x0020, 0x000E), *b"UI", &ui(b"9.8.8"))?);
+    data.extend(short_le((0x0020, 0x0010), *b"SH", &text_pad("S1"))?);
+    data.extend(short_le((0x0020, 0x0011), *b"IS", &text_pad("1"))?);
+    data.extend(short_le((0x0020, 0x0013), *b"IS", &text_pad("1"))?);
+    data.extend(short_le((0x0020, 0x0032), *b"DS", &text_pad("0\\0\\0"))?);
+    data.extend(short_le(
+        (0x0020, 0x0037),
+        *b"DS",
+        &text_pad("1\\0\\0\\0\\1\\0"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0030), *b"DS", &text_pad("1\\1"))?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    let pixels = vec![0_u8; usize::from(rows) * usize::from(columns) * 2];
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &pixels)?);
+    part10(data)
+}
+
+#[test]
+fn conformance_by_id_matches_the_body_form() -> Result<(), String> {
+    // F-225 AC32. The expected findings are the plan's reproducer, each
+    // derived from the standard and not from a run of the checker.
+    //   (0008,0018) SOP Instance UID, Type 1 in PS3.3 Table C.12-1, zero
+    //     length. PS3.5 7.4.1: "The Length of the Value Field shall not be
+    //     zero." TYPE1-EMPTY, no value number, no measure.
+    //   (0008,0060) Modality, Type 1 in PS3.3 Table C.7-5a, zero length.
+    //     TYPE1-EMPTY as above.
+    //   (0008,0080) Institution Name, LO, PS3.5 Table 6.2-1 "64 chars
+    //     maximum". 170 characters, VALUE-LENGTH value 1, 170 against 64.
+    //   (0010,1010) Patient's Age, AS, PS3.5 Table 6.2-1 "nnnD, nnnW, nnnM,
+    //     nnnY" in "4 bytes fixed". `040 ` has a SPACE where the unit letter
+    //     goes, so AS-FORMAT value 1 and no measure.
+    // Four findings and no fifth, so the badge reads 4.
+    let file = conformance_reproducer(1, 1)?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (posted_header, _) = split_http(&posted)?;
+    if !posted_header.starts_with("HTTP/1.1 200 ") {
+        return Err(format!("the reproducer did not open: {posted_header}"));
+    }
+    let id = header_line(posted_header, "X-Ocelli-File")
+        .ok_or_else(|| "the file id was missing".to_owned())?;
+    let by_id = exchange(
+        addr,
+        &http_post_to("/conformance", &format!("X-Ocelli-File: {id}\r\n"), &[]),
+    )?;
+    let (id_header, id_body) = split_http(&by_id)?;
+    if !id_header.starts_with("HTTP/1.1 200 ")
+        || header_line(id_header, "Content-Type") != Some("application/json; charset=utf-8")
+    {
+        return Err(format!("the id form was not JSON: {id_header}"));
+    }
+    let by_body = exchange(addr, &http_post_to("/conformance", "", &file))?;
+    let (body_header, body_body) = split_http(&by_body)?;
+    if !body_header.starts_with("HTTP/1.1 200 ") || body_body != id_body {
+        return Err("the body form did not answer the same bytes as the id form".to_owned());
+    }
+    let json = std::str::from_utf8(id_body).map_err(|_| "the report is not text".to_owned())?;
+    let scope = format!("{{\"scope\":\"{}\"", ocelli_dicom::CONFORMANCE_SCOPE);
+    if !json.starts_with(&scope) {
+        return Err(format!("the report does not open with its scope: {json}"));
+    }
+    let expected = [
+        "{\"tag\":\"(0008,0018)\",\"keyword\":\"SOPInstanceUID\",\"path\":[],\"rule\":\"TYPE1-EMPTY\",\"value\":null,\"measure\":null}",
+        "{\"tag\":\"(0008,0060)\",\"keyword\":\"Modality\",\"path\":[],\"rule\":\"TYPE1-EMPTY\",\"value\":null,\"measure\":null}",
+        "{\"tag\":\"(0008,0080)\",\"keyword\":\"InstitutionName\",\"path\":[],\"rule\":\"VALUE-LENGTH\",\"value\":1,\"measure\":{\"unit\":\"characters\",\"measured\":170,\"limit\":64}}",
+        "{\"tag\":\"(0010,1010)\",\"keyword\":\"PatientAge\",\"path\":[],\"rule\":\"AS-FORMAT\",\"value\":1,\"measure\":null}",
+    ];
+    for finding in expected {
+        if !json.contains(finding) {
+            return Err(format!("the report lacks {finding}: {json}"));
+        }
+    }
+    if json.matches("\"rule\":\"").count() != expected.len() {
+        return Err(format!(
+            "the report does not hold exactly four findings: {json}"
+        ));
+    }
+    for secret in ["040", "SECRET", "NAME", &"A".repeat(64)] {
+        if json.contains(secret) {
+            return Err(format!("the report repeats a value, {secret}"));
+        }
+    }
+
+    // A non-Part-10 body answers exactly what `/headers` answers.
+    let refused = exchange(addr, &http_post_to("/conformance", "", b"nope"))?;
+    let headers_refused = exchange(addr, &http_post_to("/headers", "", b"nope"))?;
+    if refused != headers_refused || !refused.starts_with(b"HTTP/1.1 4") {
+        return Err(format!(
+            "the refusal differs from /headers: {}",
+            String::from_utf8_lossy(&refused)
+        ));
+    }
+    // An id with a body, and an id the process does not hold, answer as
+    // `/headers` does.
+    let id_head = format!("X-Ocelli-File: {id}\r\n");
+    let both = exchange(addr, &http_post_to("/conformance", &id_head, b"nope"))?;
+    let headers_both = exchange(addr, &http_post_to("/headers", &id_head, b"nope"))?;
+    if both != headers_both || !both.starts_with(b"HTTP/1.1 400 ") {
+        return Err("an id with a body was not refused as /headers refuses it".to_owned());
+    }
+    let unknown = "X-Ocelli-File: 999999.999999\r\n";
+    let gone = exchange(addr, &http_post_to("/conformance", unknown, &[]))?;
+    let headers_gone = exchange(addr, &http_post_to("/headers", unknown, &[]))?;
+    if gone != headers_gone || !gone.starts_with(b"HTTP/1.1 410 ") {
+        return Err(format!(
+            "an unknown id was not refused as /headers refuses it: {}",
+            String::from_utf8_lossy(&gone)
+        ));
+    }
+
+    // `/headers` is unchanged by the new route. Its id form answers what
+    // `headers_json` answers for the same bytes.
+    let headers = exchange(addr, &http_post_to("/headers", &id_head, &[]))?;
+    let (_, headers_body) = split_http(&headers)?;
+    let direct = headers_json(&file).map_err(|_| "headers_json refused the file".to_owned())?;
+    if headers_body != direct.as_bytes() {
+        return Err("the /headers reply changed".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn the_page_shows_the_conformance_checks() -> Result<(), String> {
+    // F-225 AC33, the page source half. The browser half is
+    // `tests/browser/conformance.mjs`.
+    let page = served_page("/")?;
+    require(
+        &page,
+        &[
+            // The badge sits in the Headers button and starts hidden.
+            "<span class=\"sr\">Headers</span><span class=\"badge\" id=\"headers-badge\" hidden></span></button>",
+            // The Checks section is in the sheet above the headers table.
+            "<h3 id=\"checks-title\">Checks</h3>",
+            "id=\"checks-scope\"",
+            // Decision 14: 300 ms after the first paint, cached per file,
+            // at most 512 reports, through the library reader.
+            "const CHECKS_DELAY_MS = 300;",
+            "const CHECKS_CAP = 512;",
+            "core.readConformanceReport(text)",
+            "checksScope.textContent = report.scope;",
+            "\"The checks need the library build. Run npm run build in the repository, then start the viewer again.\"",
+            // Never beside a folder read or a thumbnail run.
+            "if (filePostsOpen > 0 || thumbRuns > 0) {",
+        ],
+        "the conformance checks",
+    )?;
+    let sheet = page
+        .find("<div id=\"modal\" hidden>")
+        .ok_or_else(|| "the page has no headers sheet".to_owned())?;
+    let checks = page
+        .find("<section id=\"checks\"")
+        .ok_or_else(|| "the sheet has no Checks section".to_owned())?;
+    let table = page
+        .find("<tbody id=\"header-rows\">")
+        .ok_or_else(|| "the sheet has no headers table".to_owned())?;
+    if !(sheet < checks && checks < table) {
+        return Err("the Checks section is not inside the sheet above the table".to_owned());
+    }
+    // One function sends the request, and every `POST /file` is counted, so
+    // the wait in `checksDue` sees each of them.
+    if page.matches("fetch(\"/conformance\"").count() != 2
+        || page.matches("fetch(\"/file\"").count() != 1
+        || !page.contains("filePostsOpen += 1;\n  try {\n    return await fetch(\"/file\"")
+    {
+        return Err("a conformance or file request escapes its one sender".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn the_pages_carry_their_own_policy() -> Result<(), String> {
+    // CSP3 6.7.3.3 hashes element source. Each response must describe its
+    // own literal, including the import map, without widening the policy.
+    let mut policies = Vec::new();
+    for (paths, page) in [
+        (["/", "/index.html"], include_str!("../src/page.html")),
+        (["/use", "/use.html"], include_str!("../src/use.html")),
+        (["/more", "/more.html"], include_str!("../src/more.html")),
+    ] {
+        assert!(!page.contains('\r'), "page source has a carriage return");
+        assert!(
+            !page.contains(" style="),
+            "page source has an inline style attribute"
+        );
+        let mut pair = Vec::new();
+        for path in paths {
+            let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+            let response = one_exchange(request.as_bytes())?;
+            let (head, body) = split_http(&response)?;
+            assert!(head.starts_with("HTTP/1.1 200 "), "{path}");
+            assert_eq!(body, page.as_bytes(), "{path} served another page");
+            let policy = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Security-Policy: "))
+                .ok_or_else(|| format!("{path} has no Content-Security-Policy"))?;
+            assert!(
+                policy.starts_with("default-src 'none'; script-src 'self'"),
+                "{path}"
+            );
+            assert!(policy.contains("'sha256-"), "{path} has no inline hashes");
+            for forbidden in [
+                "'unsafe-inline'",
+                "'unsafe-eval'",
+                "'wasm-unsafe-eval'",
+                "blob:",
+                "'unsafe-hashes'",
+            ] {
+                assert!(!policy.contains(forbidden), "{path} allows {forbidden}");
+            }
+            pair.push(policy.to_owned());
+        }
+        assert_eq!(pair.first(), pair.get(1), "aliases have different policies");
+        policies.push(pair.remove(0));
+    }
+    assert_ne!(
+        policies.first(),
+        policies.get(1),
+        "image and Use policies are not page-specific"
+    );
+    assert_ne!(
+        policies.get(1),
+        policies.get(2),
+        "Use and More policies are not page-specific"
+    );
+    Ok(())
+}
+
+/// PS3.3 C.7.6.3, a native unsigned 8-bit colour test object.
+fn colour_server_frame(
+    rows: u16,
+    columns: u16,
+    space: &str,
+    planar: u16,
+    pixels: &[u8],
+) -> Result<Vec<u8>, String> {
+    let mut data = short_le((0x0008, 0x0016), *b"UI", &ui(b"1.2.840.10008.5.1.4.1.1.7"))?;
+    for (tag, value) in [
+        ((0x0028, 0x0002), 3),
+        ((0x0028, 0x0006), planar),
+        ((0x0028, 0x0010), rows),
+        ((0x0028, 0x0011), columns),
+        ((0x0028, 0x0100), 8),
+        ((0x0028, 0x0101), 8),
+        ((0x0028, 0x0102), 7),
+        ((0x0028, 0x0103), 0),
+    ] {
+        data.extend(short_le(tag, *b"US", &value.to_le_bytes())?);
+    }
+    data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(space))?);
+    let mut value = pixels.to_vec();
+    if !value.len().is_multiple_of(2) {
+        value.push(0);
+    }
+    data.extend(long_le((0x7fe0, 0x0010), *b"OB", &value)?);
+    part10(data)
+}
+
+#[test]
+fn colour_server_channels_and_held_window_survive_a_refusal() -> Result<(), String> {
+    // D-29 uses the existing LINEAR formula per channel. C128/W100 maps
+    // 100,30,200 to 57,0,255, inverse before rounding to 198,255,0.
+    let file = colour_server_frame(1, 2, "RGB", 0, &[100, 30, 200, 10, 20, 30])?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, body) = split_http(&posted)?;
+    let inspect = std::str::from_utf8(body).map_err(|error| error.to_string())?;
+    assert!(inspect.contains("\"colour\":true,\"icc\":false"));
+    let id = header_line(header, "X-Ocelli-File").ok_or("no held id")?;
+    for (extra, expected) in [
+        ("", vec![100, 30, 200, 10, 20, 30]),
+        (
+            "X-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 100\r\n",
+            vec![57, 0, 255, 0, 0, 0],
+        ),
+        (
+            "X-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 100\r\nX-Ocelli-Invert: 1\r\n",
+            vec![198, 255, 0, 255, 255, 255],
+        ),
+    ] {
+        let response = exchange(addr, &preview_id(id, extra))?;
+        let (head, body) = split_http(&response)?;
+        assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+        assert_eq!(header_line(head, "X-Ocelli-Channels"), Some("3"));
+        assert_eq!(header_line(head, "X-Ocelli-Palette-Fallback"), Some("0"));
+        assert_eq!(body, expected);
+    }
+    for bad in [
+        "X-Ocelli-Window-Function: SIGMOID\r\n",
+        "X-Ocelli-Window-Preset: lung\r\n",
+        "X-Ocelli-Window-Index: 0\r\n",
+    ] {
+        let response = exchange(addr, &preview_id(id, bad))?;
+        let (head, _) = split_http(&response)?;
+        assert!(head.starts_with("HTTP/1.1 400 "));
+        assert_eq!(
+            header_line(head, "X-Ocelli-Error"),
+            Some("colour-not-applicable")
+        );
+    }
+    let response = exchange(addr, &preview_id(id, ""))?;
+    let (head, body) = split_http(&response)?;
+    assert_eq!(header_line(head, "X-Ocelli-Source"), Some("held"));
+    assert_eq!(body, [100, 30, 200, 10, 20, 30]);
+    let mono = one_exchange(&http_post(&mono_frame(true)?))?;
+    let (head, _) = split_http(&mono)?;
+    assert_eq!(header_line(head, "X-Ocelli-Channels"), Some("1"));
+    Ok(())
+}
+
+#[test]
+fn colour_server_native_packed_422_and_multi_band_planar_are_exact() -> Result<(), String> {
+    // C.7.6.3.1.2: Y1 Y2 Cb Cr. The inverse matrix is worked in F239 AC5.
+    let file = colour_server_frame(1, 2, "YBR_FULL_422", 0, &[50, 200, 100, 160])?;
+    assert_eq!(
+        preview_first_frame(&file)
+            .map_err(|error| error.to_string())?
+            .grey,
+        [95, 37, 0, 245, 187, 150]
+    );
+    // More than one conversion band. Each plane has its own constant byte,
+    // so using full-frame plane offsets inside a band shifts a channel.
+    let (rows, columns) = (257_u16, 256_u16);
+    let count = usize::from(rows) * usize::from(columns);
+    let planar = [vec![10; count], vec![20; count], vec![30; count]].concat();
+    let file = colour_server_frame(rows, columns, "RGB", 1, &planar)?;
+    let preview = preview_first_frame(&file).map_err(|error| error.to_string())?;
+    assert_eq!(preview.grey.len(), count * 3);
+    assert!(
+        preview
+            .grey
+            .chunks_exact(3)
+            .all(|pixel| pixel == [10, 20, 30])
+    );
+    Ok(())
+}
+
+#[test]
+fn colour_server_value_and_roi_are_pre_window_per_channel() -> Result<(), String> {
+    // F239 AC13: population SD of [10,200] is95, [20,100] is40,
+    // [30,50] is10. PS3.3 C.7.6.3 colours bypass modality rescale.
+    let file = colour_server_frame(1, 2, "RGB", 0, &[10, 20, 30, 200, 100, 50])?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id = header_line(header, "X-Ocelli-File").ok_or("no held id")?;
+    let extra = format!(
+        "X-Ocelli-File: {id}\r\nX-Ocelli-Points: 1.5,0.5\r\nX-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 2\r\nX-Ocelli-Invert: 1\r\n"
+    );
+    let response = exchange(addr, &http_post_to("/value", &extra, &[]))?;
+    let (head, body) = split_http(&response)?;
+    assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+    let text = std::str::from_utf8(body).map_err(|error| error.to_string())?;
+    assert!(text.contains("\"rgb\":[200,100,50]"), "{text}");
+    assert!(text.contains("\"text\":\"R 200.0 G 100.0 B 50.0\""));
+    assert!(!text.contains("\"value\":") && !text.contains("unit_source"));
+    let mut previous = None;
+    for window in [
+        "",
+        "X-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 2\r\nX-Ocelli-Invert: 1\r\n",
+    ] {
+        let extra = format!("X-Ocelli-File: {id}\r\nX-Ocelli-Shape: rectangle\r\n{window}");
+        let response = exchange(addr, &http_post_to("/measure", &extra, b"0,0 2,1"))?;
+        let (head, body) = split_http(&response)?;
+        assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+        let text = std::str::from_utf8(body).map_err(|error| error.to_string())?;
+        for expected in [
+            "\"padding_excluded\":0,\"unit\":\"RGB\"",
+            "\"r\":{\"count\":2,\"mean\":105,\"sd\":95,\"min\":10,\"max\":200}",
+            "\"g\":{\"count\":2,\"mean\":60,\"sd\":40,\"min\":20,\"max\":100}",
+            "\"b\":{\"count\":2,\"mean\":40,\"sd\":10,\"min\":30,\"max\":50}",
+        ] {
+            assert!(text.contains(expected), "missing {expected} in {text}");
+        }
+        if let Some(before) = &previous {
+            assert_eq!(text, before);
+        } else {
+            previous = Some(text.to_owned());
+        }
+    }
+    Ok(())
+}
+
+/// ICC-tagged native RGB, with its device range in Bits Stored. Pixel values
+/// and profile bytes are synthetic. The profile fixtures have separate provenance.
+fn icc_server_frame(bits: u16, pixels: &[u16], profile: Option<&[u8]>) -> Result<Vec<u8>, String> {
+    if !pixels.len().is_multiple_of(3) {
+        return Err("RGB triples required".to_owned());
+    }
+    let columns = u16::try_from(pixels.len() / 3).map_err(|error| error.to_string())?;
+    let allocated: u16 = if bits <= 8 { 8 } else { 16 };
+    let mut data = short_le((0x0008, 0x0016), *b"UI", &ui(b"1.2.840.10008.5.1.4.1.1.7"))?;
+    for (tag, value) in [
+        ((0x0028, 0x0002), 3),
+        ((0x0028, 0x0006), 0),
+        ((0x0028, 0x0010), 1),
+        ((0x0028, 0x0011), columns),
+        ((0x0028, 0x0100), allocated),
+        ((0x0028, 0x0101), bits),
+        ((0x0028, 0x0102), bits - 1),
+        ((0x0028, 0x0103), 0),
+    ] {
+        data.extend(short_le(tag, *b"US", &value.to_le_bytes())?);
+    }
+    data.extend(short_le((0x0028, 0x0004), *b"CS", b"RGB ")?);
+    if let Some(profile) = profile {
+        data.extend(long_le((0x0028, 0x2000), *b"OB", profile)?);
+    }
+    let mut value = Vec::new();
+    for pixel in pixels {
+        if allocated == 8 {
+            value.push(u8::try_from(*pixel).map_err(|error| error.to_string())?);
+        } else {
+            value.extend(pixel.to_le_bytes());
+        }
+    }
+    if !value.len().is_multiple_of(2) {
+        value.push(0);
+    }
+    data.extend(long_le(
+        (0x7fe0, 0x0010),
+        if allocated == 8 { *b"OB" } else { *b"OW" },
+        &value,
+    )?);
+    part10(data)
+}
+
+#[test]
+fn matrix_icc_profiles_draw_hand_values_and_untagged_frames_keep_device_rgb() -> Result<(), String>
+{
+    // F240 AC1, AC2, AC3, AC5 and AC8. Expected bytes are from the plan,
+    // independently checked with Little CMS, not captured from this renderer.
+    let neutral = [64, 64, 64, 128, 128, 128, 192, 192, 192, 255, 255, 255];
+    for (profile, input, expected) in [
+        (
+            include_bytes!("fixtures/icc_gamma1.icc").as_slice(),
+            neutral.as_slice(),
+            [137, 137, 137, 188, 188, 188, 225, 225, 225, 255, 255, 255].as_slice(),
+        ),
+        (
+            include_bytes!("fixtures/icc_gamma22.icc").as_slice(),
+            neutral.as_slice(),
+            [62, 62, 62, 129, 129, 129, 193, 193, 193, 255, 255, 255].as_slice(),
+        ),
+        (
+            include_bytes!("fixtures/icc_srgb_para.icc").as_slice(),
+            neutral.as_slice(),
+            [64, 64, 64, 128, 128, 128, 192, 192, 192, 255, 255, 255].as_slice(),
+        ),
+        (
+            include_bytes!("fixtures/icc_swap.icc").as_slice(),
+            [255, 0, 0, 0, 255, 0].as_slice(),
+            [0, 255, 0, 255, 0, 0].as_slice(),
+        ),
+    ] {
+        let file = icc_server_frame(8, input, Some(profile))?;
+        assert_eq!(
+            preview_first_frame(&file)
+                .map_err(|error| error.to_string())?
+                .grey,
+            expected
+        );
+        let info = inspect_json(&file, 0).map_err(|error| error.to_string())?;
+        assert!(
+            info.contains("\"icc\":true,\"icc_applied\":true,\"icc_kind\":\"\""),
+            "{info}"
+        );
+    }
+    let high = icc_server_frame(
+        12,
+        &[4095, 4095, 4095, 2048, 2048, 2048, 0, 0, 0],
+        Some(include_bytes!("fixtures/icc_gamma1.icc")),
+    )?;
+    assert_eq!(
+        preview_first_frame(&high)
+            .map_err(|error| error.to_string())?
+            .grey,
+        [255, 255, 255, 188, 188, 188, 0, 0, 0]
+    );
+    let plain = icc_server_frame(12, &[4095, 2048, 15], None)?;
+    assert_eq!(
+        preview_first_frame(&plain)
+            .map_err(|error| error.to_string())?
+            .grey,
+        [255, 128, 0]
+    );
+    Ok(())
+}
+
+#[test]
+fn unsupported_icc_profiles_keep_device_rgb_and_name_the_reason() -> Result<(), String> {
+    for (profile, kind) in [
+        (
+            include_bytes!("fixtures/icc_lut.icc").as_slice(),
+            "lookup-table",
+        ),
+        (b"TEST".as_slice(), "malformed"),
+    ] {
+        let file = icc_server_frame(8, &[10, 20, 30, 200, 100, 50], Some(profile))?;
+        assert_eq!(
+            preview_first_frame(&file)
+                .map_err(|error| error.to_string())?
+                .grey,
+            [10, 20, 30, 200, 100, 50]
+        );
+        let info = inspect_json(&file, 0).map_err(|error| error.to_string())?;
+        assert!(info.contains("\"icc_applied\":false"), "{info}");
+        assert!(info.contains(&format!("\"icc_kind\":\"{kind}\"")), "{info}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_held_icc_frame_applies_its_profile_without_encoded_bytes_or_reparsing() -> Result<(), String> {
+    let file = icc_server_frame(
+        8,
+        &[64, 64, 64],
+        Some(include_bytes!("fixtures/icc_gamma1.icc")),
+    )?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let posted = exchange(addr, &http_post_to("/file", "", &file))?;
+    let (header, _) = split_http(&posted)?;
+    let id = header_line(header, "X-Ocelli-File").ok_or("no held id")?;
+    for (index, extra, expected) in [
+        (0, "", vec![137, 137, 137]),
+        // After ICC the channel is above the W10 upper edge132, so255.
+        // Windowing the raw64 first would instead produce0, proving order.
+        (
+            1,
+            "X-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 10\r\n",
+            vec![255, 255, 255],
+        ),
+        (
+            2,
+            "X-Ocelli-Window-Center: 128\r\nX-Ocelli-Window-Width: 10\r\nX-Ocelli-Invert: 1\r\n",
+            vec![0, 0, 0],
+        ),
+        (3, "", vec![137, 137, 137]),
+    ] {
+        let response = exchange(addr, &preview_id(id, extra))?;
+        let (head, body) = split_http(&response)?;
+        assert_eq!(
+            header_line(head, "X-Ocelli-Source"),
+            Some(if index == 0 { "decoded" } else { "held" })
+        );
+        assert_eq!(body, expected);
+        if index == 0 {
+            let response = exchange(addr, b"GET /held HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+            let (_, body) = split_http(&response)?;
+            let census = std::str::from_utf8(body).map_err(|error| error.to_string())?;
+            assert!(
+                census.contains("\"files\":0") && census.contains("\"frames\":1"),
+                "{census}"
+            );
+        }
+    }
+    let response = exchange(
+        addr,
+        &http_post_to(
+            "/value",
+            &format!("X-Ocelli-File: {id}\r\nX-Ocelli-Points: 0.5,0.5\r\n"),
+            &[],
+        ),
+    )?;
+    let (head, body) = split_http(&response)?;
+    assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+    assert!(
+        std::str::from_utf8(body)
+            .map_err(|error| error.to_string())?
+            .contains("R 137.2 G 137.2 B 137.2")
+    );
+    Ok(())
+}
+
+/// A data set of `depth` nested Sequences, one Item per Sequence, with one
+/// US element inside the innermost Item. PS3.5 section 7.5 allows the
+/// nesting. At 20,000 a parse without the preflight would recurse past the
+/// connection thread's stack and, under panic = "abort", end the process.
+fn nested_sequence_data_set(depth: usize) -> Result<Vec<u8>, String> {
+    let mut current = short_le((0x0028, 0x0010), *b"US", &2_u16.to_le_bytes())?;
+    for _ in 0..depth {
+        let item = item(&current)?;
+        current = long_le((0x0008, 0x1110), *b"SQ", &item)?;
+    }
+    Ok(current)
+}
+
+#[test]
+fn a_sequence_deep_enough_to_abort_an_unchecked_parse_is_refused_and_the_process_answers_next()
+-> Result<(), String> {
+    // F-234. The data set nests 20,000 Sequences deep, far past the depth at
+    // which dicom-rs's recursive collector overflows a connection thread.
+    // Without the preflight the process would die inside the parse, and this
+    // test with it. With the preflight the refusal happens before any
+    // recursion, `part10_error` maps it to `not-part10` on the wire, and the
+    // next request on the process is served.
+    let data_set = nested_sequence_data_set(20_000)?;
+    let file = part10(data_set)?;
+    let request = http_post_to("/preview", "", &file);
+    let response = one_exchange(&request)?;
+    let (header, _) = split_http(&response)?;
+    if !header.contains("400") || !header.contains("X-Ocelli-Error: not-part10") {
+        return Err("the deep file was not refused by the preview".to_owned());
+    }
+    let next = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (next_header, _) = split_http(&next)?;
+    if !next_header.contains("200") {
+        return Err("the process did not answer the next request".to_owned());
+    }
+    Ok(())
+}
+
+// F-227, the automatic window, viewer half. Every expected value below is
+// computed by hand from the nearest-rank rule of the design, PS3.3 C.11.1
+// per frame and PS3.3 C.11.2.1.3.2 LINEAR_EXACT, with grey `floor(y + 0.5)`.
+// For `n` counted values the ranks are `ceil(n / 100)` and `ceil(99 n / 100)`,
+// one-based, and the window runs from the low to the high percentile. The
+// library moves each percentile at most 16 f32 units toward the other before
+// it checks the edges, which moves no grey below by a whole step.
+
+/// One monochrome 16-bit Part 10 file for the automatic window. No window
+/// unless `window` names one, Modality `modality`, Rescale Slope `slope` and
+/// intercept 0, and a Pixel Padding Value when `padding` names one.
+struct AutoSpec<'a> {
+    rows: u16,
+    columns: u16,
+    samples: &'a [i32],
+    signed: bool,
+    slope: &'a str,
+    modality: &'a str,
+    padding: Option<i16>,
+    window: Option<(&'a str, &'a str)>,
+}
+
+fn auto_file(spec: &AutoSpec<'_>) -> Result<Vec<u8>, String> {
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.128"),
+    )?);
+    data.extend(short_le(
+        (0x0008, 0x0060),
+        *b"CS",
+        &text_pad(spec.modality),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?);
+    data.extend(short_le(
+        (0x0028, 0x0004),
+        *b"CS",
+        &text_pad("MONOCHROME2"),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0010),
+        *b"US",
+        &spec.rows.to_le_bytes(),
+    )?);
+    data.extend(short_le(
+        (0x0028, 0x0011),
+        *b"US",
+        &spec.columns.to_le_bytes(),
+    )?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?);
+    let representation = u16::from(spec.signed);
+    data.extend(short_le(
+        (0x0028, 0x0103),
+        *b"US",
+        &representation.to_le_bytes(),
+    )?);
+    if let Some(padding) = spec.padding {
+        data.extend(short_le((0x0028, 0x0120), *b"SS", &padding.to_le_bytes())?);
+    }
+    if let Some((center, width)) = spec.window {
+        data.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad(center))?);
+        data.extend(short_le((0x0028, 0x1051), *b"DS", &text_pad(width))?);
+    }
+    data.extend(short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?);
+    data.extend(short_le((0x0028, 0x1053), *b"DS", &text_pad(spec.slope))?);
+    let mut pixels = Vec::with_capacity(spec.samples.len() * 2);
+    for sample in spec.samples {
+        if spec.signed {
+            let value = i16::try_from(*sample).map_err(|_| "signed sample".to_owned())?;
+            pixels.extend_from_slice(&value.to_le_bytes());
+        } else {
+            let value = u16::try_from(*sample).map_err(|_| "unsigned sample".to_owned())?;
+            pixels.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    data.extend(long_le((0x7FE0, 0x0010), *b"OW", &pixels)?);
+    part10(data)
+}
+
+/// Ten by ten, unsigned, PT, no window: stored `first` to `first + 99`.
+fn auto_ramp(first: i32, slope: &str) -> Result<Vec<u8>, String> {
+    let samples: Vec<i32> = (first..first + 100).collect();
+    auto_file(&AutoSpec {
+        rows: 10,
+        columns: 10,
+        samples: &samples,
+        signed: false,
+        slope,
+        modality: "PT",
+        padding: None,
+        window: None,
+    })
+}
+
+/// Ten by ten, stored 1 to 100, with the window centre 100 and width 200.
+fn auto_windowed() -> Result<Vec<u8>, String> {
+    let samples: Vec<i32> = (1..=100).collect();
+    auto_file(&AutoSpec {
+        rows: 10,
+        columns: 10,
+        samples: &samples,
+        signed: false,
+        slope: "1",
+        modality: "PT",
+        padding: None,
+        window: Some(("100", "200")),
+    })
+}
+
+/// AC4's frame B alone: 20 of stored -2000, then stored 51 to 100, signed,
+/// Pixel Padding Value -2000, seven rows of ten.
+fn auto_padded() -> Result<Vec<u8>, String> {
+    let mut samples = vec![-2000; 20];
+    samples.extend(51..=100);
+    auto_file(&AutoSpec {
+        rows: 7,
+        columns: 10,
+        samples: &samples,
+        signed: true,
+        slope: "1",
+        modality: "CT",
+        padding: Some(-2000),
+        window: None,
+    })
+}
+
+fn post_for_id(addr: SocketAddr, file: &[u8]) -> Result<String, String> {
+    let posted = exchange(addr, &http_post_to("/file", "", file))?;
+    let (header, _) = split_http(&posted)?;
+    header_line(header, "X-Ocelli-File")
+        .map(str::to_owned)
+        .ok_or_else(|| format!("the file id was missing: {header}"))
+}
+
+/// `POST /series-window` with one `<id> <frame>` line per image.
+fn series_window(addr: SocketAddr, lines: &[(&str, u32)]) -> Result<(String, String), String> {
+    let mut body = String::new();
+    for (id, frame) in lines {
+        body.push_str(&format!("{id} {frame}\n"));
+    }
+    let reply = exchange(addr, &http_post_to("/series-window", "", body.as_bytes()))?;
+    let (header, body) = split_http(&reply)?;
+    let body =
+        std::str::from_utf8(body).map_err(|_| "the series window reply was not text".to_owned())?;
+    Ok((header.to_owned(), body.to_owned()))
+}
+
+/// A JSON string field written as `"key":"value"`.
+fn json_text(body: &str, key: &str) -> Result<String, String> {
+    let needle = format!("\"{key}\":\"");
+    let start = body
+        .find(&needle)
+        .ok_or_else(|| format!("no {key} in {body}"))?
+        + needle.len();
+    let rest = body.get(start..).ok_or_else(|| format!("short {key}"))?;
+    let end = rest.find('"').ok_or_else(|| format!("open {key}"))?;
+    Ok(rest.get(..end).unwrap_or_default().to_owned())
+}
+
+/// The grey bytes and header of one preview by id.
+fn preview_by_id(addr: SocketAddr, id: &str, extra: &str) -> Result<(String, Vec<u8>), String> {
+    let reply = exchange(addr, &preview_id(id, extra))?;
+    let (header, body) = split_http(&reply)?;
+    Ok((header.to_owned(), body.to_vec()))
+}
+
+fn library_window(
+    frames: &[(i32, f32)],
+    declared: usize,
+) -> Result<ocelli_pixel::AutoWindow, String> {
+    let mut pool = ocelli_pixel::AutoWindowPool::new(declared)
+        .map_err(|error| format!("the pool was refused: {error:?}"))?;
+    for (first, slope) in frames {
+        let mut stored = Vec::with_capacity(100);
+        for value in *first..*first + 100 {
+            let value = u16::try_from(value).map_err(|_| "an unsigned sample".to_owned())?;
+            stored.push(ocelli_core::Stored(f32::from(value)));
+        }
+        let modality = ocelli_pixel::ModalityTransform::new(None, Some(*slope), Some(0.0))
+            .map_err(|_| "the rescale was refused".to_owned())?;
+        pool.add_frame(&stored, &modality, None)
+            .map_err(|error| format!("a frame was refused: {error:?}"))?;
+    }
+    pool.finish()
+        .map_err(|error| format!("the pool did not finish: {error:?}"))
+}
+
+fn close_to(value: &str, want: f32) -> Result<(), String> {
+    let got = value
+        .parse::<f32>()
+        .map_err(|_| format!("{value} is not a number"))?;
+    if (got - want).abs() > 0.01 {
+        return Err(format!("{value} is not {want}"));
+    }
+    Ok(())
+}
+
+/// AC10. The pinned one-sample inputs, through the route. Stored 50, no
+/// window: one counted value, the constant window centre 50 width 1, and
+/// `((50 - 50) / 1 + 0.5) * 255 = 127.5` addresses grey 128. A zero-length
+/// Window Center and Width carry no number and are the same. A windowed
+/// frame is `none`.
+#[test]
+fn the_route_labels_the_automatic_window_per_image() -> Result<(), String> {
+    for (name, file) in [
+        ("missing", mono_frame(false)?),
+        ("zero length", mono_zero_window()?),
+    ] {
+        let response = one_exchange(&http_post(&file))?;
+        let (header, body) = split_http(&response)?;
+        if header_line(header, "X-Ocelli-Auto-Window") != Some("image") || body != [128] {
+            return Err(format!(
+                "the {name} window was not image grey 128: {header} {body:?}"
+            ));
+        }
+    }
+    let response = one_exchange(&http_post(&mono_frame(true)?))?;
+    let (header, _) = split_http(&response)?;
+    if header_line(header, "X-Ocelli-Auto-Window") != Some("none") {
+        return Err(format!("a windowed frame was not labelled none: {header}"));
+    }
+    Ok(())
+}
+
+/// AC11. AC3's two frames as two PT files with their own Rescale Slope.
+/// Frame A stored 1 to 100 at slope 1, frame B stored 1 to 100 at slope 2.
+/// The pool of modality values holds 1 to 100 and 2 to 200 by 2, n = 200,
+/// ranks 2 and 198, so low 2 and high 196, centre 99, width 194. Frame B's
+/// stored 50 is modality 100, `((100 - 99) / 194 + 0.5) * 255 = 128.81`,
+/// grey 129. Frame A's stored 50 is `((50 - 99) / 194 + 0.5) * 255 = 63.09`,
+/// grey 63. Pooling stored values, or one slope for both, gives centre 50
+/// width 98 and grey 128 for B. B alone gives centre 100 width 196, grey 128.
+#[test]
+fn the_series_window_pools_each_file_rescale() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let a = post_for_id(addr, &auto_ramp(1, "1")?)?;
+    let b = post_for_id(addr, &auto_ramp(1, "2")?)?;
+    let (header, body) = series_window(addr, &[(&a, 0), (&b, 0)])?;
+    if status_token(&header)? != "200" {
+        return Err(format!("the series window was refused: {header} {body}"));
+    }
+    let center = json_text(&body, "center")?;
+    let width = json_text(&body, "width")?;
+    close_to(&center, 99.0)?;
+    close_to(&width, 194.0)?;
+    let library = library_window(&[(1, 1.0), (1, 2.0)], 2)?;
+    if center != library.center.to_string() || width != library.width.to_string() {
+        return Err(format!(
+            "the route said {center} and {width}, the library {} and {}",
+            library.center, library.width
+        ));
+    }
+    if json_text(&body, "function")? != "LINEAR_EXACT"
+        || json_text(&body, "basis")? != "percentile"
+        || json_number(&body, "sampled")? != 2
+        || json_number(&body, "skipped")? != 0
+        || json_number(&body, "counted")? != 200
+    {
+        return Err(format!("the series window reply was {body}"));
+    }
+    let extra = format!("X-Ocelli-Series-Window: {center} {width}\r\n");
+    let (b_header, b_grey) = preview_by_id(addr, &b, &extra)?;
+    if header_line(&b_header, "X-Ocelli-Auto-Window") != Some("series")
+        || b_grey.get(49) != Some(&129)
+    {
+        return Err(format!(
+            "frame B's stored 50 was {:?}, wanted grey 129 under the series window: {b_header}",
+            b_grey.get(49)
+        ));
+    }
+    let (_, a_grey) = preview_by_id(addr, &a, &extra)?;
+    if a_grey.get(49) != Some(&63) {
+        return Err(format!(
+            "frame A's stored 50 was {:?}, wanted 63",
+            a_grey.get(49)
+        ));
+    }
+    // With no series header the image is drawn at its own window.
+    let (own_header, own_grey) = preview_by_id(addr, &b, "")?;
+    if header_line(&own_header, "X-Ocelli-Auto-Window") != Some("image")
+        || own_grey.get(49) != Some(&128)
+    {
+        return Err(format!(
+            "frame B alone was {:?}, wanted grey 128 labelled image: {own_header}",
+            own_grey.get(49)
+        ));
+    }
+    Ok(())
+}
+
+/// AC12. A window in the file is used as it is. Stored 50 under the file's
+/// LINEAR_EXACT centre 100 width 200 is `((50 - 100) / 200 + 0.5) * 255 =
+/// 63.75`, grey 64, with or without a series header, and the reply is `none`.
+#[test]
+fn a_windowed_image_ignores_the_series_window() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let id = post_for_id(addr, &mono_frame(true)?)?;
+    let (header, grey) = preview_by_id(addr, &id, "X-Ocelli-Series-Window: 50 1\r\n")?;
+    if header_line(&header, "X-Ocelli-Auto-Window") != Some("none") || grey != [64] {
+        return Err(format!("the file window was replaced: {header} {grey:?}"));
+    }
+    Ok(())
+}
+
+/// AC12. A half window and a VOI LUT Sequence keep the window refusal, with
+/// and without a series header.
+#[test]
+fn a_half_window_is_not_auto() -> Result<(), String> {
+    let mut half = Vec::new();
+    half.extend(image_module()?);
+    half.extend(short_le((0x0028, 0x1050), *b"DS", &text_pad("100"))?);
+    half.extend(rescale_one()?);
+    half.extend(pixels_50()?);
+    let half = part10(half)?;
+    let lut = mono_with(false, &[(0x0028, 0x3010)])?;
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    for (name, file) in [("half window", half), ("VOI LUT Sequence", lut)] {
+        let id = post_for_id(addr, &file)?;
+        for extra in ["", "X-Ocelli-Series-Window: 50 1\r\n"] {
+            let (header, _) = preview_by_id(addr, &id, extra)?;
+            if status_token(&header)? != "400"
+                || header_line(&header, "X-Ocelli-Error") != Some("window")
+            {
+                return Err(format!("the {name} was drawn with {extra:?}: {header}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// AC13. A list of three files whose middle one has a window. Sampled 3,
+/// skipped 1. The other two are AC2's frames, stored 1 to 100 and 101 to
+/// 200 at slope 1: n = 200, ranks 2 and 198, low 2, high 198, centre 100,
+/// width 196. The third file's stored 150 is `((150 - 100) / 196 + 0.5) *
+/// 255 = 192.55`, grey 193. Replacing the skipped file with a neighbour, or
+/// the third file alone (centre 150, width 98, grey 128), differ. A list of
+/// windowed files only is `400 window`.
+#[test]
+fn a_mixed_series_skips_windowed_images() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let a = post_for_id(addr, &auto_ramp(1, "1")?)?;
+    let m = post_for_id(addr, &auto_windowed()?)?;
+    let b = post_for_id(addr, &auto_ramp(101, "1")?)?;
+    let (header, body) = series_window(addr, &[(&a, 0), (&m, 0), (&b, 0)])?;
+    if status_token(&header)? != "200" {
+        return Err(format!("the mixed series was refused: {header} {body}"));
+    }
+    if json_number(&body, "sampled")? != 3 || json_number(&body, "skipped")? != 1 {
+        return Err(format!("the mixed series counted {body}"));
+    }
+    let center = json_text(&body, "center")?;
+    let width = json_text(&body, "width")?;
+    close_to(&center, 100.0)?;
+    close_to(&width, 196.0)?;
+    let library = library_window(&[(1, 1.0), (101, 1.0)], 3)?;
+    if center != library.center.to_string() || width != library.width.to_string() {
+        return Err(format!("the mixed series said {center} {width}"));
+    }
+    let extra = format!("X-Ocelli-Series-Window: {center} {width}\r\n");
+    let (_, grey) = preview_by_id(addr, &b, &extra)?;
+    if grey.get(49) != Some(&193) {
+        return Err(format!("stored 150 was {:?}, wanted 193", grey.get(49)));
+    }
+    let (header, body) = series_window(addr, &[(&m, 0), (&m, 0)])?;
+    if status_token(&header)? != "400" || header_line(&header, "X-Ocelli-Error") != Some("window") {
+        return Err(format!(
+            "a windowed series was given a series window: {header} {body}"
+        ));
+    }
+    // Review pass 16, D2. A `-` line is an image the page cannot offer, a
+    // file changed on disk. Sampled, it is skipped and the rest still pool:
+    // file A alone, stored 1 to 100, n = 100, ranks 1 and 99, centre 50,
+    // width 98, sampled 2, skipped 1.
+    let (header, body) = series_window(addr, &[(&a, 0), ("-", 0)])?;
+    if status_token(&header)? != "200"
+        || json_number(&body, "sampled")? != 2
+        || json_number(&body, "skipped")? != 1
+    {
+        return Err(format!("a changed image was not skipped: {header} {body}"));
+    }
+    close_to(&json_text(&body, "center")?, 50.0)?;
+    close_to(&json_text(&body, "width")?, 98.0)?;
+    Ok(())
+}
+
+/// AC13. AC4's frame B alone, signed, Pixel Padding Value -2000, PS3.3
+/// C.7.5.1.1.2. The 20 padded samples are left out, so 51 to 100 are
+/// counted, n = 50, ranks 1 and 50, low 51, high 100, centre 75.5, width 49.
+/// Stored 75 is `((75 - 75.5) / 49 + 0.5) * 255 = 124.90`, grey 125, stored
+/// 51 and -2000 are grey 0 and stored 100 is 255. Ignoring the padding
+/// counts -2000: n = 70, ranks 1 and 70, centre -950, width 2100, and
+/// stored 75 is `((75 + 950) / 2100 + 0.5) * 255 = 251.96`, grey 252.
+#[test]
+fn a_padded_file_leaves_out_its_padding() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let id = post_for_id(addr, &auto_padded()?)?;
+    let (header, grey) = preview_by_id(addr, &id, "")?;
+    if header_line(&header, "X-Ocelli-Auto-Window") != Some("image") {
+        return Err(format!("the padded file was not labelled image: {header}"));
+    }
+    let want = [(0, 0), (20, 0), (44, 125), (69, 255)];
+    for (at, value) in want {
+        if grey.get(at) != Some(&value) {
+            return Err(format!(
+                "sample {at} was {:?}, wanted {value}",
+                grey.get(at)
+            ));
+        }
+    }
+    let (header, body) = series_window(addr, &[(&id, 0)])?;
+    if status_token(&header)? != "200" || json_number(&body, "counted")? != 50 {
+        return Err(format!("the padded series was {header} {body}"));
+    }
+    close_to(&json_text(&body, "center")?, 75.5)?;
+    close_to(&json_text(&body, "width")?, 49.0)?;
+    Ok(())
+}
+
+/// AC14. A series header names one window, so it is refused beside a
+/// preset, a numeric window or a file window index, and when its width is
+/// not a positive finite number. The list refuses a gone id with its id and
+/// a malformed line as a header error.
+#[test]
+fn the_series_window_refuses_conflicts() -> Result<(), String> {
+    let addr = viewer_on(8 * 1024 * 1024)?;
+    let id = post_for_id(addr, &auto_ramp(1, "1")?)?;
+    let series = "X-Ocelli-Series-Window: 50 98\r\n";
+    let conflicts = [
+        format!("{series}X-Ocelli-Window-Preset: soft_tissue\r\n"),
+        format!("{series}X-Ocelli-Window-Center: 40\r\nX-Ocelli-Window-Width: 400\r\n"),
+        format!("{series}X-Ocelli-Window-Index: 0\r\n"),
+        "X-Ocelli-Series-Window: 50 0\r\n".to_owned(),
+        "X-Ocelli-Series-Window: 50 -1\r\n".to_owned(),
+        "X-Ocelli-Series-Window: 50 inf\r\n".to_owned(),
+        "X-Ocelli-Series-Window: NaN 98\r\n".to_owned(),
+        "X-Ocelli-Series-Window: 50\r\n".to_owned(),
+        // Review pass 16, N2. A function beside the series window would draw
+        // its centre and width under another function and still say series.
+        format!("{series}X-Ocelli-Window-Function: LINEAR\r\n"),
+    ];
+    for extra in &conflicts {
+        let (header, _) = preview_by_id(addr, &id, extra)?;
+        if status_token(&header)? != "400"
+            || header_line(&header, "X-Ocelli-Error") != Some("window")
+        {
+            return Err(format!("{extra:?} was not the window refusal: {header}"));
+        }
+    }
+    // Review pass 16, D1. Every gone sampled id is named, in sample order,
+    // so the page posts them all in one round. Naming the first alone sent
+    // the page round once per gone file and lost the series window at two.
+    let gone = other_generation(&id)?;
+    let also = other_generation(&post_for_id(addr, &auto_ramp(101, "1")?)?)?;
+    let (header, body) = series_window(addr, &[(&gone, 0), (&id, 0), (&also, 0)])?;
+    if status_token(&header)? != "410"
+        || header_line(&header, "X-Ocelli-Error") != Some("file-gone")
+        || body != format!("{{\"gone\":[\"{gone}\",\"{also}\"]}}")
+    {
+        return Err(format!("the gone ids were not all named: {header} {body}"));
+    }
+    for body in [&b"not an id\n"[..], b"", b"\n"] {
+        let reply = exchange(addr, &http_post_to("/series-window", "", body))?;
+        let (header, _) = split_http(&reply)?;
+        if status_token(header)? != "400" || header_line(header, "X-Ocelli-Error") != Some("header")
+        {
+            return Err(format!(
+                "the body {body:?} was not the header refusal: {header}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// AC15, the page source. The series window's two strings travel from the
+/// `/series-window` reply to `X-Ocelli-Series-Window` untouched, the first
+/// image of a series waits for them, a thumbnail never sends them, a linked
+/// Reset sends no window of the source's series, and the words the corner
+/// adds are the reply's. Nothing named full range is left.
+#[test]
+fn the_page_draws_a_series_at_its_automatic_window() -> Result<(), String> {
+    let response = one_exchange(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")?;
+    let (_, body) = split_http(&response)?;
+    let page = std::str::from_utf8(body).map_err(|_| "the page is not utf-8".to_owned())?;
+    let lower = page.to_ascii_lowercase();
+    if lower.contains("full range") || lower.contains("full-range") || page.contains("fullRange") {
+        return Err("the page still names the full range".to_owned());
+    }
+    // The strings are kept and sent as they arrived.
+    let ask = block_from(page, "async function askSeriesWindow(")?;
+    if !ask.contains("fetch(\"/series-window\", { method: \"POST\", body: seriesBody(lines) })")
+        || !ask.contains("return { center: reply.center, width: reply.width,")
+    {
+        return Err("the series window is not asked for and kept as text".to_owned());
+    }
+    // Review pass 16, D1 and D2. Nothing is posted to ask: each line carries
+    // the id the page holds, a changed file is `-`, and only the gone ids the
+    // reply names are posted again, while a round names one not yet posted.
+    if ask.contains("ensureFile(")
+        || !ask.contains("lines.push({ image, id: await heldId(image.file) });")
+        || !ask.contains(
+            "if (!gone.size || Array.from(gone).every((id) => posted.has(id))) return null;",
+        )
+        || !function_body(page, "seriesBody")?.contains("(line.id || \"-\")")
+        || !block_from(page, "async function heldId(")?
+            .contains("if (changedFiles.has(file)) return \"\";")
+    {
+        return Err("the series window posts files to ask, or stops at one gone file".to_owned());
+    }
+    let header = function_body(page, "seriesHeader")?;
+    if !header.contains("return entry ? entry.center + \" \" + entry.width : \"\";")
+        || !header.contains("view === PLAIN_VIEW")
+    {
+        return Err(
+            "the series header is not the reply's text, or a thumbnail sends it".to_owned(),
+        );
+    }
+    for arithmetic in [
+        "Number(reply.center",
+        "Number(reply.width",
+        "Number(entry.",
+        "parseFloat(",
+    ] {
+        if page.contains(arithmetic) {
+            return Err(format!(
+                "the page reads the series window as a number: {arithmetic}"
+            ));
+        }
+    }
+    if !page.contains("if (series) headers[\"X-Ocelli-Series-Window\"] = series;")
+        || !function_body(page, "cacheKey")?.contains("seriesHeader(image, view)")
+    {
+        return Err("the series window is not in the request and its cache key".to_owned());
+    }
+    // The first image waits for the series window and takes no cached grey
+    // of its own window first.
+    let pump = block_from(page, "async function pumpMain(")?;
+    let wait = pump
+        .find("await ensureSeriesWindow(seriesOf(vp));")
+        .ok_or_else(|| "the main view does not wait for the series window".to_owned())?;
+    let fetch = pump
+        .find("const grey = await fetchGrey(image, vp);")
+        .ok_or_else(|| "the main view does not fetch".to_owned())?;
+    if wait > fetch {
+        return Err("the main view draws before the series window".to_owned());
+    }
+    if !page.contains(
+        "const hit = seriesWindowWanted(vp, image) ? null : takeGrey(cacheKey(image, vp));",
+    ) {
+        return Err("a cached grey is drawn before the series window".to_owned());
+    }
+    // One request per series per open, cleared by a new open.
+    let drop = function_body(page, "dropCache")?;
+    if !drop.contains("seriesWindows.clear();") || !drop.contains("seriesWindowRefused.clear();") {
+        return Err("a new open keeps the previous series windows".to_owned());
+    }
+    if !function_body(page, "ensureSeriesWindow")?.contains("if (pending) return pending;") {
+        return Err("two views of one series ask twice".to_owned());
+    }
+    // F-209. A linked Reset copies the file window state, not a window, so
+    // each target sends its own series' entry.
+    let copy = function_body(page, "copyWindow")?;
+    if copy.contains("seriesWindows")
+        || !function_body(page, "resetView")?.contains("copyWindow(vp);")
+    {
+        return Err("a linked Reset carries the source's series window".to_owned());
+    }
+    // F-213. One Auto window row, the file window state.
+    if !function_body(page, "chooseRow")?
+        .contains("else if (row.kind === \"auto\") chooseWindow(vp, { index: 0 });")
+        || !page.contains("rows.push({ kind: \"auto\", label: \"Auto window\",")
+    {
+        return Err("the window list has no Auto window row".to_owned());
+    }
+    let words = function_body(page, "autoWords")?;
+    if !words.contains("if (auto === \"series\") return \"  Auto window\";")
+        || !words.contains("if (auto === \"image\") return \"  Auto window, this image\";")
+        || !page.contains("auto: response.headers.get(\"X-Ocelli-Auto-Window\") || \"none\",")
+    {
+        return Err("the corner words do not come from the reply".to_owned());
     }
     Ok(())
 }

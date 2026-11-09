@@ -5711,3 +5711,87 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The lead's nineteen amendments before implementation, against the sprint head after F-231, restated the refusal codes as `InvalidValue`, forwarded `content` as well as the two stack keys, because an accepted key silently dropped is the defect this story removes, and added AC7, AC8 and AC9. After review pass 1 the remediation took the review's own regressions for its three defects and its smell, and the plan records no separate lead ruling for that pass. The lead ruling after pass 2 made AC5 compare pixels after a `Fit` and a narrow `SetWindow` with a control commit, and made AC9 count copies, not views, by spying on `set` into wasm memory and on `slice`. The lead ruling after pass 3 fixed AC9's counter on the shared typed-array prototype's `set` and `slice` and on `ArrayBuffer.prototype.slice` for the transferred buffer, narrowed AC9's rejected implementation to a second copy by `set` or `slice` through any typed-array view or of the transferred buffer, said a constructor copy, `Uint8Array.from` and `structuredClone` are outside what a prototype spy sees, and took pass 3's nitpick. Implemented by GLM in a first round and three fix rounds, after review passes 1, 2 and 3. Four review passes by independent Claude agents: pass 1, 3 defects, 1 smell and 0 nitpicks, pass 2, 2 defects, 0 smells and 0 nitpicks, pass 3, 0 defects, 1 smell and 1 nitpick, and pass 4 clean, 0 defects, 0 smells and 0 nitpicks.
 
 **Notes for future sessions.** F-236 was pulled forward from S47, so it is not in the S46 run state that `scripts/sprint_workflow.py` initialised from `allocation.json`. A refusal by epoch is the plan's named departure from cornerstone3D 5.8.2: a frame in flight across a reinstall of identical keys is refused where cornerstone draws it, at the cost of one recommit. On the two stack routes a transferred frame's `generation` is validated and has no effect, as for `writeFrame`. AC9's copy counter does not see a constructor copy, `Uint8Array.from` or `structuredClone`, and the lead's ruling closed that scope. The built-module evidence is the dev build under Node, not a browser worker.
+
+## F-243, JPEG-LS run mode decoded per T.87, completed 2026-11-09
+
+
+**What was built.** JPEG-LS run decoding in the vendored `ritk-codecs` 0.6.0 follows T.87's partial-end-of-line run-index rule. The patch adds read bounds and scan-end validation, named unsupported-preset refusals and threshold CLAMP fixes, with the patched encoder unused by Ocelli. The adapter maps failures to `CodecError` and preserves caller output on failure.
+
+**HLD sections implemented.** HLD 21 (codec registry), 25 (testing) and 27 (fixture and provenance). DICOM PS3.5 A.4.3 plus ITU-T T.87 (06/1998) C.2.4.1.1.1, F.1 step 18 and Annexes A and F.
+
+**Deviations.** D-20 amended, source pins and provenance merged with the F-239 codec patch, no CharLS production dependency. The five recorded vendor JPEG-LS source files and one published test fixture marker F8 to F0 were changed under the explicit lead AC11 amendment, with the test assertion unchanged.
+
+**Crates / packages modified.** The vendored ritk-codecs 0.6.0 JPEG-LS decoder and encoder, and the Ocelli codec adapter.
+
+**Tests added.** Run-mode trigger, scan-end and preset refusal, default, output atomicity, CLAMP, P12 and generated-stream regressions in `crates/ocelli-codec/tests/jpegls.rs`. Recorded current suites pass, 33 JPEG-LS tests and 321 merged vendor tests, the F-243 published 320 plus the F-239 one.
+
+**Fixture provenance.** CharLS lossless 8x4 and 32x32 banded references from an independent source formula, NEAR 3 bounded and CharLS exact, truncation 90/50/10, end marker, FF fill, padding, preset defaults, MAXVAL, RESET, mixed threshold order, CLAMP NEAR 34, run miss past line, P12 without LSE, and 150 generated streams plus 61 mutations with explicit scope. 149 of 150 undamaged generated streams open and match CharLS, the remaining hand-built stream refuses on both. A damaged scan can still encode another valid image, not all are refused. Fixture binaries are own synthetic bare codestreams and raw truths, DICOM stays in ignored corpus data.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** Three generated banded rows comprise one uncompressed reference and two JPEG-LS compressed rows, lossless and near-lossless. The dated `8fdee914` corpus gate verified the manifest and decode digests. DICOM data remains ignored behind the manifest. Final corpus results are in the completion receipt.
+
+**Tier coverage.** Tiers A and B are n/a for this CPU codec fix, whose decoding precedes the rendering tier. Tier C native decode and consumer observations are recorded separately. They do not supply new GPU-tier rendering proof or a new wasm boundary.
+
+**LLD updated.** docs/lld/codecs.md, docs/lld/corpus.md and docs/lld/benchmarks.md describe the current implementation and observations. The codecs and corpus contributor headers and dates were completed with this entry.
+
+**User-facing documentation.** `README.md`, the syntax paragraph, `examples/folder-viewer/src/use.html`, the codec paragraph, and `examples/folder-viewer/src/more.html`, the decoder registry paragraph, were already reviewed. JPEG-LS follows the run mode, named preset and bounded refusal statements.
+
+**Deviations from the design plan.** AC13 named unverified host and instrument gap, user approved 2026-11-09, a matching idle run on the compatible host and instrument is still owed. The registered 0.1215 actual is incomparable and not a comparison pass. Old banded base medians measured wrong pixels, never a speedup, baseline, bands and tolerances unchanged.
+
+**Notes for future sessions.** Dated `8fdee914` source evidence includes feature-floor and corpus exits 0, 33 JPEG-LS and 321 merged vendor tests passing, and native candidate comparison SHA256 `842a9dbb5b9396b671b739308985bd5b73cbbf75bd9c7ce1731fd0e4110c263e`: 133 views, 74 pass, 59 unmeasured, 0 fail, 0 absent, with both banded JPEG-LS rows scored pass. Isolated F243 wasm modules are unchanged at 2,202,907/16,455 bytes. The dated 8f whole union measured 2,205,614/16,455 bytes within existing budgets, without attributing unrelated stack growth to F243. AC13 remains incomparable, not pass, with the user-approved matching host/instrument and idle-run gap still owed. The separate AC14 standard review and current source/evidence audit remain distinct from implementation. Initial implementation was by Claude. Completion metadata was drafted through GLM and corrected by Codex participants. The optional F269 comment audit remains future work. These records complete no other sprint story.
+## F-225, DICOM conformance report and Checks section, completed 2026-11-09
+
+**What was built.** The Rust checker produces scoped VR, VM and Type-rule findings, with a generated catalogue and validating `@ocelli/core` reader. `POST /conformance` accepts an encoded-held id or file body, and the folder viewer requests a background badge and a Checks section in Headers. Findings carry no file value and never gate display, while presence covers CR with six modules and CT, MR and PET with seven, including the listed decidable 1C and 2C rules, not full DICOM certification.
+
+**HLD sections implemented.** Operator-added scope outside the HLD checker specification. The rule sources are DICOM PS3.5, PS3.3 and PS3.6, as transcribed in the approved plan.
+
+**Deviations.** none.
+
+**Crates / packages modified.** `crates/ocelli-dicom`, `packages/core`, `examples/folder-viewer`, their generated contract and tests, and benchmark/browser acceptance tooling. No Rust `ocelli-core` change is attributed to this story.
+
+**Tests added.** 42 Rust conformance fixture tests, one typegen regression and three checker unit tests. Core reader/export tests, HTTP/page fixtures and `conformance.mjs` headless controls cover the other consumers. Counts beyond these named categories were not isolated.
+
+**Fixture provenance.** No pixel arithmetic. Synthetic element fixtures follow PS3.5 6.1.2.2, 6.2, 6.4, 7.4 and 9.1, the declared PS3.3 modules and PS3.6 VR/VM rows.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** At the dated `8fdee914` source checkpoint, 133 manifest rows verified and 46 syntax decode digests matched. Final completion-tree corpus results are bound by the completion receipt.
+
+**Tier coverage.** A (WebGPU) n/a, the checker adds no GPU path. B (WebGL2 downlevel) n/a. C (CPU) integration draw and badges observed, not a new all-tier pixel proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md, docs/lld/public-api.md, docs/lld/benchmarks.md.
+
+**User-facing documentation.** `README.md`, Start the local series viewer, `use.html`, Conformance report, and `more.html`, conformance scope/card. They distinguish the local producer from future browser-owned production.
+
+**Deviations from the design plan.** Approved viewer amendments include direct body fallback after ID410, immediate sheet requests and stale-generation recovery. The later AC35 evidence-stage amendment accepts a fresh independent counterfactual while preserving unavailable historical chronology. No finding, tolerance or rendering rule changed.
+
+**Notes for future sessions.** Other SOP classes leave presence unevaluated while value checks run. Browser-owned production remains future F-202/F-260. Checker SHA256 prefix `6ee2d61d` and fixture SHA256 prefix `4a5f56fd` match the recorded `8fdee914` source. AC35 records 42 GREEN, five empty-checker missing-finding failures and four fault failures at exit101, then restored 42 GREEN, not historical pre-code or test-first proof. Image observations 967 ms open, CT 11.3/DX 30.3 ms first and 108.774 fps meet unchanged absolute limits. Native reply medians 0.382875/0.535041/4.779375 ms are separately qualified, not browser latency, checker CPU or idle-host evidence. Implementation and review crossed GLM, Claude and Codex roles, with no isolated total effort measurement.
+
+## F-244, Encapsulated Pixel Data with an empty Basic Offset Table, completed 2026-11-09
+
+**What was built.** A recorded one-line vendored `dicom-object` collector patch accepts an empty Basic Offset Table, including nested icons without adding icon rendering. Shared `EncapsulatedFrameIndex::from_parsed` serves the viewer and oracle candidate, applies Extended tables and validates frame boundaries/counts. Logical marker reads cross even Fragments, impossible declared counts refuse before allocation, and ambiguous RLE/JPEG XL splitting remains refused.
+
+**HLD sections implemented.** Encapsulation is specified by PS3.5 A.4/8.2 and PS3.3 C.7.6.3, not HLD pixel arithmetic. `docs/hld/12-workspace-and-build.md` section 15.2 dependency control is recorded through amended D-18.
+
+**Deviations.** Amended D-18 in docs/hld/DEVIATIONS.md, the vendored dicom-object dependency and its publication caveat.
+
+**Crates / packages modified.** `crates/ocelli-dicom`, `vendor/dicom-object-0.10.0`, folder-viewer/oracle consumers, corpus generation/manifest/decode records, pins and guard/provenance tooling.
+
+**Tests added.** Feature-only source comparison identifies five Part10 fixtures, nine frame-index fixtures, one preview fixture and one ignored corpus conformance test. Reviewed suite totals 46/18 are not new-test counts. Separate independent review exercised 1,024 cut pairs and real SV1/J2K two-byte fragments. Python/vendor/pin refusal controls and 19 generated corpus rows complete the coverage.
+
+**Fixture provenance.** No pixel arithmetic in the new parser or index code. The preview hand check runs the existing CPU chain on a hand-computed RLE fixture, 10/20/30/40 to 0/85/170/255, citing PS3.5 G.2 and G.3.1 for RLE and PS3.3 C.11.2.1.3.2 for the full-range window. Parser and index provenance is PS3.5 A.4 and PS3.3 C.7.6.3.1.8.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** At the dated `8fdee914` source checkpoint, 133 manifest rows verified and 46 syntax decode digests matched. The 19 new rows comprise 14 syntax and 5 shape cases. Final completion-tree corpus results are bound by the completion receipt.
+
+**Tier coverage.** A (WebGPU) n/a, the new parser and index add no GPU path. B (WebGL2 downlevel) n/a. C (CPU) observed through the native consumer, the reference GPU is software and is not product tier proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md, docs/lld/corpus.md, docs/lld/oracle.md, docs/lld/build-targets.md.
+
+**User-facing documentation.** README.md empty Basic Offset Table note, use.html Rust parse usage, more.html transfer syntax rule.
+
+**Deviations from the design plan.** Approved review amendments added cross-Fragment marker inspection, early impossible-count refusal and fallible reservation. A later oracle metadata-prefix amendment restores EOT metadata without a generic OV parser or partial-error dataset. The approved HTJ2K split policy is lenient interoperability, not standard conformance.
+
+**Notes for future sessions.** D-18 prohibits publishing `ocelli-dicom` until an upstream release carries the collector fix and the vendor is removed, since cargo publish discards the path patch. No upstream issue publication is claimed. Exact F244 feature-only `5efae178` to `3aec4ae5` release pairs measure render 2,202,907/decode 16,455 bytes unchanged, independently of later aggregate wasm sizes. The repaired oracle/reference and native candidate retain 74 pass, 59 unmeasured, 0 fail, 0 absent. Weak content and software SwiftShader reference are not scored parity or hardware-tier proof. JPEG XL reference rows remain declared `unsupported_source`, with native synthetic-byte evidence separate. The `0 absent` count refers to candidate-census coverage. Claude implemented the parser, root repaired critical marker/count paths and independent Codex reviews challenged them. Total effort was not measured.

@@ -1,7 +1,7 @@
 # Release policy
 
-**F-IDs that contributed:** F-117, F-217, F-220
-**Last updated:** 2026-11-05
+**F-IDs that contributed:** F-117, F-217, F-220, F-237
+**Last updated:** 2026-11-07
 
 `/release` is the only command that publishes. This page does not publish
 and it does not create a `v` tag. The workspace version stays 0.1.0.
@@ -21,18 +21,41 @@ Tiers A, B and C are not applicable. The functions do not render.
 
 `THIRD_PARTY_NOTICES` carries the upstream OpenJPH notice and the vendored
 ritk-codecs MIT grant. `NOTICE` names Tensorbee Limited and is published with
-both npm packages. `python3 scripts/pin_and_size_check.py
+all three npm packages. `python3 scripts/pin_and_size_check.py
 --require-redistribution` passes. A stable claim stays false while D-22 is
 open. The notice being present does not by itself close that row.
 
 `THIRD_PARTY_LICENSES` carries the full texts of the Rust crates and the Rust
 standard library compiled into the wasm module and the native binaries. The
 closure is the third-party crates reachable on a normal or build edge from
-the wasm entry point for wasm32-unknown-unknown and from the native entry
-point with no platform filter. Workspace members are excluded.
+the wasm entry point for wasm32-unknown-unknown, and the union of the
+shipped native graphs of the archive targets recorded in
+`scripts/licence_check.py`. Workspace members are excluded.
 `python3 scripts/licence_check.py --write binaries` regenerates the file.
 `gate packages` refuses a tarball that carries a `.wasm` file and lacks
 `THIRD_PARTY_LICENSES` or `THIRD_PARTY_NOTICES`. The milestone that lifts
 `ocelli-native` `publish = false` ships a native archive carrying `LICENSE`,
 `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`, `THIRD_PARTY_NOTICES` and
 `THIRD_PARTY_LICENSES`.
+
+The wasm module ships as `@ocelli/wasm`, an npm package built by wasm-pack
+from `crates/ocelli-wasm`. It carries the render module as its root entry,
+the decode module under `./decode`, both third-party files at the tarball
+root, and a `dist/build-id.json` recording the package version, whether the
+working tree had unstaged tracked changes when the modules were built, the
+git SHA of that HEAD, the git write-tree of the staged index, and each
+module's SHA-256 digest. F-237. `/release` publishes it before
+`@ocelli/core`, which peer-depends on it at the same version, and refuses a
+release whose build id names another SHA or another tree than the tag's,
+records unstaged tracked changes, or whose recorded digests differ from a
+cold build of the tagged SHA. The comparison is
+`python3 scripts/release_wasm.py HEAD`, a numbered preflight item that runs
+before any tag, push or publish, and it copies the verified `.tgz` to
+`target/release-wasm`, the exact file `npm publish` is then given. The wasm
+build is byte-reproducible for a given SHA on one toolchain, measured on
+2026-11-07. `gate packages` refuses a tarball whose build id is absent,
+stale against the current git HEAD or the current index, recorded with
+unstaged tracked changes, or recording a digest its own module bytes do not
+hash to. Its consumer smoke and type check pin a render-only export on the
+root entry and its absence on `./decode`, so a staging edit that swaps the
+two modules is refused.

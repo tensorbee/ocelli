@@ -87,7 +87,7 @@ test("the LLD's suite count is the number of suites", () => {
   );
   const words = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
-    "nine", "ten", "eleven", "twelve",
+    "nine", "ten", "eleven", "twelve", "thirteen",
   ];
   const expected = words[suitesOnDisk().length];
   assert.ok(expected, "add a word to the list above");

@@ -1,15 +1,16 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-230, F-236
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-228, F-230, F-236, F-237
 **Last updated:** 2026-11-08
 
-What `@ocelli/core` and `@ocelli/react` publish, and what proves it.
+What `@ocelli/core`, `@ocelli/wasm` and `@ocelli/react` publish, and what proves it.
 
-## The two packages
+## The three packages
 
 | Package | What it is | Runtime dependencies |
 |---------|-----------|---------------------|
-| `@ocelli/core` | The TypeScript shell of HLD section 10 | `dcmjs` at `0.52.2` |
+| `@ocelli/core` | The TypeScript shell of HLD section 10 | `dcmjs` at `0.52.2`, peer `@ocelli/wasm` at an exact version |
+| `@ocelli/wasm` | The module built from `crates/ocelli-wasm`, both halves | none |
 | `@ocelli/react` | The React binding | `@ocelli/core` at an exact version |
 
 `@ocelli/react` publishes the viewport pump, the hook and the host component.
@@ -20,6 +21,77 @@ bounded DICOMweb transport and one-write response-sink contract, and F-035's
 decode-to-render handoff. F-100 publishes `viewport.ts`, which is the
 viewport, scene and tool types. F-101 adds `commands.ts` and the copied
 ring drain. `coreAvailable()` stays false until a built module is loaded.
+
+## The module package
+
+`@ocelli/wasm` is `packages/wasm`, the published place of the module. The HLD
+names no distribution route, and F-237's answer is a package in the `@ocelli`
+scope beside the shell. The crate `ocelli-wasm` stays `publish = false`: what
+npm publishes is the artefact, not a crate.
+
+The tarball is staged by `packages/wasm/scripts/stage.mjs`, which npm runs as
+the prepack lifecycle script on every pack and publish, unless scripts are
+ignored, which packs whatever `dist` already holds without a rebuild. It
+builds both modules through `bin/ocelli.sh wasm` and
+`bin/ocelli.sh wasm-decode`, copies the glue and both `.wasm` files out of
+`crates/ocelli-wasm/pkg` and `crates/ocelli-wasm/pkg-decode`, and writes
+`dist/build-id.json`. The two out-dirs stay where they are, because the size
+budget of `scripts/pin_and_size_check.py` reads them there.
+
+The render module is the package's root entry and the decode module is the
+`./decode` subpath. Both keep the file names wasm-pack generates, the decode
+files under `dist/decode/`, so the glue's relative fetch of its `.wasm`
+needs no edit.
+
+`dist/build-id.json` records the package version, whether the working tree
+had unstaged tracked changes when the modules were built, the git SHA of
+that HEAD, the git write-tree of the staged index, and the SHA-256 digest
+of each module. That is the form `docs/RELEASE.md` item 6
+compares to the release HEAD. The wasm build is byte-reproducible for a
+given SHA on one toolchain, measured on 2026-11-07: two cold builds of one
+tree and a warm rebuild agree on every byte of both modules. A release
+compares the recorded digests to a cold build of the tagged source with
+`python3 scripts/release_wasm.py HEAD`, a preflight item that runs before
+any tag, push or publish, and copies the verified `.tgz`
+to `target/release-wasm`, the exact file `npm publish <file>` is then
+given. `npm publish <file>` runs no prepack, so the published bytes are
+the compared bytes.
+
+`gate packages` packs all three packages and refuses a `@ocelli/wasm`
+tarball without both modules and their glue, without the two third-party
+files at the tarball root, and with a build id that is absent, stale against
+the current git HEAD or the current index, recorded with unstaged tracked
+changes, or recording a digest the
+tarball's own module bytes do not hash to. Eleven level-1 probes drive the
+build id refusals: nine over the parsed id and two over its wiring, one
+through `wasm_identity_from_tarball` on a real tarball and one behavioural,
+running `main()` with the npm steps stubbed over a stale build id and
+refusing a `main()` that does not refuse it. Two more pin the module
+surface, one over the smoke text and one over the type check text, and one
+drives the notice rule. `check_tarball`'s presence refusal for the module
+paths has no probe of its own, standing beside the generic `REQUIRED` check
+the way that one does.
+
+`@ocelli/core` declares `@ocelli/wasm` as a peer dependency at the same
+version, verified by `check_manifest` against the workspace version. The
+shell does not import the module itself: `loadCore(initialise)` leaves the
+initialiser to the caller, which is why the module is a peer dependency and
+not a runtime one.
+
+The consumer proof installs all three tarballs outside the workspace and
+loads the module through the public path: `loadCore` with an initialiser
+that reads the installed module's bytes and calls its default export, then
+`ocelli_version()` compared against the `VERSION` string the shell exports.
+It reads `@ocelli/wasm/decode`'s bytes through `import.meta.resolve` the
+same way and initialises it directly, because the decode pool builds its
+own instances and loadCore latches once per realm. The proof tells the two
+modules apart by the render-only export `apply_commands`, compiled only
+with the render-worker feature: the root entry must export it as a
+function, `./decode` must not carry it, and the type check reads it the
+same way under `bundler` and `node16`, so a staging edit that swaps the two
+copies is refused by both halves. The bytes come from
+`import.meta.resolve` inside the installed package, never from a
+repository path.
 
 ### What is in the `@ocelli/core` tarball today
 
@@ -278,8 +350,8 @@ high, because they depend on dcmjs.
 ## `npm publish --dry-run`
 
 The last step, and it publishes nothing. It is the only step that exercises the
-registry-facing path at all, including the `publishConfig.access` setting both
-packages carry.
+registry-facing path at all, including the `publishConfig.access` setting all
+three packages carry.
 
 **An earlier draft refused to run where npm credentials existed, and that was
 removed before it landed.** The theory was defence against a future edit
@@ -312,3 +384,85 @@ false.
 against the `package.json` it was copied from restates it and passes whatever
 either says. Comparing the two FILES is `package_check.py`'s job, and it does
 that against `Cargo.toml` as well.
+
+## The Content Security Policy an embedder needs
+
+F-228. An embedding page that loads the Ocelli worker and the wasm module
+needs exactly four directives, and it needs the same header on every
+response, the worker script included:
+
+<!-- ocelli:csp -->
+```text
+Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'
+```
+
+`script-src 'self'` loads the page bundle, the module worker's own imports
+and the wasm-bindgen glue through `import()`. `'wasm-unsafe-eval'` lets the
+worker compile `ocelli_wasm_bg.wasm` and is narrower than `'unsafe-eval'`,
+which would also allow `eval`. `connect-src 'self'` covers the glue's fetch
+of the module and the worker's probe fetch of the glue. `worker-src 'self'`
+is an explicit pin rather than a requirement: the worker is also allowed
+through `worker-src`'s fallback to `script-src 'self'`, and the pin keeps a
+later widening of `script-src` from widening worker construction with it.
+`default-src 'none'` is in the tested header so the probe can prove Ocelli
+needs nothing beyond the three named sources. Styles, images and fonts are
+the embedding page's own business and outside this claim. A DICOMweb
+service on another origin is added to `connect-src`.
+
+The evidence for the every-response rule is E1 of the design plan, measured
+in the pinned Chromium: the worker's wasm compile obeys the worker
+response's policy, not the page's. A header on the HTML document alone
+leaves the worker unrestricted in Chromium, and a header on the worker alone
+without `'wasm-unsafe-eval'` breaks the compile. `blob:` and `data:` are
+refused in the other direction by the same response model, measured as E2:
+a worker constructed from a local scheme inherits its creator's policy, so a
+strict page breaks it and loosening the page for it weakens every script on
+the page. Ocelli constructs workers from URLs only, and the embedder's
+`openDecodePool` factory should too.
+
+The policy exists once, in `examples/viewer-react/src/csp-policy.ts`. Its
+test spells out the four directives and forbidden source list independently.
+It also checks marked policy blocks in README, this document and the Use page,
+with one expected header inside each Markdown text fence or HTML `pre` block.
+Two guards
+stand beside the document check. The first reads the resolved normal-edge
+dependency graph of `crates/ocelli-wasm` through `cargo tree` with `-e
+normal --all-features`, and it must not name `ocelli-codec`, by any
+spelling of the edge (a rename, a dotted key, a subtable) and through no
+intermediate crate. A dev-dependency on the codec links nothing into the
+module and stays green. An optional edge that a feature enables, as
+`decode-worker` would, goes red. That graph check is the decode gap: the
+wasm module decodes nothing today, so the probe measures the worker and
+wasm path with a stored sample. When the codec joins the module's normal
+dependencies, the test fails until the probe is extended to decode one
+frame in the worker under the policy. The second guard scans every shipped
+source directory found under `packages/*/src` and the example's `src` for
+`createObjectURL`, `blob:`, `data:`, `eval(` and `new Function(`, so
+nothing Ocelli ships needs a weaker policy to run.
+
+The probe is `examples/viewer-react/csp-probe.mjs`. It serves the built
+example and the built wasm package through Playwright routes on the invented
+origins `http://ocelli.test` and `http://dicomweb.test`, so it binds no
+port, and it measures the strict header, each directive's minimality, the
+worker-src fallback, where the worker's policy comes from, the blob control
+and its positive half, the dcmjs document paths and a cross-origin DICOMweb
+instance from `corpus/data/syntax`. The pure parts run in `npm run test`
+under the `packages` gate. No gate was added.
+
+The `@ocelli/core` tarball carries no wasm module. The module ships as
+`@ocelli/wasm`, and an embedder serves it from wherever it hosts
+`node_modules/@ocelli/wasm/dist`, or from a `bin/ocelli.sh wasm` build of
+`crates/ocelli-wasm/pkg` inside this repository.
+
+### The local folder viewer's page policy
+
+The folder viewer uses `csp::page_policy` on each embedded page, caching its
+hashes at first use. The main page, Use and More and their `.html` aliases
+carry their own `Content-Security-Policy` header. Inline script and style text,
+including the import map, is hashed with SHA-256 and RFC 4648 base64.
+The policy permits same-origin script, style, image and connection resources,
+and `data:` images for the favicon. The source pages contain no inline handler
+or style attribute. The policy permits no eval, blob worker or wasm compilation.
+The process decodes frames.
+`examples/folder-viewer/csp-probe.mjs` independently checks hashes, blocked
+tampering, compressed-frame pixels, the region window and SR save/load.

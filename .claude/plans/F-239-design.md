@@ -228,8 +228,8 @@ Every item is this plan's decision unless it names an open question.
 7. **The palette tables are read once, in the library.** A new `ocelli_dicom` reader returns `Option<PaletteColorLut>` from the three descriptors and three data elements, refusing Segmented Palette Color Lookup Table Data and a missing table by name. The oracle's private reader is replaced by it, by the lead's answer to question 7.
 8. **The colour window is the existing LINEAR function, not a second copy.** The operator's answers to questions 3 and 4 follow cornerstone3D's rule, and that rule is PS3.3 C.11.2.1.2's LINEAR with output range `0 ..= 255`, character for character: `getVOILut.js:3` is `((x - (c - 0.5)) / (w - 1) + 0.5) * 255` clamped to `[0, 255]`, and `apply_window` at `crates/ocelli-pixel/src/lut.rs:776` to `:788` is the same expression with the clamps written as `x <= lower` and `x > upper`. At `w = 1`, cornerstone divides by zero and ends at 0 or 255 through the clamp, and `apply_window` reaches the same two values by comparison. So the colour window is `VoiTransform` with `VoiFunction::Linear`, `ymin = 0` and `ymax = 255`, applied to each channel, and the colour invert is `PresentationTransform` with `Inverse` over the same range, `0 + 255 - y` (`lut.rs:534` to `:543`). The only new code is the per-channel composition, `ColourWindow`, in `ocelli-pixel`. It does not go through `LutChain`, which D-23 keeps monochrome.
 9. **Where the colour window sits.** After stage 4 and after the display scaling of item 11, before the byte rule, because cornerstone3D windows the 8-bit RGB its converters produce. Its initial value is width 256 and centre 128 for every colour image, ignoring the file's Window Center and Width, as `createImage.js:321` to `:324` does. Only LINEAR is offered, because the colour path never reads `voiLUTFunction`.
-10. **Rounding at a tie is the one place this story knowingly differs from the oracle.** cornerstone stores into a `Uint8ClampedArray`, which rounds a tie to even. Tier C's `byte_from_channel` rounds a tie up (`cpu.rs:1062` to `:1063`) and serves every monochrome frame too, so changing it is out of scope. The divergence is at most one code, only where the windowed value is exactly `k + 0.5`, and AC19 measures one such case. A second source of one-code divergence is cornerstone rounding its YBR and palette conversions to bytes before the window, while the library windows the `f32` stage 4 output. Under D14 these are claimed as measured divergences, not hidden.
-11. **The display scaling rule, the operator's answer to question 8.** A colour sample or a palette entry of `n` bits is shifted right by `n - 8` for `9 <= n <= 16`, and taken as it is for `n = 8`. For a sample, `n` is Bits Stored `(0028,0101)`. For a palette entry, `n` is the third value of the Red, Green and Blue Palette Color Lookup Table Descriptors, each channel by its own descriptor. The rule is decided from the header, never from the data. Colour with `n` below 8 or above 16, or signed colour samples, is refused by name. A sample is shifted before stage 4, so the 8-bit YCbCr matrix and its `+ 128` offset apply to an 8-bit value. A palette entry is shifted on the way out of the table.
+10. **Rounding at a tie matches the oracle**, by the operator's decision of 2026-11-07 below. cornerstone stores into a `Uint8ClampedArray`, which rounds a tie to even, and tier C's `byte_from_channel` now rounds a tie to even too. Tier C monochrome reaches that rule only with whole table bytes, so by ruling R2 monochrome keeps its rounding through `display_index` and its bytes are measured unchanged, 0 of 102 views. AC21 measures the colour tie. A second source of one-code divergence is cornerstone rounding its YBR and palette conversions to bytes before the window, while the library windows the `f32` stage 4 output. Under D14 these are claimed as measured divergences, not hidden.
+11. **The display scaling rule, the operator's answer to question 8.** A colour sample or a palette entry of `n` bits is shifted right by `n - 8` for `9 <= n <= 16`, and taken as it is for `n = 8`. For a sample, `n` is Bits Stored `(0028,0101)`. For a palette, `n` is the third value of each channel's Palette Color Lookup Table Descriptor and ruling R1 gives the one rule: a palette is read as 8-bit only when at least one channel is declared above 8 bits and every entry of every such channel fits in 8 bits, otherwise each channel is shifted by its own declared depth minus 8. Colour with `n` below 8 or above 16, or signed colour samples, is refused by name. A sample is shifted before stage 4, so the 8-bit YCbCr matrix and its `+ 128` offset apply to an 8-bit value. A palette entry is shifted on the way out of the table.
 12. **Statistics on a colour region.** One walk over the region, F-211's `region_statistics` in `examples/folder-viewer/src/measure.rs:468`, gathers three channel vectors and calls `roi_statistics` once per channel. The values are the colour stage's output after the display scaling and before the window and invert, so a window drag never changes a statistic, which is the rule F-211 keeps for monochrome. The unit is `RGB`. Padding is not applicable to colour and `padding_excluded` is 0.
 13. **The ICC sentence.** A file with ICC Profile `(0028,2000)` at the top level is drawn and the corner and the image's help sentence say "This image's ICC profile was not applied." The presence test is the element alone, whatever its length. An ICC profile inside the Optical Path Sequence is a whole-slide concern this viewer does not open.
 14. **The window link.** F-209's window link copies a window between viewports of the same kind only, colour to colour and monochrome to monochrome, because a colour window is in display sample units and a monochrome one is in modality units.
@@ -315,7 +315,7 @@ Protocol strings that change:
 | value JSON on colour | `rgb` | `[r, g, b]` as `f32`, with `unit` `RGB` and no modality fields |
 | measure JSON | `stats` on colour | `{"unit":"RGB","channels":{"r":{...},"g":{...},"b":{...}}}`, each with `count`, `mean`, `sd`, `min` and `max` |
 | page sentence | preset note | "This image is colour, so the file's windows and the presets do not apply. Drag to window each channel." |
-| page readout | value at the pointer on colour | `R 47.0 G 119.6 B 139.0` |
+| page readout | value at the pointer on colour | `R 46.7 G 119.6 B 139.0` |
 | page sentence | ICC | "This image's ICC profile was not applied." |
 
 Refusal sentences for `colour-unavailable`, one per reason: a JPEG 2000 or HTJ2K codestream shape this build does not decode, colour samples outside 8 to 16 bits or signed, a palette descriptor outside 8 to 16 bits, a segmented or missing palette table, an odd Columns on a native 4:2:2 frame, a photometric value this build does not know.
@@ -326,7 +326,7 @@ Refusal sentences for `colour-unavailable`, one per reason: a JPEG 2000 or HTJ2K
 |------------------------|-------------------|-------------------------|-------------------|
 | `POST /preview`, `/file` | `decode_held`, then `render_held` with the colour recipe and the request's colour window | Decoder reports read once per held frame | Three bytes per pixel, `X-Ocelli-Channels: 3` |
 | Colour space and layout | `ColorTransform::resolve` | Inputs from the data set, `DispatchPath` and the registry | One resolved transform per held frame |
-| Display scaling | `ocelli_pixel::DisplayScale` | Bits Stored for samples, each palette descriptor's third value for entries | 8-bit-scale `f32`, or a named refusal |
+| Display scaling | `ocelli_pixel::DisplayScale` | Bits Stored for samples, each palette descriptor's third value for entries unless ruling R1 reads the whole palette as 8-bit | 8-bit-scale `f32`, or a named refusal |
 | Colour window and invert | `ocelli_pixel::ColourWindow` over `VoiTransform` LINEAR and `PresentationTransform` Inverse | Initial 256 and 128, skipped at cornerstone's identity condition | Windowed `Rgb` |
 | Byte rounding | `ocelli_render::colour_bytes_into` | Tier C's `byte_from_channel` and refusals | Bytes, or `Unavailable` |
 | Palette tables | `ocelli_dicom::palette_color_lut` | Top-level elements only | `PaletteColorLut` or a named refusal |
@@ -340,7 +340,7 @@ Refusal sentences for `colour-unavailable`, one per reason: a JPEG 2000 or HTJ2K
 | F-209 window link | `copyWindow` | Same kind only, item 14 | Colour to colour, monochrome to monochrome |
 | F-209 scroll and zoom link, reference lines | `planes` in inspect JSON | Photometric independent | Unchanged |
 | Presets, W/L drag, invert | page tool state | Drag and invert on, presets off, on colour | Requests carry a colour window and invert |
-| Oracle candidate producer | `produce_current.rs` through `palette_color_lut` and `decoded_output_len` | One palette reader | Unchanged candidate bytes for 8-bit palettes, recorded change for the 16-bit row |
+| Oracle candidate producer | `produce_current.rs` through `palette_color_lut` and `decoded_output_len` | One palette reader | Unchanged candidate bytes for both corpus palette rows, which ruling R1's fallback reads as 8-bit |
 | F-213 presets and region window, pending | F-213 | Must keep presets off on colour | Recorded for F-213's design |
 
 The rounding owner is `ocelli-render`. The selection owner is `ColorTransform::resolve`. The window and scaling owner is `ocelli-pixel`. The inverse component transform owner is `ocelli-codec`. The folder viewer owns only which reason sentence a refusal shows and the window the viewport holds.
@@ -369,7 +369,7 @@ Invariants across consumers: a colour frame never reaches `LutChain`, and a mono
 |---------------------------|-----------------------|-------------------|-------------------------|------------------------------------------|
 | Held colour frame | `decode_held` under F-216's cache | File id and frame, as F-216 and F-224 key it | Admission to the `Lru` | A refused resolve holds the refusal in the recipe, so a retry gives the same refusal without a second decode |
 | Colour reply buffer | `render_capped` under the grey gate | One reply | Reply written | Charged at `width * height * 3` from admission. A refused render charges nothing |
-| Colour scratch | the decode workspace | The worker | Returned with the workspace | Counted in `workspace_bytes`. A band larger than any later frame is freed by the existing over-twice rule |
+| Colour scratch | the decode workspace | The worker | Returned with the workspace | Counted in `workspace_bytes`. The bounded colour vectors are retained per conversion workspace and their actual capacities remain counted in workspace bytes. The existing over-twice rule applies to the grey reply |
 | Page cache entry | `rememberGrey` | `cacheKey` | `cache.set` | Byte length counts against `CACHE_BYTE_BUDGET` as it does today |
 
 Cache validity. A colour reply depends on the file, the frame, the colour window's width and centre, and invert. The page's `cacheKey` (`page.html:2065` to `:2070`) writes a `colour` token in place of the window function token for a colour image, so a monochrome and a colour entry cannot collide, and keeps the window and invert tokens. A refused request does not replace the last shown image. The held frame carries the palette, up to `3 * 65536` `f32` entries, and `charged_bytes` (`preview.rs:510`) adds its heap bytes. Statistics depend on the region and the held frame only.
@@ -400,13 +400,13 @@ Hand-computed values below use the library's inverse at `color.rs:441` to `:446`
 | AC18 | Mutation. Swapping two inverse coefficients in `FULL_RANGE`, dropping the `+ 16` offset, making the planar gather interleaved, using `w` for `w - 1` in the colour window, shifting by Bits Allocated, swapping `Y1` and `Y2` in the inverse RCT, and moving the inverse after the level shift turn AC3, AC6, AC2, AC19, AC11 and AC24 red, the last through its pure red case | Recorded in the review | A test that passes on the wrong code | implementation, reviewer |
 | AC19 | Colour window, cornerstone3D's rule through the existing LINEAR function, `f32`, then the tier C byte rule. Native RGB 1 by 1, stored `100 30 200`, width 100, centre 128: channels `56.666664 0 255`, reply `57 0 255`. With invert: `198.33334 255 0`, reply `198 255 0`. Stored `128 128 128` at the same window: `128.78787`, reply `129 129 129`, inverted `126 126 126`. Width 256 and centre 128, stored `10 200 50`: reply `10 200 50`. Width 255 and centre 127, stored `100 100 100`: skipped as `renderColorImage.js:30` to `:36` skips, reply `100 100 100`, where the formula would give `100.8957` and `101`. Width 2, centre 128, stored `127 128 0`: `0 255 0`. Width 10, centre 128, stored `125 128 130`: `56.666664 141.66667 198.33334`, reply `57 142 198`, inverted `198 113 57` | `colour_window_is_linear_per_channel_and_inverted_after` | `w` in place of `w - 1`, which gives `64 140 191` at width 10. LINEAR_EXACT's `c` and `w`, which gives `51 128 179`. Inverting before the window. Applying the formula at cornerstone's identity condition. The width 100 rows alone do not reject the `w` mutation, which is why the width 10 row exists | implementation |
 | AC20 | Reference observation of the floor. The oracle's reference half already renders every colour corpus row through cornerstone3D 5.8.2 under headless Chromium on SwiftShader (`produce_current.rs:375` to `:383`). For each colour row cornerstone can render, including the four new JPEG 2000 rows, the candidate bytes from `colour_bytes_into` at the initial window are compared per pixel with the reference, and the largest difference and the count of differing pixels are recorded per row. `synthetic/sc_rgb_interleaved.dcm` is also rendered at width 100 and centre 128, invert off and on, through one new `render-params.json` row per case, and compared the same way. Every difference is attributed to a row of "cornerstone3D 5.8.2 is the floor", and a difference no row explains is a defect. The comparison is a recorded observation, not a scored oracle row, because HLD 25.1 states no colour threshold. Missing code: the two parameter rows and the colour window in `produce_current.rs` | Recorded in `docs/lld/oracle.md` with the 5.8.2 pin and the lockfile integrity check | A rule transcribed from memory rather than the oracle | integrated, implementer, on the host the oracle gate already uses |
-| AC21 | Tie divergence, measured. Native RGB 1 by 1, stored `130 130 130`, width 511, centre 128.5: `128.5` exactly, reply `129 129 129` by `byte_from_channel`. cornerstone stores 128 by ties to even. The test asserts 129, and the plan's D14 claim names this case | `a_colour_window_tie_rounds_up_as_tier_c_does` | A quiet change to the shared byte rule, which would move every monochrome tie | implementation |
-| AC22 | Palette scaling. PALETTE COLOR 5 by 1, 8-bit stored `0 1 2 3 4`, descriptors `5\0\16` for all three, red `0 255 256 32768 65535`, green and blue `65535 32768 256 255 0`. Reply `0 255 255 0 128 128 1 1 1 128 0 0 255 0 0`. A 16-bit descriptor whose entries are `0 100 255` replies `0 0 0` for those entries, where cornerstone keeps `0 100 255` because no red entry is above 255. Descriptor bits 12 shift by 4. Bits 17 refuse by name | `palette_entries_are_shifted_by_their_descriptor` | cornerstone's red-only, data-dependent test. Rounding instead of truncating, which gives 128 for 32768 too but 1 for 255 | implementation |
+| AC21 | Tie divergence, measured. Native RGB 1 by 1, stored `130 130 130`, width 511, centre 128.5: `128.5` exactly, reply `128 128 128` by `byte_from_channel`, ties to even, as cornerstone stores. Inverted, `126.5` replies `126 126 126`. Centre 130.5 and width 100 put stored 130 on `127.5`, which replies 128, so both tie directions are asserted | `a_colour_window_tie_rounds_half_to_even` | A rule that always rounds a tie up or always down | implementation |
+| AC22 | Palette scaling. PALETTE COLOR 5 by 1, 8-bit stored `0 1 2 3 4`, descriptors `5\0\16` for all three, red `0 255 256 32768 65535`, green and blue `65535 32768 256 255 0`. Reply `0 255 255 0 128 128 1 1 1 128 0 0 255 0 0`. Three 16-bit descriptors whose entries are all `0 100 255` are read as 8-bit by ruling R1 and reply `0 100 255`, as cornerstone does, with `entries_read_as_8_bit` set. Three 12-bit descriptors with the same entries do the same. The rule is decided once for the whole palette, so channels `0 100 255`, `0 100 255` and `0 100 256`, all 16-bit, are all shifted, to `0 0 0`, `0 0 0` and `0 0 1`, and the flag is clear. A 12-bit channel in a palette not read as 8-bit shifts by 4. Bits 17 refuse by name | `palette_entries_are_shifted_by_their_descriptor`, `a_palette_is_read_as_8_bit_only_when_every_wide_channel_fits_in_8_bits`, `a_twelve_bit_palette_of_8_bit_entries_is_read_as_8_bit` and `each_palette_channel_is_scaled_by_its_own_depth` | cornerstone's red-only, data-dependent test. Rounding instead of truncating, which gives 128 for 32768 too but 1 for 255 | implementation |
 | AC23 | Decoder output length. `decoded_output_len` for native `YBR_FULL_422` 2 by 1 at 8 bits is 4, for native RGB 2 by 1 is 6, and for JPEG baseline `YBR_FULL_422` 2 by 1 is 6. `Registry::decode` refuses a 6-byte buffer for the native 4:2:2 frame with `OutputLength { expected: 4, actual: 6 }` | `crates/ocelli-codec/tests/registry.rs`, `decoded_output_len_is_the_decoders` | A registry that still checks `desc.output_len()` | implementation |
 | AC24 | Inverse RCT, ISO/IEC 15444-1 G.2. Hand values at `B = 8`: `200 100 50` level-shifts to `72 -28 -78`, forward `Y0 = floor(-62 / 4) = -16`, `Y1 = -50`, `Y2 = 100`, and the inverse gives `I1 = -16 - floor(50 / 4) = -28`, `I0 = 72`, `I2 = -78`, so `200 100 50`. Pure red `255 0 0` gives `Y0 = -65`, `Y1 = 0`, `Y2 = 255` and back. The lossless rows `syntax/j2k_lossless_ybr_rct.dcm` and `syntax/htj2k_lossless_ybr_rct.dcm` decode byte for byte to their RGB reference | `inverse_rct_is_exact_before_the_level_shift`, and the corpus rows in `crates/ocelli-dicom/tests/corpus.rs` | Inverting after `openjph-core`'s level shift and clamp, which gives `159 32 32` for pure red | implementation, codec part |
-| AC25 | Inverse ICT, ISO/IEC 15444-1 G.3. Hand values: `Y0 = -28`, `Y1 = 22`, `Y2 = -38` give `I0 = -28 + 1.402 * -38 = -81.276`, `I1 = -28 - 0.34413 * 22 - 0.71414 * -38 = -8.43354`, `I2 = -28 + 1.772 * 22 = 10.984`, then `+ 128` and the decoder's rounding to `47 120 139`. The lossy rows `syntax/j2k_lossy_ybr_ict.dcm` and `syntax/htj2k_lossy_ybr_ict.dcm` are compared with OpenJPEG's own decode of the same codestream through the corpus tooling, the largest per-channel difference is measured and recorded, and a decode with the inverse left out is shown to differ by more | `inverse_ict_uses_annex_g_coefficients`, plus the recorded measurement | The YBR_FULL inverse of `color.rs` in place of Annex G's, or no inverse | implementation, codec part |
+| AC25 | Inverse ICT, ISO/IEC 15444-1 G.3. Hand values: `Y0 = -28`, `Y1 = 22`, `Y2 = -38` give `I0 = -28 + 1.402 * -38 = -81.276`, `I1 = -28 - 0.34413 * 22 - 0.71414 * -38 = -8.43354`, `I2 = -28 + 1.772 * 22 = 10.984`, then `+ 128` and the decoder's rounding to `47 120 139`. The lossy rows `syntax/j2k_lossy_ybr_ict.dcm` and `syntax/htj2k_lossy_ybr_ict.dcm` are compared with OpenJPEG's own decode of the same codestream through the corpus tooling, the largest per-channel difference is measured and recorded, and a decode with the inverse left out is shown to differ by more | `inverse_ict_uses_g6_literal_coefficients`, plus the recorded measurement | The YBR_FULL inverse of `color.rs` in place of Annex G's, or no inverse | implementation, codec part |
 | AC26 | ICC sentence. `synthetic/sc_rgb_icc.dcm` draws the same bytes as the same frame without the element, inspect JSON has `"icc":true`, and the page shows "This image's ICC profile was not applied." The file without the element has `"icc":false` and no sentence | `an_icc_profile_is_named_as_not_applied` | Refusing the file, or applying nothing and saying nothing | implementation, integrated in AC16 |
-| AC27 | One palette reader. `tools/oracle/src/produce_current.rs` calls `ocelli_dicom::palette_color_lut` and its private reader at `:578` to `:687` is deleted. The candidate bytes for `synthetic/sc_palette_color.dcm` are byte-identical before and after at the sprint corpus gate. `synthetic/sc_palette_color_16.dcm` changes from its current outcome to AC22's scaled bytes, and both outcomes are recorded | Corpus gate output, recorded | Two readers that agree today and drift later | implementation, sprint corpus gate |
+| AC27 | One palette reader. `tools/oracle/src/produce_current.rs` calls `ocelli_dicom::palette_color_lut` and its private reader at `:578` to `:687` is deleted. The candidate bytes for `synthetic/sc_palette_color.dcm` are byte-identical before and after at the sprint corpus gate. `synthetic/sc_palette_color_16.dcm` is byte-identical before and after too, because both rows declare 16 bits with every entry at most 255 and ruling R1 reads them as 8-bit | Corpus gate output, recorded | Two readers that agree today and drift later | implementation, sprint corpus gate |
 | AC28 | Window link by kind. With link on, a window dragged on an RGB viewport reaches a second RGB viewport and not a CT viewport, and one dragged on the CT reaches the other monochrome viewport and not the RGB one | `examples/folder-viewer/tests/browser/colour.mjs`, link case | A modality-unit window sent to a colour viewport | integrated |
 | AC29 | Wasm size. `bin/ocelli.sh gate wasm` passes on the story's tip, which runs `bin/ocelli.sh wasm`, `bin/ocelli.sh wasm-decode` and `scripts/pin_and_size_check.py --with-size` against `ci/wasm-size-budget.json` and `ci/wasm-decode-size.json`, with neither budget file edited and `--accept-size` never run. The byte size of `crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm` and `pkg-decode/ocelli_wasm_bg.wasm` is measured on the story's base, the sprint head its work branch starts from, and on its tip with the same commands, and both deltas are recorded. Reachability, measured for this plan on 5451cb7d with `cargo tree -p ocelli-wasm -e normal --target wasm32-unknown-unknown --prefix none` and again with `--no-default-features --features decode-worker`: the shipped module reaches `ocelli-pixel` and `ocelli-render`, the decode module reaches `ocelli-pixel`, and neither reaches `ocelli-codec`, `ocelli-dicom`, `openjph-core` or `ritk-codecs`. So D-31's patches and the codec part cannot change either module, and the only shipped code this story adds is `ColourWindow`, `DisplayScale` and `colour_bytes_into`, which no `ocelli-wasm` export calls and fat LTO is expected to remove. The implementer reruns both `cargo tree` commands on the tip and records them. Any non-zero delta is explained by symbol, from `twiggy top` or an equivalent listing of the two builds | Recorded in `docs/lld/build-targets.md` | A new edge from `ocelli-wasm` to the codec crates, or a budget re-baselined to make room | implementation, both parts |
 | AC30 | No monochrome regression. `bin/ocelli.sh bench viewer.open viewer.first_image viewer.window_step viewer.scroll_rate viewer.resident_memory` runs on the F-216 host with F-216's instrument identity, once on the story's base and once on its tip, and every subject stays within F-216's answered thresholds. Each before and after median is recorded side by side. A run on another host class is `incomparable` and leaves the row open, as F-216 records | Recorded in `docs/lld/benchmarks.md` | A monochrome request that now builds a colour recipe, or a reply header path that allocates per request | external, viewer part, sprint verification |
@@ -452,7 +452,7 @@ The write set is split into two parts with disjoint files, by the lead's order o
 - Pixels across the boundary: no wasm crossing. The folder viewer's local HTTP reply carries display bytes, as it does today for grey.
 - Render-loop allocation: n/a. The colour scratch is a workspace buffer reused across requests and counted in `workspace_bytes`.
 - unsafe: none in the workspace. D-31's vendored patches touch external code whose unsafe sites are counted by the external audit, and the count is re-measured and recorded. The patches add no unsafe of their own.
-- Tier A (WebGPU): n/a for the folder viewer, whose page opens no device, as F-210 and F-212 record. In the library, `ColourWindow` and `DisplayScale` have no GPU form in this story and no GPU entry point accepts a colour window or a scaled colour sample, so nothing can draw a colour window differently on tier A. The GPU colour path, `ColourLut` in `crates/ocelli-render/src/colour.rs`, is unchanged.
+- Tier A (WebGPU): n/a for the folder viewer, whose page opens no device, as F-210 and F-212 record. In the library, `ColourWindow` and `DisplayScale` have no GPU form in this story and no GPU entry point accepts a colour window or a scaled colour sample, so nothing can draw a colour window differently on tier A. The GPU colour path, `ColourLut` in `crates/ocelli-render/src/colour.rs`, is unchanged in code, and its palette bake reads the entries `PaletteColorLut` scales, so a palette bakes the same bytes tier C draws, under the one palette rule, asserted by `the_gpu_bake_holds_sixteen_bit_entries_after_their_display_scale`.
 - Tier B (WebGL2): n/a, for the same reasons.
 - Tier C (CPU): full for the drawn codes, through `ocelli-pixel`'s `ColorTransform`, `DisplayScale` and `ColourWindow` and `ocelli-render`'s CPU byte rule, on the host process whatever GPU the machine has. Every shape that rule refuses is refused by name, never drawn differently. The JPEG 2000 and HTJ2K decoding is tier independent and runs on every target the codec crate builds for.
 
@@ -491,14 +491,19 @@ By the operator's clarification of 2026-11-07, relayed by the lead: every behavi
 | YBR_PARTIAL_422 | Throws "No color space conversion" (`convertColorSpace.js:38`) | Drawn with the studio offset | Better, a frame PS3.3 defines is drawn. AC6 |
 | YBR_ICT and YBR_RCT | Copied as RGB on the decoder's word (`convertColorSpace.js:23` to `:25`) | Decoded with Annex G's inverse inside the decoder | Same outcome. AC24, AC25, AC20 on the four new rows |
 | YBR_PARTIAL_420 | Copied as RGB | Refused by name | **Gap, named.** PS3.5 uses it with the MPEG and H.264 video syntaxes, and the codec registry knows none of them, so no file this build can decode carries it. The gap closes with a video decoder story |
-| PALETTE COLOR, 8 and 16 bits | Drawn, 16-bit entries shifted right by 8 when a red entry exceeds 255 | Drawn, every channel shifted by its own descriptor | Better, closer to PS3.3 C.7.6.3.1.5. AC22 measures the case where the two differ |
+| PALETTE COLOR, 8 and 16 bits, a channel declared above 8 bits holding an entry above 255 | Drawn, 16-bit entries shifted right by 8 when a red entry exceeds 255 | Drawn, each channel shifted by its own declared depth minus 8 | Better, closer to PS3.3 C.7.6.3.1.5. AC22 measures the case where the two differ |
+| PALETTE COLOR, every channel declared 8 bits | Drawn, entries as they are | Drawn, entries as they are, not flagged | Same. `an_all_8_bit_palette_does_not_report_the_fallback` |
+| PALETTE COLOR, at least one channel declared above 8 bits and every entry of every such channel at most 255 | Drawn, entries as they are | Drawn, the whole palette read as 8-bit by ruling R1, and flagged | Same. AC22's fallback rows and both corpus palette rows, 0 bytes differ from base |
 | Colour above 8 bits | Saturates at 255 | Shifted by Bits Stored | Better, closer to PS3.3's Bits Stored, and a 12-bit image is not drawn nearly white. AC11 |
 | Window and invert per channel | Yes, LINEAR, initial 256 and 128 | Yes, the same rule | Same. AC19, AC20 |
 | Window from rounded or unrounded samples | Windows bytes its converters already rounded | Windows the `f32` stage 4 output and rounds once | Better, one rounding, HLD 27.3. AC20 counts the pixels that differ by one code |
-| Rounding a tie | Ties to even, `Uint8ClampedArray` | Ties up, tier C's shared `byte_from_channel` | **Gap, named, not better.** The rule is shared with every monochrome frame on tier C and predates this story, so changing it is its own story with its own monochrome oracle evidence. AC21 measures it. The lead raises the follow-up |
+| Rounding a tie | Ties to even, `Uint8ClampedArray` | Ties to even, tier C's `byte_from_channel` | Same, by the operator's decision of 2026-11-07. AC21 asserts both tie directions. Monochrome keeps its table address rounding by ruling R2 and its bytes are measured unchanged |
 | Value at the pointer | Probe shows the components | R, G and B | Same. AC13 |
 | Region statistics | Per channel, `BasicStatsCalculator.js:25` to `:54` | Per channel, one walk | Same, on unrounded values. AC13 |
 | ICC profile | Ignored silently | Named on the page | Better, the omission is visible. AC26. F-240 applies it |
+| Initial JPEG baseline decoder RGB | Cornerstone's decoder output | The existing native decoder's reported RGB, with no second inverse | **Gap, measured.** On the corpus JPEG baseline row, 3857 of 6144 source-centre pixels differ, maximum two codes. The initial colour transform is identity on those already decoded RGB bytes. This is a bounded observation of the existing decoders, not a new tolerance or a claim about every JPEG file |
+| Explicit colour-window display quantisation | The reference's rendered window | Existing LINEAR arithmetic with one final byte rounding | Better on the measured hand fixture. Both explicit window cases match all 720 hand-derived source-centre channels in Ocelli. The reference differs on ten channels by one code, five below and five above. Default unwindowed source-centre bytes agree |
+| Oracle canvas quad coverage | Fractional boundary pixels in the reference canvas | The current native CpuRaster projection used only by the observation producer | **Gap, named.** Initial synthetic RGB and palette canvases differ only at fractional edges, maximum 64 codes. Window cases have 853 edge pixels above one code. This pre-existing producer geometry is recorded separately from the exact source-centre colour arithmetic and is not claimed as canvas parity |
 | Speed and memory | Measured by F-223's harness | Measured on the same frames | Target not slower. AC32 |
 
 ## Parity surface covered
@@ -541,7 +546,7 @@ Each answer is the operator's unless it says lead. The original options are kept
 5. **ICC Profile (0028,2000).** Shown, with a page sentence that the profile was not applied, until a new story applies it. That story is F-240, filed the same day. Recorded as D-30. Applied in item 13 and AC26.
 6. **Measure on a colour region.** Area plus mean, SD, minimum and maximum per channel R, G and B, through F-211's single region walk. Applied in item 12 and AC13.
 7. **The oracle's palette reader** (lead). Option A, replaced by the new `ocelli-dicom` reader so one exists. Applied in AC27.
-8. **Colour above 8 bits and palette entries above 255.** One library rule in `ocelli-pixel` scales both to the display's 8 bits. The rule is item 11: shift right by `n - 8` for `9 <= n <= 16`, where `n` is Bits Stored for a sample and the descriptor's third value for a palette entry, decided from the header. It matches cornerstone's `>> 8` for a 16-bit palette (`convertPALETTECOLOR.js:2` to `:9`). It departs from cornerstone where cornerstone is not defensible against PS3.3 C.7.6.3.1.5: that section makes the descriptor's third value the bit depth of every entry, so a palette whose descriptor says 16 is scaled as 16 even when its red entries happen to be small, and the green and blue tables are scaled by their own descriptors rather than by the red data. For colour samples, PS3.3 gives Bits Stored as the range of the sample, so a 12-bit sample is scaled by 12, where cornerstone saturates it. The truncating shift is kept because it is cornerstone's and gives every output code an equal share of the input range. AC17 makes the reviewer check C.7.6.3.1.5's text. Applied in AC11 and AC22.
+8. **Colour above 8 bits and palette entries above 255.** One library rule in `ocelli-pixel` scales both to the display's 8 bits. The rule is item 11: shift right by `n - 8` for `9 <= n <= 16`, where `n` is Bits Stored for a sample and the descriptor's third value for a palette entry, decided from the header. It matches cornerstone's `>> 8` for a 16-bit palette (`convertPALETTECOLOR.js:2` to `:9`). It departs from cornerstone where cornerstone is not defensible against PS3.3 C.7.6.3.1.5: that section makes the descriptor's third value the bit depth of every entry, so a palette whose descriptor says 16 is scaled as 16 even when its red entries happen to be small, and the green and blue tables are scaled by their own depths rather than by the red data. Ruling R1 below refines this: a palette is read as 8-bit only when at least one channel is declared above 8 bits and every entry of every such channel fits in 8 bits, otherwise each channel is shifted by its own declared depth minus 8. For colour samples, PS3.3 gives Bits Stored as the range of the sample, so a 12-bit sample is scaled by 12, where cornerstone saturates it. The truncating shift is kept because it is cornerstone's and gives every output code an equal share of the input range. AC17 makes the reviewer check C.7.6.3.1.5's text. Applied in AC11 and AC22.
 
 9. **How the JPEG 2000 colour decode is built**, raised by the answer to question 2. Patch the vendored crates with recorded provenance and a deviation row, HTJ2K first: call `openjph-core`'s existing `rct_backward` and `ict_backward` on the decode path and move the level shift and clamp after them. Then teach `ritk-codecs` multi-component decoding for Part 1. Recorded as D-31. Applied in item 16, Approach step 5, AC10, AC24, AC25 and the codec part of the write set.
 
@@ -554,3 +559,245 @@ Also given on 2026-11-07, relayed by the lead and applied:
 ## Open questions
 
 None. Questions 1 to 9 are answered above. AC17's reviewer check of the cited standards and AC20's reference observation are evidence rows with an owner and a stage, not open decisions.
+
+### Decided by the operator on 2026-11-07, tie rounding
+
+Ruling R2 below refines this record for monochrome. The operator chose to fix the tie rounding inside F-239. The shared tier C byte rule changes from rounding a tie up to rounding half to even, as cornerstone3D 5.8.2 does, for monochrome and colour alike, so the arithmetic stays in one place.
+
+- **Library half owns it.** The rule in `crates/ocelli-render/src/cpu.rs` and every caller of it, with hand-computed fixtures at exact ties for both parities and a control just either side of a tie.
+- **Monochrome moves too, and that is measured.** Every existing test that pinned a tie byte is updated from the rule, not from the new output, and the number of changed bytes over the corpus's monochrome rows is measured and recorded. The oracle's monochrome verdict on the changed rows is a sprint verification observation.
+- **Tiers A and B are checked.** The WGSL path's conversion to bytes is compared with the new rule at ties on a real adapter where one is available, and the result is recorded. A disagreement is reported, not hidden.
+- **The floor table** row for tie rounding moves from a named gap to matching cornerstone.
+
+### Rulings after the library half's review pass 1
+
+Made on 2026-11-07 after `.claude/reviews/F-239-lib-working-pass-1.md`.
+
+- **R1, decided by the operator: the standard, with a fallback.** Decided once for the whole palette by the lead's later ruling, a palette is read as 8-bit only when at least one channel is declared above 8 bits and every entry of every such channel fits in 8 bits, otherwise each channel is shifted by its own declared depth minus 8. The 8-bit reading is cornerstone3D 5.8.2's, and the frame carries a flag the page states. An all-8-bit palette is not flagged, and a conforming palette is unaffected. AC22 gains rows for that palette and AC27's two corpus palette rows are expected to draw as at base and as the reference does.
+- **R2, lead: monochrome keeps its rounding.** Tier C monochrome hands whole table bytes to the byte rule, and the table address rounds a tie up through `display_index`, which tiers A and B share and which matches the reference's `Math.floor(x * 255 + 0.5)` table quantisation. It does not change. The tie section above is corrected: the half-to-even rule governs colour bytes, and monochrome bytes are measured unchanged, 0 of 102 views.
+- **R3, lead: the unorm8 store is recorded, not changed.** No colour route reaches the `present_display` mode 0 path. The 128 of 255 ties it rounds up are recorded as measured in the LLD.
+- **R4, lead: stale text is corrected in this change.** D-29, item 10, AC21's expected bytes (128 and 126), the floor table's tie row and the Boundary section's statement that `ColourLut` is unchanged are brought to what the code and the rulings say.
+
+### Lead ruling after the codec part's review pass 2
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-239-codec-working-pass-2.md`, which found openjph-core's inverse ICT uses its own derived constants, so green at the AC25 point is `-8.433824` where ISO/IEC 15444-1 Annex G equation G-6's literal coefficients give `-8.43354`.
+
+- **The inverse ICT uses G-6's literal coefficients,** 1.402, 0.34413, 0.71414 and 1.772, in both vendored decoders. OpenJPEG, which cornerstone3D 5.8.2 decodes with, uses the same literals, so the floor and the standard agree. The openjph patch changes those constants and D-31's provenance records it, and the unit tests assert AC25's hand values within 1e-4 and go red under any one coefficient changed by more than that.
+- **The OpenJPEG comparison is a bound, not a pin,** and every sentence that says otherwise is corrected.
+
+### Lead ruling after the codec part's review pass 3
+
+Pass 3 found two defects in prose and no wrong pixel.
+
+- **D1.** The `pins.openjph-inventory` note in `scripts/guards/catalogue.py` drops its file count. The gate's refusal already names the files, so a count beside it only goes stale.
+- **D2.** `colour.rs` and the openjph `PATCH-PROVENANCE.md` either state the measured gap between the G-6 literals and the derived coefficients, measured again by the implementer, or give no number. "The same values" goes. Both openjph hashes are pinned again after the edit.
+- **Nitpicks taken.** The provenance's purpose clause covers `colour.rs`. The D-31 row names the coefficient change in one clause. The test is renamed so its name says the G-6 literals, and this plan's Tests row follows the new name.
+- **Not taken.** The f32 half-rounding difference from OpenJPEG was not observed and is left as a note.
+- **Outside this story.** Pass 3 measured ritk's J2K lossy 9/7 path far from OpenJPEG on colour `.91` data. That code predates F-239, and it becomes its own backlog story at sprint close.
+
+### Lead ruling after the codec part's review pass 4
+
+- **S1, the vendored suites run in no gate.** The floor gains one step that runs the library tests of both vendored crates, `cargo test --offline --locked --manifest-path vendor/<crate>/Cargo.toml --lib`, with `CARGO_TARGET_DIR` outside `vendor/`, and `.github/workflows/ci.yml` runs it. The step leaves each vendored `Cargo.lock` byte-identical and the pins gate green. A guard probe applies a 1e-2 change to one inverse ICT coefficient in a scratch copy and requires the step red. If CI cannot fetch a vendored crate's dependencies offline, the implementer reports that and how CI already supplies the workspace's, rather than dropping `--offline`.
+- **N1 taken.** The catalogue note says the files its refusal names.
+- **Outside this story.** F-243's ritk patch gains the same protection through this step once both land, and the integration order already merges the codec branch onto F-243.
+
+### Lead ruling after the codec part's review pass 5
+
+- **S1.** Both lint-policy probe blocks are copied from `sprint/s46` byte for byte by the lead, so this branch carries no wording of its own for them.
+- **N1 taken,** by the lead: the comment credits the 300 seconds to `Sandbox.run`'s default.
+- **Outside this story.** In a clean clone `cargo test --workspace` fails two `ocelli-oracle` tests that read the untracked `tools/oracle/out/run.json`, present on `sprint/s46` too since F-X021. It is recorded for the lead to fix before the sprint push, because CI's rust job runs that command.
+
+
+### Viewer integration wiring, 2026-11-08
+
+The colour browser probe is invoked by the existing `viewer-browser` gate in
+`bin/ocelli.sh`, and its ordinary page globals are declared in
+`eslint.config.js`. No lint rule or gate is disabled. The page's window-state
+selection is also used for mixed-kind tiles and prefetches, so a CT window is
+not sent to a colour image in the same series. A four-cell browser case checks
+both directions of AC28 with window linking enabled.
+
+
+### Viewer review ownership ruling, 2026-11-08
+
+Pass 1 measured 1,966,050 bytes of colour scratch after a large planar band
+and the same retained capacity after a small RGB frame. The ownership table's
+claim that the over-twice rule frees colour bands was false. That rule applies
+to the grey reply only. Colour Stored, RGB and packed vectors remain reusable
+conversion workspace storage, bounded by the whole-row 65,536-pixel band, at most 1.875 MiB
+per workspace for a 16-bit planar frame. A 32-bit container with supported
+stored bits uses up to 2.25 MiB per workspace. Their actual capacities are
+charged in workspace bytes. No trimming optimization or memory budget change is made.
+
+
+### Protocol fixture ruling after GLM test review, 2026-11-08
+
+The AC13 YBR RGB array is checked numerically against the hand values
+46.72366, 119.56544 and 138.98863, using the existing 0.001 bound of
+ocelli-pixel/tests/color.rs. This is the already approved colour-stage fixture
+rule described above, not a new renderer or scored oracle threshold. Each of
+the three channels must be finite. The one-decimal readout text remains exact.
+Observed shortest-f32 JSON spellings are not expected-value evidence and are
+removed from the test. The numeric-channel mutation with unchanged text must
+fail. This repair is reviewed independently before test acceptance.
+
+### AC20 observation instrument amendment, 2026-11-08
+
+The resumed implementation found the two declared colour-window observations
+and candidate window binding still missing. The lead supplies the two cases as
+`colourObservations` rows in the existing render-params declaration, selected
+only by `--colour-observation <id>` into a separate partial output directory.
+The default reference parameters and scored census are unchanged. Each row
+names the existing synthetic RGB file, centre 128, width 100 and invert off
+or on. The reference page records and applies the explicit LINEAR window and
+invert together. The candidate uses `colour_bytes_into` for stage 4, sample
+scale and the colour window, then the existing native RGB raster for geometric
+projection of those bytes. No new pixel formula or public renderer API is
+added. All colour observations remain unscored. This measured source-byte
+projection uses the declared NEAREST interpolation. Differences are recorded
+per row and investigated against the floor table, without a new threshold.
+
+The full AC20 reference run initially refused metadata coverage because no
+hand-written expectation asserted YBR_RCT or YBR_ICT. The four declared
+64 by 96, three-component, unsigned 8-bit colour codestream fixtures now
+carry those literal assertions in metadata-truth.json. They follow the
+approved PS3.5 8.2.4 names and input specification, not observed output.
+The installed dicom-image-loader 5.8.2 package was compared with its official
+registry tarball after SHA-512 verification against the lockfile. All 248
+regular files match, including createImage.js. Its debug block is therefore
+present in the published pinned artifact, correcting the earlier expectation
+that it was a local modification. No package source was changed.
+
+### Lead clarification, the shared regression instrument, 2026-11-08
+
+AC30 uses the same corrected permanent instrument on both products. The
+original `5451cb7d` source inherits a first-image runner that waits for
+the element renamed by F-208.
+The F-225 one-line selector repair must therefore also instrument the base.
+The current shared helper includes the already approved F-227 informational
+PET workload and pool accounting. Both sides use its exact same bytes.
+The five existing monochrome subjects keep their answered F-216 thresholds.
+No baseline file, tolerance or product source is changed on the original.
+
+The prepared base is original source tree `dd269895` plus only
+`tools/bench/src/viewer_work.mjs`, giving staged tree `68702951`.
+Independent byte comparison regenerated the registered first CT and DX
+files with their real subject UID and instance arguments and proved their
+bytes unchanged: CT 524822 bytes, SHA256
+`01cb3563cdd9a0a41e1e9ec6a1eb859643c4ac8926d7d7c276e6a235874ff582`,
+and DX 17400538 bytes, SHA256
+`a94585cdd1cbaf1aaff6603b93a748790e13c8a60531710e01e32a790e2925e7`.
+The run records the full helper hash, binary hash, staged source, actual
+browser and host on each side. Any later helper edit is copied and checked
+on both sides before measurement. This is an instrument repair, not an
+isolated causal claim for every story in the combined source stack.
+The factual size attribution belongs in `docs/lld/build-targets.md`.
+
+### Lead ruling, reuse palette acceptance across a draw, 2026-11-08
+
+The actual release AC31 observation at source `0c327dd7` records a
+19023.172166 ms median over the nine 8192-square palette window steps.
+GLM's subsequent source investigation found that the folder draw calls
+RasterColor::supported inside each conversion band. At that width the band
+is eight rows, so the same immutable palette is checked 1024 times per draw.
+The library's AcceptedColor already carries the validated borrow, but this
+caller discards it after each band. This is measured investigation followed
+by a source-level repeated-work finding, not a new numerical rule.
+
+The lead approves validating once per draw and reusing that same descriptor
+for every band. RasterColor becomes Copy and Clone because it contains only
+an immutable borrowed acceptance descriptor or the unsupported discriminant.
+No transform mutation, cross-frame cache, new allocation or pixel arithmetic
+is introduced. Unsupported transforms still refuse before conversion.
+The exact existing colour, palette and ICC fixtures remain authoritative.
+Run affected checks and the same release benchmark after the repair, preserve
+the old observations and report actual changes without a new tolerance or
+baseline acceptance. Controlled cost comparisons remain separate evidence.
+
+### Lead implementation amendment, exact final byte store, 2026-11-08
+
+The largest-frame benchmark records a 4699.183 ms RGB8 window median after
+the palette validation hoist. A separate GLM source investigation identified
+the final channel store's binary search as a candidate for measurement, not
+an established dominant cost. Its illustrative IEEE examples contained two
+errors, retained in the original report and corrected during review. They
+do not supply fixture expectations.
+
+This bounded implementation keeps ruling R2 unchanged. The pinned Rust
+1.97.1 standard library's `round_ties_even` returns the nearest integer with
+halfway values rounded to even. The original non-finite and endpoint guards
+remain in their original order. For the interior positive value below 255,
+the rounded value is an exact integer in 0 through 255. The existing shared
+`exact_f32_integer` reader and checked `u8::try_from` recover that integer.
+There is no new float-to-integer cast, unsafe code, allocation or dependency.
+The exact-byte predicate, monochrome table addressing and table construction
+in `colour.rs` are unchanged.
+
+Existing independent fixtures cover all 255 exact halves and their adjacent
+floats through the public colour entry. Additional literal IEEE controls
+retain the non-finite policy, especially positive infinity to zero, both
+signed zeros, subnormals and finite extremes. A dropped or reordered
+non-finite guard must fail the positive-infinity control. The implementation
+requires independent source review, native and wasm checks, and an unchanged
+registered largest-frame instrument before any cost conclusion. No threshold
+or tolerance changes.
+
+### Lead implementation ruling, AC27, 2026-11-08
+
+The oracle candidate projects only the shared palette provider's eleven input
+attributes into `MetadataSet`, then calls `palette_color_lut` directly. This
+projection copies metadata values and performs no LUT interpretation. Projecting
+the complete DICOM object would copy native Pixel Data and refuse encapsulated
+fragments, neither of which is required to read a palette. The existing
+decoder-reported RGB bypass, sidecar-driven non-palette eligibility and coarse
+`palette-refused` output remain the candidate's policy.
+
+The private LUT reader and its now-unused parsing helpers are removed. Two
+native producer controls exercise the approved R1 fallback, true 16-bit words,
+first-mapped clamping, missing channels, illegal depth, segmented element
+presence and non-palette bypass. Removing only the segmented presence tags from
+the candidate projection makes the policy control fail. The two existing
+synthetic corpus rows still require the actual before and after candidate byte
+identity record that AC27 names. Unit tests do not replace that observation.
+
+### Lead correction, nearest inverse coefficients, 2026-11-08
+
+AC17 at-source review found three legacy inverse literals rounded through
+short decimal summaries, despite the stated single nearest-f32 policy.
+Independent exact rational inversions by root and a second reviewer agree.
+Change only FULL red-Cb to nearest bits b81a6f2a, FULL blue-Cr to b90d1ef6,
+and PARTIAL red-Cb to b8c74e0f. The matrices, offsets, sample scaling, order
+of operations, final byte rule and existing tolerance stay unchanged.
+Clarify that the printed decimal equations are approximations, with the
+three exact rational fractions stated beside the literals.
+
+Three public basis inputs isolate these coefficients and assert their
+exact output bits. A fourth public colour/window control uses YBR
+[0,128,0], LINEAR centre bits3f0468f7 and width1. The independent binary32
+calculation predicts corrected blue255, versus oldblue0. These controls
+must fail on the old literals and pass on the corrected source. The
+existing full/partial fixture suite also runs unchanged.
+
+The observed identity-window NumPy sweep does not establish absence of
+effects under other windows. Actual native and wasm checks, candidate
+observations and the source-independent review remain required before
+completion. This repairs the declared arithmetic rather than changing
+a tolerance or substituting the textbook inverse.
+
+
+### Lead ruling, explicit colour census declarations, 2026-11-09
+
+The first post-citation oracle gate reached the reference identity comparison and failed its coverage census. Eleven newly added synthetic colour views were correctly unmeasured under existing D-16 but absent from the declared inventory. The four compressed YBR views and saturated RGB reference belong to F-239. The six RGB ICC views belong to F-239 and F-240. Every one is absent from the canonical pre-integration manifest and has three components with eight stored bits in the actual reference sidecar. No previously scored view is demoted.
+
+The lead adopts an explicit addition of those eleven identifiers with only `unstated-threshold` to `tools/oracle/compare-expectations.json`, subject to independent review like a tolerance change. All 48 prior entries and qualifiers remain unchanged. This applies the approved unscored-colour scope and existing HLD 25.1/D-16, with no new metric, numerical tolerance, class rule, pixel gold, gate bypass or passed-colour claim. It does not absorb an unexpected scored failure. The exact identifiers, provenance and review are recorded in the existing feature review series. The failed gate remains failed. The corrected tree must pass the actual identity and mutation consumers and a fresh named oracle gate before a passing receipt is recorded. Native candidate parity remains a separate production comparison.
+
+
+### Lead ruling, architecture-dependent JPEG class-two observations, 2026-11-09
+
+The Ubuntu x86_64 qualification run of source `8fdee914` decoded the two existing three-component JPEG fixtures successfully, but their tests refused different complete difference-statistic vectors from the local aarch64 vectors. The fixture RGB truths and the measured Linux and local vectors are retained separately. The pinned `jpeg-decoder` 0.3.2 source can dispatch x86 SSSE3 IDCT and YCbCr conversion while the current aarch64 build uses its scalar path. This source fact identifies available distinct implementations. It does not prove which operation caused these observed differences.
+
+The lead adopts the reviewed test-policy amendment. It keeps both fixture decodes, RGB and interleaved output contracts, exact decoded shape and independent reference bytes. It publishes each per-channel class-two measurement as an unmeasured observation instead of requiring one host's full statistic vector on every target. HLD 25.1 and D-16 provide no colour metric or threshold. This is an explicit change to the assertions, subject to independent review like code. No new numerical bound, host-specific gold, scalar-only shipping feature, dependency, fixture, quality-pass or colour-parity claim is introduced. Existing monochrome tolerances and lossless exact assertions remain unchanged.
+
+The measurement calculator gains counted hand-vector controls for each channel's differing count, signed sum, maximum and nearest-rank 99.9 percentile, including the 1000-sample boundary and malformed lengths. Those controls establish the reporter's arithmetic. They do not establish lossy JPEG decoder correctness. Existing lossless hand fixtures, the independent 12-bit monochrome comparison, malformed codestream refusal and caller-buffer atomicity controls continue to detect their named wrong implementations. The RGB/layout contract and F-239's existing decoder-to-viewer identity control reject changing the output-space contract or applying a second colour conversion.
+
+An arbitrary mutation of a valid three-component lossy decoder's RGB sample values can change the reported statistics without failing these two observation tests. That limitation is explicit. Hand metric tests, unchanged lossless controls and an unmeasured oracle colour row must not be presented as a new lossy-colour quality guarantee. Adopting a scored colour metric would require a separate approved design decision. The targeted tests and six contract, metric and exact-decoder mutants were observed before adoption, with a restored 13-test GREEN suite. The bounded review records their source identities and direct receipts.

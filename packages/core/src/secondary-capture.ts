@@ -11,9 +11,9 @@
 import dcmjs from "dcmjs";
 
 import { SECONDARY_CAPTURE_REQUEST_KEYS, refuseUnknownOptions } from "./options.js";
+import { part10 } from "./tid1500.js";
 
 const SOP_CLASS = "1.2.840.10008.5.1.4.1.1.7";
-const TRANSFER_SYNTAX = "1.2.840.10008.1.2.1";
 
 export type SecondaryCaptureRequest = {
   study: string;
@@ -79,11 +79,6 @@ function dicomUid(value: string): boolean {
     }
   }
   return true;
-}
-
-function asBytes(value: ArrayBuffer | Uint8Array): Uint8Array {
-  const view = value instanceof Uint8Array ? value : new Uint8Array(value);
-  return new Uint8Array(view);
 }
 
 function exactBuffer(bytes: Uint8Array | ArrayBuffer): ArrayBuffer {
@@ -171,14 +166,8 @@ function writeImage(request: SecondaryCaptureRequest): Uint8Array | null {
     PixelData: new Uint8Array(request.pixels),
     _vrMap: { PixelData: "OB" },
   };
-  const meta = dcmjs.data.DicomMetaDictionary.denaturalizeDataset({
-    TransferSyntaxUID: TRANSFER_SYNTAX,
-    MediaStorageSOPClassUID: SOP_CLASS,
-    MediaStorageSOPInstanceUID: request.instance,
-  });
-  const dict = new dcmjs.data.DicomDict(meta);
-  dict.dict = dcmjs.data.DicomMetaDictionary.denaturalizeDataset(dataset);
-  return asBytes(dict.write());
+  // The same file meta as every other writer here, PS3.10 Table 7.1-1.
+  return part10(dataset, SOP_CLASS, request.instance);
 }
 
 /** Write one secondary capture. A short pixel buffer returns nothing. */

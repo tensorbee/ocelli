@@ -794,7 +794,7 @@ class Binaries(unittest.TestCase):
         records, members = L._rust_shipped()
         third = [package for ident, package in records.items()
                  if ident not in members]
-        self.assertEqual(len(third), 129)
+        self.assertEqual(len(third), 105)
         blob = L.generate_third_party_licenses()
         text = blob.decode("utf-8")
         names = []
@@ -1003,83 +1003,69 @@ class Binaries(unittest.TestCase):
         self.assertIn("statement names no repository or commit",
                       str(caught.exception))
 
-    def test_objc2_crates_name_their_holder(self) -> None:
+    def test_the_objc2_family_is_absent_from_the_shipped_notices(self) -> None:
+        """F-238, AC5. The shipped native graph compiles no objc2 crate, so
+        the generated notices carry none of them.
+
+        The pins and fallback reasons stay recorded in `sources.toml`. They
+        are upstream facts that `verify-upstream` still re-fetches, and the
+        crates leave the closure through the shipped feature set, not through
+        the lockfile. The count beside the closure in
+        `test_closure_lists_each_shipped_crate_once` moves for the same
+        reason.
+        """
         self.assertNotIn("not a grant",
                          (REPO / "ci/notices/sources.toml").read_text(
                              encoding="utf-8"))
         reasons = L.fallback_reasons()
         objc2 = (
-            ("block2", "0.6.2", True),
-            ("objc2", "0.6.4", True),
-            ("objc2-encode", "4.1.0", True),
-            ("objc2-foundation", "0.3.2", True),
-            ("dispatch2", "0.3.1", False),
-            ("objc2-core-foundation", "0.3.2", False),
-            ("objc2-core-graphics", "0.3.2", False),
-            ("objc2-io-surface", "0.3.2", False),
-            ("objc2-metal", "0.3.2", False),
-            ("objc2-quartz-core", "0.3.2", False),
+            ("block2", "0.6.2"),
+            ("objc2", "0.6.4"),
+            ("objc2-encode", "4.1.0"),
+            ("objc2-foundation", "0.3.2"),
+            ("dispatch2", "0.3.1"),
+            ("objc2-core-foundation", "0.3.2"),
+            ("objc2-core-graphics", "0.3.2"),
+            ("objc2-io-surface", "0.3.2"),
+            ("objc2-metal", "0.3.2"),
+            ("objc2-quartz-core", "0.3.2"),
         )
-        for name, version, _mit in objc2:
+        for name, version in objc2:
             self.assertIn("no licence text", reasons[(name, version)])
-        earlier = {
-            (str(row["name"]), str(row["version"]))
-            for row in L._table_rows(L._load_sources(), "earlier", required=False)
-        }
-        pins = {
-            (str(row["name"]), str(row["version"])): row
-            for row in L.crate_pin_rows()
-        }
-        earlier_pins = {
-            (str(row["name"]), str(row["version"])): row
-            for row in L._table_rows(
-                L._load_sources(), "earlier", required=False)
-        }
         blob = L.generate_third_party_licenses()
         text = blob.decode("utf-8")
-        lines = text.splitlines()
+        for name, version in objc2:
+            self.assertNotIn(f"carrier: {name} {version}", text)
+            self.assertNotIn(f"name: {name}\n", text)
+        self.assertNotIn("madsmtm/objc2", text)
+        self.assertNotIn("derived from Apple SDKs", text)
+        self.assertNotIn("Copyright (c) Steven Sheldon", text)
+        # Whole-file guards that rode in the test this replaces and do not
+        # belong to objc2 alone: the superseded commit, the superseded
+        # sentence, the invented year, the zlib holder, and the unfilled
+        # template placeholders.
         self.assertNotIn("cfb19922", text)
         self.assertNotIn("at that commit", text)
-        for name, version, mit in objc2:
-            needle = f"carrier: {name} {version} LICENSE.md"
-            self.assertIn(needle, lines)
-            window = "\n".join(lines[lines.index(needle):lines.index(needle) + 4])
-            repo, commit, _path = L.raw_pin(str(pins[(name, version)]["url"]))
-            self.assertIn(repo, window)
-            self.assertIn(commit, window)
-            self.assertNotIn("licence file from its repository", window)
-            self.assertNotIn("at that commit", window)
-            if mit:
-                self.assertIn((name, version), earlier)
-                earlier_row = earlier_pins[(name, version)]
-                earlier_repo, earlier_commit, _earlier_path = L.raw_pin(
-                    str(earlier_row["url"]))
-                self.assertEqual(
-                    earlier_commit, str(earlier_row["commit"]).lower())
-                self.assertIn(earlier_repo, window)
-                self.assertIn(earlier_commit, window)
-                self.assertIn("LICENSE.txt", window)
-            else:
-                self.assertNotIn((name, version), earlier)
-                self.assertNotIn("LICENSE.txt", window)
-        self.assertIn("derived from Apple SDKs", text)
-        self.assertIn(
-            "Copyright (c) Mads Marquart <mads@marquart.dk>", text)
-        self.assertIn(
-            "Copyright (c) Mads Marquart <mads@marquart.dk>, "
-            "Mary <mary@mary.zone>", text)
-        self.assertIn(
-            "Copyright (c) the objc2-foundation authors "
-            "(https://github.com/madsmtm/objc2)", text)
-        self.assertIn(
-            "Copyright (c) the objc2-metal authors "
-            "(https://github.com/madsmtm/objc2)", text)
-        self.assertIn("Copyright (c) Steven Sheldon", text)
         self.assertNotIn("Copyright 2026 Mads Marquart", text)
         self.assertNotIn("Jean-loup Gailly", text)
         self.assertNotIn("[fullname]", text)
         self.assertNotIn("[year]", text)
         self.assertNotIn("<copyright-holder>", text)
+
+    def test_the_archive_target_list_is_the_five_desktop_triples(self) -> None:
+        # The native closure is the union over this named list, so a target
+        # dropped from it takes that platform's crates out of the notices with
+        # nothing else going red. Removing aarch64-apple-darwin leaves the
+        # absence test above green, measured, because the arm64 and x86_64
+        # Apple graphs hold the same crates today. The list is the decision,
+        # and this pins it the way `shipped_native_check` pins its pair.
+        self.assertEqual(
+            L.NATIVE_ARCHIVE_TARGETS,
+            ("aarch64-apple-darwin",
+             "x86_64-apple-darwin",
+             "x86_64-unknown-linux-gnu",
+             "aarch64-unknown-linux-gnu",
+             "x86_64-pc-windows-msvc"))
 
     def test_a_pin_from_another_commit_is_refused(self) -> None:
         published = "a" * 40

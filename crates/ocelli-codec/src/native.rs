@@ -90,6 +90,7 @@ impl RawDecoder {
         desc: &FrameDesc,
     ) -> Result<NativeFrameIndex<'a>, CodecError> {
         validate_pixel_format(self.requires_ow, desc)?;
+        validate_column_pairs(desc)?;
         if frame_count == 0 {
             return Err(CodecError::FrameMismatch);
         }
@@ -126,11 +127,16 @@ impl RawDecoder {
                 return Err(CodecError::TrailingData);
             }
         }
+        // The per-frame output is the stored frame's own length, which equals
+        // `desc.output_len()` for every photometric whose stored sample count
+        // is Samples per Pixel and is the two-sample 4:2:2 length otherwise.
+        let output_len =
+            usize::try_from(frame_bits.div_ceil(8)).map_err(|_| CodecError::FrameMismatch)?;
         Ok(NativeFrameIndex {
             value,
             frame_count,
             frame_bits,
-            output_len: desc.output_len(),
+            output_len,
             byte_order: self.byte_order,
             pixel_data_vr: desc.pixel_data_vr(),
         })
@@ -284,16 +290,41 @@ impl Decoder for RawDecoder {
         self.transfer_syntaxes
     }
 
+    fn decoded_output_len(&self, desc: &FrameDesc) -> usize {
+        let stored = stored_samples_per_pixel(desc);
+        if stored == desc.samples_per_pixel() {
+            return desc.output_len();
+        }
+        // PS3.3 C.7.6.3.1.2: two of the frame's three samples are stored for
+        // the two 4:2:2 codes it defines over three samples per pixel. This
+        // arm runs only when `stored_samples_per_pixel` answered 2 against
+        // Samples per Pixel 3. The product below is therefore bounded by
+        // 65535 * 65535 * 2 * 32 bits, far below `u64::MAX`, and it cannot
+        // exceed the container length `FrameDesc::new` proved representable
+        // on this target.
+        let bits = u64::from(desc.rows())
+            * u64::from(desc.columns())
+            * u64::from(stored)
+            * u64::from(desc.bits_allocated());
+        usize::try_from(bits.div_ceil(8)).unwrap_or(desc.output_len())
+    }
+
     fn decode(&self, src: &[u8], desc: &FrameDesc, out: &mut [u8]) -> Result<(), CodecError> {
-        if out.len() != desc.output_len() {
+        // A 4:2:2 photometric over any other sample count contradicts the
+        // section that defines it, and the refusal must not depend on the
+        // buffer the caller happened to bring.
+        validate_stored_samples(desc)?;
+        let output_len = self.decoded_output_len(desc);
+        if out.len() != output_len {
             return Err(CodecError::OutputLength {
-                expected: desc.output_len(),
+                expected: output_len,
                 actual: out.len(),
             });
         }
         validate_pixel_format(self.requires_ow, desc)?;
+        validate_column_pairs(desc)?;
 
-        let logical_len = desc.output_len();
+        let logical_len = output_len;
         validate_logical_frame_length(src, logical_len)?;
         if self.byte_order == NativeByteOrder::BigEndian
             && desc.pixel_data_vr() == PixelDataVr::Ow
@@ -314,6 +345,65 @@ impl Decoder for RawDecoder {
         }
         Ok(())
     }
+}
+
+/// Whether the photometric names one of the two 4:2:2 codes PS3.3
+/// C.7.6.3.1.2 defines. The one copy of that code list, shared by the
+/// stored-sample answer and the refusal below it.
+fn photometric_names_a_422_code(photometric_interpretation: &str) -> bool {
+    matches!(
+        photometric_interpretation,
+        "YBR_FULL_422" | "YBR_PARTIAL_422"
+    )
+}
+
+/// Stored samples on the wire for one pixel of a native frame.
+///
+/// PS3.3 C.7.6.3.1.2 subsamples the chroma of `YBR_FULL_422` and
+/// `YBR_PARTIAL_422` two to one horizontally and stores each pair of pixels
+/// as `Y1 Y2 Cb Cr`, so two samples are stored where Samples per Pixel says
+/// three. This is the same fact `ocelli_pixel`'s sample layout encodes as
+/// its stored-samples-per-pixel answer, which a [`FrameDesc`] cannot reach:
+/// the frame carries the photometric as text and carries no Planar
+/// Configuration, so the two codes are named here against that section
+/// rather than re-derived. `ocelli_pixel` reaches its copy only through
+/// `SampleLayout::new`, which refuses a sample count other than the
+/// photometric's expected three, so the answer 2 here carries the same
+/// condition and `decode` refuses the contradiction rather than re-counting.
+fn stored_samples_per_pixel(desc: &FrameDesc) -> u16 {
+    if photometric_names_a_422_code(desc.photometric_interpretation())
+        && desc.samples_per_pixel() == 3
+    {
+        2
+    } else {
+        desc.samples_per_pixel()
+    }
+}
+
+/// PS3.3 C.7.6.3.1.2 defines the two 4:2:2 codes over three samples per
+/// pixel, the rule `ocelli_pixel`'s `SampleLayout::new` applies before its
+/// own stored-sample answer is reachable. A header naming one of the two
+/// codes with any other Samples per Pixel contradicts the section and is
+/// refused rather than re-counted, so the codec's answer and `ocelli_pixel`'s
+/// cannot diverge on the input the two copies used to disagree on.
+fn validate_stored_samples(desc: &FrameDesc) -> Result<(), CodecError> {
+    if photometric_names_a_422_code(desc.photometric_interpretation())
+        && desc.samples_per_pixel() != 3
+    {
+        return Err(CodecError::FrameMismatch);
+    }
+    Ok(())
+}
+
+/// PS3.3 C.7.6.3.1.2 stores a pair of horizontally adjacent pixels as one
+/// chroma unit. An odd Columns leaves the last pixel of a row without a
+/// partner, and PS3.3 names no rule that joins it to the next row, so the
+/// frame is refused rather than silently re-paired.
+fn validate_column_pairs(desc: &FrameDesc) -> Result<(), CodecError> {
+    if stored_samples_per_pixel(desc) != desc.samples_per_pixel() && desc.columns() % 2 == 1 {
+        return Err(CodecError::FrameMismatch);
+    }
+    Ok(())
 }
 
 fn validate_pixel_format(requires_ow: bool, desc: &FrameDesc) -> Result<(), CodecError> {
@@ -337,9 +427,12 @@ fn validate_logical_frame_length(src: &[u8], logical_len: usize) -> Result<(), C
 }
 
 fn frame_bits(desc: &FrameDesc) -> Result<u64, CodecError> {
+    // Sized from the stored sample count, not Samples per Pixel, so a native
+    // 4:2:2 frame is two samples per pixel (PS3.3 C.7.6.3.1.2). The two are
+    // equal for every other photometric.
     u64::from(desc.rows())
         .checked_mul(u64::from(desc.columns()))
-        .and_then(|bits| bits.checked_mul(u64::from(desc.samples_per_pixel())))
+        .and_then(|bits| bits.checked_mul(u64::from(stored_samples_per_pixel(desc))))
         .and_then(|bits| bits.checked_mul(u64::from(desc.bits_allocated())))
         .ok_or(CodecError::FrameMismatch)
 }

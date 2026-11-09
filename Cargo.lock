@@ -295,8 +295,6 @@ dependencies = [
 [[package]]
 name = "dicom-object"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0504b87987f0e7624cf7ee063fe7ffdb438c66c092620817fb9bb0f130686b85"
 dependencies = [
  "byteordered",
  "dicom-core",
@@ -1268,6 +1266,7 @@ dependencies = [
  "ocelli-pixel",
  "ocelli-render",
  "ocelli-viewport",
+ "sha2",
  "thiserror",
 ]
 

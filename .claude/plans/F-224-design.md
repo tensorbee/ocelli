@@ -388,3 +388,123 @@ Made by the sprint lead on 2026-11-07 from read-only groundwork. Where these dif
 - **`cacheKey` is shared with F-213,** which will add the file window index. This story replaces only the file identity prefix, so the later merge is one line.
 - **The new browser check is wired** into `bin/ocelli.sh viewer-browser` and its `--list` description, beside the four checks already there.
 - **Owed with this half:** README, `use.html` section 12 and `more.html` `#worker` per AC19, the `postWadoInstance` `cache` option in its option table (pass 3's note). CHANGELOG is written at integration.
+
+## First-image remediation, 2026-11-08
+
+The operator rejected the close exception and requires the first-image
+movement fixed before S46 closes. Fresh registered same-host base/tip medians
+are 8.7/12.7 ms. The recorded baseline is 9.7 ms with an unchanged 25 percent
+band. All absolute budgets pass, but this movement remains open.
+
+The measured probe-settled intervention and source inspection motivate one
+bounded experiment, not an established isolated cause: loadSeries starts
+showIndex asynchronously, then immediately constructs the active-series file
+list and starts four file reads. Prioritize the first publication before that
+background probe while preserving AC13 to AC17.
+
+Proposed mechanism, pending independent challenge before implementation:
+
+- Retain the drawing promise returned by showIndex. Only an active series
+  selection uses the new bounded scheduling helper. Focus, visible-page and
+  viewport-activation probes retain their existing behavior.
+- After the drawing promise settles, on either success or failure, allow two
+  animation-frame callbacks before starting the probe. This leaves a paint
+  opportunity after the first canvas publication. The file list and all reads
+  begin only when the callback actually calls probeActive.
+- Independently arm a 100 ms fallback from selection. A slow or unresolved draw,
+  rejected draw or absent animation callback cannot omit the probe. This is
+  a scheduling deadline within the existing one-second probe observation,
+  not a new performance tolerance or weakened detection requirement.
+- One local done flag cancels the timer and any pending animation callbacks.
+  A late draw settlement cannot start another sweep. Before probing, check
+  the captured folder generation and that the same series/viewport remains
+  active. Its later activation or selection owns its own existing trigger.
+- No pixel math, cache identity, changed-file refusal, file contents, read
+  size, four-worker limit or probe busy/again coalescing changes. Never await
+  the probe on a foreground path. No per-frame scheduling allocation.
+
+| ID | Observable control | Wrong implementation rejected | Evidence |
+| --- | --- | --- | --- |
+| AC20 | On a fast synthetic first draw, the first one-byte probe read starts after the first canvas publication has had a paint opportunity | Immediate probe contends with first draw | New actual-browser observer, old semantic RED and repaired GREEN |
+| AC21 | Hold the first preview unresolved and separately refuse it. The selected series is still probed within the existing one-second limit | Waiting only on successful draw, or requiring animation callbacks forever | Browser hold/refusal and fallback controls |
+| AC22 | A fallback followed by late draw settlement produces one complete sweep, and a folder/active-series replacement drops the stale scheduled request | Duplicate late sweep or probing abandoned files | Browser lifecycle controls |
+| AC23 | The 1693-file sweep still reads one byte each, at most four in flight, under 1 second. Existing changed/restored/late/tiles/cells controls remain green | Performance fixed by losing detection or reading fewer files | Existing changed.mjs plus source/guard checks |
+| AC24 | Same-host registered before/after measurements restore first_image within the existing recorded 25 percent band, without any baseline or tolerance edit | Accepting the movement by changing the bar | Registered five-subject runs and unchanged comparer |
+
+Owned source is page.html, existing changed.mjs browser observer and its
+preview.rs source pin, this existing plan and necessary existing LLD/review
+records. User-facing behavior and cache limits remain as documented, so no
+new control or settings text is needed. The full changed-file browser suite,
+page test, lint/types and required feature profile follow independent review.
+No acceptance or performance gain is claimed by this proposal.
+
+### Independent design ruling for the first-image remediation
+
+The independent Codex reviewer found one defect and one smell in the proposed
+mechanism. Generation, viewport and key alone alias an A to B to A selection,
+and a requested timer delay is not a guaranteed browser deadline. Adopt one
+global pending-selection cancel closure. A new active selection cancels the
+old one. Every immediate probeActive call cancels it before looking up the
+active series, so focus, visibility and activation, including an empty cell,
+consume pending work. Finish clears only its own timer, callbacks and owner
+before checking generation, viewport and key, then starts the existing probe.
+Late settlement observes the done flag. No viewport fields or load-token
+coupling are added. The 100 ms fallback is a requested delay, and acceptance
+still requires actual visible-page completion under the existing one-second
+limit. Tests also cover repeated selection, same-UID folder replacement and
+viewport activation. The route hold is released safely even if its network
+fetch settles after release.
+
+### Reviewed background concurrency experiment, 2026-11-09
+
+The first-image scheduling change measured 10.3 and 10.4 ms inside the
+unchanged recorded band, but window step measured 3.2 ms twice, outside its
+unchanged 2.4 ms plus 25 percent band. A four-arm transparent diagnostic
+observed 3.2 ms with probe overlap in both old and new builds, and 2.4 to
+2.5 ms after settling. This supports an overlap hypothesis, not an isolated
+cause or accepted replacement for registered measurements.
+
+The lead proposes one background read worker instead of four. The independent
+reviewer approves a bounded experiment with an explicit amendment: original
+decision 10, AC17 and approach 4 specified four workers, and the validator
+required a peak exactly four. This changes the chosen concurrency to one and
+the assertion policy to an integer peak from one through the independent
+ceiling of four. It is not an unchanged original AC17 assertion. A five-read
+negative control must still fail. Every file and byte check and the original
+one-second limit stay. No performance baseline, measured band or time limit
+changes. No pause timers, new scheduling state or pixel logic are added.
+
+Before adoption, the full changed-file browser suite must pass, including the
+1693-file sweep and a new large-running-A to final-active-B coalescing control.
+The latter changes a picked B file while A is still reading, selects B and
+focuses the page in one task, then requires exactly one complete A sweep and
+one B sweep, the changed-file fault and final status within one second of the
+B request. This rejects losing probe.again or starving the newly active
+series behind a slower old sweep. Registered first-image and window measures
+must then meet the unchanged bands, and all other budgets remain required.
+The experiment is not acceptance until its measurements and independent
+review are recorded.
+
+### Measured concurrency adoption, 2026-11-09
+
+Adopt the reviewed one-worker amendment. The full changed-file browser run
+passed, including all prior controls and the new running-A to active-B case.
+The 1693-file sweep read 1693 bytes at peak one in 284.9 ms. The queued case
+read exactly 1693 A and three B bytes, refused and counted the changed B file,
+and finished 276.5 ms after B selection. The five-inflight validator mutant
+and dropped-probe.again page mutant were semantic RED, and the original
+source was restored exactly. Earlier immediate-cancellation and fallback
+mutants were also semantic RED. Original exact-four policy RED is evidence
+of this explicit amendment, not a claim that the original implementation
+violated its own plan.
+
+The complete five-subject registered run passed all absolute budgets and all
+existing recorded bands. Open was 967 ms, first image 11.3 ms, window step
+2.2 ms, scroll 108.774 frames per second with zero release and debug blanks,
+and peak native RSS 464125952 bytes. The fresh pre-ICC first-image median
+remains recorded as 8.7 ms, rather than being replaced by the 9.7 ms recorded
+baseline. The earlier assembled 12.7 ms regression and the intermediate
+3.2 ms window movement remain in their receipts. No baseline or performance
+band was changed. Detailed source identities and limitations are recorded
+in docs/lld/benchmarks.md. Final composed feature verification and operator
+acceptance remain separate from these private-build measurements.

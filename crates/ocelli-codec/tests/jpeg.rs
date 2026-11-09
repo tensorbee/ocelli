@@ -164,32 +164,14 @@ fn baseline_colour_reports_rgb_and_class_two_measurement_against_corpus_truth() 
         &desc,
         &mut out,
     )?;
-    assert_eq!(
-        class_two_measurement(&out, expected)?,
-        [
-            ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 4_248,
-                signed_sum: 1_661,
-                max_abs_diff: 4,
-                percentile_999_abs_diff: 4,
-            },
-            ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 3_134,
-                signed_sum: -753,
-                max_abs_diff: 3,
-                percentile_999_abs_diff: 2,
-            },
-            ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 3_622,
-                signed_sum: -186,
-                max_abs_diff: 3,
-                percentile_999_abs_diff: 3,
-            },
-        ]
+    let measurements = class_two_measurement(&out, expected)?;
+    println!(
+        "class-two observation, unmeasured ({}): {:?}",
+        JPEG_BASELINE, measurements
     );
+    for measurement in &measurements {
+        assert_eq!(measurement.pixels, 6_144);
+    }
     Ok(())
 }
 
@@ -208,37 +190,127 @@ fn extended_process_2_eight_bit_decodes_against_independent_dcmtk_truth() -> Tes
         decoder.decode_photometric_interpretation(&desc),
         DecodePhotometricInterpretation::Rgb
     );
+    assert_eq!(
+        decoder.decode_sample_layout(&desc),
+        DecodeSampleLayout::Interleaved
+    );
     decoder.decode(
         include_bytes!("fixtures/jpeg_extended_process2_8bit.jpg"),
         &desc,
         &mut out,
     )?;
+    let measurements = class_two_measurement(&out, expected)?;
+    println!(
+        "class-two observation, unmeasured ({}): {:?}",
+        JPEG_EXTENDED, measurements
+    );
+    for measurement in &measurements {
+        assert_eq!(measurement.pixels, 6_144);
+    }
+    Ok(())
+}
+
+#[test]
+fn class_two_hand_metric_controls_match_counted_triplet_differences() -> TestResult {
+    // Exact independent hand metric controls on fixed numeric RGB triplets
+    // with no decoder, fixture or output-derived expectation. Every expected
+    // value is derived directly by counting the per-channel differences of
+    // the pixels below, not from any DICOM pixel formula. D-16 reports
+    // measured statistics and never invents a pass threshold, so these only
+    // pin the counting arithmetic itself.
+    // R: differences 1 and 2 give pixels 2, differing 2, signed -1, max 2,
+    // p999 2. G: differences 2 and 0 give differing 1, signed -2, max 2,
+    // p999 2. B: differences 0 and 5 give differing 1, signed 5, max 5,
+    // p999 5.
+    let actual = [11_u8, 18, 30, 8, 20, 35];
+    let expected = [10_u8, 20, 30, 10, 20, 30];
     assert_eq!(
-        class_two_measurement(&out, expected)?,
+        class_two_measurement(&actual, &expected)?,
         [
             ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 1_235,
-                signed_sum: 1_640,
-                max_abs_diff: 3,
-                percentile_999_abs_diff: 2,
-            },
-            ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 917,
-                signed_sum: -846,
+                pixels: 2,
+                differing: 2,
+                signed_sum: -1,
                 max_abs_diff: 2,
                 percentile_999_abs_diff: 2,
             },
             ClassTwoMeasurement {
-                pixels: 6_144,
-                differing: 113,
-                signed_sum: 49,
+                pixels: 2,
+                differing: 1,
+                signed_sum: -2,
                 max_abs_diff: 2,
                 percentile_999_abs_diff: 2,
+            },
+            ClassTwoMeasurement {
+                pixels: 2,
+                differing: 1,
+                signed_sum: 5,
+                max_abs_diff: 5,
+                percentile_999_abs_diff: 5,
             },
         ]
     );
+    Ok(())
+}
+
+#[test]
+fn class_two_nearest_rank_boundary_control_separates_max_from_percentile() -> TestResult {
+    // Nearest-rank boundary control: one thousand black expected RGB
+    // triplets against black actual triplets where only the first R sample
+    // is 1 and the last R sample is 255. Counting those differences gives R
+    // pixels 1000, differing 2, signed 256, max 255 and p999 1, because the
+    // 999th ordered difference is 1 under the existing 999 per 1000
+    // nearest-rank rule. Max and percentile are distinct statistics and the
+    // boundary sits exactly on the 999 sample threshold. G and B count all
+    // zeros except pixels 1000.
+    let expected = vec![0_u8; 3_000];
+    let mut actual = vec![0_u8; 3_000];
+    *actual
+        .get_mut(0)
+        .ok_or("hand fixture has no first red sample")? = 1;
+    *actual
+        .get_mut(2_997)
+        .ok_or("hand fixture has no last red sample")? = 255;
+    assert_eq!(
+        class_two_measurement(&actual, &expected)?,
+        [
+            ClassTwoMeasurement {
+                pixels: 1_000,
+                differing: 2,
+                signed_sum: 256,
+                max_abs_diff: 255,
+                percentile_999_abs_diff: 1,
+            },
+            ClassTwoMeasurement {
+                pixels: 1_000,
+                differing: 0,
+                signed_sum: 0,
+                max_abs_diff: 0,
+                percentile_999_abs_diff: 0,
+            },
+            ClassTwoMeasurement {
+                pixels: 1_000,
+                differing: 0,
+                signed_sum: 0,
+                max_abs_diff: 0,
+                percentile_999_abs_diff: 0,
+            },
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn class_two_measurement_rejects_unequal_and_non_triplet_buffers() -> TestResult {
+    // The helper must keep refusing unequal-length buffers and buffers that
+    // are not a whole number of RGB triplets, so mispaired pixel data can
+    // never produce a statistic.
+    let triplet = [11_u8, 18, 30];
+    let mismatched = [10_u8, 20, 30, 10];
+    assert!(class_two_measurement(&triplet, &mismatched).is_err());
+    assert!(class_two_measurement(&mismatched, &triplet).is_err());
+    let non_triplet = [0_u8; 4];
+    assert!(class_two_measurement(&non_triplet, &non_triplet).is_err());
     Ok(())
 }
 

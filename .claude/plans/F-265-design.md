@@ -138,3 +138,20 @@ finite resource limits, calibration policy, typed module/API map, command and
 surface ownership, literal fixture values and actual browser selectors.
 Independently review those decisions before coding. This is scheduled new
 implementation work, not an existing feature hidden behind a UI selector.
+
+
+## Reviewed draft refinement
+
+Additive to the F-265 draft only. Status, sprint, estimate and dependencies stay unchanged. No implementation, acceptance, new API, policy, math, tolerance or encoding is selected.
+
+Same-viewer consumer controls:
+
+1. Open an own synthetic supported ECG object from local data and from a genuinely configured remote source. Real multi-channel traces appear through the new bounded reader. A KOS reference, enum or label panel is not display.
+2. Decode literal signed 16-bit interleaved vectors through the actual provider and point readout. Challenge channel order, sign, stored and allocated bits, byte order and several distinct channel shapes.
+3. Confirm labels and declared time and amplitude axes come from the same selected samples. Raw sample, time, channel skew and offset, and coded amplitude units stay separate claims.
+4. Change channel visibility, time pan and zoom, amplitude scale, reset and resize. Only the current identity commits, unrelated viewports keep their state, and release and reopen leave no duplicated surface or stale readout.
+5. Present unsupported forms, multiple groups, impossible counts, nonfinite calibration and truncated data. Refusal happens before allocation or publication, with no silent first-group choice and no zero-filled tail, and the prior usable view survives.
+6. Observe the declared owned no-GPU 2D path on each tier, separating supported behaviour from missing-host evidence. No image window, inversion or ruler is applied to samples.
+7. Check logs and errors expose no samples, patient attributes, labels, identifiers or paths, and rerun standing image, marks, colour/ICC, video, document and conformance workflows. More names no second showcase.
+
+Unresolved lead questions: exact calibration policy, padding and truncated or extra byte treatment, typed ownership boundary, presentation and units fallback including physical display scaling, and permanent observers for every approved acceptance row.

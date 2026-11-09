@@ -693,14 +693,9 @@ fn encapsulated_bytes(
         .object()
         .element(PIXEL_DATA)
         .map_err(|_| RowStop::failed("pixel-data-absent"))?;
-    let offsets = match element.value().offset_table() {
-        Some(table) => table.to_vec(),
-        None => Vec::new(),
-    };
-    let fragments = element
-        .value()
-        .fragments()
-        .ok_or_else(|| RowStop::failed("pixel-data-absent"))?;
+    if element.value().fragments().is_none() {
+        return Err(RowStop::failed("pixel-data-absent"));
+    }
     let facts = pixel_facts(sidecar)?;
     let desc = frame_desc(sidecar, &facts)?;
     let registry = codecs().map_err(RowStop::failed)?;
@@ -710,8 +705,9 @@ fn encapsulated_bytes(
     if decoder_rgb && !allow_decoder_rgb {
         return Err(RowStop::failed("decoder-colour-output"));
     }
-    let borrowed: Vec<&[u8]> = fragments.iter().map(Vec::as_slice).collect();
-    let index = EncapsulatedFrameIndex::from_basic(facts.frames, &offsets, &borrowed)
+    // F-244. The Extended or Basic Offset Table and the syntax's frame
+    // delimiter are chosen once, in ocelli-dicom.
+    let index = EncapsulatedFrameIndex::from_parsed(parsed, facts.frames)
         .map_err(|_| RowStop::failed("frame-index-refused"))?;
     let parts = index
         .frame_fragments(0)

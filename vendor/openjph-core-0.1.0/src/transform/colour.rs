@@ -19,17 +19,13 @@ pub const BETA_CBF: f32 = (0.5 / (1.0 - ALPHA_BF as f64)) as f32;
 // BETA_CrF = 0.5 / (1 - ALPHA_RF)
 pub const BETA_CRF: f32 = (0.5 / (1.0 - ALPHA_RF as f64)) as f32;
 
-// Inverse ICT coefficients
-// GAMMA_CR2R = 2.0 * (1 - ALPHA_RF)
-pub const GAMMA_CR2R: f32 = (2.0 * (1.0 - ALPHA_RF as f64)) as f32;
-// GAMMA_CB2B = 2.0 * (1 - ALPHA_BF)
-pub const GAMMA_CB2B: f32 = (2.0 * (1.0 - ALPHA_BF as f64)) as f32;
-// GAMMA_CR2G = 2.0 * ALPHA_RF * (1 - ALPHA_RF) / ALPHA_GF
-pub const GAMMA_CR2G: f32 =
-    (2.0 * ALPHA_RF as f64 * (1.0 - ALPHA_RF as f64) / ALPHA_GF as f64) as f32;
-// GAMMA_CB2G = 2.0 * ALPHA_BF * (1 - ALPHA_BF) / ALPHA_GF
-pub const GAMMA_CB2G: f32 =
-    (2.0 * ALPHA_BF as f64 * (1.0 - ALPHA_BF as f64) / ALPHA_GF as f64) as f32;
+// Inverse ICT coefficients, ISO/IEC 15444-1 equation G-6's literals. The
+// F-239 patch pins these instead of deriving them from the forward matrix.
+// OpenJPEG applies the same literals.
+pub const GAMMA_CR2R: f32 = 1.402;
+pub const GAMMA_CB2B: f32 = 1.772;
+pub const GAMMA_CR2G: f32 = 0.71414;
+pub const GAMMA_CB2G: f32 = 0.34413;
 
 // =========================================================================
 // Unsafe pointer accessors (same pattern as wavelet.rs)

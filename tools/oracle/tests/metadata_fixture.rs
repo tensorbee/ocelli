@@ -200,3 +200,44 @@ fn projected_gaps_not_thickness_expose_nonuniform_spacing() -> Outcome {
     );
     Ok(())
 }
+
+#[test]
+fn committed_metadata_truth_satisfies_comparator_schema() -> Outcome {
+    let document = serde_json::from_str(include_str!("../metadata-truth.json"))?;
+    let volumes = serde_json::from_str(include_str!("../volume-truth.json"))?;
+    ocelli_oracle::metadata::MetadataTruth::from_json(&document, &volumes)?;
+    Ok(())
+}
+
+#[test]
+fn every_colour_codestream_citation_is_checked_by_the_comparator() -> Outcome {
+    let document: serde_json::Value = serde_json::from_str(include_str!("../metadata-truth.json"))?;
+    let volumes = serde_json::from_str(include_str!("../volume-truth.json"))?;
+    // Establish a valid control first. Four invalid entries must not make
+    // every later mutation appear to be correctly refused.
+    ocelli_oracle::metadata::MetadataTruth::from_json(&document, &volumes)?;
+    for path in [
+        "syntax/j2k_lossless_ybr_rct.dcm",
+        "syntax/j2k_lossy_ybr_ict.dcm",
+        "syntax/htj2k_lossless_ybr_rct.dcm",
+        "syntax/htj2k_lossy_ybr_ict.dcm",
+    ] {
+        let mut invalid = document.clone();
+        let citation = invalid
+            .get_mut("entries")
+            .and_then(|entries| entries.get_mut(path))
+            .and_then(|entry| entry.get_mut("citation"))
+            .ok_or("declared colour fixture citation is absent")?;
+        *citation = serde_json::Value::String("PS3.5 8.2.4".to_owned());
+        let error = ocelli_oracle::metadata::MetadataTruth::from_json(&invalid, &volumes)
+            .err()
+            .ok_or("a missing leading PS3.3 citation was accepted")?
+            .to_string();
+        assert!(error.contains(path), "{error}");
+        assert!(
+            error.contains("needs a citation beginning with PS3.3"),
+            "{error}"
+        );
+    }
+    Ok(())
+}

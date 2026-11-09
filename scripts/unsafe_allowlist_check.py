@@ -101,6 +101,9 @@ VENDOR_ROOT = "vendor/"
 VENDORED_UNSAFE = {
     # D-20. The published package contains no unsafe Rust at all.
     "ritk-codecs-0.6.0": 0,
+    # F-244 and D-18. The published package contains no unsafe Rust, and its
+    # one recorded patch adds none.
+    "dicom-object-0.10.0": 0,
     # D-22. 104 constructs in nine files, of which the scalar memory, wavelet
     # and colour paths are the ones reachable on wasm32. The architecture SIMD
     # files hold the rest and are compiled only for x86_64 and aarch64.

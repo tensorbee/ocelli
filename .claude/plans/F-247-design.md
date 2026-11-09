@@ -176,3 +176,20 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+
+## Reviewed draft refinement
+
+Additive to the F-247 draft only. Status, sprint, estimate and dependencies stay unchanged. No implementation, acceptance, new API, policy, math or tolerance is selected.
+
+Same-viewer consumer controls, each through the actual provider against the selected image:
+
+1. Toggle one synthetic plane with row and column origin below 1 and one with origin greater than 1. The below-1 plane sits above or left of the image top-left. The greater-1 plane sits lower or right. Two separate observations, not one arbitrary-nonzero rule.
+2. Compose the mask with real image geometry and observe it under zoom, pan, rotate, flip and device pixel ratio, preserving anisotropic alignment and quantitative readout/ROI. A text panel or disconnected CSS stand-in is not evidence.
+3. On a multiframe source with frame association, step to a later frame and confirm the mask follows the contiguous per-frame bit offset with no interframe byte padding. Caller frame indices stay distinct from DICOM frame numbers.
+4. Apply a rectangular and a circular shutter together. Only the intersection of their openings stays visible.
+5. Apply a BITMAP shutter. Set bits hide, and its referenced plane does not also draw as a graphic overlay. A supplied source-only mixed case stays a bounded future question.
+6. Change source, frame or viewport while pending. A stale reply is rejected before visible commit, and refusal, cancellation, release and reopen leave no old mask or duplicated resources.
+7. Masking hides pixels. It is not redaction or deidentification, and logs and failures expose neither bitmap text nor file metadata. More names the reachable workflow truthfully.
+
+Unresolved lead questions: missing geometric neutral value, P-value handling, optional encoded-colour presentation, ordinary overlay styling and defaults, and supported bitmap and presentation-state input scope. No presentation conversion or full GSPS application is proposed.

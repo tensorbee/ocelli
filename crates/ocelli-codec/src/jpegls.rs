@@ -21,7 +21,7 @@ use ritk_codecs::{PixelLayout, PixelSignedness, decode_jpeg_ls_fragment};
 
 use crate::{
     Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
-    FrameDesc, PixelDataVr, PixelRepresentation, Registry, RegistryError,
+    FrameDesc, JpegLsPreset, PixelDataVr, PixelRepresentation, Registry, RegistryError,
     sample_convert::convert_samples,
 };
 
@@ -35,6 +35,10 @@ const SOI: u8 = 0xd8;
 const EOI: u8 = 0xd9;
 const SOF55: u8 = 0xf7;
 const SOS: u8 = 0xda;
+const LSE: u8 = 0xf8;
+
+/// ISO/IEC 14495-1 C.2.4.1.1, the default RESET.
+const DEFAULT_RESET: u16 = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -137,6 +141,8 @@ impl Decoder for JpegLsDecoder {
             out.copy_from_slice(&decoded);
             return Ok(());
         }
+
+        validate_presets(codestream, header)?;
 
         let signedness = match desc.pixel_representation() {
             PixelRepresentation::Unsigned => PixelSignedness::Unsigned,
@@ -376,6 +382,85 @@ fn validate_header(mode: Mode, header: Headers, desc: &FrameDesc) -> Result<(), 
             ))
     {
         return Err(CodecError::FrameMismatch);
+    }
+    Ok(())
+}
+
+/// Refuse every LSE preset, ID 1, that the vendored decoder does not apply.
+///
+/// ISO/IEC 14495-1 C.2.4.1.1: `ID MAXVAL T1 T2 T3 RESET`, the five parameters
+/// 16 bits each, where zero selects a parameter's default. The vendored decoder
+/// always takes MAXVAL as `2^P - 1` and RESET as 64, and it uses all three
+/// thresholds from the segment when T1 is non-zero and all three defaults
+/// otherwise. A stream relying on anything else would decode to other
+/// contexts than its encoder used, so it is refused by name instead. Every
+/// segment is checked, because a later one only replaces the thresholds.
+fn validate_presets(src: &[u8], header: Headers) -> Result<(), CodecError> {
+    // P is 2 to 16, checked in `parse_sof55`, so the shift cannot overflow.
+    let default_maxval = u32::from(u16::MAX) >> (16 - u32::from(header.precision));
+    let mut offset = 2usize;
+    while offset.checked_add(4).is_some_and(|end| end <= src.len()) {
+        let marker = *src.get(offset + 1).ok_or(CodecError::InvalidCodestream)?;
+        let length = usize::from(read_u16(src, offset + 2)?);
+        let end = offset
+            .checked_add(2)
+            .and_then(|value| value.checked_add(length))
+            .ok_or(CodecError::InvalidCodestream)?;
+        let payload = src
+            .get(offset + 4..end)
+            .ok_or(CodecError::InvalidCodestream)?;
+        match marker {
+            SOS => return Ok(()),
+            LSE if payload.first() == Some(&1) => {
+                if payload.len() != 11 {
+                    return Err(CodecError::InvalidCodestream);
+                }
+                let maxval = read_u16(payload, 1)?;
+                let thresholds = [
+                    read_u16(payload, 3)?,
+                    read_u16(payload, 5)?,
+                    read_u16(payload, 7)?,
+                ];
+                let reset = read_u16(payload, 9)?;
+                check_preset(maxval, thresholds, reset, default_maxval, header.near)?;
+            }
+            _ => {}
+        }
+        offset = end;
+    }
+    Err(CodecError::InvalidCodestream)
+}
+
+/// One LSE ID 1 segment against what the vendored decoder applies, in the
+/// order MAXVAL, RESET, partial default thresholds, threshold order.
+fn check_preset(
+    maxval: u16,
+    [t1, t2, t3]: [u16; 3],
+    reset: u16,
+    default_maxval: u32,
+    near: u8,
+) -> Result<(), CodecError> {
+    if maxval != 0 && u32::from(maxval) != default_maxval {
+        return Err(CodecError::UnsupportedPreset(JpegLsPreset::MaxVal));
+    }
+    if reset != 0 && reset != DEFAULT_RESET {
+        return Err(CodecError::UnsupportedPreset(JpegLsPreset::Reset));
+    }
+    let zeros = [t1, t2, t3].iter().filter(|value| **value == 0).count();
+    if zeros == 3 {
+        return Ok(());
+    }
+    if zeros != 0 {
+        return Err(CodecError::UnsupportedPreset(
+            JpegLsPreset::PartialDefaultThresholds,
+        ));
+    }
+    // C.2.4.1.1: NEAR + 1 <= T1 <= T2 <= T3 <= MAXVAL, the first written as
+    // NEAR < T1 over integers, and MAXVAL here is the default, the only one
+    // accepted above.
+    let (t1, t2, t3) = (u32::from(t1), u32::from(t2), u32::from(t3));
+    if !(u32::from(near) < t1 && t1 <= t2 && t2 <= t3 && t3 <= default_maxval) {
+        return Err(CodecError::UnsupportedPreset(JpegLsPreset::ThresholdOrder));
     }
     Ok(())
 }

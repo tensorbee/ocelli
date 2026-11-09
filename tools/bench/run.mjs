@@ -33,6 +33,7 @@ import {
   runnerBasename,
   runnerPath,
 } from "./src/paths.mjs";
+import { COLOUR_CASE_IDS } from "./src/comparison_colour.mjs";
 import { loadRegistry } from "./src/registry.mjs";
 import { INCOMPARABLE, MEASURED, subjectState } from "./src/state.mjs";
 import { conditions, hostClass, hostClassKey } from "./src/hostclass.mjs";
@@ -47,6 +48,11 @@ const require = createRequire(import.meta.url);
 
 export const USAGE = `bin/ocelli.sh bench [options]
 
+  --compare-cornerstone  compare both local viewers, requires --pseudo or OCELLI_PSEUDO_DIR
+  --pseudo <dir>         local comparison input root, never written to reports
+  --colour-case <id>     supplemental controlled colour case, never published
+  --publish              write the generated tracked comparison pair
+  --software             permit and name SwiftShader for comparison
   --list                 print each subject with its definition, the story that
                          gives it a subject and that story's backlog status,
                          then stop. It resolves no state and runs nothing
@@ -80,6 +86,11 @@ skip, and a skipped gate is not a pass here.
 
 export function parseArgs(argv) {
   const options = {
+    compareCornerstone: false,
+    colourCase: null,
+    pseudo: null,
+    publish: false,
+    software: false,
     list: false,
     compare: false,
     accept: false,
@@ -104,6 +115,11 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
+      case "--compare-cornerstone": options.compareCornerstone = true; break;
+      case "--colour-case": options.colourCase = value(++index, arg); break;
+      case "--pseudo": options.pseudo = value(++index, arg); break;
+      case "--publish": options.publish = true; break;
+      case "--software": options.software = true; break;
       case "--list": options.list = true; break;
       case "--compare": options.compare = true; break;
       case "--accept": options.accept = true; break;
@@ -161,6 +177,17 @@ export function parseArgs(argv) {
         options.only.push(arg);
         break;
     }
+  }
+  if (options.colourCase !== null && !COLOUR_CASE_IDS.includes(options.colourCase)) throw new Error("--colour-case needs a supported controlled case");
+  if (options.compareCornerstone) {
+    if (options.compare || options.accept || options.subject || options.story || options.why || options.list || options.only.length || options.tolerance !== null || Object.keys(options.tolerances).length || options.toleranceWhy) {
+      throw new Error("--compare-cornerstone refuses baseline and subject comparison options");
+    }
+    if (options.publish && options.colourCase) throw new Error("--publish refuses supplemental colour cases");
+    if (options.publish && !options.build) throw new Error("--publish refuses --no-build for a comparison");
+    if (!argv.includes("--out")) options.out = join(DEFAULT_OUT, "compare");
+  } else if (options.pseudo !== null || options.publish || options.software || options.colourCase !== null) {
+    throw new Error("--pseudo, --publish, --software and --colour-case require --compare-cornerstone");
   }
   if (options.accept && (!options.story || !options.why)) {
     throw new Error(
@@ -324,6 +351,18 @@ export async function main(argv) {
   if (options.help) {
     process.stdout.write(USAGE);
     return 0;
+  }
+
+  if (options.compareCornerstone) {
+    try {
+      const { runComparison } = await import("./src/comparison_run.mjs");
+      const result = await runComparison(options);
+      process.stdout.write(`comparison ${result.state}\n`);
+      return result.state === "measured" ? 0 : 1;
+    } catch (error) {
+      process.stderr.write(`${error?.safeMessage || "comparison refused before publication"}\n`);
+      return error?.exitCode || 2;
+    }
   }
 
   // Outside the try, so a registry the loader refuses still rejects main and

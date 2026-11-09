@@ -189,6 +189,38 @@ pub fn decode_tile_part(
     height: usize,
     coding: TileCodingParams<'_>,
 ) -> Result<TileComponentSamples> {
+    let mut planes = decode_tile_planes(tile_data, width, height, coding, 1, false)?;
+    let samples = planes
+        .pop()
+        .context("J2K: the single component's decode is missing")?;
+    Ok(TileComponentSamples {
+        samples,
+        width,
+        height,
+    })
+}
+
+/// Decode `num_components` components of one tile-part body, returning each
+/// component's level-shifted samples.
+///
+/// When `multiple_component_transform` is set and three components are
+/// decoded, the inverse transform runs here rather than in the caller:
+/// ISO 15444-1 G.2's RCT is exact on the integer reconstruction and G.3's
+/// ICT needs the unrounded float reconstruction, and the irreversible
+/// path's one rounding runs after the transform in both cases. The transform
+/// kind follows the wavelet, as Part 1 pairs the reversible 5/3 kernel with
+/// the RCT and the irreversible 9/7 kernel with the ICT.
+///
+/// # Errors
+/// Returns the same errors as [`decode_tile_part`], per component.
+pub(crate) fn decode_tile_planes(
+    tile_data: &[u8],
+    width: usize,
+    height: usize,
+    coding: TileCodingParams<'_>,
+    num_components: usize,
+    multiple_component_transform: bool,
+) -> Result<Vec<Vec<i32>>> {
     let sample_count =
         checked_pixel_count(width, height).context("J2K tile-component dimensions")?;
     let bands = subband_layout(width, height, coding.num_decomp_levels);
@@ -197,14 +229,19 @@ pub fn decode_tile_part(
         .enumerate()
         .flat_map(|(bi, b)| band_cblks(bi, b))
         .collect();
-    let mut states: Vec<CblkState> = cblks
-        .iter()
-        .map(|_| CblkState {
-            lblock: 3,
-            ..CblkState::default()
+    let mut states: Vec<Vec<CblkState>> = (0..num_components)
+        .map(|_| {
+            cblks
+                .iter()
+                .map(|_| CblkState {
+                    lblock: 3,
+                    ..CblkState::default()
+                })
+                .collect()
         })
         .collect();
-    let mut trees = band_trees(&bands);
+    let mut trees: Vec<Vec<Option<BandTrees>>> =
+        (0..num_components).map(|_| band_trees(&bands)).collect();
     // Per-band index range into the flat `cblks` list.
     let mut band_ranges = Vec::with_capacity(bands.len());
     let mut start = 0usize;
@@ -222,76 +259,81 @@ pub fn decode_tile_part(
     let mut pos = 0usize;
     for layer in 0..u32::from(coding.num_layers.max(1)) {
         for r in 0..=usize::from(coding.num_decomp_levels) {
-            if pos >= tile_data.len() {
-                bail!(
-                    "J2K: tile data ended before LRCP packet header for layer {layer}, resolution {r}"
-                );
-            }
-            let (s, e) = resolution_band_range(r);
-            let mut br = BitReader::new(&tile_data[pos..]);
-            // (flat code-block index, body length) included in this packet.
-            let mut included: Vec<(usize, usize)> = Vec::new();
-            if br.read_bit()? == 1 {
-                for bi in s..e {
-                    let Some(t) = trees[bi].as_mut() else {
-                        continue;
-                    };
-                    for ci in band_ranges[bi].clone() {
-                        let c = cblks[ci];
-                        let st = &mut states[ci];
-                        // Inclusion (§B.10.4): tag tree before first
-                        // inclusion, a single raw bit afterwards.
-                        let included_now = if st.included_before {
-                            br.read_bit()? == 1
-                        } else {
-                            t.incl.decode(&mut br, c.gx, c.gy, layer + 1)?
-                        };
-                        if !included_now {
+            for component in 0..num_components {
+                if pos >= tile_data.len() {
+                    bail!(
+                        "J2K: tile data ended before LRCP packet header for layer {layer}, \
+                         resolution {r}, component {component}"
+                    );
+                }
+                let (s, e) = resolution_band_range(r);
+                let mut br = BitReader::new(&tile_data[pos..]);
+                // (flat code-block index, body length) included in this packet.
+                let mut included: Vec<(usize, usize)> = Vec::new();
+                if br.read_bit()? == 1 {
+                    for bi in s..e {
+                        let Some(t) = trees[component][bi].as_mut() else {
                             continue;
-                        }
-                        if !st.included_before {
-                            st.msbs = t.msbs.decode_value(&mut br, c.gx, c.gy)?;
-                            st.included_before = true;
-                        }
-                        let np = read_num_passes(&mut br)?;
-                        st.num_passes = st
-                            .num_passes
-                            .checked_add(np)
-                            .context("J2K packet coding-pass count overflow")?;
-                        while br.read_bit()? == 1 {
-                            st.lblock = st
+                        };
+                        for ci in band_ranges[bi].clone() {
+                            let c = cblks[ci];
+                            let st = &mut states[component][ci];
+                            // Inclusion (§B.10.4): tag tree before first
+                            // inclusion, a single raw bit afterwards.
+                            let included_now = if st.included_before {
+                                br.read_bit()? == 1
+                            } else {
+                                t.incl.decode(&mut br, c.gx, c.gy, layer + 1)?
+                            };
+                            if !included_now {
+                                continue;
+                            }
+                            if !st.included_before {
+                                st.msbs = t.msbs.decode_value(&mut br, c.gx, c.gy)?;
+                                st.included_before = true;
+                            }
+                            let np = read_num_passes(&mut br)?;
+                            st.num_passes = st
+                                .num_passes
+                                .checked_add(np)
+                                .context("J2K packet coding-pass count overflow")?;
+                            while br.read_bit()? == 1 {
+                                st.lblock = st
+                                    .lblock
+                                    .checked_add(1)
+                                    .context("J2K packet Lblock unary value overflow")?;
+                            }
+                            let bits = st
                                 .lblock
-                                .checked_add(1)
-                                .context("J2K packet Lblock unary value overflow")?;
+                                .checked_add(lblock_extra_bits(np))
+                                .context("J2K packet length field width overflow")?;
+                            let len = br.read_bits(bits)? as usize;
+                            if len == 0 {
+                                bail!(
+                                    "J2K: included code-block declares {np} coding passes with a zero-length packet body"
+                                );
+                            }
+                            included.push((ci, len));
                         }
-                        let bits = st
-                            .lblock
-                            .checked_add(lblock_extra_bits(np))
-                            .context("J2K packet length field width overflow")?;
-                        let len = br.read_bits(bits)? as usize;
-                        if len == 0 {
-                            bail!(
-                                "J2K: included code-block declares {np} coding passes with a zero-length packet body"
-                            );
-                        }
-                        included.push((ci, len));
                     }
                 }
-            }
-            pos = pos
-                .checked_add(br.byte_pos()?)
-                .filter(|&header_end| header_end <= tile_data.len())
-                .context("J2K packet-header offset exceeds tile data")?;
-            for (ci, len) in included {
-                let end = pos.checked_add(len).filter(|&e2| e2 <= tile_data.len());
-                let Some(end) = end else {
-                    bail!(
-                        "J2K: packet body length {len} at offset {pos} exceeds tile data {}",
-                        tile_data.len()
-                    );
-                };
-                states[ci].data.extend_from_slice(&tile_data[pos..end]);
-                pos = end;
+                pos = pos
+                    .checked_add(br.byte_pos()?)
+                    .filter(|&header_end| header_end <= tile_data.len())
+                    .context("J2K packet-header offset exceeds tile data")?;
+                for (ci, len) in included {
+                    let end = pos.checked_add(len).filter(|&e2| e2 <= tile_data.len());
+                    let Some(end) = end else {
+                        bail!(
+                            "J2K: packet body length {len} at offset {pos} exceeds tile data {}",
+                            tile_data.len()
+                        );
+                    };
+                    states[component][ci]
+                        .data
+                        .extend_from_slice(&tile_data[pos..end]);
+                    pos = end;
+                }
             }
         }
     }
@@ -300,78 +342,164 @@ pub fn decode_tile_part(
     // records, per coefficient, the lowest bit-plane its code-block decoded so
     // the irreversible reconstruction can place the dequantized value at the
     // midpoint of the still-undecoded interval (ISO 15444-1 §E.1.1.2).
-    let mut mallat = vec![0i32; sample_count];
-    let mut bp_plane = vec![0u32; sample_count];
-    for (ci, c) in cblks.iter().enumerate() {
-        let b = &bands[c.band];
-        let st = &states[ci];
-        let exponent = coding
-            .exponents
-            .get(c.band)
-            .copied()
-            .unwrap_or(coding.precision + b.gain);
-        // Mb = ε_b + G − 1 (ISO 15444-1 §E.1).
-        let total_bp = total_bit_planes(coding.num_guard_bits, exponent);
-        let num_bit_planes = if st.included_before {
-            total_bp.saturating_sub(st.msbs)
-        } else {
-            0
-        };
-        let block = decode_code_block(
-            &st.data,
-            c.w,
-            c.h,
-            num_bit_planes as u8,
-            st.num_passes,
-            b.orient,
-        )
-        .with_context(|| format!("J2K: decode code-block {ci}"))?;
-        for y in 0..c.h {
-            let off = (b.y0 + c.y0 + y) * width + b.x0 + c.x0;
-            mallat[off..off + c.w].copy_from_slice(&block.samples[y * c.w..(y + 1) * c.w]);
-            for x in 0..c.w {
-                bp_plane[off + x] = block.lowest_bitplane;
+    let mut mallats: Vec<Vec<i32>> = Vec::with_capacity(num_components);
+    for _ in 0..num_components {
+        mallats.push(vec![0i32; sample_count]);
+    }
+    let mut float_planes: Vec<Vec<f32>> = Vec::with_capacity(num_components);
+    for (component, mallat) in mallats.iter_mut().enumerate() {
+        let mut bp_plane = vec![0u32; sample_count];
+        for (ci, c) in cblks.iter().enumerate() {
+            let b = &bands[c.band];
+            let st = &states[component][ci];
+            let exponent = coding
+                .exponents
+                .get(c.band)
+                .copied()
+                .unwrap_or(coding.precision + b.gain);
+            // Mb = ε_b + G − 1 (ISO 15444-1 §E.1).
+            let total_bp = total_bit_planes(coding.num_guard_bits, exponent);
+            let num_bit_planes = if st.included_before {
+                total_bp.saturating_sub(st.msbs)
+            } else {
+                0
+            };
+            let block = decode_code_block(
+                &st.data,
+                c.w,
+                c.h,
+                num_bit_planes as u8,
+                st.num_passes,
+                b.orient,
+            )
+            .with_context(|| format!("J2K: decode code-block {ci}"))?;
+            for y in 0..c.h {
+                let off = (b.y0 + c.y0 + y) * width + b.x0 + c.x0;
+                mallat[off..off + c.w].copy_from_slice(&block.samples[y * c.w..(y + 1) * c.w]);
+                for x in 0..c.w {
+                    bp_plane[off + x] = block.lowest_bitplane;
+                }
+            }
+        }
+
+        match coding.transform {
+            WaveletTransform::Reversible => {
+                inverse_dwt_5_3(mallat, width, height, coding.num_decomp_levels)?;
+            }
+            WaveletTransform::Irreversible => {
+                // Dequantize each subband (Δ_b from the QCD ε_b/μ_b relative to
+                // R_b = precision + gain_b), inverse 9/7, then round to integers.
+                // With ≥ 1 decomposition level the coefficients are continuous 9/7
+                // outputs (sub-step uncertainty → midpoint reconstruction). With
+                // zero levels the single LL band is exact only when Δ = 1; any
+                // coarser quantizer still carries interval uncertainty.
+                let mut coeffs = vec![0f32; sample_count];
+                for (bi, b) in bands.iter().enumerate() {
+                    let r_b = coding.precision + b.gain;
+                    let exponent = coding.exponents.get(bi).copied().unwrap_or(r_b);
+                    let mantissa = coding.mantissas.get(bi).copied().unwrap_or(0);
+                    let delta = step_size(r_b, exponent, mantissa);
+                    let exact_integer =
+                        coding.num_decomp_levels == 0 && exponent == r_b && mantissa == 0;
+                    let continuous = !exact_integer;
+                    for y in 0..b.h {
+                        for x in 0..b.w {
+                            let idx = (b.y0 + y) * width + b.x0 + x;
+                            coeffs[idx] = dequantize(mallat[idx], delta, bp_plane[idx], continuous);
+                        }
+                    }
+                }
+                inverse_dwt_9_7(&mut coeffs, width, height, coding.num_decomp_levels)?;
+                // The inverse ICT needs these floats unrounded. The rounding
+                // waits until after `multiple_component_transform` below.
+                float_planes.push(coeffs);
             }
         }
     }
 
-    match coding.transform {
-        WaveletTransform::Reversible => {
-            inverse_dwt_5_3(&mut mallat, width, height, coding.num_decomp_levels)?;
-        }
-        WaveletTransform::Irreversible => {
-            // Dequantize each subband (Δ_b from the QCD ε_b/μ_b relative to
-            // R_b = precision + gain_b), inverse 9/7, then round to integers.
-            // With ≥ 1 decomposition level the coefficients are continuous 9/7
-            // outputs (sub-step uncertainty → midpoint reconstruction). With
-            // zero levels the single LL band is exact only when Δ = 1; any
-            // coarser quantizer still carries interval uncertainty.
-            let mut coeffs = vec![0f32; sample_count];
-            for (bi, b) in bands.iter().enumerate() {
-                let r_b = coding.precision + b.gain;
-                let exponent = coding.exponents.get(bi).copied().unwrap_or(r_b);
-                let mantissa = coding.mantissas.get(bi).copied().unwrap_or(0);
-                let delta = step_size(r_b, exponent, mantissa);
-                let exact_integer =
-                    coding.num_decomp_levels == 0 && exponent == r_b && mantissa == 0;
-                let continuous = !exact_integer;
-                for y in 0..b.h {
-                    for x in 0..b.w {
-                        let idx = (b.y0 + y) * width + b.x0 + x;
-                        coeffs[idx] = dequantize(mallat[idx], delta, bp_plane[idx], continuous);
-                    }
-                }
+    if multiple_component_transform && num_components == 3 {
+        match coding.transform {
+            WaveletTransform::Reversible => {
+                let (first, rest) = mallats.split_at_mut(1);
+                let (second, third) = rest.split_at_mut(1);
+                inverse_rct_5_3(&mut first[0], &mut second[0], &mut third[0]);
             }
-            inverse_dwt_9_7(&mut coeffs, width, height, coding.num_decomp_levels)?;
+            WaveletTransform::Irreversible => {
+                let (first, rest) = float_planes.split_at_mut(1);
+                let (second, third) = rest.split_at_mut(1);
+                inverse_ict_9_7(&mut first[0], &mut second[0], &mut third[0]);
+            }
+        }
+    }
+    if coding.transform == WaveletTransform::Irreversible {
+        // The decode's one rounding, after the inverse transform.
+        for (mallat, coeffs) in mallats.iter_mut().zip(float_planes.iter()) {
             for (m, &c) in mallat.iter_mut().zip(coeffs.iter()) {
                 *m = c.round() as i32;
             }
         }
     }
+    Ok(mallats)
+}
 
-    Ok(TileComponentSamples {
-        samples: mallat,
-        width,
-        height,
-    })
+/// Inverse RCT (ISO 15444-1 G.2) across three level-shifted components.
+///
+/// With `Y0` the luma and `Y1`, `Y2` its chroma pair:
+/// `I1 = Y0 - (Y2 + Y1 >> 2)`, `I0 = Y2 + I1`, `I2 = Y1 + I1`. The shift is
+/// arithmetic, which floors for negative operands, matching the standard.
+fn inverse_rct_5_3(y0: &mut [i32], y1: &mut [i32], y2: &mut [i32]) {
+    for index in 0..y0.len() {
+        let (y, cb, cr) = (y0[index], y1[index], y2[index]);
+        let i1 = y - ((cr + cb) >> 2);
+        y0[index] = cr + i1;
+        y1[index] = i1;
+        y2[index] = cb + i1;
+    }
+}
+
+/// Inverse ICT (ISO 15444-1 G.3) across three level-shifted components.
+///
+/// `I0 = Y0 + 1.402 Y2`, `I1 = Y0 - 0.34413 Y1 - 0.71414 Y2`,
+/// `I2 = Y0 + 1.772 Y1`.
+fn inverse_ict_9_7(y0: &mut [f32], y1: &mut [f32], y2: &mut [f32]) {
+    for index in 0..y0.len() {
+        let (y, cb, cr) = (y0[index], y1[index], y2[index]);
+        y0[index] = y + 1.402 * cr;
+        y1[index] = y - 0.34413 * cb - 0.71414 * cr;
+        y2[index] = y + 1.772 * cb;
+    }
+}
+
+#[cfg(test)]
+mod inverse_colour_transform {
+    use super::*;
+
+    /// The F-239 plan's AC25 hand case, ISO/IEC 15444-1 G.3. Transformed
+    /// components `Y0 = -28, Y1 = 22, Y2 = -38` invert to
+    /// `-81.276 -8.43354 10.984`, and adding the DC level shift's 128 and
+    /// the decoder's one rounding gives `47 120 139`.
+    ///
+    /// The tolerance is 1e-4, far above this build's f32 representation error
+    /// near these magnitudes and far below the gap between Annex G's
+    /// `1.402` and the full-range YBR matrix coefficient `1.4019876`, which
+    /// moves the first output by about `0.00047` at `Y2 = -38`. A
+    /// coefficient swapped in from a different matrix cannot pass.
+    #[test]
+    fn inverse_ict_9_7_is_the_annex_g_transform() {
+        let mut y0 = [-28.0_f32];
+        let mut y1 = [22.0_f32];
+        let mut y2 = [-38.0_f32];
+        inverse_ict_9_7(&mut y0, &mut y1, &mut y2);
+        for (actual, expected) in [y0[0], y1[0], y2[0]]
+            .iter()
+            .zip([-81.276_f32, -8.43354, 10.984])
+        {
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "{actual} against the Annex G value {expected}"
+            );
+        }
+        let bytes: [i32; 3] = [y0[0], y1[0], y2[0]].map(|value| (value + 128.0).round() as i32);
+        assert_eq!(bytes, [47, 120, 139]);
+    }
 }

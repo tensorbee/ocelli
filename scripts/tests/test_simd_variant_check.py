@@ -19,7 +19,7 @@ immediate, `v128.load` is 0 and `v128.store` is 11 with a memarg,
 `i32x4.add` is 174 with no immediate, `memory.copy` is `0xFC 10` with two
 memory indices, and `i32.const` takes a signed LEB128 whose two-byte encoding
 of 125 is `0xFD 0x00`. The modules stand in for the two that `bin/ocelli.sh
-native` steps 7 and 11 link, `examples/<name>.wasm` under each variant's
+native` steps 9 and 13 link, `examples/<name>.wasm` under each variant's
 release wasm32 target directory, reduced to one type, one function per body
 and a code section.
 """

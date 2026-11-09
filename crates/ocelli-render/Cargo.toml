@@ -36,10 +36,39 @@ workspace = true
 # D-27. The workspace entry sets `default-features = false`, because Cargo
 # rejects that switch on a member while the workspace entry leaves the
 # defaults on. The two targets do not share one feature line. Native names
-# the pinned default backends plus `webgl`. wasm32 names `webgl` and `wgsl`
-# and drops `dx12`, `metal`, `gles` and `vulkan`.
+# the pinned default backends plus `webgl`, with `metal` moved to the feature
+# below under D-33. wasm32 names `webgl` and `wgsl` and drops `dx12`, `metal`,
+# `gles` and `vulkan`.
+#
+# D-33, F-238. `metal` is the one wgpu feature that reaches the objc2 crates
+# on Apple, and the shipped native archive must compile none of them. It is
+# therefore not named here but forwarded by the `metal` feature, which the
+# shipped build turns off with `cargo build -p ocelli-native
+# --no-default-features`. Development turns it on in four places: this
+# crate's and `ocelli-compute`'s dev-dependencies, `ocelli-native`'s own
+# default feature, the hard `metal` in `ocelli-wasm`'s and `tools/oracle`'s
+# native tables, and `ocelli-native`'s own dev-dependency on `wgpu`. The
+# forwarding feature is deliberately not in this crate's `default` set,
+# because a default is target-blind: `ocelli-wasm` enables this crate with
+# default features on wasm32, where a forwarded `wgpu/metal` would put the
+# feature name on the wasm32 resolve and fail the decode-graph guard.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu", "webgl"] }
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "gles", "vulkan", "wgsl", "webgpu", "webgl"] }
+
+# D-33's development half. Tests build this crate without its dependents, so
+# nothing else would restore `metal`, and `bin/ocelli.sh gate gpu` must keep
+# resolving tier A through Metal on the macOS host. The table names the pinned
+# default set, and the union with the dependency above is that set plus
+# `webgl`. Dev-only, so it never enters a shipped graph, which is the same
+# argument the workspace entry makes for `proptest` and `trybuild`.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+wgpu = { workspace = true, features = ["std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
+
+[features]
+# The named user is `ocelli-native`'s own `metal` feature, which the shipped
+# native archive omits, and this crate's dev-dependencies, which restore the
+# D-27 set for tests. See D-33 above.
+metal = ["wgpu/metal"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { workspace = true, default-features = false, features = ["std", "parking_lot", "wgsl", "webgpu", "webgl"] }

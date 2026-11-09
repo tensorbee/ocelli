@@ -140,3 +140,43 @@ Made by the sprint lead on 2026-11-07 under the operator's answer of 2026-11-06 
 - **Q2.** The build writes the package version and the git SHA of HEAD into the package, and `/release` refuses unless that SHA is the tag's and the `.wasm` digest equals a fresh build of that SHA. If the measured build is not byte-reproducible, the story stops and reports rather than relaxing the check.
 - **Q3.** `pkg-decode` ships in the same package as a second module file, under the same identity rule.
 - **Order.** This story depends on F-228, which is not integrated. It is built on F-228's branch and integrates after it.
+
+### Lead rulings after review pass 1
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-237-working-pass-1.md`.
+
+- **D1, the write set widens to CI.** The CI job that runs `gate packages` installs `wasm-pack` and the `wasm32-unknown-unknown` target the way the `wasm` job does, in `.github/workflows/ci.yml`, and `scripts/ci_floor_check.py` stays green.
+- **D2, the write set widens to `/release`.** `.claude/commands/release.md` requires the module in `@ocelli/wasm`, publishes `@ocelli/wasm` before `@ocelli/core` and `@ocelli/react`, and the adapters are regenerated with `scripts/sync_agent_skills.py`. `docs/lld/release-policy.md` says the same.
+- **D3, the release compares a cold build with what is published.** A script builds the tag cold in a temporary checkout, compares its module digests with the staged package's recorded digests, and produces the exact `.tgz` that `npm publish` is then given, so the published bytes are the compared bytes. Item 6 names the script and the command. Tests drive a matching build, a mismatched digest and a wrong SHA.
+- **S1, a dirty tree is never recorded as HEAD.** The build id records whether the tree was clean, and both the packages gate and the release script refuse an id built from a dirty tree.
+- **S2 and S3** each gain a catalogue probe: removing the identity check's call, and swapping the render and decode modules, both go red.
+- **D4, D5, N1, N2.** The sentences are corrected to what the files and commands show.
+- **Not F-237's:** a clean clone's `npm run build` failing at the example viewer on the base commit is recorded for the lead and investigated separately.
+
+### Lead rulings after review pass 2
+
+Made by the sprint lead on 2026-11-07 after `.claude/reviews/F-237-working-pass-2.md`.
+
+- **D1, the build id records the tree, not only HEAD.** It records the git SHA of HEAD and the `git write-tree` of the staged index, and whether the working tree has unstaged tracked changes. `gate packages` refuses only unstaged tracked changes, so `/verify` on a staged tree records, and `release_wasm.py` keeps refusing anything but a clean checkout of the tag. A test stages a change and shows the gate green, and leaves one unstaged and shows it red.
+- **D2, the comparison is a precondition.** `release_wasm.py` runs before any tag, push or crates.io publish, as a numbered preflight item in `.claude/commands/release.md` and `docs/RELEASE.md`, and the publish step uses the exact file it verified.
+- **D3, the CI comment says only what is true.** No CI run of this branch exists, so the comment describes the provisioning, not a failure it never saw.
+- **S1, the call-in-main probe is behavioural.** It runs `main()` with the npm steps stubbed over a tarball with a stale build id and requires the refusal, red under each of the three unwirings the review lists.
+- **N2, N3 and N4** are taken. For N4 the sprint's F-232 note text wins.
+- **The fresh-clone `npm run build` failure is not F-237's.** It reproduces on the sprint head and not on main, and the lead investigates it separately.
+
+### Lead ruling after review pass 3
+
+- **D1.** The two lint-policy probe notes are copied from `sprint/s46` byte for byte, which the lead did, and both probe blocks now equal `sprint/s46`'s.
+- **N2 taken,** by the lead: the release refusal says the release revision's tree. N1 and N3 are not taken. Precondition 2 covers N1's gap and the procedure cannot reach N3.
+- **Owed acceptance.** AC4's `frontend` job on `ubuntu-latest` after integration, the feature `/verify` receipt with the corpus on the operator's machine, AC3 end to end at the real release, and AC5 against the registry after publish. AC3 and AC5 are release-time rows and are named as such in the completion record.
+
+### Lead ruling after review pass 4
+
+- **D1.** The "(F-210)" attribution is deleted from both notes, identically on `sprint/s46` and here, so the blocks stay byte-identical. `held.rs` came with F-216.
+- **N1 taken.** The `compare_problems` docstring says the tree of that commit.
+
+### Lead acceptance-stage clarification, 2026-11-09
+
+The same reviewed packaging sources may supply AC4's CI observation through the existing workflow on an explicitly authorized qualification ref before formal feature completion. This changes only the observation's order relative to the final sprint push. It retains the actual `frontend` job on `ubuntu-latest`, including its `gate packages` consumer proof, exact source identity and outcome. A later metadata tree is not thereby claimed tested, and packaging or relevant build-input changes require fresh evidence.
+
+CI run `42576164087`, on the operator-authorized qualification ref at exact `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf`, observed the TypeScript job and `gate packages` succeeding. This is a successful job within a failed workflow, not a green whole CI run. Formal feature integration, completion records and final feature verification remain separate. AC3's real-release comparison and AC5's registry observation remain release obligations as previously approved.

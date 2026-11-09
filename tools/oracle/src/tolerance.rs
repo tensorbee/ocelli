@@ -15,7 +15,8 @@
 //! `render-params.json` so that the reference half's configuration cannot
 //! decide a comparator verdict.
 
-use crate::frame::{ChannelStats, StatsError};
+use crate::frame::{ChannelSet, ChannelStats, Frame, FrameError, Rect, StatsError, difference};
+use serde::Serialize;
 
 /// 25.1's first bullet, verbatim. Every character, the `≤` and the prose
 /// semicolon included.
@@ -179,6 +180,8 @@ pub enum ToleranceError {
     NoClass(Vec<String>),
     #[error("{0}")]
     Stats(#[from] StatsError),
+    #[error(transparent)]
+    Frame(#[from] FrameError),
 }
 
 /// Resolve the tolerance class from a view's manifest category tokens.
@@ -288,6 +291,96 @@ pub fn bias_bound(region: &ChannelStats) -> Result<BiasVerdict, ToleranceError> 
     Ok(BiasVerdict {
         signed_mean_diff,
         passes: signed_mean_diff.abs() <= MONOCHROME_SIGNED_MEAN_BIAS,
+    })
+}
+
+/// The verdict `ocelli-compare pair` prints for one pair of frames, and the
+/// only thing F-223's comparison mode reads from it.
+///
+/// The field set is fixed here rather than in the binary so the harness and
+/// the tool cannot drift: the binary serialises this struct with serde, so
+/// the JSON keys are the field names below and a field added here reaches
+/// the output without a second hand-written copy of them. The fields are
+/// the three statistics 25.1's monochrome rule is evaluated from, over the
+/// FULL frame, the bias bullet's signed mean over the INFORMATIVE region,
+/// the informative fraction and the floor's verdict on it, and `passes`,
+/// which is the whole contract.
+///
+/// When every pixel is clipped to the same extreme on both sides the
+/// informative region is empty, the bias over it was not measured, and the
+/// verdict serialises `null` for it with `low_information` true and
+/// `passes` false, per the ruling after review pass 2: a bias that was not
+/// measured is null and not a placeholder zero, because a zero beside an
+/// informative fraction of zero reads as the best possible bias.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PairVerdict {
+    pub within_one_lsb_fraction: f64,
+    pub count_over_max: u64,
+    pub max_abs_diff: u8,
+    pub signed_mean_bias_informative: Option<f64>,
+    pub informative_fraction: f64,
+    pub low_information: bool,
+    pub passes: bool,
+}
+
+/// The 25.1 verdict over two whole frames, as `monochrome_predicate` over
+/// `full` and `bias_bound` over `informative`, in one pass of
+/// `difference`.
+///
+/// The rectangle is `Rect::full`, so there is no letterbox and the three
+/// regions are nested: the informative subset is inside the image rectangle,
+/// which is the whole frame. The monochrome rule is evaluated over the FULL
+/// frame because 25.1 says "of pixels" and excludes nothing, and the bias
+/// bound over the informative region because a clipped background cannot
+/// express a divergence, exactly as `compare_view` evaluates a corpus view.
+/// `passes` additionally requires an informative fraction at or above
+/// `INFORMATIVE_FRACTION_FLOOR`, which is NOT from 25.1 and is a declared
+/// judgement documented at the constant.
+///
+/// # Errors
+/// When the frames differ in size or the image region is empty.
+pub fn pair_verdict(reference: &Frame, candidate: &Frame) -> Result<PairVerdict, ToleranceError> {
+    let diff = difference(
+        reference,
+        candidate,
+        Rect::full(reference.width(), reference.height()),
+        ChannelSet::Monochrome,
+    )?;
+    // `ChannelSet::Monochrome` produces exactly one channel per region, so
+    // the `None` arms are the only place the error type cannot be avoided
+    // and they are unreachable in practice. The error type gains exactly one
+    // variant this story, the frame error the plan names, and inventing a
+    // second one for a state the channel set cannot produce would widen the
+    // enum for nothing, so the impossible state is reported as the
+    // empty-statistic error it is nearest to. An EMPTY informative region is
+    // a different case and reachable, by clipping every pixel of both frames
+    // to the same extreme, and it is not an error at all: it is the most
+    // low-information verdict there is, answered below rather than refused,
+    // because the image region is not empty and the plan's `# Errors`
+    // contract covers only that.
+    let empty = || ToleranceError::Stats(StatsError::NoPixels);
+    let full = diff.full.channel(0).ok_or_else(empty)?;
+    let informative = diff.informative.channel(0).ok_or_else(empty)?;
+    let monochrome = monochrome_predicate(full)?;
+    let informative_fraction = diff.informative_fraction()?;
+    // A bias over zero informative pixels does not exist, and inventing a
+    // mean for it would invent evidence. It is carried as `None`, which
+    // serialises as `null`, per the ruling after review pass 2: a bias that
+    // was not measured is null and not a placeholder zero.
+    let bias = if informative.pixels() == 0 {
+        None
+    } else {
+        Some(bias_bound(informative)?)
+    };
+    let low_information = informative_fraction < INFORMATIVE_FRACTION_FLOOR;
+    Ok(PairVerdict {
+        within_one_lsb_fraction: monochrome.within_one_lsb_fraction,
+        count_over_max: monochrome.count_over_max,
+        max_abs_diff: monochrome.max_abs_diff,
+        signed_mean_bias_informative: bias.map(|bound| bound.signed_mean_diff),
+        informative_fraction,
+        low_information,
+        passes: monochrome.passes && bias.is_some_and(|bound| bound.passes) && !low_information,
     })
 }
 

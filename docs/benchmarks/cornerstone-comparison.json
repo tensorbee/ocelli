@@ -1,0 +1,639 @@
+{
+  "machine": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "arch": "arm64",
+    "cpu_model": "Apple M4 Max",
+    "cpu_count": 16,
+    "memory_bytes": 51539607552
+  },
+  "versions": {
+    "chromium": "151.0.7922.34",
+    "playwright": "1.62.1",
+    "@cornerstonejs/core": "5.8.2",
+    "@cornerstonejs/dicom-image-loader": "5.8.2"
+  },
+  "browser": {
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Max, Unspecified Version)",
+    "headed": false,
+    "software": false
+  },
+  "defaults": {
+    "ocelli": {
+      "serverCacheBytes": 268435456,
+      "pageGreyCacheBytes": 67108864,
+      "decodePermits": 2
+    },
+    "cornerstone": {
+      "maxCacheSizeBytes": 3221225472,
+      "decodeWorkers": 8
+    }
+  },
+  "workloads": {
+    "synthetic-ct": {
+      "state": "selected",
+      "count": 1693
+    },
+    "synthetic-dx": {
+      "state": "selected",
+      "count": 1
+    },
+    "pseudo-full": {
+      "state": "selected",
+      "count": 201
+    },
+    "pseudo-ct": {
+      "state": "selected",
+      "count": 200
+    },
+    "pseudo-dx": {
+      "state": "selected",
+      "count": 1
+    }
+  },
+  "metrics": {
+    "page_ready": {
+      "session/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 267.9688,
+          "p25": 264.5259,
+          "p75": 280.6082,
+          "min": 255.5793,
+          "max": 284.7732
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 135.4043,
+          "p25": 134.2446,
+          "p75": 135.9919,
+          "min": 133.0029,
+          "max": 141.4004
+        }
+      },
+      "session/warm": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a warm page load measures the browser cache, not either library"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a warm page load measures the browser cache, not either library"
+        }
+      }
+    },
+    "open": {
+      "synthetic-ct/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 985.8000000715256,
+          "p25": 982.3999999761581,
+          "p75": 990.8999999761581,
+          "min": 972.2999999523163,
+          "max": 1039.3999999761581
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 717.5,
+          "p25": 716,
+          "p75": 718.6999999284744,
+          "min": 708.7999999523163,
+          "max": 727.6000000238419
+        }
+      },
+      "synthetic-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 1005.1000000238419,
+          "p25": 1002.8999999761581,
+          "p75": 1009.7000000476837,
+          "min": 999.2000000476837,
+          "max": 1012.3999999761581
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 713.5999999046326,
+          "p25": 705.1000000238419,
+          "p75": 715.1000000238419,
+          "min": 703.2999999523163,
+          "max": 718.3000000715256
+        }
+      },
+      "pseudo-full/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 146.60000002384186,
+          "p25": 145.29999995231628,
+          "p75": 147.60000002384186,
+          "min": 145,
+          "max": 156.69999992847443
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 106.5,
+          "p25": 106,
+          "p75": 107.30000007152557,
+          "min": 104.29999995231628,
+          "max": 114.10000002384186
+        }
+      },
+      "pseudo-full/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 146.30000007152557,
+          "p25": 145.39999997615814,
+          "p75": 148.29999995231628,
+          "min": 143.29999995231628,
+          "max": 151.30000007152557
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 109.39999997615814,
+          "p25": 108.69999992847443,
+          "p75": 111.69999992847443,
+          "min": 108.29999995231628,
+          "max": 114.60000002384186
+        }
+      }
+    },
+    "first_image": {
+      "synthetic-ct/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 8.5,
+          "p25": 7.700000047683716,
+          "p75": 8.799999952316284,
+          "min": 7.5,
+          "max": 11.200000047683716
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 24.799999952316284,
+          "p25": 24.100000023841858,
+          "p75": 26.5,
+          "min": 24,
+          "max": 28.300000071525574
+        }
+      },
+      "synthetic-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 7.699999928474426,
+          "p25": 7.5,
+          "p75": 8.5,
+          "min": 6.399999976158142,
+          "max": 12.100000023841858
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 24.799999952316284,
+          "p25": 23.5,
+          "p75": 25.300000071525574,
+          "min": 23.200000047683716,
+          "max": 29.200000047683716
+        }
+      },
+      "synthetic-dx/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 32.60000002384186,
+          "p25": 32.09999990463257,
+          "p75": 33.39999997615814,
+          "min": 31.5,
+          "max": 34.60000002384186
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 52.60000002384186,
+          "p25": 52.199999928474426,
+          "p75": 53.5,
+          "min": 51.39999997615814,
+          "max": 53.60000002384186
+        }
+      },
+      "synthetic-dx/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 29.100000023841858,
+          "p25": 28.700000047683716,
+          "p75": 29.700000047683716,
+          "min": 27.399999976158142,
+          "max": 33
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 52.200000047683716,
+          "p25": 51.799999952316284,
+          "p75": 53,
+          "min": 51.5,
+          "max": 54.39999997615814
+        }
+      },
+      "pseudo-ct/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 8,
+          "p25": 7.799999952316284,
+          "p75": 8.799999952316284,
+          "min": 6.899999976158142,
+          "max": 10.899999976158142
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 24.799999952316284,
+          "p25": 24.399999976158142,
+          "p75": 26.300000071525574,
+          "min": 23.5,
+          "max": 27.300000071525574
+        }
+      },
+      "pseudo-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 7.799999952316284,
+          "p25": 7.400000095367432,
+          "p75": 10.100000023841858,
+          "min": 6.600000023841858,
+          "max": 12.699999928474426
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 24.09999990463257,
+          "p25": 23.899999976158142,
+          "p75": 24.5,
+          "min": 23.100000023841858,
+          "max": 25.5
+        }
+      },
+      "pseudo-dx/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 32.800000071525574,
+          "p25": 32.10000002384186,
+          "p75": 33.60000002384186,
+          "min": 31.300000071525574,
+          "max": 34.60000002384186
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 52.700000047683716,
+          "p25": 52.59999990463257,
+          "p75": 53.39999997615814,
+          "min": 51.700000047683716,
+          "max": 53.60000002384186
+        }
+      },
+      "pseudo-dx/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 29.5,
+          "p25": 29,
+          "p75": 30.300000071525574,
+          "min": 28.700000047683716,
+          "max": 32.299999952316284
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 52.59999990463257,
+          "p25": 52.199999928474426,
+          "p75": 53,
+          "min": 51.5,
+          "max": 54.39999997615814
+        }
+      }
+    },
+    "scroll": {
+      "synthetic-ct/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "scroll is measured after the first image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "scroll is measured after the first image"
+        }
+      },
+      "synthetic-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 5,
+          "median": 96.71179883945842,
+          "p25": 96.6681703982176,
+          "p75": 96.76795045332099,
+          "min": 96.64325752800504,
+          "max": 96.86793671294801
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 5,
+          "median": 48.35278189597523,
+          "p25": 48.34031582339671,
+          "p75": 48.368373532082295,
+          "min": 48.32785617704248,
+          "max": 48.37773333970184
+        }
+      },
+      "pseudo-ct/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "scroll is measured after the first image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "scroll is measured after the first image"
+        }
+      },
+      "pseudo-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 5,
+          "median": 96.67440061723066,
+          "p25": 96.64948453608247,
+          "p75": 96.77419354838709,
+          "min": 96.6245812875452,
+          "max": 96.79917398633937
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 5,
+          "median": 48.37773333970184,
+          "p25": 48.34966477788695,
+          "p75": 48.37773334342181,
+          "min": 48.34966477417129,
+          "max": 48.387096774193544
+        }
+      }
+    },
+    "window_change": {
+      "synthetic-ct/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        }
+      },
+      "synthetic-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 7.700000047683716,
+          "p25": 7.699999928474426,
+          "p75": 7.799999952316284,
+          "min": 7.600000023841858,
+          "max": 9.899999976158142
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 16.100000023841858,
+          "p25": 15.899999976158142,
+          "p75": 16.200000047683716,
+          "min": 11.700000047683716,
+          "max": 16.299999952316284
+        }
+      },
+      "synthetic-dx/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        }
+      },
+      "synthetic-dx/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 19.399999976158142,
+          "p25": 17.800000071525574,
+          "p75": 19.899999976158142,
+          "min": 16.5,
+          "max": 21.200000047683716
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 12.5,
+          "p25": 12,
+          "p75": 14.199999928474426,
+          "min": 10.199999928474426,
+          "max": 15.700000047683716
+        }
+      },
+      "pseudo-ct/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        }
+      },
+      "pseudo-ct/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 7.599999904632568,
+          "p25": 7.399999976158142,
+          "p75": 7.599999904632568,
+          "min": 2.100000023841858,
+          "max": 8.800000071525574
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 16.100000023841858,
+          "p25": 14.899999976158142,
+          "p75": 16.200000047683716,
+          "min": 14.600000023841858,
+          "max": 16.300000071525574
+        }
+      },
+      "pseudo-dx/cold": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "a window change needs a drawn image"
+        }
+      },
+      "pseudo-dx/warm": {
+        "ocelli": {
+          "state": "measured",
+          "n": 9,
+          "median": 18,
+          "p25": 17.600000023841858,
+          "p75": 19.5,
+          "min": 17.100000023841858,
+          "max": 20.600000023841858
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 9,
+          "median": 13,
+          "p25": 11.699999928474426,
+          "p75": 14,
+          "min": 7.700000047683716,
+          "max": 15
+        }
+      }
+    },
+    "peak_memory": {
+      "session/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 3,
+          "median": 1103307032,
+          "p25": 1100972348,
+          "p75": 1104216524,
+          "min": 1098637664,
+          "max": 1105126016,
+          "upper_bound": {
+            "state": "measured",
+            "n": 3,
+            "median": 1137123608,
+            "p25": 1133904164,
+            "p75": 1140105652,
+            "min": 1130684720,
+            "max": 1143087696
+          }
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 3,
+          "median": 1335272640,
+          "p25": 1314727044,
+          "p75": 1337992492,
+          "min": 1294181448,
+          "max": 1340712344,
+          "upper_bound": {
+            "state": "measured",
+            "n": 3,
+            "median": 1441080560,
+            "p25": 1422009692,
+            "p75": 1441899784,
+            "min": 1402938824,
+            "max": 1442719008
+          }
+        }
+      },
+      "session/warm": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "this condition is not applicable"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "this condition is not applicable"
+        }
+      }
+    },
+    "session_cpu": {
+      "session/cold": {
+        "ocelli": {
+          "state": "measured",
+          "n": 3,
+          "median": 3.31,
+          "p25": 3.3049999999999997,
+          "p75": 3.325,
+          "min": 3.3,
+          "max": 3.34
+        },
+        "cornerstone": {
+          "state": "measured",
+          "n": 3,
+          "median": 1.93,
+          "p25": 1.9249999999999998,
+          "p75": 1.94,
+          "min": 1.92,
+          "max": 1.95
+        }
+      },
+      "session/warm": {
+        "ocelli": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "this condition is not applicable"
+        },
+        "cornerstone": {
+          "state": "unavailable",
+          "n": 0,
+          "reason": "this condition is not applicable"
+        }
+      }
+    }
+  },
+  "pair_verdict": {
+    "within_one_lsb_fraction": 1,
+    "count_over_max": 0,
+    "max_abs_diff": 1,
+    "signed_mean_bias_informative": -0.058577405857740586,
+    "informative_fraction": 0.466796875,
+    "low_information": false,
+    "passes": true
+  },
+  "architecture": "The two sides do different work in different places. The Ocelli folder viewer parses and decodes each file in a native process on this machine and sends 8-bit grey frames over loopback to the page, which draws them on a 2D canvas on the CPU. The cornerstone3D page parses and decodes in the browser, in dicom-image-loader's WebAssembly workers, and renders through WebGL. Memory and CPU are therefore counted over every process each side runs: for Ocelli the native process and every Chromium process, and for cornerstone3D every Chromium process, including the GPU process. This measures the local folder viewer example, not the Ocelli browser core, which has no viewer page to measure yet.",
+  "not_shown": [
+    "one machine and one browser build",
+    "loopback only and no network",
+    "a warm operating system file cache",
+    "different default budgets on the two sides",
+    "a comparator page written for this measurement rather than an application such as OHIF",
+    "the matched prefetch policy",
+    "a comparator-only adapter wraps valid VOI strings for loader5.8.2, with pinned package bytes and cache and worker defaults unchanged",
+    "uncompressed inputs only so no codec cost",
+    "a 2D canvas against WebGL",
+    "the tier: Ocelli tier C on the CPU, cornerstone3D on the named WebGL renderer"
+  ],
+  "input_identity": "d87461fd59a9dc875b6b5ffe96f20ff7640059f8cd69c04c89adc97a7ff5aa58"
+}

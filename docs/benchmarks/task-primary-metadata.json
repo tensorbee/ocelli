@@ -1,0 +1,272 @@
+[
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T11:30:08.259470+00:00",
+    "end_utc": "2026-11-08T11:48:21.172564+00:00",
+    "elapsed_seconds": 1092.9237842089497,
+    "retries": 0,
+    "exit_code": 0,
+    "base": "534c3a7492db623388670a000797050126a1a5f1",
+    "task": "F-225 pass2 D1 repair",
+    "run_primary": {
+      "path": "/private/tmp/f225-codex-p2/glm-run.json",
+      "sha256": "f3ab6a1f5811e6a73c13c3ce781615b1bf8b9a9817b75a1ed09361aa417855f3",
+      "bytes": 968
+    },
+    "UTC_end_minus_start_seconds": 1092.913094,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/f225-codex-p2/glm-stats.json",
+      "sha256": "157597ddaf8f5c32d65570e3f68b0534a9896a19691b578786e292f593343d4b",
+      "bytes": 1891
+    },
+    "provider_reported": {
+      "steps": 28,
+      "tokens": {
+        "input": 95650,
+        "output": 4637,
+        "reasoning": 25741,
+        "cache": {
+          "read": 2015104,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T11:25:40.123545+00:00",
+    "end_utc": "2026-11-08T11:55:17.229834+00:00",
+    "elapsed_seconds": 1777.102238166961,
+    "retries": 0,
+    "exit_code": 0,
+    "base": "2414d639c274ac649e46f414417c792fe20e5f63",
+    "task": "F-239 codec merge onto F-243",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-codex-f239-glm/run.json",
+      "sha256": "bf2005ba10341fcc56e21881450ed2c3e92728ee31f7a0fd98393b9b435ba566",
+      "bytes": 950
+    },
+    "UTC_end_minus_start_seconds": 1777.106289,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_reported": {
+      "tokens": {
+        "input": 221434,
+        "output": 40702,
+        "reasoning": 31904,
+        "cache": {
+          "read": 26933824,
+          "write": 0
+        }
+      }
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T12:40:37.370556+00:00",
+    "end_utc": "2026-11-08T12:58:33.519202+00:00",
+    "elapsed_seconds": 1076.1468139160424,
+    "retries": 0,
+    "exit_code": 0,
+    "source_tree": "4d818b2dd7edd92ae59ec5c7d308a0a0d3803f2a",
+    "base": "05d9aca259bd4dd651f32652230a487881cd253c",
+    "task": "F239 codec/library source union",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-codex-f239-lib-union/run.json",
+      "sha256": "93f6fdbc1920ce4aa346c7b7cd7ceeb9239aff8165318e35bf79ec2ad4275124",
+      "bytes": 937
+    },
+    "UTC_end_minus_start_seconds": 1076.148646,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/ocelli-codex-f239-lib-union/stats.json",
+      "sha256": "ff52deda405e2e82f3ee1fd680c8f60dddc3962ea8afad25316fa8533b179a56",
+      "bytes": 1903
+    },
+    "provider_reported": {
+      "steps": 78,
+      "tokens": {
+        "input": 208879,
+        "output": 20044,
+        "reasoning": 32351,
+        "cache": {
+          "read": 11826176,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T13:12:34.536542+00:00",
+    "end_utc": "2026-11-08T14:05:39.880317+00:00",
+    "elapsed_seconds": 3185.336526124971,
+    "retries": 0,
+    "exit_code": 0,
+    "source_head": "055b8633f8e4d1ef98e07fe40721b8050ee92c35",
+    "task": "F239 additive native colour tests",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f239-colour-tests-glm/run.json",
+      "sha256": "e69a993d75bc025a2df9e6ea44a8cd7eed43436d9120db8cd565060ac27c40c3",
+      "bytes": 589
+    },
+    "UTC_end_minus_start_seconds": 3185.343775,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f239-colour-tests-glm/usage.json",
+      "sha256": "956009c4decea08bb9b88a82c5d7b5459ec3dc4b45bf6b4e435fcc4f387473b4",
+      "bytes": 1741
+    },
+    "provider_reported": {
+      "steps": 75,
+      "tokens": {
+        "input": 269162,
+        "output": 48177,
+        "reasoning": 72181,
+        "cache": {
+          "read": 13206144,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T13:09:54.639735+00:00",
+    "end_utc": "2026-11-08T14:16:58.321527+00:00",
+    "elapsed_seconds": 4023.6732767079957,
+    "retries": 0,
+    "exit_code": 0,
+    "source_head": "58e71431f0f4e737e29122b0f4c920ec061feee2",
+    "task": "F239 AC31 benchmark instrument",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f239-colour-bench-glm/run.json",
+      "sha256": "220e3a529f5fedb060d23d512a220839e4580268c4b9d32aebe556601f441364",
+      "bytes": 589
+    },
+    "UTC_end_minus_start_seconds": 4023.681792,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f239-colour-bench-glm/usage.json",
+      "sha256": "2158f24e496e111cf62e14d188f335fdf0c42ee55436fbfe2dac838b1b7bfb7e",
+      "bytes": 1903
+    },
+    "provider_reported": {
+      "steps": 140,
+      "tokens": {
+        "input": 283946,
+        "output": 33465,
+        "reasoning": 98877,
+        "cache": {
+          "read": 27400960,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T14:54:42.851584+00:00",
+    "end_utc": "2026-11-08T15:59:22.539007+00:00",
+    "elapsed_seconds": 3879.676737874979,
+    "retries": 0,
+    "exit_code": 0,
+    "source_head": "22e9aab5d3f8ad1aa452ac9de17bed8688129e43",
+    "task": "F223 comparison browser page",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f223-comparison-page-glm/run.json",
+      "sha256": "a85b9ae71b43fb472456275283aed18370b26f39d5a244734ba87d32f24f0f9e",
+      "bytes": 594
+    },
+    "UTC_end_minus_start_seconds": 3879.687423,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f223-comparison-page-glm/usage.json",
+      "sha256": "dc0c70a92c8c382e3b408c0a17d434727668d83170842348e4de98ae6479ce14",
+      "bytes": 1746
+    },
+    "provider_reported": {
+      "steps": 153,
+      "tokens": {
+        "input": 248056,
+        "output": 22302,
+        "reasoning": 102918,
+        "cache": {
+          "read": 22162048,
+          "write": 0
+        }
+      },
+      "cost": 0
+    }
+  },
+  {
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T15:08:50.425201+00:00",
+    "end_utc": "2026-11-08T16:07:22.109541+00:00",
+    "elapsed_seconds": 3511.674339790945,
+    "retries": 0,
+    "exit_code": 0,
+    "task": "F240 ICC benchmark additive extension",
+    "run_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f240-colour-bench-glm/run.json",
+      "sha256": "b78e202a812cad4aa0eaa8fd2089f4fff398bb80f1085e37aa167dc4ae6ead74",
+      "bytes": 1175
+    },
+    "UTC_end_minus_start_seconds": 3511.68434,
+    "local_pause_record": "none recorded in this run metadata, not an inference-time measurement",
+    "provider_counters_primary": {
+      "path": "/private/tmp/ocelli-s46-codex/f240-colour-bench-glm/usage.json",
+      "sha256": "23770690c577aaea555e2f273bb9a812b40da705efa5b42fbe50ef9f3af593de",
+      "bytes": 2081
+    },
+    "provider_reported": {
+      "steps": 114,
+      "tokens": {
+        "input": 272932,
+        "output": 48119,
+        "reasoning": 84987,
+        "cache": {
+          "read": 22689216,
+          "write": 0
+        }
+      },
+      "provider_reported_cost": 0,
+      "cost_interpretation": "Local provider reported zero. This is not a measured API dollar comparison.",
+      "tool_success_interpretation": "Tool transport completion only, not command exit success or product correctness."
+    }
+  },
+  {
+    "task": "F228 bounded CSP module (supplemental actual record, absent from seven-row state snapshot)",
+    "model": "dgx/GLM-5.3-Flash-EXL3",
+    "start_utc": "2026-11-08T11:52:58.015646+00:00",
+    "end_utc": "2026-11-08T12:27:55.693247+00:00",
+    "elapsed_seconds": 2097.6838664580137,
+    "local_suspension_seconds": 199.24292995792348,
+    "wall_seconds_excluding_local_suspension": 1898.4409365000902,
+    "timing_note": "Raw elapsed includes local SIGSTOP while root merged source. Excluding that suspension is adjusted wall time, not measured model compute time.",
+    "exit_code": 0,
+    "retries": 0,
+    "scope": "AC11 test-scoped module only, runtime wiring deferred",
+    "provider_reported": {
+      "tokens": {
+        "input": 163119,
+        "output": 18621,
+        "reasoning": 75627,
+        "cache": {
+          "read": 5238528,
+          "write": 0
+        }
+      }
+    },
+    "run_primary": {
+      "path": "/private/tmp/ocelli-codex-f228-glm/run.json",
+      "sha256": "7aa5e8482270106b1bff1b01ab23571fdd66fa39ae209418ee4021aa079abca9",
+      "bytes": 2167
+    },
+    "review_limit": "GLM module plus Codex runtime integration later reviewed together. Do not assign a standalone model quality score."
+  }
+]

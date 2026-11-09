@@ -1,0 +1,9 @@
+# Root JPEG CI visibility and adoption wording, bounded peer review
+
+0D,0S,0N in this narrow source-only review. No code, test, browser, build or CI job was run. Other workflow hunks and the already reviewed policy/test implementation are excluded.
+
+The Rust addition follows cargo test --workspace and runs only the targeted JPEG suite with --show-output. It retains successful synthetic per-channel observations that normal test capture would hide. It does not introduce a numerical threshold, force a backend, suppress a failure, continue after an error, relax a gate or assert quality. The step name and comments explicitly say unmeasured. It is a future CI execution path, not evidence that a new run has passed.
+
+The F239 append changes the proposal heading and adoption paragraph to the lead's actual adopted decision, then replaces the proposed acceptance prerequisite with the observed13-test and six-mutant facts. The restored direct receipt exits0 and its full log reports13passed,0failed. Each of the six named direct mutant receipts exits101, with intended assertion failures retained. Current candidate test and production JPEG hashes match the restored-source record. Production source remains unchanged. The explicit arbitrary-colour-corruption limitation remains, and the text distinguishes reporter arithmetic/contract tests from a lossy-colour quality guarantee. No claim of numerical host gold, parity, isolated cause, new tolerance or whole acceptance was added.
+
+Exact source/proposal/receipt hashes and the reviewed narrow hunk/append are retained in `/private/tmp/ocelli-s46-codex/root-jpeg-ci-wording-review`. Root's earlier independent full policy/test review remains the authority for that broader scope. This peer review approves only the root-authored CI visibility and factual adoption wording changes.

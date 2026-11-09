@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211, F-234, F-225, F-244
+**Last updated:** 2026-11-09
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -48,13 +48,53 @@ The order is fixed by DICOM PS3.10 sections 7 and 7.1.
    Explicit VR Little Endian is inflated.
 5. Walk the adapted bytes with a strict lazy parser under the resolved syntax.
    Odd lengths, malformed nesting, incomplete values, and top-level group 0002
-   elements are refused.
+   elements are refused. Sequence nesting deeper than `MAX_SEQUENCE_DEPTH` is
+   refused as `SequenceTooDeep` at the push of a Sequence container, before
+   dicom-rs's recursive collection runs.
 6. Append a fixed completion marker and collect the data set once under the
    same resolved syntax. Require and remove the marker before returning the
    object.
 
 There is no retry with Explicit VR Little Endian and no alternate-syntax
 fallback.
+
+## Sequence depth bound
+
+PS3.5 section 7.5 sets no bound on nesting, so this build sets one:
+`MAX_SEQUENCE_DEPTH`, re-exported beside `parse_part10`. The structural
+preflight counts open Sequence containers and refuses one more than the
+constant. Items are not counted, because an item cannot open without a
+sequence, and encapsulated pixel data cannot nest. The refusal is typed and
+carries no depth, value or tag.
+
+The constant is a power of two at least four times the deepest nesting
+measured in the corpus, in the output or fixture of every repository DICOM
+writer, Rust and TypeScript, and in the PS3.16 template shapes those writers
+target, each wrapped once more by de-identification's Original Attributes
+Sequence, chosen so a parse at the limit succeeds on a 2 MiB debug test
+thread. The deepest known shape is the PS3.16 2026d measurement chain, at 8
+open Sequences and 10 wrapped, so the value is the next power of two at or
+above 4 times 10, which is 64. The chain runs from the TID 1500 row 6
+"Imaging Measurements" CONTAINER and its row 9 inclusion of TID 1501,
+through TID 1501 row 10's TID 300 measurement and TID 300 row 1b's TID
+301, to TID 301 row 11's INFERRED FROM of TID 315 "Equation or Table" with
+TID 315 row 1's CODE and row 2's HAS PROPERTIES NUM, whose Measured Value
+Sequence (0040,A300) of PS3.3 C.18 carries the Measurement Units Code
+Sequence (0040,08EA) and the Type 3 Equivalent Code Sequence (0008,0121)
+of PS3.3 Table 8.8-1, wrapped in the Original Attributes Sequence
+(0400,0561) through the Modified Attributes Sequence (0400,0550) of PS3.3
+C.12.1.1.9. The templates are Extensible, so this is the deepest shape
+known, not a ceiling. Re-measured on 2026-11-07: the corpus is 2 deep over
+100 DICOM files, the TID 1500 document `writeTid1500` writes is 5 deep, and
+the deepest shape fixture is 10 wrapped. The key-object writer's 2 and the
+secondary-capture and synthetic slice writers' 0 are the 2026-11-06
+measurements of the same unchanged TypeScript source, not re-measured in
+this round. The measured inputs and the chosen value are recorded in the
+F-234 handoff. A corpus row
+or fixture that nests deeper than a quarter of the constant returns the
+story to the lead rather than widening the constant in place. dicom-rs 0.10
+offers no depth option, and its collector recurses, which is why the bound
+sits in the preflight rather than beside it.
 
 ## Supported routes
 
@@ -103,6 +143,7 @@ untrusted value bytes.
 | `UnsupportedDataSetTransferSyntax` | The registry entry cannot supply a supported data-set route |
 | `TruncatedDataSet` | The data set ends inside a token, value, or sequence |
 | `InvalidDataSet` | Structure is invalid under the declared syntax |
+| `SequenceTooDeep` | Sequences nest deeper than `MAX_SEQUENCE_DEPTH` |
 
 The variants carry no input bytes, attribute values, instance identifiers,
 paths, or upstream parser tokens. A caller can report the error class without
@@ -145,6 +186,89 @@ constructor.
 typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
 positions without weakening the existing value constructors. SQ nulls and
 binary carriers cannot use the wrapper.
+
+## Conformance report
+
+`ocelli_dicom::check_conformance(&ParsedDicom)` produces the report, and
+`to_json` owns its wire form. The check is advisory and on demand. It runs
+after a successful parse, performs no decode, and never gates image
+display. Producing a report in the browser would need a wasm build that
+links the parser, and this build does not supply one. Measurements are
+recorded in [the benchmark LLD](benchmarks.md).
+
+The rule catalogue is produced by
+`crates/ocelli-dicom/tests/conformance_typegen.rs`, which writes
+`conformance.generated.ts` into `packages/core/src`. That file is distinct
+from the boundary `generated.ts`. The VM source is `conformance/vm.rs`, 47
+tags transcribed from PS3.6 2026d Table 6-1. It is not the full PS3.6
+dictionary, and it is cross-checked against the dictionary VRs. Encoded UN
+content is counted and is not value checked. The
+[public report reader](public-api.md#conformance-report-reader) lists the
+rule identifiers by family. `DS-RANGE` names the binary64 range limit, not
+a violation of the decimal-string grammar.
+
+The report carries this exact `CONFORMANCE_SCOPE` sentence:
+
+> This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM.
+
+Module presence covers Patient, General Study, General Series, General
+Image, Image Plane, Image Pixel and SOP Common for the four IODs below.
+Classic CR Image Storage has six, all but Image Plane. Classic CT, MR and PET Image Storage
+have all seven. Other SOP classes, including the Enhanced variants, do not
+evaluate module presence. Their value, VR and limited VM rules still
+apply. This is not full DICOM conformance.
+
+The decidable 1C and 2C conditions are the ones the approved plan names.
+`PlanarConfiguration` when `SamplesPerPixel` is greater than 1. The six
+palette elements for PALETTE COLOR. `PixelData` when `PixelDataProviderURL`
+is absent. The EOT lengths when EOT is present. `SpecificCharacterSet`
+when relevant text uses the expanded or replacement repertoire.
+`PatientPosition` for CT and MR when (0054,0410) is absent.
+`PatientOrientation` for CR. Not checked are `Laterality`, `ContentDate`
+and `ContentTime`, `AnatomicalOrientationType`, `PixelAspectRatio`,
+`PixelPaddingRangeLimit` and the `PixelDataProviderURL` condition itself,
+plus the nonhuman, alternative calendar, deidentification, encryption,
+HL7, `QueryRetrieveView` and conversion rows. The distinction matters. An
+absent URL decides `PixelData`, while the condition that requires a URL is
+not decided.
+
+A finding carries tag, keyword, path, rule and section, with an optional
+value ordinal and an optional measure. It never carries the original
+attribute value, a substring of it or a character code from it. `path` is a
+list of sequence steps. Each step's `item` and a finding's `value` are
+1-based item and value ordinals, not contents. A character measure carries
+a 0-based `index` and a character `class`. Retained numeric lengths and
+counts are actionable. The module scope of an unevaluated SOP class may
+repeat a well-formed UID under the DICOM root. Invalid UIDs and UIDs
+outside that root are not repeated. The field is null with a closed note, or just null
+when absent or empty. This selector is separate from a finding's value
+ordinal and does not permit arbitrary attribute contents in findings.
+
+`POST /conformance` accepts the original raw Part 10 body, or an
+`X-Ocelli-File` id with an empty body. Both together are a 400. An unknown
+id, or one whose encoded bytes have retired, answers 410. Bytes that are
+not Part 10 get the
+refusal `/headers` gives. The route performs no decode and touches no held
+frame. Encoded bytes can retire after decode, for CT and DX alike, while
+the decoded held frames remain. The viewer asks with the id first. On 410
+it retries once with the original File as the `/conformance` body. It does
+not repost to `/file` and does not create a new held id.
+
+The page asks for the report of the file the active viewport shows once
+that file has stayed stable for 300 ms. Delayed background requests wait
+during file posts and thumbnails. One request is in flight at a time. Reports are cached
+against the File object, not against a retired native id, at most 512 per
+folder, oldest dropped first. A new folder resets the cache, and replies
+from a stale generation are dropped. A sheet open can request immediately.
+Findings never gate display. The badge stays hidden until the shown file
+has findings above zero, and an absent badge is not a conformance
+certificate. A missing library build shows:
+
+> The checks need the library build. Run npm run build in the repository, then start the viewer again.
+
+If the library entry is served but the library cannot load, it shows:
+
+> The checks need dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.
 
 ## Derived frame geometry
 
@@ -297,16 +421,68 @@ contain one strictly increasing offset per frame and every offset must land on
 a supplied Fragment boundary. One frame may therefore borrow several adjacent
 Fragments.
 
-An empty Basic Offset Table maps a single frame to all Fragments. For multiple
-frames it accepts only the proven one-Fragment-per-frame case where the counts
-match. Every other empty-table mapping reports unavailable boundary evidence
-instead of guessing.
+An empty Basic Offset Table maps a single frame to all Fragments, and several
+frames to one Fragment each when the counts match, with no marker read. F-244
+adds the case PS3.5 8.2 requires and A.4 leaves without an algorithm, more
+Fragments than frames. `FrameDelimiter::for_transfer_syntax` owns the
+delimiter table: `JpegMarkers` for `.50`, `.51`, `.57`, `.70`, `.80` and `.81`
+(A.4.1 and A.4.3), `Jpeg2000Markers` for `.90`, `.91`, `.201`, `.202` and
+`.203` (A.4.4, HTJ2K read leniently because it shares the Part 1 markers), and
+`Unmarked` for RLE, JPEG XL and any other UID. Frame 0 starts at Fragment 0.
+Each frame ends at the first Fragment whose logical suffix through its Value
+ends `FF D9`, or `FF D9 00` with A.4's one pad byte. The next frame starts at
+the following Fragment, whose logical prefix across Fragment Values must
+begin `FF D8 FF` or `FF 4F FF 51`. Either marker may cross an even Fragment
+boundary. Only a bounded prefix and three suffix bytes are inspected, without
+joining a frame. An empty-table frame count greater than the Fragment count
+is refused before reservation. Marker ranges use fallible reservation, with
+`AllocationFailed` on allocation failure. Exactly the declared number of
+frames must be found, the last ending at the last Fragment.
+Anything else, and every `Unmarked` case, is `BoundaryUnavailable`, so an
+`FF D9` inside a header segment refuses the file rather than handing a decoder
+the wrong bytes. The populated-table and equal-count paths read no markers.
+
+`EncapsulatedFrameIndex::from_parsed` is the one constructor both production
+callers use, the folder viewer preview and the oracle producer. It reads the
+top-level Pixel Data, refusing native or absent Pixel Data as
+`NotEncapsulated`. When Extended Offset Table `(7FE0,0001)` is present it
+requires an empty Basic Offset Table, refusing `ExtendedWithBasicOffsets`
+otherwise as A.4 forbids both, requires Extended Offset Table Lengths
+`(7FE0,0002)` and both as `OV` 64-bit values, refusing
+`ExtendedOffsetTableUnreadable` otherwise, and builds through `from_extended`.
+Without it, it builds through `from_basic` with the transfer syntax's
+delimiter. It looks elements up with `get`, because dicom-object's `element`
+error captures a backtrace, about 4 microseconds per absent tag, measured.
 
 Extended Offset Table input follows PS3.3 C.7.6.3.1.8. It requires one
 Fragment per frame, one 64-bit offset and length per frame, the same Fragment
 Item Tag offset origin, and exact ordered boundaries. A returned Fragment view
 excludes the one trailing Item pad byte when the encoded frame length is odd.
 Frame lookup never clamps an out-of-range index.
+
+### cornerstone3D 5.8.2 and decision D14
+
+The floor is `@cornerstonejs/dicom-image-loader` 5.8.2 with `dicom-parser`
+1.8.21, read from `tools/oracle/node_modules`. It reads an empty table as
+empty, takes Fragment `i` for frame `i` when the counts match, and otherwise
+ends each frame at the first Fragment whose last bytes hold `FF D9`. It never
+reads the Extended Offset Table. Ocelli opens every case it opens, except two
+named departures, both on input PS3.5 or PS3.3 call non-conformant:
+
+- An RLE or JPEG XL frame split across Fragments, which A.4.2 and A.4.12
+  forbid. cornerstone3D gives frame 0 every Fragment and throws for later
+  frames. Ocelli refuses the file as `BoundaryUnavailable`, because neither
+  codestream has an end marker to prove a boundary.
+- An Extended Offset Table beside a populated Basic table, or one that
+  disagrees with the Fragments. cornerstone3D ignores it. Ocelli refuses by
+  name, because a table that disagrees with the Fragments means one of the two
+  is wrong.
+
+One case is better than the floor: an `FF D9` at the end of a Fragment that
+is not the frame's end, followed by a Fragment with no start marker, is
+refused rather than handed to a decoder. These are behaviours read from the
+two sources, not measured divergence. The oracle measurement over the new
+corpus rows is F-244's AC22, run on a GPU host.
 
 Native Pixel Data has no per-frame offset table. After ingest retains the
 complete native Value and `MultiframeMetadata` validates Number of Frames,
@@ -349,6 +525,18 @@ cannot report how many encoded bytes the stream consumed. Ocelli uses the
 decoder directly for this one selected route so it can require the exact
 PS3.5 A.5 end of stream and mandatory NULL padding without inflating twice.
 
+F-244 vendors `dicom-object` 0.10.0 at `vendor/dicom-object-0.10.0` with one
+recorded source patch, `first = false;` at the end of the `ItemEnd` arm of
+`build_encapsulated_data` in `src/collector.rs`. The published collector
+cleared its first-item flag only when an Item value was read, so the first
+Fragment after a zero-length Basic Offset Table was read as the table, at the
+top level and inside an Icon Image Sequence item. 0.10.1 and upstream `master`
+carry the same code. The pins gate's `check_dicom_object_vendor` holds the
+inventory, the patched file's digest and `PATCH-PROVENANCE.md`. D-18 records
+that a published `ocelli-dicom` would lose the patch, so it is not published
+until a dicom-object release carries the fix, when a follow-up story removes
+the vendor directory and returns the dependency to the registry.
+
 The dicom-rs graph requires `std`, so `ocelli-dicom` is not in the repository's
 self-selected no-std set. It remains a shared crate that builds for native and
 `wasm32-unknown-unknown`. The `native` gate checks both targets and proves that
@@ -365,7 +553,14 @@ encapsulated Pixel Data to the selected transfer syntax, requires OB or OW for
 Native Format, requires OB plus a Basic Offset Table and at least one nonempty
 Fragment for Encapsulated Format, and rejects missing Deflate padding or
 trailing bytes. Native Format Pixel Data nested in a Sequence Item remains
-available under an encapsulated syntax.
+available under an encapsulated syntax. The depth fixtures parse at
+`MAX_SEQUENCE_DEPTH`, refuse one past it on every little endian form, refuse
+100,000 nested Sequences on a 256 KiB stack, refuse a deflated data set one
+past the limit, and run a proptest over per-level length forms. F-244 adds PS3.5 Table A.4-1 and A.4-2
+shapes by hand: an empty table then Fragments of six, eight, and four, six and
+two bytes, each asserted as an empty table and exactly those Fragments, a
+populated two-frame table returned unchanged, and an Icon Image Sequence item
+whose encapsulated Pixel Data has an empty table and a six-byte Fragment.
 
 The ordinary workspace suite remains self-contained. `bin/ocelli.sh gate
 corpus` first checks coverage, digests, and non-sensitive metadata for the
@@ -399,7 +594,15 @@ per-frame precedence, explicit top-level permission, retained source evidence,
 and frame order. `crates/ocelli-dicom/tests/frame_index.rs` uses hand-computed
 Fragment Item Tag offsets to check multi-Fragment Basic Offset Table frames,
 empty-table evidence, Extended Offset Table lengths and pad removal, malformed
-boundaries, truncated tables, and final frame bounds. The ignored corpus test
+boundaries, truncated tables, and final frame bounds. F-244 adds the marker
+rule for JPEG and JPEG 2000 frames spanning Fragments, its five refusals
+including a false end marker, equal counts reading no marker, the delimiter
+table against A.4.1 to A.4.12, and `from_parsed` over a hand-built Extended
+Offset Table with its wrong offset, wrong length, populated Basic table and
+missing Lengths refusals. The ignored corpus test also decodes the nineteen
+empty-table rows through `from_parsed`, each single-frame row equal to its
+source row's decode and each multi-frame row frame by frame equal to the
+uncompressed reference, reversed by columns and reversed by rows. The ignored corpus test
 projects the exact manifest-backed enhanced CT row through `MetadataSet` and
 `MultiframeMetadata`, then checks its frame count and distinct shared and
 per-frame source labels without reading attribute values into the assertion.

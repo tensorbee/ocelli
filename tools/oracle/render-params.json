@@ -13,7 +13,11 @@
       "height": 512,
       "why": "Fixed and square, so no row's aspect ratio decides the output size. Most corpus frames are smaller than this and are magnified into it. Two real rows are not: real/dx_varepop/00000001.dcm is 879 by 1168 and real/us_cmb_crc/00000001.dcm is 590 by 819, and both are fitted DOWN under NEAREST, which discards source pixels. The sidecar records the source Rows and Columns beside the canvas size for exactly that reason, and run.json counts the downsampled rows."
     },
-    "background": [0, 0, 0],
+    "background": [
+      0,
+      0,
+      0
+    ],
     "interpolation": "NEAREST",
     "camera": {
       "mode": "reset",
@@ -43,9 +47,33 @@
   },
   "rules": [
     {
-      "match": { "category": "colour" },
-      "apply": { "voi": { "source": "none" } },
+      "match": {
+        "category": "colour"
+      },
+      "apply": {
+        "voi": {
+          "source": "none"
+        }
+      },
       "why": "PS3.3 C.11.2 puts the VOI LUT in the grayscale pipeline. An RGB or YBR frame has no VOI stage, so asking for one would record a window that did not act on anything."
+    }
+  ],
+  "colourObservations": [
+    {
+      "id": "rgb-window",
+      "path": "synthetic/sc_rgb_interleaved.dcm",
+      "windowCenter": 128,
+      "windowWidth": 100,
+      "invert": false,
+      "why": "F-239 AC20, the approved per-channel LINEAR colour window, without inversion."
+    },
+    {
+      "id": "rgb-window-invert",
+      "path": "synthetic/sc_rgb_interleaved.dcm",
+      "windowCenter": 128,
+      "windowWidth": 100,
+      "invert": true,
+      "why": "F-239 AC20, inversion after the same per-channel LINEAR colour window."
     }
   ]
 }

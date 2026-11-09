@@ -146,3 +146,25 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+## Appended draft refinement, observable controls and lead questions
+
+This draft refinement is retained for the normal pre-implementation design round after independent non-author review. Status stays draft. It maps observable controls to the existing numbered acceptance inventory above and lists remaining lead questions. No existing AC row is rewritten or weakened, and no new policy, rounding, tolerance, equality, refusal, API, dependency, estimate, sprint or status choice is made here.
+
+**Observable controls mapped to existing ACs**
+
+- **AC1.** The same canonical viewer browses the synthetic fixture, including nested sequences, VR, multiplicity, keyword and safely rendered values. The existing Headers transport already traverses SQ into 0-based prefixed flat rows and searches tag, VR, name, value and text content. The current depth limit of 6, the 4096 element-row cap plus its omission marker and the separate 1024-character value cap are observed facts, and the fixture must not have deep or broad elements silently dropped by them.
+- **Typed slots.** Typed MetadataSet presentation preserves absent, present-empty and null slots, value multiplicity, ordered sequence items and carriers, with file meta kept separate.
+- **AC2.** Search navigates to the exact matching item path, including repeated tags in different items, and shows VR, VM and typed values. DOM metacharacters render safely. Cap and unsupported disclosure is visible rather than silent. No generated stand-in rows, no dictionary meaning invented for unknown private tags and no automatic BulkData URI fetch.
+- **AC3.** Opening another instance or source invalidates the previous tree. A-B-A, close, reopen and frame, source and viewport replacement never show A as B. A retained prior tree or image carries honest identity and status. MetadataError unsupported pixel projection can abort an entire set today, so per-row unsupported with the rest of the tree is an open provider gap and design question, not claimed as existing behaviour.
+- **AC4.** Repeat, pending source and viewport change, release and reopen use the generation-carrying lifecycle.
+- **AC5.** Existing S46 workflows remain reachable on the final stacked source.
+- **AC6.** Metadata browsing is renderer-tier independent. Tiers A, B and C each observe the declared result, and Tier C refusal is never required merely because GPU stack drawing is unavailable.
+- **AC7.** The More row names the usable workflow, its caps and its evidence.
+- **Privacy.** Actual private user values are allowed in the intended local UI only. Evidence uses synthetic fixtures. No real values in logs, prompts, errors or telemetry and no conflation with conformance claims.
+
+**Remaining lead questions, explicitly unresolved**
+
+- Tree and path navigation UX, search scope, pagination, the file meta group and a VM column.
+- The per-row unsupported disclosure design for the MetadataError abort case.
+- Exact retained-prior-tree presentation and identity labelling.

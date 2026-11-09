@@ -103,6 +103,7 @@ Prerequisites, all native:
 | `imagecodecs` | JPEG lossless and the two DCT rows |
 | **DCMTK** (`dcmcjpeg` on `PATH`) | the four JPEG syntaxes pydicom has no encoder for |
 | **OpenJPH** (`ojph_compress` on `PATH`) | the HTJ2K codestream, which the generator then encapsulates |
+| **OpenJPEG** (`opj_compress` on `PATH`) | the two JPEG 2000 colour codestreams, which the generator then encapsulates |
 
 **The versions matter**, and they are not written down here. They are
 `BUILT_WITH` in `scripts/corpus_synth.py`, beside the code that depends on
@@ -311,7 +312,10 @@ is worth more than a row nobody can evidence.
 - **The `j2k_*` and `jpegls_*` cases are encoded and decoded by the same
   library**, OpenJPEG and pyjpegls respectively, so the conformance check on
   those is weaker than on the rest. The `jpeg_*` and `htj2k_*` cases are
-  decoded by a different library from the one that encoded them.
+  decoded by a different library from the one that encoded them. The two
+  `jpegls_banded_*` rows, added by F-243, decode against
+  `syntax/reference_banded16.dcm`, which is their two-band formula written
+  uncompressed, so their lossless anchor does not depend on CharLS.
 - **No encapsulation edge cases.** Every compressed case is one frame in one
   fragment with a populated Basic Offset Table. Multi-fragment frames, a
   multi-frame encapsulated instance and an empty Basic Offset Table are three

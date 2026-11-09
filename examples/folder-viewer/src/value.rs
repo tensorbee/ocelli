@@ -146,18 +146,19 @@ impl UnitText {
     }
 }
 
-/// Read the value inputs of one frame.
+/// The stored padding range of a frame, PS3.3 C.7.5.1.1.2.
 ///
-/// `modality` is the held frame's stage 1, built after the caller refused a
-/// Modality LUT Sequence. Only padding and the unit are read here.
-pub(crate) fn value_facts(
+/// The one reader of padding for the value at a point, region statistics and
+/// the automatic window, so all three leave out the same samples.
+///
+/// # Errors
+///
+/// [`PreviewError::Attribute`] when the padding attributes cannot be read,
+/// and when padding is declared above 24 stored bits.
+pub(crate) fn stored_padding(
     metadata: &MetadataSet,
-    object: &DefaultDicomObject,
-    multi: &MultiframeMetadata<'_>,
-    frame_index: usize,
     description: &StoredPixelDescription,
-    modality: &ModalityTransform,
-) -> Result<ValueFacts, PreviewError> {
+) -> Result<Option<PaddingRange>, PreviewError> {
     let signed = description.bits.pixel_representation() == PixelRepresentation::Signed;
     let padding = read_padding(
         metadata,
@@ -170,6 +171,22 @@ pub(crate) fn value_facts(
     if padding.is_some() && description.bits.bits_stored() > EXACT_STORED_BITS {
         return Err(PreviewError::Attribute);
     }
+    Ok(padding)
+}
+
+/// Read the value inputs of one frame.
+///
+/// `modality` is the held frame's stage 1, built after the caller refused a
+/// Modality LUT Sequence. Only padding and the unit are read here.
+pub(crate) fn value_facts(
+    metadata: &MetadataSet,
+    object: &DefaultDicomObject,
+    multi: &MultiframeMetadata<'_>,
+    frame_index: usize,
+    description: &StoredPixelDescription,
+    modality: &ModalityTransform,
+) -> Result<ValueFacts, PreviewError> {
+    let padding = stored_padding(metadata, description)?;
     let rescale_type = resolved_text(multi, frame_index, PIXEL_VALUE_TRANSFORMATION, RESCALE_TYPE)?;
     let modality_code = optional_text(object, MODALITY)?;
     let (units, multi_energy) = match modality_code.as_deref() {
@@ -243,7 +260,7 @@ pub fn value_frame(
         &mut native,
         &mut samples,
         &mut |_| {},
-        &mut |_| Vec::new(),
+        &mut |_, _| Vec::new(),
     )?;
     value_json(&held, frame, points)
 }
@@ -260,11 +277,28 @@ pub(crate) fn value_json(
     frame: u32,
     points: &[ImagePoint],
 ) -> Result<String, PreviewError> {
+    value_json_with_scratch(
+        held,
+        frame,
+        points,
+        &mut crate::colour::ColourScratch::default(),
+    )
+}
+
+pub(crate) fn value_json_with_scratch(
+    held: &HeldFrame,
+    frame: u32,
+    points: &[ImagePoint],
+    scratch: &mut crate::colour::ColourScratch,
+) -> Result<String, PreviewError> {
     let mut cells = Vec::with_capacity(points.len());
     for point in points {
         let column = cell_index(point.x, held.width).ok_or(PreviewError::Point)?;
         let row = cell_index(point.y, held.height).ok_or(PreviewError::Point)?;
         cells.push((column, row));
+    }
+    if let Some(recipe) = crate::colour::recipe(held)? {
+        return colour_value_json(held, frame, &cells, recipe, scratch);
     }
     let facts = held.value.as_ref().map_err(|error| *error)?;
     let mut out = String::from("{\"frame\":");
@@ -309,6 +343,45 @@ pub(crate) fn value_json(
                 &format!("{number} {unit}", unit = facts.unit.as_str()),
             );
         }
+        out.push('}');
+    }
+    out.push_str("]}");
+    Ok(out)
+}
+
+fn colour_value_json(
+    held: &HeldFrame,
+    frame: u32,
+    cells: &[(u32, u32)],
+    recipe: &crate::colour::ColourRecipe,
+    scratch: &mut crate::colour::ColourScratch,
+) -> Result<String, PreviewError> {
+    let mut out = format!("{{\"frame\":{frame},\"unit\":\"RGB\",\"points\":[");
+    let step = crate::colour::rows_per_band(held.width)?;
+    let mut loaded = None;
+    for (at, &(column, row)) in cells.iter().enumerate() {
+        let first = row / step * step;
+        if loaded != Some(first) {
+            crate::colour::map_band(held, recipe, first, step.min(held.height - first), scratch)?;
+            loaded = Some(first);
+        }
+        let index = usize::try_from(row - first)
+            .ok()
+            .and_then(|n| n.checked_mul(usize::try_from(held.width).ok()?))
+            .and_then(|n| n.checked_add(usize::try_from(column).ok()?))
+            .ok_or(PreviewError::Point)?;
+        let rgb = scratch.rgb.get(index).ok_or(PreviewError::Point)?;
+        if ![rgb.r, rgb.g, rgb.b].iter().all(|v| v.is_finite()) {
+            return Err(PreviewError::Attribute);
+        }
+        if at > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("{{\"column\":{},\"row\":{},\"index_column\":{column},\"index_row\":{row},\"padding\":false,\"rgb\":[{},{},{}],\"text\":",column + 1,row + 1,rgb.r,rgb.g,rgb.b));
+        json_string(
+            &mut out,
+            &format!("R {:.1} G {:.1} B {:.1}", rgb.r, rgb.g, rgb.b),
+        );
         out.push('}');
     }
     out.push_str("]}");
@@ -394,7 +467,7 @@ mod tests {
             &mut native,
             &mut samples,
             &mut |_| {},
-            &mut |_| Vec::new(),
+            &mut |_, _| Vec::new(),
         )
         .map_err(|error| format!("frame {frame} was refused: {}", error.code()))
     }
@@ -545,6 +618,9 @@ mod tests {
                 .value
                 .as_ref()
                 .map_err(|error| format!("{name}: no value, {}", error.code()))?;
+            let crate::preview::Recipe::Monochrome(recipe) = recipe else {
+                return Err(format!("{name}: expected monochrome recipe"));
+            };
             if value.modality != recipe.modality {
                 return Err(format!(
                     "{name}: value {:?} and preview {:?} differ",

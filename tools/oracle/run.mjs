@@ -78,6 +78,7 @@ import {
 import {
   canvasScale,
   readRenderParams,
+  colourObservation,
   resolveRenderParams,
   RENDER_PARAMS_PATH,
 } from "./src/params.mjs";
@@ -195,6 +196,7 @@ export function parseArgs(argv) {
   const options = {
     out: DEFAULT_OUT,
     rows: null,
+    colourObservation: null,
     once: false,
     inject: null,
     unit: true,
@@ -225,6 +227,9 @@ export function parseArgs(argv) {
         break;
       case "--rows":
         options.rows = value(++index, arg);
+        break;
+      case "--colour-observation":
+        options.colourObservation = value(++index, arg);
         break;
       case "--once":
         options.once = true;
@@ -286,9 +291,9 @@ export function parseArgs(argv) {
   // have caught `<out>/sub` and missed `<OUT>/sub` and
   // `<symlink-to-out>/sub`, which is the comparison the paragraph above says
   // is not enough, made one level up.
-  if (options.rows && isInside(options.out, DEFAULT_OUT)) {
+  if ((options.rows || options.colourObservation) && isInside(options.out, DEFAULT_OUT)) {
     throw new Error(
-      `--rows selects a subset of the corpus, so --out must name a directory ` +
+      `--rows or --colour-observation selects a subset of the corpus, so --out must name a directory ` +
         `outside ${DEFAULT_OUT}. Writing a subset there would leave F-011 ` +
         `reading part of the corpus as if it were all of it. The relative ` +
         `spelling, the absolute one, a case-only variant, a symlink and a ` +
@@ -301,6 +306,7 @@ export function parseArgs(argv) {
 const USAGE = `bin/ocelli.sh oracle [options]
 
   --out <dir>            where reference output goes (default tools/oracle/out)
+  --colour-observation <id>  one declared AC20 case, requires separate --out
   --rows <substring>     only rows whose manifest path contains this. Requires
                          --out, because a subset must not become the output
   --once                 one pass, so determinism is not measured
@@ -333,7 +339,7 @@ so a run that skipped a check cannot be recorded as one that passed it.
  * an unpinned reference is not comparable with reference output from a pinned
  * one.
  */
-function checkPins() {
+export function checkPins() {
   const installed = {};
   const problems = [];
   const pins = { ...PINNED, ...PINNED_CODECS, ...PINNED_TOOLS_PEERS };
@@ -457,6 +463,7 @@ async function runUnitTests() {
     [
       "--test",
       "tests/args_test.mjs",
+      "tests/bench_series_test.mjs",
       "tests/geometry_test.mjs",
       "tests/manifest_test.mjs",
       "tests/output_test.mjs",
@@ -889,15 +896,23 @@ export async function runOracle(argv) {
   }
 
   const allRows = await readManifest();
+  let spec = readRenderParams();
+  let observationPath = null;
+  if (options.colourObservation) {
+    const observation = colourObservation(spec, options.colourObservation);
+    spec = observation.spec;
+    observationPath = observation.path;
+  }
+  const selectedRows = observationPath
+    ? allRows.filter((row) => row.path === observationPath) : allRows;
   const rows = options.rows
-    ? allRows.filter((row) => row.path.includes(options.rows))
-    : allRows;
+    ? selectedRows.filter((row) => row.path.includes(options.rows))
+    : selectedRows;
   if (rows.length === 0) {
     throw new Error(
       `no manifest row matches --rows ${JSON.stringify(options.rows)}`,
     );
   }
-  const spec = readRenderParams();
   const unsupported = readUnsupported();
   if (unsupported.cornerstone3DVersion !== installed["@cornerstonejs/core"]) {
     throw new Error(
@@ -1634,7 +1649,7 @@ async function report(context) {
       // indistinguishable from one that did it.
       volumePass: volumePasses !== null,
     },
-    partial: options.rows !== null,
+    partial: options.rows !== null || options.colourObservation !== null,
     inject: options.inject,
     elapsedMs,
     manifestSha256: await digestOfManifest(),
@@ -1723,7 +1738,7 @@ async function report(context) {
   // one place below that discards the output.
   if (problems.length === 0 && options.metadataCheck) {
     try {
-      await checkSidecarMetadata(options.out, options.rows !== null);
+      await checkSidecarMetadata(options.out, options.rows !== null || options.colourObservation !== null);
     } catch (error) {
       problems.push(String(error?.message ?? error));
     }

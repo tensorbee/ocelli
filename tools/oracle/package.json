@@ -16,7 +16,7 @@
   "scripts": {
     "build:page": "node build-page.mjs",
     "start": "node run.mjs",
-    "test": "node --test tests/args_test.mjs tests/geometry_test.mjs tests/manifest_test.mjs tests/output_test.mjs tests/params_test.mjs tests/paths_test.mjs tests/pins_test.mjs tests/registration_test.mjs tests/server_test.mjs tests/sidecar_test.mjs tests/unsupported_test.mjs tests/volume_test.mjs"
+    "test": "node --test tests/args_test.mjs tests/bench_series_test.mjs tests/geometry_test.mjs tests/manifest_test.mjs tests/output_test.mjs tests/params_test.mjs tests/paths_test.mjs tests/pins_test.mjs tests/registration_test.mjs tests/server_test.mjs tests/sidecar_test.mjs tests/unsupported_test.mjs tests/volume_test.mjs"
   },
   "dependencies": {
     "@cornerstonejs/codec-charls": "1.2.5",

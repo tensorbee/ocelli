@@ -28,7 +28,10 @@ fn build_jpeg_ls_frame(height: u16, width: u16, scan_data: &[u8]) -> Vec<u8> {
 
 #[test]
 fn jpeg_ls_fragment_2x2_all_zero_decodes_correctly() {
-    let frame = build_jpeg_ls_frame(2, 2, &[0xF8]);
+    // Ocelli F-243: was 0xF8. Four hit bits fill the frame and the padding
+    // after them must be zero, which CharLS 2.4.4 enforces and the patched
+    // scan decoder now does, so the published padding bit is cleared.
+    let frame = build_jpeg_ls_frame(2, 2, &[0xF0]);
     let layout = layout_8bit(2, 2, 1.0, 0.0);
     let result = decode_jpeg_ls_fragment(&frame, layout).unwrap();
     assert_eq!(result, vec![0.0f32, 0.0, 0.0, 0.0]);

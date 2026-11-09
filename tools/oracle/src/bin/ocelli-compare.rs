@@ -1,20 +1,25 @@
 //! `ocelli-compare`, the comparator's runner.
 //!
-//! Four commands, and none of them is a `cargo test`. All four need a
-//! rendered run under `tools/oracle/out/`, and an `#[ignore]` test that needs
-//! a directory reads as a pass on the day it did not run, which is a shape
-//! this repository refuses.
+//! Five commands. Four of them need a rendered run under `tools/oracle/out/`,
+//! and an `#[ignore]` test that needs a directory reads as a pass on the day
+//! it did not run, which is a shape this repository refuses. The fifth,
+//! `pair`, needs only two raw frames and is the preconditions check F-223's
+//! comparison mode calls before it records any timing figure.
 //!
 //! ```text
 //! ocelli-compare gate      --reference DIR --candidate DIR [--out DIR]
 //! ocelli-compare identity  [--reference DIR] [--candidate DIR] [--out DIR]
 //! ocelli-compare mutations [--reference DIR] [--candidate DIR]
 //! ocelli-compare census    [--reference DIR] [--candidate DIR]
+//! ocelli-compare pair      --reference FILE --candidate FILE --width W --height H
 //! ```
 //!
 //! `--candidate` defaults to `--reference` for every command including
 //! `census`, whose baseline is a full comparison of the two directories, so
-//! passing it there changes which views the census finds gating.
+//! passing it there changes which views the census finds gating. `pair`
+//! requires both explicitly, because its two arguments are frame files and
+//! not run directories, and a default directory would silently compare a
+//! directory that happens to exist.
 //!
 //! `identity` compares a directory against itself, which proves the plumbing
 //! over every view. `mutations` replays the declared catalogue and requires
@@ -32,6 +37,16 @@
 //! catalogue's own swap to every gating class-one view and prints what it
 //! measures, so a number in prose has a command beside it rather than a
 //! provenance.
+//!
+//! `pair` takes two raw RGBA8 frames of a stated size and prints the 25.1
+//! verdict from `tolerance::pair_verdict` as JSON. It loads no run, no
+//! register and no census, because its inputs are two files the caller
+//! rendered, and the comparison harness writes them to a temporary directory
+//! outside the repository and removes them afterwards. A rendered
+//! pseudo-PHI image is a picture of the input, so the command itself writes
+//! nothing and the verdict goes to stdout. It exits 0 when the verdict
+//! passes and 1 when it does not, either because a clause failed or because
+//! the informative fraction is below the floor.
 
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -51,7 +66,7 @@ use ocelli_oracle::render_hash::ALGORITHM as RENDER_HASH_ALGORITHM;
 use ocelli_oracle::report::{Census, Outcome, RunReport, Side, ViewRecord};
 use ocelli_oracle::sidecar::Run;
 use ocelli_oracle::tolerance::{
-    MONOCHROME_SIGNED_MEAN_BIAS, ToleranceClass, class_from_categories,
+    MONOCHROME_SIGNED_MEAN_BIAS, PairVerdict, ToleranceClass, class_from_categories, pair_verdict,
 };
 use serde_json::Value;
 
@@ -85,6 +100,10 @@ struct Arguments {
     out: PathBuf,
     reference_explicit: bool,
     candidate_explicit: bool,
+    corpus_explicit: bool,
+    out_explicit: bool,
+    pair_width: Option<u32>,
+    pair_height: Option<u32>,
 }
 
 fn parse_arguments() -> Result<Arguments, String> {
@@ -102,23 +121,40 @@ where
     let mut candidate: Option<PathBuf> = None;
     let mut candidate_explicit = false;
     let mut corpus = None;
+    let mut corpus_explicit = false;
     let mut out = PathBuf::from(DEFAULT_OUT);
+    let mut out_explicit = false;
+    let mut pair_width = None;
+    let mut pair_height = None;
     let mut arguments = input.into_iter().map(Into::into);
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
             "--reference" => {
+                // `pair`'s --reference is a frame file and every other
+                // command's is a run directory, so the noun follows the
+                // command the argument is for.
+                let noun = if command == "pair" {
+                    "frame file"
+                } else {
+                    "directory"
+                };
                 reference = PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "--reference wants a directory".to_owned())?,
+                        .ok_or_else(|| format!("--reference wants a {noun}"))?,
                 );
                 reference_explicit = true;
             }
             "--candidate" => {
+                let noun = if command == "pair" {
+                    "frame file"
+                } else {
+                    "directory"
+                };
                 candidate = Some(PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "--candidate wants a directory".to_owned())?,
+                        .ok_or_else(|| format!("--candidate wants a {noun}"))?,
                 ));
                 candidate_explicit = true;
             }
@@ -128,12 +164,36 @@ where
                         .next()
                         .ok_or_else(|| "--corpus wants a directory".to_owned())?,
                 ));
+                corpus_explicit = true;
             }
             "--out" => {
                 out = PathBuf::from(
                     arguments
                         .next()
                         .ok_or_else(|| "--out wants a directory".to_owned())?,
+                );
+                out_explicit = true;
+            }
+            // `pair`'s frame size, parsed as u32 so a dimension that does not
+            // fit is an argument error rather than a wrapped number.
+            "--width" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--width wants a pixel count".to_owned())?;
+                pair_width = Some(
+                    raw.to_string_lossy()
+                        .parse::<u32>()
+                        .map_err(|_| format!("{raw:?} is not a pixel count for --width"))?,
+                );
+            }
+            "--height" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--height wants a pixel count".to_owned())?;
+                pair_height = Some(
+                    raw.to_string_lossy()
+                        .parse::<u32>()
+                        .map_err(|_| format!("{raw:?} is not a pixel count for --height"))?,
                 );
             }
             other if other.starts_with("--") => {
@@ -145,7 +205,7 @@ where
     }
     if command.is_empty() {
         return Err("a command is required: `gate`, `identity`, `mutations`, \
-             `census` or `produce`. See docs/lld/comparator.md"
+             `census`, `produce` or `pair`. See docs/lld/comparator.md"
             .to_owned());
     }
     Ok(Arguments {
@@ -156,6 +216,10 @@ where
         out,
         reference_explicit,
         candidate_explicit,
+        corpus_explicit,
+        out_explicit,
+        pair_width,
+        pair_height,
     })
 }
 
@@ -253,10 +317,47 @@ fn validate_output_directory(out: &Path, reference: &Path, candidate: &Path) -> 
     Ok(())
 }
 
+/// `--width` and `--height` describe a pair of raw frames and nothing else,
+/// so a command that silently carried them would be an argument the command
+/// ignored.
+///
+/// # Errors
+/// When the command is not `pair` and a frame size was given anyway.
+fn refuse_stray_frame_size(arguments: &Arguments) -> Result<(), String> {
+    if arguments.command != "pair"
+        && (arguments.pair_width.is_some() || arguments.pair_height.is_some())
+    {
+        return Err("--width and --height belong to the `pair` command".to_owned());
+    }
+    Ok(())
+}
+
+/// `pair` writes nothing to disk, so the run-directory arguments are stray
+/// there for the same reason a frame size is stray everywhere else: an
+/// argument a command ignores is a caller's mistake reading as success.
+///
+/// # Errors
+/// When the command is `pair` and an output or corpus directory was given.
+fn refuse_stray_pair_arguments(arguments: &Arguments) -> Result<(), String> {
+    if arguments.command == "pair" && (arguments.out_explicit || arguments.corpus_explicit) {
+        return Err(
+            "--out and --corpus belong to the commands that read a run, and \
+             `pair` writes nothing to disk"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
 fn run() -> Result<bool, String> {
     let arguments = parse_arguments()?;
+    refuse_stray_frame_size(&arguments)?;
+    refuse_stray_pair_arguments(&arguments)?;
     if arguments.command == "produce" {
         return produce_command(&arguments);
+    }
+    if arguments.command == "pair" {
+        return pair_command(&arguments);
     }
     if arguments.command == "gate" {
         validate_gate_directories(&arguments)?;
@@ -288,8 +389,8 @@ fn run() -> Result<bool, String> {
         "mutations" => mutations(&reference, &candidate, &register, &metadata_truth, &census),
         "census" => detectability(&reference, &candidate, &register, &metadata_truth, &census),
         other => Err(format!(
-            "{other} is not a command. `gate`, `identity`, `mutations`, `census` \
-             or `produce`"
+            "{other} is not a command. `gate`, `identity`, `mutations`, `census`, \
+             `produce` or `pair`"
         )),
     }
 }
@@ -318,6 +419,74 @@ fn produce_command(arguments: &Arguments) -> Result<bool, String> {
     } else {
         Err(format!("produce refused: {}", summary.resources))
     }
+}
+
+/// `pair`: the 25.1 verdict over two raw RGBA8 frames of a stated size.
+///
+/// Both frame files are explicit, because a default directory would compare
+/// whatever happens to be lying in `tools/oracle/out`. The verdict is
+/// printed as JSON serialising exactly `PairVerdict`, so its keys are the
+/// struct's field names, and the exit code is the verdict: 0 when it passes,
+/// 1 when a clause fails or the frame carries too little information to
+/// mean anything. An argument or frame-size error also exits 1, through
+/// `main`'s error arm, so a caller telling a refusal apart from a failing
+/// verdict reads stdout: the verdict is the only path that prints JSON, and
+/// an error prints on stderr and prints nothing on stdout. Nothing is
+/// written to disk, because the frames are the caller's temporary files and
+/// a rendered pseudo-PHI image is a picture of the input.
+fn pair_command(arguments: &Arguments) -> Result<bool, String> {
+    let width = arguments
+        .pair_width
+        .ok_or_else(|| "`pair` requires an explicit --width".to_owned())?;
+    let height = arguments
+        .pair_height
+        .ok_or_else(|| "`pair` requires an explicit --height".to_owned())?;
+    if !arguments.reference_explicit {
+        return Err("`pair` requires an explicit --reference frame file".to_owned());
+    }
+    if !arguments.candidate_explicit {
+        return Err("`pair` requires an explicit --candidate frame file".to_owned());
+    }
+    let verdict =
+        pair_verdict_from_files(&arguments.reference, &arguments.candidate, width, height)?;
+    let text = pair_json(&verdict)?;
+    println!("{text}");
+    Ok(verdict.passes)
+}
+
+/// The pair verdict as the harness reads it: the struct serialised, so the
+/// seven JSON keys are `PairVerdict`'s seven field names and cannot drift
+/// from them.
+///
+/// # Errors
+/// When serde cannot serialise the verdict.
+fn pair_json(verdict: &PairVerdict) -> Result<String, String> {
+    serde_json::to_string_pretty(verdict).map_err(|error| format!("pair: {error}"))
+}
+
+/// Read two frame files at one stated size and return the 25.1 verdict.
+///
+/// The byte count is checked by `Frame::new` against `width * height * 4`,
+/// so a truncated or padded `.raw` is refused before a pixel is read.
+///
+/// # Errors
+/// When either file cannot be read, does not match the stated size, or the
+/// verdict itself refuses the pair.
+fn pair_verdict_from_files(
+    reference: &Path,
+    candidate: &Path,
+    width: u32,
+    height: u32,
+) -> Result<PairVerdict, String> {
+    let read = |path: &Path, role: &str| -> Result<Vec<u8>, String> {
+        std::fs::read(path)
+            .map_err(|error| format!("{}: cannot read the {role} frame: {error}", path.display()))
+    };
+    let reference_frame = Frame::new(width, height, read(reference, "reference")?)
+        .map_err(|error| format!("{}: {error}", reference.display()))?;
+    let candidate_frame = Frame::new(width, height, read(candidate, "candidate")?)
+        .map_err(|error| format!("{}: {error}", candidate.display()))?;
+    pair_verdict(&reference_frame, &candidate_frame).map_err(|error| format!("pair: {error}"))
 }
 
 fn load_register(path: &Path) -> Result<Register, String> {
@@ -1089,9 +1258,14 @@ fn check(
 mod argument_tests {
     use std::path::PathBuf;
 
+    use ocelli_oracle::tolerance::PairVerdict;
     use ocelli_oracle::{mutations::CATALOGUE, report::RunReport};
+    use serde_json::Value;
 
-    use super::{check, parse_arguments_from, validate_gate_directories};
+    use super::{
+        check, parse_arguments_from, refuse_stray_frame_size, refuse_stray_pair_arguments,
+        validate_gate_directories,
+    };
 
     fn parsed<const N: usize>(arguments: [&str; N]) -> Result<super::Arguments, String> {
         parse_arguments_from(arguments)
@@ -1326,5 +1500,276 @@ mod argument_tests {
         };
 
         check(mutation, "a", &Ok(report))
+    }
+
+    /// The mid-grey byte repeated across a 2 by 2 opaque frame: 16 bytes.
+    const TINY_FRAME: usize = 16;
+    const TINY_GREY: u8 = 128;
+
+    fn write_frame(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+        std::fs::write(path, bytes).map_err(|error| format!("{}: {error}", path.display()))
+    }
+
+    fn path_argument(path: &std::path::Path) -> Result<&str, String> {
+        path.to_str()
+            .ok_or_else(|| format!("{} is not a UTF-8 path", path.display()))
+    }
+
+    #[test]
+    fn pair_passes_over_identical_frames() -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!("ocelli-f223-pair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let reference = root.join("reference.raw");
+        let candidate = root.join("candidate.raw");
+        let bytes = vec![TINY_GREY; TINY_FRAME];
+        write_frame(&reference, &bytes)?;
+        write_frame(&candidate, &bytes)?;
+        let arguments = parsed([
+            "pair",
+            "--reference",
+            path_argument(&reference)?,
+            "--candidate",
+            path_argument(&candidate)?,
+            "--width",
+            "2",
+            "--height",
+            "2",
+        ])?;
+        assert!(
+            super::pair_command(&arguments)?,
+            "an identical pair passes 25.1"
+        );
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// The exit contract the harness reads: a verdict that fails 25.1 is
+    /// `Ok(false)`, which `main` turns into `ExitCode::FAILURE` (1), and a
+    /// passing one is `Ok(true)`. Before this test the failing half was
+    /// unwatched: changing the return to `Ok(true)` left every bin test
+    /// green, which is exactly the silent success a comparison mode must not
+    /// be able to publish through.
+    #[test]
+    fn a_failing_pair_answers_false() -> Result<(), String> {
+        let root =
+            std::env::temp_dir().join(format!("ocelli-f223-pair-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let reference = root.join("reference.raw");
+        let candidate = root.join("candidate.raw");
+        // One pixel three codes brighter: "zero pixels differing by more
+        // than 2" admits no count of them, so the verdict fails at any
+        // count, with the bias (3/4 = 0.75) and the within-one fraction
+        // (0.75) both inside or outside their bounds beside the point.
+        write_frame(&reference, &[TINY_GREY; TINY_FRAME])?;
+        let mut damaged = vec![TINY_GREY; TINY_FRAME];
+        if let Some(slot) = damaged.first_mut() {
+            *slot = TINY_GREY + 3;
+        }
+        write_frame(&candidate, &damaged)?;
+        let arguments = parsed([
+            "pair",
+            "--reference",
+            path_argument(&reference)?,
+            "--candidate",
+            path_argument(&candidate)?,
+            "--width",
+            "2",
+            "--height",
+            "2",
+        ])?;
+        assert!(
+            !super::pair_command(&arguments)?,
+            "a pixel three codes over the maximum refuses, and the exit code \
+             is the verdict"
+        );
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// The JSON key names are `PairVerdict`'s field names, because the
+    /// command serialises the struct. Renaming a key by hand, in either
+    /// direction, is the drift this pins: the harness reads these seven
+    /// names and nothing else.
+    #[test]
+    fn the_pair_output_names_exactly_the_structs_fields() -> Result<(), String> {
+        // `pair_json` is pure over the verdict, so a verdict built by hand
+        // pins the output without touching the file system. The values are
+        // the passing shape of an identical pair.
+        let verdict = PairVerdict {
+            within_one_lsb_fraction: 1.0,
+            count_over_max: 0,
+            max_abs_diff: 0,
+            signed_mean_bias_informative: Some(0.0),
+            informative_fraction: 1.0,
+            low_information: false,
+            passes: true,
+        };
+        let text = super::pair_json(&verdict)?;
+        let parsed: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+        let mut keys = parsed
+            .as_object()
+            .ok_or_else(|| "the pair output is not an object".to_owned())?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "count_over_max",
+                "informative_fraction",
+                "low_information",
+                "max_abs_diff",
+                "passes",
+                "signed_mean_bias_informative",
+                "within_one_lsb_fraction",
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_run_directory_arguments_belong_to_the_run_commands() -> Result<(), String> {
+        let arguments = parsed([
+            "pair",
+            "--out",
+            "somewhere",
+            "--width",
+            "2",
+            "--height",
+            "2",
+        ])?;
+        let Err(error) = refuse_stray_pair_arguments(&arguments) else {
+            return Err("pair accepted --out".to_owned());
+        };
+        assert!(error.contains("writes nothing to disk"), "{error}");
+        let arguments = parsed(["pair", "--corpus", "corpus"])?;
+        let Err(error) = refuse_stray_pair_arguments(&arguments) else {
+            return Err("pair accepted --corpus".to_owned());
+        };
+        assert!(error.contains("writes nothing to disk"), "{error}");
+        let arguments = parsed(["pair", "--width", "2", "--height", "2"])?;
+        assert!(
+            refuse_stray_pair_arguments(&arguments).is_ok(),
+            "a bare pair takes no run directory and refuses none"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pair_refuses_a_frame_of_the_wrong_length() -> Result<(), String> {
+        let root =
+            std::env::temp_dir().join(format!("ocelli-f223-pair-short-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let reference = root.join("reference.raw");
+        let candidate = root.join("candidate.raw");
+        write_frame(&reference, &[TINY_GREY; TINY_FRAME])?;
+        // One byte short. A `.raw` whose length is not width * height * 4 is
+        // not the frame the harness rendered, and the refusal names it.
+        write_frame(&candidate, &[TINY_GREY; TINY_FRAME - 1])?;
+        let arguments = parsed([
+            "pair",
+            "--reference",
+            path_argument(&reference)?,
+            "--candidate",
+            path_argument(&candidate)?,
+            "--width",
+            "2",
+            "--height",
+            "2",
+        ])?;
+        let Err(error) = super::pair_command(&arguments) else {
+            return Err("a truncated frame was compared".to_owned());
+        };
+        assert!(error.contains("is 15 bytes"), "{error}");
+        std::fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    #[test]
+    fn pair_requires_its_frame_size() -> Result<(), String> {
+        let arguments = parsed(["pair", "--width", "2"])?;
+        let Err(error) = super::pair_command(&arguments) else {
+            return Err("pair ran without a height".to_owned());
+        };
+        assert!(error.contains("explicit --height"), "{error}");
+        let arguments = parsed(["pair", "--height", "2"])?;
+        let Err(error) = super::pair_command(&arguments) else {
+            return Err("pair ran without a width".to_owned());
+        };
+        assert!(error.contains("explicit --width"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn pair_requires_both_frames_explicitly() -> Result<(), String> {
+        let arguments = parsed(["pair", "--width", "2", "--height", "2"])?;
+        let Err(error) = super::pair_command(&arguments) else {
+            return Err("pair ran on an implicit reference".to_owned());
+        };
+        assert!(error.contains("explicit --reference"), "{error}");
+        let arguments = parsed([
+            "pair",
+            "--reference",
+            "reference.raw",
+            "--width",
+            "2",
+            "--height",
+            "2",
+        ])?;
+        let Err(error) = super::pair_command(&arguments) else {
+            return Err("pair ran on an implicit candidate".to_owned());
+        };
+        assert!(error.contains("explicit --candidate"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn pair_refuses_a_width_that_is_not_a_number() -> Result<(), String> {
+        let Err(error) = parsed(["pair", "--width", "abc", "--height", "2"]) else {
+            return Err("a width that is not a number was accepted".to_owned());
+        };
+        assert!(error.contains("not a pixel count for --width"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn pair_refuses_a_height_that_is_not_a_number() -> Result<(), String> {
+        let Err(error) = parsed(["pair", "--width", "2", "--height", "abc"]) else {
+            return Err("a height that is not a number was accepted".to_owned());
+        };
+        assert!(error.contains("not a pixel count for --height"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn pair_refuses_a_width_with_no_value() -> Result<(), String> {
+        let Err(error) = parsed(["pair", "--width"]) else {
+            return Err("a --width with no value was accepted".to_owned());
+        };
+        assert!(error.contains("--width wants a pixel count"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn pair_refuses_a_height_with_no_value() -> Result<(), String> {
+        let Err(error) = parsed(["pair", "--height"]) else {
+            return Err("a --height with no value was accepted".to_owned());
+        };
+        assert!(error.contains("--height wants a pixel count"), "{error}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_frame_size_belongs_to_pair_alone() -> Result<(), String> {
+        let arguments = parsed(["identity", "--width", "2"])?;
+        let Err(error) = refuse_stray_frame_size(&arguments) else {
+            return Err("identity accepted a frame size".to_owned());
+        };
+        assert!(error.contains("belong to the `pair` command"), "{error}");
+        Ok(())
     }
 }

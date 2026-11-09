@@ -205,6 +205,176 @@
         "/attributes/rows": { "scope": "top-level", "value": 64 },
         "/attributes/columns": { "scope": "top-level", "value": 96 }
       }
+    },
+    "syntax/j2k_lossless_multiframe_eot.dcm": {
+      "citation": "PS3.3 C.7.6.3, C.7.6.6 and C.7.6.16, with PS3.5 A.4",
+      "fields": {
+        "/attributes/transferSyntaxUID": { "scope": "top-level", "value": "1.2.840.10008.1.2.4.90" },
+        "/attributes/rows": { "scope": "top-level", "value": 64 },
+        "/attributes/columns": { "scope": "top-level", "value": 96 },
+        "/attributes/samplesPerPixel": { "scope": "top-level", "value": 1 },
+        "/attributes/photometricInterpretation": { "scope": "top-level", "value": "MONOCHROME2" },
+        "/attributes/bitsAllocated": { "scope": "top-level", "value": 16 },
+        "/attributes/bitsStored": { "scope": "top-level", "value": 16 },
+        "/attributes/highBit": { "scope": "top-level", "value": 15 },
+        "/attributes/pixelRepresentation": { "scope": "top-level", "value": 0 },
+        "/attributes/numberOfFrames": { "scope": "top-level", "value": 3 },
+        "/attributes/rescaleSlope": { "scope": "top-level", "value": null },
+        "/attributes/rescaleIntercept": { "scope": "top-level", "value": null },
+        "/cornerstoneMetadata/modalityLutModule/rescaleSlope": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleSlope", "value": 1.0 },
+        "/cornerstoneMetadata/modalityLutModule/rescaleIntercept": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/modalityLutModule/rescaleIntercept", "value": 0.0 },
+        "/cornerstoneMetadata/voiLutModule/windowCenter": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowCenter", "value": [40.0] },
+        "/cornerstoneMetadata/voiLutModule/windowWidth": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/windowWidth", "value": [400.0] },
+        "/cornerstoneMetadata/voiLutModule/voiLUTFunction": { "scope": "shared-functional-group", "sourcePointer": "/metadataSources/cornerstoneMetadata/voiLutModule/voiLUTFunction", "value": "LINEAR" }
+      }
+    },
+    "syntax/j2k_lossless_ybr_rct.dcm": {
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.4, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "YBR_RCT"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        }
+      }
+    },
+    "syntax/j2k_lossy_ybr_ict.dcm": {
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.4, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "YBR_ICT"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        }
+      }
+    },
+    "syntax/htj2k_lossless_ybr_rct.dcm": {
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.14, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "YBR_RCT"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        }
+      }
+    },
+    "syntax/htj2k_lossy_ybr_ict.dcm": {
+      "citation": "PS3.3 C.7.6.3 and C.7.6.3.1.2, PS3.5 8.2.14, F-239 declared saturated 64 by 96 RGB8 fixtures",
+      "fields": {
+        "/attributes/photometricInterpretation": {
+          "scope": "top-level",
+          "value": "YBR_ICT"
+        },
+        "/attributes/samplesPerPixel": {
+          "scope": "top-level",
+          "value": 3
+        },
+        "/attributes/bitsAllocated": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/bitsStored": {
+          "scope": "top-level",
+          "value": 8
+        },
+        "/attributes/highBit": {
+          "scope": "top-level",
+          "value": 7
+        },
+        "/attributes/pixelRepresentation": {
+          "scope": "top-level",
+          "value": 0
+        },
+        "/attributes/rows": {
+          "scope": "top-level",
+          "value": 64
+        },
+        "/attributes/columns": {
+          "scope": "top-level",
+          "value": 96
+        }
+      }
     }
   }
 }

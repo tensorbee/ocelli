@@ -1,13 +1,13 @@
 //! ISO 14495-1 context model for JPEG-LS lossless decoding.
 //!
-//! # Context Selection (ISO 14495-1 §A.2)
+//! # Context Selection (ISO 14495-1 §A.3)
 //! For each sample, three local gradients D1, D2, D3 are computed from the
 //! causal neighborhood. Each gradient is quantized into one of 9 levels
 //! [-4..4] using thresholds T1, T2, T3. The triplet is sign-normalized
 //! (ensuring the first non-zero component is positive) and mapped to a
 //! context index in [0, 365).
 //!
-//! # Context State (ISO 14495-1 §A.4–§A.5)
+//! # Context State (ISO 14495-1 §A.2.1 and §A.6)
 //! Each context tracks:
 //! - `a`: accumulated absolute error sum (initialized to `a_init = max(2, (RANGE+32)/64)`)
 //! - `b`: accumulated signed error sum for bias tracking
@@ -17,7 +17,7 @@
 /// ISO 14495-1 context state for one regular or run-interrupt context.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ContextState {
-    /// Accumulated absolute error magnitude (A in ISO 14495-1 §A.4).
+    /// Accumulated absolute error magnitude (A in ISO 14495-1 §A.2.1 and §A.6.1).
     pub(crate) a: u32,
     /// Accumulated signed error sum (B, used for bias estimation).
     pub(crate) b: i32,
@@ -28,7 +28,8 @@ pub(crate) struct ContextState {
 }
 
 impl Default for ContextState {
-    /// Returns the ISO 14495-1 initial state: n=1 (avoids zero-division in k computation).
+    /// A zeroed state with n = 1, used by tests. The T.87 initial state is
+    /// `ContextModel::new`'s.
     fn default() -> Self {
         Self {
             a: 0,
@@ -39,35 +40,38 @@ impl Default for ContextState {
     }
 }
 
-/// ISO 14495-1 regular context count: 5×9×9 / 2 + 1 = 365 (sign-normalized triplets).
+/// ISO 14495-1 §A.3.4 regular context count: (9×9×9 - 1) / 2 + 1 = 365
+/// (sign-normalized triplets).
 pub(crate) const CONTEXTS: usize = 365;
 
-/// Context model reset threshold (ISO 14495-1 §A.5: RESET = 64).
+/// Context model reset threshold (ISO 14495-1 Table C.2: RESET = 64, applied in §A.6.1).
 const RESET: u32 = 64;
 
-/// Minimum bias correction value (ISO 14495-1 §A.6: MIN_C = −128).
+/// Minimum bias correction value (ISO 14495-1 §3.3: MIN_C = −128, used in §A.6.2).
 pub(super) const MIN_C: i32 = -128;
 
-/// Maximum bias correction value (ISO 14495-1 §A.6: MAX_C = 127).
+/// Maximum bias correction value (ISO 14495-1 §3.3: MAX_C = 127, used in §A.6.2).
 pub(super) const MAX_C: i32 = 127;
 
-/// ISO 14495-1 context model: 365 regular contexts + 1 run-interrupt context.
+/// ISO 14495-1 context model: 365 regular contexts + 2 run-interrupt contexts.
 pub(crate) struct ContextModel {
     /// Regular-mode context states indexed by `context_index()`.
     pub(crate) regular: [ContextState; CONTEXTS],
-    /// Run-interrupt context for `RItype = 0` (§A.6).
+    /// Run-interrupt context for `RItype = 0` (§A.7.2).
     pub(crate) run_int_diff: RunInterruptionContext,
-    /// Run-interrupt context for `RItype = 1` (§A.6).
+    /// Run-interrupt context for `RItype = 1` (§A.7.2).
     pub(crate) run_int_same: RunInterruptionContext,
-    /// Run-mode Golomb J-table index per component (§A.6.4, Rl).
+    /// Run-mode Golomb J-table index per component (§A.2.1 step 3 and §A.7.1, RUNindex).
     pub(crate) run_index: usize,
 }
 
 impl ContextModel {
     /// Initialize all context states.
     ///
-    /// `a_init = max(2, (RANGE + 32) / 64)` where `RANGE = MAXVAL + 1`.
-    /// From ISO 14495-1 §A.4: initial `A[q]` = a_init for all q.
+    /// `a_init = max(2, (RANGE + 32) / 64)` where RANGE is A.2.1 step 1's,
+    /// `MAXVAL + 1` for lossless and
+    /// `floor((MAXVAL + 2*NEAR) / (2*NEAR + 1)) + 1` for NEAR > 0.
+    /// From ISO 14495-1 §A.2.1: initial `A[q]` = a_init for all q.
     pub(crate) fn new(a_init: u32) -> Self {
         let s = ContextState {
             a: a_init,
@@ -157,14 +161,18 @@ impl RunInterruptionContext {
 /// Update a regular-mode context state after decoding one sample.
 ///
 /// Updates A, B, N with optional renormalization (RESET), and adjusts C.
-/// ISO 14495-1 §A.5.
+/// ISO 14495-1 §A.6.
 #[inline(always)]
 pub(crate) fn update_context(ctx: &mut ContextState, errval: i32, near: u32) {
     ctx.a += errval.unsigned_abs();
     ctx.b += errval * (2 * near as i32 + 1);
     if ctx.n == RESET {
         ctx.a >>= 1;
-        ctx.b /= 2;
+        // Ocelli F-243: an arithmetic shift, which floors, as CharLS 2.4.4
+        // does. `/ 2` truncates toward zero and leaves an odd negative B one
+        // too high, which moves the bias correction and desynchronises the
+        // scan from the encoder's at the context RESET.
+        ctx.b >>= 1;
         ctx.n >>= 1;
     }
     ctx.n += 1;
@@ -200,14 +208,12 @@ pub(crate) fn error_correction(ctx: &ContextState, k_or_near: u32) -> i32 {
     }
 }
 
-/// Compute Golomb-Rice parameter k = floor(log₂(A/N)), clamped to [0, qbpp].
-///
-/// Invariant: N×2^k ≤ A < N×2^(k+1).
-/// ISO 14495-1 §A.3.
+/// Golomb parameter k, the smallest k with `N * 2^k >= A` (T.87 A.5.1 Code
+/// segment A.10), bounded here by qbpp.
 #[inline(always)]
 pub(crate) fn compute_k(a: u32, n: u32, qbpp: u32) -> u32 {
     let mut k = 0u32;
-    // Smallest k such that N << k >= A (equivalent to k = ceil(log2(A/N)) but floored)
+    // Smallest k such that N << k >= A
     while (n << k) < a && k < qbpp {
         k += 1;
     }
@@ -245,7 +251,7 @@ pub(crate) fn quant(d: i32, t1: i32, t2: i32, t3: i32, near: i32) -> i32 {
 /// Sign-normalize triplet (Q1, Q2, Q3) so the first non-zero component is positive.
 ///
 /// Returns (Q1', Q2', Q3', sign) where sign ∈ {1, −1}.
-/// ISO 14495-1 §A.2.
+/// ISO 14495-1 §A.3.4.
 #[inline(always)]
 pub(crate) fn sign_normalize(q1: i32, q2: i32, q3: i32) -> (i32, i32, i32, i32) {
     if q1 < 0 || (q1 == 0 && q2 < 0) || (q1 == 0 && q2 == 0 && q3 < 0) {
@@ -262,7 +268,7 @@ pub(crate) fn sign_normalize(q1: i32, q2: i32, q3: i32) -> (i32, i32, i32, i32) 
 /// - Q1=0, Q2>0: indices [5, 41) (Q2 ∈ {1..4}, Q3 ∈ {−4..4}: 4×9=36)
 /// - Q1>0: indices [41, 365) (Q1 ∈ {1..4}, Q2 ∈ {−4..4}, Q3 ∈ {−4..4}: 4×81=324)
 ///
-/// ISO 14495-1 §A.2.
+/// ISO 14495-1 §A.3.4.
 #[inline(always)]
 pub(crate) fn context_index(q1: i32, q2: i32, q3: i32) -> usize {
     if q1 == 0 && q2 == 0 {
@@ -284,24 +290,36 @@ pub(crate) fn context_index(q1: i32, q2: i32, q3: i32) -> usize {
 /// `T1 = FACTOR·(BASIC_T1 − 2) + 2 + 3·NEAR`,
 /// `T2 = FACTOR·(BASIC_T2 − 3) + 3 + 5·NEAR`,
 /// `T3 = FACTOR·(BASIC_T3 − 4) + 4 + 7·NEAR`,
-/// with `BASIC = (3, 7, 21)`, each clamped to `[NEAR + 1 / T1 / T2, MAXVAL]`.
+/// with `BASIC = (3, 7, 21)`, each passed through `CLAMP(i, NEAR + 1 / T1 /
+/// T2, MAXVAL)`.
 /// For `MAXVAL < 128` the FACTOR term scales the basic values down instead;
 /// DICOM data is ≥ 8-bit so the high branch is the production path.
 pub(crate) fn default_thresholds(maxval: i32, near: i32) -> (i32, i32, i32) {
     if maxval >= 128 {
         let factor = (maxval.min(4095) + 128) / 256;
-        let t1 = (factor + 2 + 3 * near).clamp(near + 1, maxval);
-        let t2 = (4 * factor + 3 + 5 * near).clamp(t1, maxval);
-        let t3 = (17 * factor + 4 + 7 * near).clamp(t2, maxval);
+        let t1 = clamp_threshold(factor + 2 + 3 * near, near + 1, maxval);
+        let t2 = clamp_threshold(4 * factor + 3 + 5 * near, t1, maxval);
+        let t3 = clamp_threshold(17 * factor + 4 + 7 * near, t2, maxval);
         (t1, t2, t3)
     } else {
         // Low-precision branch (ISO 14495-1 §C.2.4.1.1.1, MAXVAL < 128):
         // FACTOR = 256 / (MAXVAL + 1) divides the basic thresholds.
         let factor = 256 / (maxval + 1);
-        let t1 = (3 / factor + 3 * near).max(2).clamp(near + 1, maxval);
-        let t2 = (7 / factor + 5 * near).max(3).clamp(t1, maxval);
-        let t3 = (21 / factor + 7 * near).max(4).clamp(t2, maxval);
+        let t1 = clamp_threshold((3 / factor + 3 * near).max(2), near + 1, maxval);
+        let t2 = clamp_threshold((7 / factor + 5 * near).max(3), t1, maxval);
+        let t3 = clamp_threshold((21 / factor + 7 * near).max(4), t2, maxval);
         (t1, t2, t3)
+    }
+}
+
+/// ISO 14495-1 §C.2.4.1.1.1 `CLAMP(i, j, MAXVAL)`: `j` when `i > MAXVAL` or
+/// `i < j`, otherwise `i`. Not a saturating clamp: a value above MAXVAL falls
+/// to the lower bound `j` (Ocelli F-243).
+fn clamp_threshold(i: i32, j: i32, maxval: i32) -> i32 {
+    if i > maxval || i < j {
+        j
+    } else {
+        i
     }
 }
 
@@ -365,9 +383,10 @@ pub(crate) fn quantize_error(e: i32, near: i32) -> i32 {
     }
 }
 
-/// Dequantize and reconstruct a sample (ISO 14495-1 §A.4.4 / §A.8.2): wrap
-/// into `[−NEAR, MAXVAL + NEAR]` by RANGE·(2·NEAR+1) steps, then clamp to
-/// `[0, MAXVAL]`. For NEAR = 0 this is the modulo-RANGE reconstruction.
+/// Dequantize and reconstruct a sample (ISO 14495-1 §A.4.4, with the decoder's
+/// modulo wrap from F.1 step 14): wrap into `[−NEAR, MAXVAL + NEAR]` by
+/// RANGE·(2·NEAR+1) steps, then clamp to `[0, MAXVAL]`. For NEAR = 0 this is
+/// the modulo-RANGE reconstruction.
 #[inline(always)]
 pub(crate) fn reconstruct(pred: i32, errval_q: i32, p: &CodingParams) -> i32 {
     let mut rx = pred + errval_q * (2 * p.near + 1);
@@ -383,7 +402,7 @@ pub(crate) fn reconstruct(pred: i32, errval_q: i32, p: &CodingParams) -> i32 {
 ///
 /// Forward mapping: errval ≥ 0 → MErrval = 2×errval (even); errval < 0 → MErrval = −2×errval−1 (odd).
 /// Inverse: even MErrval → errval = MErrval/2; odd → errval = −(MErrval+1)/2.
-/// ISO 14495-1 §A.3.
+/// ISO 14495-1 §A.5.2.
 #[inline(always)]
 pub(crate) fn inverse_map(me: u32) -> i32 {
     if me & 1 == 0 {

@@ -2,8 +2,8 @@
 
 Ocelli publishes to two registries from one repository: the `ocelli-*` crates
 to crates.io, and the `@ocelli/*` packages to npm. They version together and
-release together, because `@ocelli/core` ships the wasm module built from the
-crates and a version skew between them is not a supported configuration.
+release together, and a version skew between the shell and its module is not
+a supported configuration.
 
 ## Cadence, tied to milestones
 
@@ -37,24 +37,26 @@ milestone.
 `ocelli-pixel`, `ocelli-codec`, `ocelli-dicom`, `ocelli-cache`, `ocelli-volume`,
 `ocelli-render`, `ocelli-compute`, `ocelli-seg`, `ocelli-viewport`.
 
-**npm:** `@ocelli/core`, then `@ocelli/react`.
+**npm:** `@ocelli/wasm`, then `@ocelli/core`, then `@ocelli/react`.
 
-**Never published:** `ocelli-wasm` is `publish = false`. It is a `cdylib` whose
-artefact ships inside `@ocelli/core`, so publishing it to crates.io would offer
-a crate nobody can use from Rust. `ocelli-native` is `publish = false` for as
-long as it stays stubbed, because publishing it would claim Phase 2 and Phase 3
-entry points that do not exist yet. The milestone that ships them lifts the
-flag and adds it to the crates.io list above. That milestone also ships a
-native archive carrying `LICENSE`, `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`,
-`THIRD_PARTY_NOTICES` and `THIRD_PARTY_LICENSES`. `ocelli-oracle` is
-`publish = false` too, being test infrastructure, and
-`@ocelli/example-viewer` is private. `grep -rn '^publish' crates/*/Cargo.toml
-tools/oracle/Cargo.toml` prints the whole set.
+**Never published:** `ocelli-wasm` is `publish = false`. It is a `cdylib`
+whose artefact ships as `@ocelli/wasm` on npm, so publishing it to crates.io
+would offer a crate nobody can use from Rust. `ocelli-native` is
+`publish = false` for as long as it stays stubbed, because publishing it would
+claim Phase 2 and Phase 3 entry points that do not exist yet. The milestone
+that ships them lifts the flag and adds it to the crates.io list above. That
+milestone also ships a native archive carrying `LICENSE`, `LICENSE-MIT`,
+`LICENSE-APACHE`, `NOTICE`, `THIRD_PARTY_NOTICES` and `THIRD_PARTY_LICENSES`.
+`ocelli-oracle` is `publish = false` too, being test infrastructure, and
+`@ocelli/example-viewer` is private. `grep -rn '^publish'
+crates/*/Cargo.toml tools/oracle/Cargo.toml` prints the whole set.
 
-npm publishes **after** crates.io, because the npm package embeds the wasm
-module and a failed crate publish should stop the release before anything
-reaches npm. npm has no unpublish after 72 hours, crates.io has none at all.
-Order the irreversible steps from most recoverable to least.
+npm publishes **after** crates.io, because the crates and the packages
+version together and a failed crate publish should stop the release before
+anything reaches npm. Within npm, `@ocelli/wasm` publishes first: a failed
+module publish stops the release before `@ocelli/core`, which peer-depends on
+it at the same version. npm has no unpublish after 72 hours, crates.io has
+none at all. Order the irreversible steps from most recoverable to least.
 
 ## `/release` is the only command that may publish
 
@@ -94,10 +96,27 @@ changelog means one of the two is lying and there is no way to tell which.
    internal dependencies resolve against this reviewed source graph rather
    than registry placeholders. A dry run uploads nothing.
 6. `npm pack` for each published package, with its contents listed. The wasm
-   module must be present in `@ocelli/core` and must be the one this HEAD
-   builds, not a stale artefact from a previous build. The tarball that
-   carries that module must also carry `THIRD_PARTY_LICENSES` and
-   `THIRD_PARTY_NOTICES`. `gate packages` refuses a `.wasm` file without both.
+   module ships in `@ocelli/wasm`, not in `@ocelli/core`. The tarball must
+   carry both modules and their glue, `THIRD_PARTY_LICENSES` and
+   `THIRD_PARTY_NOTICES`, and a `dist/build-id.json` whose git SHA is this
+   tag's SHA, whose tree is the tag commit's, and whose recorded digests
+   match a cold build of the tagged source. The comparison is
+   `python3 scripts/release_wasm.py HEAD`, and it runs HERE, before any tag,
+   push or publish: HEAD is the commit the tag is created at, and the script
+   does not need the tag. It builds HEAD in a temporary checkout with an
+   empty cargo target directory, packs `@ocelli/wasm`, refuses unless the
+   packed build id names that SHA and its tree, records no unstaged tracked
+   changes and digests equal to the cold build's and to the tarball's own
+   bytes, and copies the verified `.tgz` to `target/release-wasm`. The
+   publish step gives `npm publish` that exact file, and `npm publish
+   <file>` runs no prepack, so publishing it publishes the compared bytes.
+   The wasm build is byte-reproducible for a given SHA on one toolchain,
+   which is what makes the comparison meaningful. Measured on 2026-11-07:
+   two cold builds of one tree and a warm rebuild agree on every byte of
+   both modules. `gate packages` refuses a `.wasm` file without both
+   notice files, and refuses a build id that is absent, stale against the
+   release HEAD, recorded with unstaged tracked changes, or disagreeing
+   with its own module bytes.
 7. The `CHANGELOG.md` section for the exact tag exists and `--check` passes.
 8. `docs/hld/DEVIATIONS.md` has no row whose "Why" is a temporary measure that
    has since expired. A deviation shipped in a 1.x release is a supported

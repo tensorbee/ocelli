@@ -1,0 +1,294 @@
+{
+  "about": [
+    "Provenance for the ICC profile bytes and the expected-value data of the F-240 AC15 viewer.colour_frame extension.",
+    "The two source profiles are the project-authored synthetic inputs from frozen ICC input tree 81987bd7c13f8e981b62838e18d8afa21b9b7ce4, retained verbatim under inputs/profile-provenance.json of the task inputs. Their entries below are that record's, unedited.",
+    "No third-party profile bytes are used, and no product ICC readback is involved: the expected values are hand-vectors computed independently before implementation, from published ICC sRGB D50 colourants, their independently computed inverse, the actual s15Fixed16 profile colourants, ICC.1 curv normalisation and the IEC 61966-2-1 sRGB encoding.",
+    "The 16-bit workload's profile is not stored. It is derived at load time from icc_gamma1.icc by rewriting each of the three TRC tags in place: the tag-table size field goes from 14 to 16 and the count-1 u8Fixed8 gamma payload becomes a count-2 table with entries 0 and 65535. The slots are 16 bytes apart, so alignment and every other profile byte are preserved, which the diff regions below record."
+  ],
+  "source_tree": "81987bd7c13f8e981b62838e18d8afa21b9b7ce4",
+  "inputs": [
+    {
+      "path": "examples/folder-viewer/tests/fixtures/icc_gamma1.icc",
+      "source_tree": "81987bd7c13f8e981b62838e18d8afa21b9b7ce4",
+      "size": 560,
+      "sha256": "3fe8ebe1214514d4417c52348371ab979fd4af550210ec21640ad2256c01de18",
+      "tags": [
+        {
+          "signature": "rXYZ",
+          "offset": 240,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "gXYZ",
+          "offset": 260,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "bXYZ",
+          "offset": 280,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "rTRC",
+          "offset": 300,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            256
+          ]
+        },
+        {
+          "signature": "gTRC",
+          "offset": 316,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            256
+          ]
+        },
+        {
+          "signature": "bTRC",
+          "offset": 332,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            256
+          ]
+        },
+        {
+          "signature": "wtpt",
+          "offset": 348,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "desc",
+          "offset": 368,
+          "size": 74,
+          "type": "mluc",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "cprt",
+          "offset": 444,
+          "size": 114,
+          "type": "mluc",
+          "curve_count": null,
+          "curve_entries": null
+        }
+      ]
+    },
+    {
+      "path": "examples/folder-viewer/tests/fixtures/icc_gamma22.icc",
+      "source_tree": "81987bd7c13f8e981b62838e18d8afa21b9b7ce4",
+      "size": 560,
+      "sha256": "b6b85710e64c6104b9bd502aeaa010b30f0c71c25fe39fedeb8bfe9baa4f81ab",
+      "tags": [
+        {
+          "signature": "rXYZ",
+          "offset": 240,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "gXYZ",
+          "offset": 260,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "bXYZ",
+          "offset": 280,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "rTRC",
+          "offset": 300,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            563
+          ]
+        },
+        {
+          "signature": "gTRC",
+          "offset": 316,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            563
+          ]
+        },
+        {
+          "signature": "bTRC",
+          "offset": 332,
+          "size": 14,
+          "type": "curv",
+          "curve_count": 1,
+          "curve_entries": [
+            563
+          ]
+        },
+        {
+          "signature": "wtpt",
+          "offset": 348,
+          "size": 20,
+          "type": "XYZ ",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "desc",
+          "offset": 368,
+          "size": 76,
+          "type": "mluc",
+          "curve_count": null,
+          "curve_entries": null
+        },
+        {
+          "signature": "cprt",
+          "offset": 444,
+          "size": 114,
+          "type": "mluc",
+          "curve_count": null,
+          "curve_entries": null
+        }
+      ]
+    }
+  ],
+  "bench_assets": {
+    "icc_gamma1.icc": {
+      "copied_from_input": "inputs/icc_gamma1.icc",
+      "size": 560,
+      "sha256": "3fe8ebe1214514d4417c52348371ab979fd4af550210ec21640ad2256c01de18",
+      "used_by": "the 16-bit workload's profile is derived from these bytes"
+    },
+    "icc_gamma22.icc": {
+      "copied_from_input": "inputs/icc_gamma22.icc",
+      "size": 560,
+      "sha256": "b6b85710e64c6104b9bd502aeaa010b30f0c71c25fe39fedeb8bfe9baa4f81ab",
+      "used_by": "the 8-bit workload embeds these bytes verbatim as (0028,2000)"
+    },
+    "hand-vectors.json": {
+      "copied_from_input": "inputs/independent-hand-vectors.json",
+      "sha256": "d841fe0b774732f5920cfc7b711d6d9f0d4ff27896d2d2eb98ce5557d7beac2f",
+      "note": "one row per hand code per depth, each carrying the unrounded ICC display value and the windowed bytes for the identity window and the nine steps"
+    },
+    "icc_linear16_table.icc": {
+      "derived": true,
+      "derived_from": "icc_gamma1.icc",
+      "stored": false,
+      "size": 560,
+      "sha256": "94977cfdf14ee323cfc5709c2382942f21f67073f3525a30c3c5d46a7b101158",
+      "derivation": "each TRC tag table size 14 becomes 16 and each curv payload becomes count 2 with entries 0 and 65535, written in place; recompute the nonzero profile ID per ICC.1:2022 7.2.18 with flags, intent and ID zeroed for hashing",
+      "changed_byte_regions_vs_icc_gamma1": [
+        [
+          84,
+          87
+        ],
+        [
+          89,
+          99
+        ],
+        [
+          179,
+          179
+        ],
+        [
+          191,
+          191
+        ],
+        [
+          203,
+          203
+        ],
+        [
+          311,
+          312
+        ],
+        [
+          314,
+          315
+        ],
+        [
+          327,
+          328
+        ],
+        [
+          330,
+          331
+        ],
+        [
+          343,
+          344
+        ],
+        [
+          346,
+          347
+        ]
+      ],
+      "changed_regions_meaning": "the low byte of each of the three tag-table size fields, and each TRC payload's count low byte, first table entry and second table entry over the former padding; nonzero profile ID bytes84..99 are recomputed, with byte88 coincidentally unchanged",
+      "trc_tags_after_derivation": [
+        {
+          "signature": "rTRC",
+          "offset": 300,
+          "size": 16,
+          "type": "curv",
+          "curve_count": 2,
+          "curve_entries": [
+            0,
+            65535
+          ]
+        },
+        {
+          "signature": "gTRC",
+          "offset": 316,
+          "size": 16,
+          "type": "curv",
+          "curve_count": 2,
+          "curve_entries": [
+            0,
+            65535
+          ]
+        },
+        {
+          "signature": "bTRC",
+          "offset": 332,
+          "size": 16,
+          "type": "curv",
+          "curve_count": 2,
+          "curve_entries": [
+            0,
+            65535
+          ]
+        }
+      ],
+      "profile_id": "ef3a144416bbf68ae488f9978642e3b1",
+      "coordinator_correction": "The initial task required all non-TRC bytes preserved but omitted profile ID recomputation. Codex corrected that prompt omission after preserving the complete initial GLM output. Expected SHA and ID were independently derived from the frozen gamma1 profile before this correction."
+    }
+  }
+}

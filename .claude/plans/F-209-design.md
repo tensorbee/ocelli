@@ -535,3 +535,19 @@ target <cell> <shown> <scroll> <uid> <plane> <uid> <plane> ...
 - Added: `crates/ocelli-viewport/src/sync.rs`, `examples/folder-viewer/src/value.rs`, `examples/folder-viewer/src/measure.rs`, `examples/folder-viewer/src/use.html` and `README.md` (both already named in the documentation section).
 - Mutation controls, in addition to the plan's: `same_frame_of_reference` returning true for two `None` turns AC7 and a `sync.rs` test red, `ref-lines` moved inside ink turns AC15 red, `{:e}` changed to `{}` turns AC8 red, and `LINK_BODY_CAP` read after the body turns AC13 red.
 - Focused checks add `cargo test -p ocelli-viewport --test sync` and `bin/ocelli.sh gate viewer-browser`.
+
+## Lead cross-reference, F-239 colour support, 2026-11-08
+
+F-239 item14 and AC28 supersede AC19's historical colour-refusal example.
+Supported RGB is drawable and has its own window and invert. A window links
+only between images of the same kind, monochrome to monochrome or colour to
+colour. Therefore a monochrome drag, preset or Reset leaves a colour target's
+picture, window and invert unchanged, while linked zoom still reaches that
+visible target. A colour drag can reach another colour target and leaves
+monochrome targets unchanged. Modality presets remain unavailable for colour.
+The `Window not applicable` corner is now for an image that cannot be drawn,
+whose hidden stage is also skipped by zoom linking.
+
+The integrated operator check uses these same-kind and mixed-kind cases.
+This records the already approved F-239 contract and does not claim the
+operator has performed that check.

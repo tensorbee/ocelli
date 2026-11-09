@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229
-**Last updated:** 2026-11-07
+F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229, F-239, F-240, F-244
+**Last updated:** 2026-11-09
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -59,7 +59,7 @@ evidence of anything on its own.
 | `tools/oracle/page/app.mjs` | the stack render page, `window.__oracle` |
 | `tools/oracle/page/volume.mjs` | the volume and MPR render page, `window.__oracleVolume` |
 | `tools/oracle/src/` | the reference half's `.mjs` modules: paths, manifest, params, voi, geometry, volume, sidecar, output, pins, server, unsupported, faults, metadata-sources. The comparator's Rust sits beside them, its binary under `src/bin/` |
-| `tools/oracle/tests/` | twelve `node:test` suites, the fault runner, and the comparator's Rust fixtures |
+| `tools/oracle/tests/` | thirteen `node:test` suites, the fault runner, and the comparator's Rust fixtures |
 | `tools/oracle/check_sidecars.py` | the pydicom cross-read of the sidecars |
 | `tools/oracle/render-params.json` | committed, and it decides every stack frame |
 | `tools/oracle/unsupported.json` | committed, what 5.8.2 cannot render |
@@ -1177,6 +1177,97 @@ it is ABSENT from every member of both synthetic series, and
 `check_sidecars.py` asserts that directly against the files under pydicom, which
 is where an absence can actually be checked.
 
+## Current oracle evidence, 2026-11-09
+
+Root executed the source repair at staged tree `d73cc1a8e53af777a767ca3f8de47f40ca29e2d6`. The reviewer independently inspected the three approved file objects and retained synthetic metadata and results, and did not run hardware.
+
+**Reference identity.** The current reference named oracle exited 0 in 170.431266292s with 29 mutation controls and zero undetected. The original old-reference/new-truth semantic control exited 1 in 2.778195667s, with 133 views, 74 pass, 1 fail, 58 unmeasured and 0 absent. Its sole failure is the EOT view at the metadata-truth rung, answered before pixel bytes were read, and the retained old sidecar has `attributes: null`. Six metadata-fixture cases passed separately. Separately executed File Meta merge and shared-FG stop implementation mutants are not claimed. Before/after run records preserve all source-row identities and all 133 digest values, including nine null refusal hashes. All 133 non-null rendered digests agree across 124 source images plus nine volume reformats, and manifest and render-parameter identities agree. This compares retained digest evidence, not unretained old raw pixel bodies. The EOT sidecar's changed metadata hash is `8b4ebea4ca67bbea39ddf7c9497d7d1b194693afb1982758e10acf8d357ebca9`.
+
+**Current native candidate.** This is the production candidate comparison, separate from reference identity. Candidate produce exited 0 in 7.783573167s with 133 written, zero omitted and nine declared unsupported inputs. The actual candidate gate exited 0 in 3.327361208s with 133 views, 74 pass, 0 fail, 59 unmeasured and 0 absent. The EOT view is present and unmeasured solely for its existing weak-content qualifier. Unmeasured is not a pass, and weak content is not inflated into scored pixel parity.
+
+**Narrow EOT metadata prefix fix.** Pinned MIT dicom-parser 1.8.21 mishandles OV long VL. Reference `readAttributes` now calls exactly `parseDicom(bytes,{untilTag:'x7fe00001'})`, stopping at the top-level Extended Offset Table before value traversal, with FileMeta merged after the normal prefix return. All 31 queried attributes and FG selectors precede EOT, max `x52009230`, and nested SQ parsing does not forward the top-level stop. Earlier parse errors remain refusal/null, with no `error.dataSet` recovery, no Ocelli metadata substitution, no dependency patch and no generic OV support. The bulk-data tail is not validated by this. Ordinary files without EOT retain traversal. One explicit truth entry, `syntax/j2k_lossless_multiframe_eot.dcm`, asserts 17 generator facts including the `.90` transfer syntax, 64x96, 3 frames, mono16, shared rescale 1/0 and VOI 40/400/LINEAR, and existing truth entries are unchanged. The EOT sidecar now carries 17 generator-derived truth fields with five shared-FG source pointers and no attributes error.
+
+**Eleven explicit class-two colour census additions, no threshold.** The existing 48 entries and qualifiers are byte-identical, and 59 entries are declared after exactly 11 additions, each with the sole `unstated-threshold` qualifier, so no prior pass is demoted. All 11 synthetic rows are new since canonical `7f6a3e908eac21b2959bd5a1ad255bf4f3cbac8d`, with 8 stored bits and 3 components: `syntax__htj2k_lossless_ybr_rct`, `syntax__htj2k_lossy_ybr_ict`, `syntax__j2k_lossless_ybr_rct`, `syntax__j2k_lossy_ybr_ict`, `syntax__reference_rgb8_saturated`, `synthetic__sc_rgb_icc`, `synthetic__sc_rgb_icc_gamma1`, `synthetic__sc_rgb_icc_gamma22`, `synthetic__sc_rgb_icc_lut`, `synthetic__sc_rgb_icc_srgb_para`, `synthetic__sc_rgb_icc_swap`. HLD 25.1 supplies no colour perceptual metric or threshold, and D-16 and the approved F239 unscored scope require observations/unmeasured, not pass. F240 does not claim Cornerstone applies ICC. No numerical policy, tolerance, pixel gold, CSV or gate bypass changed. Root's dated 11-09 lead rulings in both plans and the tracked `F-239-F-240-oracle-census-pass-1` review approve the census amendment subject to actual identity, mutation and named consumers, now run. Existing colour/ICC differences remain observations, not scored colour parity.
+
+Receipts under `/private/tmp/ocelli-s46-codex`: `f244-eot-prefix-repaired-oracle.json/log`, `f244-eot-prefix-current-candidate-produce.json/log`, `f244-eot-prefix-current-candidate-gate.json/log`, comparison `f244-eot-prefix-current-candidate-comparison/compare.json`, and `reference-frame-stability.json` under `f244-eot-reference-metadata-remediation`.
+
+These results support the narrow metadata-prefix repair and restore the missing candidate observation. The dated F-244 observation below remains a historical record. Formal acceptance, the final verification profile and sprint closure remain separate.
+
+## F-244 empty-table reference observation
+
+Measured on 2026-11-08 from HEAD `025f3736`, staged source tree
+`33410eca25489449adbe297173d596bb1c941e1a`, in the detached worktree
+`/private/tmp/ocelli-f244-ac22-gate-source`. Its ignored corpus and pinned
+reference dependencies are linked, while `tools/oracle/out` and `compare-out`
+are private real directories. The unchanged `bin/ocelli.sh gate oracle` has no
+output override, so running it there leaves the shared output untouched.
+`CARGO_BUILD_JOBS=2` and the existing pydicom interpreter were explicit.
+
+The reference passed all default checks, including its fault self-test and two
+deterministic passes. All 119 stack rows were reached. There were 110 readbacks
+and nine declared unsupported rows. Three volumes produced nine reformats, and
+one volume refusal was declared. The event catalogue matched the pinned
+5.8.2 package, 50 core and 53 tool event names. The renderer was ANGLE
+SwiftShader with WebGL2, `effectiveRenderBackend: gpu` and
+`useCPURendering: false`, as this reference harness requires. This is a software
+rasterizer observation.
+
+Of F-244's nineteen new rows, seventeen produced reference frames. The two
+JPEG XL rows failed at `decoded`, with `No decoder for transfer syntax`
+followed by `.110` or `.112`'s full UID. Only their exact paths were added to
+the existing syntax-specific `unsupported.json` entries. Their error and
+boundary predicates were retained. The seventeen rendered views were all
+`unmeasured` in the identity comparator: sixteen have `weak`, and
+`syntax__jpeg_baseline_rgb8_empty_bot` has `unstated-threshold`. These are
+separate reasons, with the same definitions and thresholds as the existing
+census. The file window is used without a new presentation rule.
+
+The independent metadata checker cross-read 109 stack sidecars overall,
+including sixteen of F-244's new reference sidecars. The EOT row records
+`attributes: null` and `attributesError: [object Object]`, so its attributes
+were not cross-read. Its reference frame still reached every render boundary.
+Its black and white fractions sum to 0.997192, which also limits the pixel
+differences its `weak` frame can reveal. The stack pass renders one frame per
+row. The native all-frame decode evidence is recorded separately in the story.
+
+The initial named gate exited 1 after its identity comparator reported exactly
+seventeen missing census entries, 71 passing views, zero failing views and
+48 unmeasured views. The comparator mutation command did not run because the
+identity command was red. The same observation supplies the seventeen exact
+qualifier entries now recorded in `compare-expectations.json`. The census
+reconciliation passed independent review on staged tree
+`3aec4ae5e5967354a2023ab2a27d088608b5bae7`. The final unchanged named gate
+ran from that exact tree in the same private detached worktree and exited 0
+in 164.870 seconds. The reference checks, event catalogue, identity comparison
+and all 29 comparator mutations passed. There were zero undetected mutations.
+The identity comparison reported 119 views, 71 pass, zero fail, 48 unmeasured
+and zero absent, with the qualifications above retained.
+A bounded identity rerun with the reconciled census exited 0. Two isolated
+census controls exited 1 at the intended coverage assertion: removing
+`syntax__htj2k_lossless_empty_bot`, and replacing the JPEG baseline RGB row's
+`unstated-threshold` qualifier with `weak`. The canonical census was unchanged
+by those controls.
+An identity comparison exercises the comparator against its own reference
+frames. It does not render an Ocelli candidate.
+
+Receipts are under `/private/tmp/ocelli-s46-codex`:
+`f244-oracle-empty-bot` preserves the first missing-census refusal,
+`f244-oracle-eot` preserves the isolated one-row check, and
+`f244-oracle-gate-census-red` records the full named gate, exit 1 in
+143.831 seconds. The bounded rerun and controls are
+`f244-oracle-census-identity-green`, `f244-oracle-census-drop-red` and
+`f244-oracle-census-wrong-qualifier-red`. The complete passing gate is
+`f244-oracle-gate-final`. Each has a JSON command receipt and a log. The private
+full reference has its own `run.json`, sidecars and console record, and its
+current green identity report is `tools/oracle/compare-out/compare.json`.
+The original red comparison and reference run records were preserved beside
+the receipts as `f244-oracle-gate-census-red-compare.json` and
+`f244-oracle-gate-census-red-reference-run.json` before output reuse.
+Temporary structured summaries are `/private/tmp/f244-ac22-observation.json`,
+`/private/tmp/f244-ac22-new-qualifiers.json` and
+`/private/tmp/f244-ac22-final-observation.json`. Historical receipts were not
+counted as these new runs.
+
 ## Where it sits in the gates
 
 `bin/ocelli.sh oracle` runs everything: the pins, the unit suites, two corpus
@@ -1252,3 +1343,130 @@ The traced `toLowHighRange` result is lower 39.75 and upper 39.25, and
 LUT keeps the file width. The producer passes the recovered window into the
 unchanged C.11.2.1.3.1 function. A width of at least one stays the file
 window. The parity bounds in section 25.1 are unchanged.
+
+## F-239 unscored colour observations, 2026-11-08
+
+The observation source is the resumed colour implementation. Its exact source
+identities and independent review remain in the F-239 review records. This is
+not a scored colour oracle. The existing colour-not-scored reasons and all
+scored tolerances remain unchanged.
+
+The installed dicom-image-loader 5.8.2 package matches all 248 regular files
+in its official registry tarball, verified against the lockfile SHA-512.
+createImage.js, including its debug block, is byte-identical. No installed
+source was changed. The reference is pinned headless Chromium on SwiftShader.
+
+The initial full observation ran normal unit, pin and metadata checks, one
+reference pass and no fault self-test. Its first attempt failed metadata
+coverage because no hand-written row asserted YBR_RCT or YBR_ICT. Four
+literal expectations from the approved unsigned RGB8, 64 by 96 source
+specification repair that coverage. The repeated reference run passed.
+The candidate producer wrote all 111 applicable frames and omitted none,
+with seven declared reference refusals. That command's success is production
+evidence, not a scored comparator verdict.
+
+All 86 shared monochrome frames, including MONOCHROME1, are byte-identical
+to the earlier F-244 AC22 reference. A review found and removed an unconditional
+invert=false assignment before this observation. Only an explicit colour
+case now sets inversion. The failed initial source and receipts remain kept.
+
+Each table row below compares the entire 512 by 512 RGBA canvas. RGB maximum
+and differing-pixel count are observations, not acceptance thresholds. Alpha
+is identical throughout. Source centres are additional diagnostics using the
+recorded physical camera and pixel spacing. They do not replace the full
+canvas figures.
+
+| Corpus row | Maximum RGB difference | Different canvas pixels | Source centres different / sampled | Attribution |
+|------------|------------------------|-------------------------|------------------------------------|-------------|
+| `syntax__htj2k_lossless_ybr_rct` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `syntax__htj2k_lossy_ybr_ict` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `syntax__j2k_lossless_ybr_rct` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `syntax__j2k_lossy_ybr_ict` | 1 | 1312 | 41 / 6144 | Previously recorded lossy decoder rounding observation, AC25 |
+| `syntax__jpeg_baseline_rgb8` | 2 | 123424 | 3857 / 6144 | Existing decoder RGB difference, no second colour inverse |
+| `syntax__jpegls_lossless_rgb8` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `syntax__reference_rgb8` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `syntax__reference_rgb8_saturated` | 0 | 0 | 0 / 6144 | Exact whole canvas |
+| `synthetic__sc_palette_color` | 64 | 1024 | 0 / 240 | Fractional quad coverage, centre colours exact |
+| `synthetic__sc_palette_color_16` | 64 | 1024 | 0 / 240 | Fractional quad coverage, centre colours exact |
+| `synthetic__sc_rgb_icc` | 64 | 981 | 0 / 240 | Fractional quad coverage, centre colours exact |
+| `synthetic__sc_rgb_interleaved` | 64 | 981 | 0 / 240 | Fractional quad coverage, centre colours exact |
+| `synthetic__sc_rgb_planar` | 64 | 981 | 0 / 240 | Fractional quad coverage, centre colours exact |
+
+The native YBR_FULL_422 row is a declared reference read-back refusal. It is
+not included as a measured colour success. Every renderable colour row in
+this manifest has a corresponding candidate and is listed above.
+
+Two additional declared render-params observations use the existing synthetic
+RGB frame, width 100, centre 128, invert off and on. Each has its own partial
+output directory, guarded from replacing the canonical reference. The page
+applies and records the same explicit LINEAR window and inversion.
+
+| Observation | Maximum RGB difference | Different canvas pixels | Pixels above one code at fractional edges | Source-centre result |
+|-------------|------------------------|-------------------------|------------------------------------------|----------------------|
+| `rgb-window` | 64 | 9948 | 853 | Ocelli equals all 720 hand channels. Reference differs at 10 channels by one code |
+| `rgb-window-invert` | 64 | 9948 | 853 | Ocelli equals all 720 hand channels. Reference differs at 10 channels by one code |
+
+The independent reviewer computed every source-centre expected value from
+PS3.3 C.11.2.1.2 and approved ties-to-even byte rounding. Five reference
+channels lie one code below that hand result and five above, in each case.
+All differences above one code lie on canvas columns 42 and 469, at the
+fractional image boundaries. This geometry difference belongs to the native
+observation producer, which projects packed display RGB through CpuRaster.
+It is an explicitly named gap, not a colour threshold exception or a claim
+that the folder viewer uses this canvas projector.
+
+Reproduce the two reference cases with `node tools/oracle/run.mjs
+--colour-observation <id> --out <separate-dir> --once --no-self-test`,
+then `bin/ocelli.sh compare produce --reference <separate-dir>
+--candidate <candidate-dir> --corpus corpus/data`. The default observation
+uses the same reference command without `--colour-observation`. The producer
+reuses colour_bytes_into for the scale, stage 4, colour window and final byte
+conversion. ICC profile application is not compared against a reference that
+ignores profiles. F-240 has its independent colour-management comparison.
+
+Receipts, immutable input identities, full per-pixel aggregate observations
+and the independent source-centre calculation are under
+`/private/tmp/ocelli-s46-codex/`, named `colour-reference-*`,
+`colour-candidate-*`, `colour-default-observations.json`,
+`colour-default-monochrome-preservation.json` and `ac20-review-p1/`.
+These private outputs are not tracked DICOM data or a new scored baseline.
+
+## Comparison page entry, F-223
+
+`buildPage({ dist })` also builds `bench.html` and `bench.js` for the explicit
+`bin/ocelli.sh bench --compare-cornerstone` mode. The controller imports the
+unchanged pin check and uses the installed cornerstone3D 5.8.2 packages. This
+page parses folders and exposes count, commit and window endpoints, while the
+stack and volume oracle entries keep their existing programs. Adding the entry
+was checked against the before-build hashes of both existing bundles.
+`bench_series_test.mjs` is registered in both exact oracle Node test lists.
+The comparison's one-frame CT agreement precondition and cost measurements do
+not replace a rendered oracle corpus or its comparator gate. See the dedicated
+mode in `docs/lld/benchmarks.md`.
+
+### Shared palette reader in the native candidate
+
+The native current-view producer calls `ocelli_dicom::palette_color_lut`.
+Its adapter projects only eleven palette input attributes into `MetadataSet`,
+excluding Pixel Data. The private descriptor and table parser is removed.
+Decoder-reported RGB and non-palette sidecars retain their existing bypass,
+and provider refusals map to the candidate's fixed `palette-refused` reason.
+
+Actual release producers were built before and after the repair, at source
+`7678f744063b674c2fffec3547adb162cfd5d638` and
+`8d142a48d22672824a1a6cf758f6f320d57e0633`. Both returned zero on the
+same two synthetic palette rows selected from the existing reference run.
+Each candidate contains 1048576 RGBA bytes and is byte-identical across the
+pair. Candidate SHA-256 values are:
+
+| Input | Candidate SHA-256, before and after |
+| --- | --- |
+| synthetic/sc_palette_color.dcm | `19341b4f4e8c7cf95501015c324e1964bfa5d70cbaf4cef0e1fe2ffa25472f0c` |
+| synthetic/sc_palette_color_16.dcm | `06ddef8c9a7e4511f638314506b8f86fd6bc76bff930f5b8250d611a3a7a03f0` |
+
+The second row declares 16 bits with every table entry at most 255. Both
+products follow the approved R1 eight-bit reading. The observation records
+input and sidecar digests, exact producer binary hashes and direct exits.
+It reuses reference pixels without rerunning the browser and makes no new
+colour parity or whole-corpus gate claim. The normal final corpus gate
+remains separate.

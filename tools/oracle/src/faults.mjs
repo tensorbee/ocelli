@@ -179,7 +179,7 @@ export const FAULTS = {
   "bad-voi-source": {
     boundary: "internal",
     row: SUBJECT,
-    expect: 'The only sources are "file" and "none"',
+    expect: 'The only sources are "file", "none" and "explicit-colour"',
     what: "an unexpected throw inside the page, which must arrive as a boundary and not as an evaluation error",
     mutateParams: (params) => ({ ...params, voi: { source: "whatever" } }),
   },

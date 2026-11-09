@@ -22,6 +22,11 @@ WASM_FEATURES = {"std", "parking_lot", "wgsl", "webgpu", "webgl"}
 NATIVE_FEATURES = {
     "std", "parking_lot", "dx12", "metal", "gles", "vulkan", "wgsl", "webgpu",
 }
+# D-33, F-238. What the SHIPPED native table must keep: the D-27 native set
+# minus `metal`, which moves to a forwarding feature so the shipped archive
+# can build without it. `gles` stays, measured: on Apple the `gles` chain
+# never reaches wgpu-hal's own `gles`, so no objc2 crate follows it.
+SHIPPED_NATIVE_FEATURES = NATIVE_FEATURES - {"metal"}
 NATIVE_CFG = 'cfg(not(target_arch = "wasm32"))'
 WASM_CFG = 'cfg(target_arch = "wasm32")'
 PACKAGE = re.compile(r"(?:^|\s)(wgpu|naga|ocelli-render) v")
@@ -73,8 +78,16 @@ def check_features(manifest: dict) -> list[str]:
     return problems
 
 
-def check_trimmed(name: str, manifest: dict, native_webgl: bool) -> list[str]:
+def check_trimmed(name: str, manifest: dict, native_webgl: bool,
+                  shipped: bool = False,
+                  forward_metal: bool | None = None) -> list[str]:
     problems = []
+    # `forward_metal` defaults to `shipped`: the crate judged against the
+    # shipped table is the one whose `metal` forwarding is required. A crate
+    # outside the shipped graph can pass `forward_metal=False` to be judged
+    # against the same table without the forwarding.
+    if forward_metal is None:
+        forward_metal = shipped
     wasm = target_wgpu(manifest, WASM_CFG)
     native = target_wgpu(manifest, NATIVE_CFG)
     if not isinstance(wasm, dict):
@@ -88,10 +101,28 @@ def check_trimmed(name: str, manifest: dict, native_webgl: bool) -> list[str]:
         problems.append(f"{name} has no native wgpu dependency")
     else:
         native_features = set(native.get("features") or [])
-        if not NATIVE_FEATURES <= native_features:
+        # D-27 keeps `metal` in the table for the crates whose native graph is
+        # development-only. D-33 moves it to a forwarding feature on the
+        # renderer, which the shipped archive is built from, and this half
+        # asserts both halves of that: the table keeps every shipped backend,
+        # and the manifest still forwards `metal` to wgpu so development can
+        # restore the D-27 set. The shipped set is a floor, not the exact
+        # table: a table that drops one of its backends is refused, and one
+        # that names more is not. `ocelli-compute` is judged against that
+        # floor without being in the shipped graph, and names no forwarding
+        # feature, because nothing depends on it there and a flag with no
+        # named user is forbidden.
+        required = SHIPPED_NATIVE_FEATURES if shipped else NATIVE_FEATURES
+        if not required <= native_features:
             problems.append(f"{name} native wgpu drops a default backend")
         if native_webgl and "webgl" not in native_features:
             problems.append(f"{name} native wgpu does not enable webgl")
+    if forward_metal:
+        forwarded = (manifest.get("features") or {}).get("metal")
+        if forwarded != ["wgpu/metal"]:
+            problems.append(
+                f"{name} does not forward metal to wgpu, so the D-27 native "
+                f"set is unreachable in development")
     return problems
 
 
@@ -100,8 +131,17 @@ def manifests() -> list[str]:
     problems = check_wasm_opt(wasm)
     problems += check_features(wasm)
     problems += check_trimmed("ocelli-wasm", wasm, False)
-    problems += check_trimmed("ocelli-render", load(RENDER_CRATE), True)
-    problems += check_trimmed("ocelli-compute", load(COMPUTE_CRATE), False)
+    # D-33. The renderer is the crate the shipped native archive is built
+    # from, so its table is judged against the shipped set and its `metal`
+    # forwarding is required. The compute crate is not in the shipped graph,
+    # but it shares the renderer's device, so its table is held to the
+    # shipped set as a floor for the day it joins one. It names no `metal`
+    # feature: nothing depends on it there, and a flag with no named user is
+    # forbidden.
+    problems += check_trimmed("ocelli-render", load(RENDER_CRATE), True,
+                              shipped=True)
+    problems += check_trimmed("ocelli-compute", load(COMPUTE_CRATE), False,
+                              shipped=True, forward_metal=False)
     return problems
 
 

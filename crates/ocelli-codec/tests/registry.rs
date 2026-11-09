@@ -19,6 +19,9 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 const TS_A: &str = "1.2.840.10008.1.2.4.50";
 const TS_B: &str = "1.2.840.10008.1.2.4.51";
+const IMPLICIT_VR_LE: &str = "1.2.840.10008.1.2";
+const EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1";
+const JPEG_BASELINE: &str = "1.2.840.10008.1.2.4.50";
 const TS_UNKNOWN: &str = "1.2.840.10008.1.2.4.500";
 const ONE_TS_A: &[&str] = &[TS_A];
 const ONE_TS_B: &[&str] = &[TS_B];
@@ -432,6 +435,122 @@ const KNOWN_SYNTAX_COUNT: usize = 19;
 const AVAILABLE_SYNTAX_COUNT: usize = 17;
 /// Syntaxes that stay known and unregistered.
 const UNAVAILABLE_SYNTAX_COUNT: usize = 2;
+
+/// The decoder's own answer to how long a decoded frame is, per the operator's
+/// answer to F-239 question 1. Native `YBR_FULL_422` stores two of its three
+/// samples per pixel (PS3.3 C.7.6.3.1.2 stores each pixel pair as `Y1 Y2 Cb
+/// Cr`), so its frame is four bytes and not six, while every decoder of
+/// three-component output keeps six.
+#[test]
+fn decoded_output_len_is_the_decoders() -> TestResult {
+    let mut registry = Registry::new();
+    register_native_and_rle_decoders(&mut registry)?;
+    register_jpeg_decoders(&mut registry)?;
+
+    // One row, two columns, three samples per pixel at eight bits. The
+    // container's own length is 2 * 3 * 1 = 6.
+    let colour = FrameDesc::new(colour_input())?;
+    // PS3.5 8.2: implicit VR Pixel Data is OW, explicit VR may carry OB.
+    let colour_ow = FrameDesc::new(FrameDescInput {
+        pixel_data_vr: PixelDataVr::Ow,
+        ..colour_input()
+    })?;
+    let rgb = FrameDesc::new(FrameDescInput {
+        photometric_interpretation: "RGB".to_owned(),
+        ..colour_input()
+    })?;
+
+    // PS3.3 C.7.6.3.1.2: two stored samples per pixel for the native 4:2:2
+    // frame, so 1 * 2 * 2 * 8 / 8 = 4.
+    assert_eq!(registry.decoded_output_len(IMPLICIT_VR_LE, &colour_ow)?, 4);
+    assert_eq!(
+        registry.decoded_output_len(EXPLICIT_VR_LE, &colour)?,
+        4,
+        "both native byte orders store two samples per pixel"
+    );
+    // Full three-sample output keeps the container length, 6.
+    assert_eq!(registry.decoded_output_len(EXPLICIT_VR_LE, &rgb)?, 6);
+    // JPEG decodes to three samples per pixel even for a 4:2:2 photometric.
+    assert_eq!(registry.decoded_output_len(JPEG_BASELINE, &colour)?, 6);
+
+    // And the dispatch length is the decoder's answer, not the container's.
+    // A caller sizing from Samples per Pixel hands the native decoder six
+    // bytes for a four-byte frame and is refused before any decoder runs.
+    let source = [50_u8, 200, 100, 160];
+    let mut too_long = [0_u8; 6];
+    assert_eq!(
+        registry.decode(IMPLICIT_VR_LE, &source, &colour_ow, &mut too_long),
+        Err(CodecError::OutputLength {
+            expected: 4,
+            actual: 6,
+        })
+    );
+    assert_eq!(too_long, [0_u8; 6], "a refused decode writes nothing");
+
+    let mut out = [0_u8; 4];
+    registry.decode(IMPLICIT_VR_LE, &source, &colour_ow, &mut out)?;
+    assert_eq!(out, source, "a native 4:2:2 frame copies its stored bytes");
+
+    let mut explicit_out = [0_u8; 4];
+    registry.decode(EXPLICIT_VR_LE, &source, &colour, &mut explicit_out)?;
+    assert_eq!(explicit_out, source);
+
+    // A pixel pair with no partner. PS3.3 C.7.6.3.1.2 stores `Y1 Y2 Cb Cr`,
+    // so an odd Columns cannot name which pixels share the last chroma pair
+    // and the frame is refused rather than re-paired across rows.
+    let odd = FrameDesc::new(FrameDescInput {
+        columns: 3,
+        pixel_data_vr: PixelDataVr::Ow,
+        ..colour_input()
+    })?;
+    let mut out = [0_u8; 6];
+    assert_eq!(
+        registry.decode(IMPLICIT_VR_LE, &[0_u8; 6], &odd, &mut out),
+        Err(CodecError::FrameMismatch)
+    );
+    assert_eq!(out, [0_u8; 6], "a refused decode writes nothing");
+
+    // PS3.3 C.7.6.3.1.2 defines both 4:2:2 codes over three samples per
+    // pixel. A header whose Samples per Pixel contradicts the photometric is
+    // refused rather than re-counted. The buffer here is the length the
+    // header itself declares, so the registry's buffer check passes and the
+    // decoder's own refusal is the answer.
+    for photometric in ["YBR_FULL_422", "YBR_PARTIAL_422"] {
+        for samples_per_pixel in [1_u16, 2] {
+            let contradicted = FrameDesc::new(FrameDescInput {
+                samples_per_pixel,
+                photometric_interpretation: photometric.to_owned(),
+                ..colour_input()
+            })?;
+            let source = vec![0_u8; contradicted.output_len()];
+            let mut out = vec![0xa5; contradicted.output_len()];
+            assert_eq!(
+                registry.decode(EXPLICIT_VR_LE, &source, &contradicted, &mut out),
+                Err(CodecError::FrameMismatch),
+                "Samples per Pixel {samples_per_pixel} under {photometric} must be refused"
+            );
+            assert!(
+                out.iter().all(|byte| *byte == 0xa5),
+                "a refused decode writes nothing"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn colour_input() -> FrameDescInput {
+    FrameDescInput {
+        rows: 1,
+        columns: 2,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "YBR_FULL_422".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    }
+}
 
 #[test]
 fn every_decoder_family_registers_into_one_registry_without_collision() -> TestResult {

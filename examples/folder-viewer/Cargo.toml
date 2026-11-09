@@ -22,6 +22,7 @@ ocelli-geom = { path = "../../crates/ocelli-geom" }
 ocelli-pixel = { path = "../../crates/ocelli-pixel" }
 ocelli-render = { path = "../../crates/ocelli-render" }
 ocelli-viewport = { path = "../../crates/ocelli-viewport" }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 # Native process only. The wasm check of this package has no listener.

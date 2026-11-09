@@ -30,7 +30,7 @@ pub use byte_decode::{
     decode_bytes_to_f32, parse_f64_vec, parse_floats, parse_usize_vec, require_bytes, ByteOrder,
 };
 pub use jpeg::decode_jpeg_fragment;
-pub use jpeg_2000::decode_jpeg2000_fragment;
+pub use jpeg_2000::{decode_jpeg2000_fragment, decode_jpeg2000_fragment_colour};
 pub use jpeg_ls::decode_jpeg_ls_fragment;
 pub use packbits::packbits_decode;
 pub use pixel_layout::{decode_native_pixel_bytes_checked, PixelLayout, PixelSignedness};

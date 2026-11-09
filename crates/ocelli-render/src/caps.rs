@@ -695,6 +695,15 @@ pub struct TierEvidence {
     pub simd: SimdSupport,
     /// What became of the operator's request.
     pub override_outcome: OverrideOutcome,
+    /// True when this build compiled no wgpu backend for its target.
+    ///
+    /// Set by `probe.rs`'s empty-backend guard, ahead of the resolver: an
+    /// empty platform-filtered set never reaches an instance, so `classify`
+    /// cannot observe it and the `NoAdapter` it records would otherwise read
+    /// the same as a machine with backends and no GPU. The report prints the
+    /// cause so a macOS user of the shipped build is not sent to debug
+    /// hardware that is not the problem.
+    pub no_backend_compiled: bool,
 }
 
 /// The resolved capabilities and the record of how they were reached.
@@ -766,6 +775,7 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
                 adapters_seen: 0,
                 simd: signals.simd,
                 override_outcome: OverrideOutcome::Applied(Tier::Cpu),
+                no_backend_compiled: false,
             },
         };
     }
@@ -933,6 +943,7 @@ pub fn classify(signals: &TierSignals, request: TierRequest) -> Resolution {
             failed_adapters,
             simd: signals.simd,
             override_outcome,
+            no_backend_compiled: false,
         },
     }
 }

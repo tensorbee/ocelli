@@ -488,3 +488,30 @@ None open. Each is a lead decision under the operator's delegation of 2026-11-05
 - Q5, what a finding may carry. Answered: lead decision under the operator's delegation of 2026-11-05. No value and no character code, lengths, counts and indexes only, decision 5.
 - Q6, when the viewer computes. Answered: lead decision under the operator's delegation of 2026-11-05. 300 ms after first paint, decision 14, held to F-216's thresholds by AC34.
 - Q7, the E-ID. Answered: lead decision under the operator's delegation of 2026-11-05. E3.8, the next free number in E3. If a sibling story designed in the same round also claims E3.8, the lead renumbers one of them when writing the allocation.
+
+### Lead amendments after review pass 2
+
+Made by the sprint lead on 2026-11-05 under the operator's delegation of the quality call, after `.claude/reviews/F-225-working-pass-2.md`.
+
+- **The report repeats a SOP Class UID only under the DICOM root.** A value is repeated in `sopClass` only when it is a well-formed UID beginning `1.2.840.10008.`, the root of every UID PS3.6 registers. Any other value, a well-formed private UID or a date-shaped `19620203` included, is never repeated, and `sopClassNote` says which case applies. A grammatically valid UID is not enough, because a value an operator typed into the wrong element can be identifying.
+- **`modules` carries `sopClassNote`.** The report's JSON shape gains `sopClassNote`, a fixed note string from a closed set, beside `evaluated` and `sopClass`. The TypeScript reader accepts only that set.
+
+### Lead rulings after the viewer half's review pass 1
+
+- **Amendments the implementation needed, recorded.** A 410 on the id form falls back to the body form and does not re-post `/file`, because a held file's encoded bytes are dropped once its frames are held, as measured. Opening the Checks sheet asks for that file at once. That is the one exception to "no request during /file or thumbnails", and AC33 reads accordingly.
+- **D1.** On a generation mismatch `pumpChecks` continues to the next due entry rather than breaking, and breaks only on a null entry. A `conformance.mjs` step holds the first reply, opens a second folder, and requires one report for it and badge 4. Red on today's page.
+- **S1.** A fault shown for an image counts as its first paint, so a colour image and a refused file get a badge like a drawn one. A refused file is where the report helps a user most. README step 8 says the count is for the shown file, drawn or refused. A browser step on an RGB file and on a refused file requires the badge without opening the sheet.
+- **AC34's bench driver.** It is carried in this story, because AC34 and the sprint's benchmark gate both need it. `tools/bench/src/viewer_work.mjs:753` reads the active cell's `.fault`, the selector F-208 moved the scroll sampler to, using pass 1's smallest fix. AC34's three rows are then measured, `viewer.first_image` included, and recorded as informational on a busy host until the idle-host run at sprint close.
+- **Nitpicks.** Pass 1's N1 to N5 are taken where they are one line each, and the rest are recorded.
+
+### Lead ruling after viewer review pass 2, 2026-11-08
+
+A null result from an older folder generation continues the request loop, so an aborted old file repost cannot strand the new folder's due report. A null result in the current generation still ends that attempt. The permanent browser regression waits for the new folder to be due while the old check is busy before releasing the held library import.
+
+### Lead evidence-stage amendment for AC35, 2026-11-09
+
+The original pre-code empty-checker progress record was not recovered by the bounded handoff search. Its historical chronology remains unverified. For AC35 only, the lead accepts the fresh independent counterfactual replay below in place of that unavailable historical record. It proves the same fixture-discrimination intent and does not claim the original pre-code event or test-first ordering occurred.
+
+The replay uses commit `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf`, checker SHA256 `6ee2d61dea53791065ede025c6de191ad735feba2be6f301a8b6185f56a9ad44` and fixture SHA256 `4a5f56fd8a863f9551961bf3dabc852c9aa7850c6f1f469cab1f70a8c4c80e2b`. The original 42 conformance tests pass. A private empty-checker variant makes AC2, AC3, AC5, AC9 and AC12 each exit 101 at the specified missing-finding assertion. Each of AC35's four after-GREEN faults also exits 101 on its intended test: LO byte counting, the four-year leap rule, dropping the last-value pad exception and a synthetic value echoed in finding JSON. No compiler or setup failure counts as RED.
+
+All private mutations are restored. The unchanged 42-test suite then exits 0. The accompanying independent acceptance record retains every command, mutant hash, direct exit and restoration check. This changes only the evidence stage for AC35. No expected finding, fixture, algorithm, tolerance or other acceptance requirement changes. It supplies no CI result or feature-completion decision.

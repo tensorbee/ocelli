@@ -7,7 +7,8 @@ import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -313,4 +314,40 @@ test("release worker instrument observes a first frame and a real pointer batch"
     build: false, diagnostic: true,
     workerTransform: mutateWorker('const white = canvas.getContext("2d").getImageData(64, 64, 1, 1).data[0];', 'const white = black;'),
   }), /cine frames did not change the actual canvas/);
+});
+
+// F223 AC1, the explicit comparison mode never enters the subject runner.
+test("comparison flags select only the comparison mode", () => {
+ const got=command.parseArgs(["--compare-cornerstone","--pseudo","/a/local/input","--software","--publish"]);
+ assert.equal(got.compareCornerstone,true);assert.equal(got.pseudo,"/a/local/input");assert.equal(got.software,true);assert.equal(got.publish,true);assert(got.out.endsWith("compare"));
+});
+test("comparison mode refuses baseline, subject and publication conflicts", () => {
+ for(const flags of [["--compare"],["--accept"],["--subject","viewer.open"],["--story","F-223"],["--why","x"],["--tolerance","0.1"],["--list"],["viewer.open"],["--publish","--no-build"]]) assert.throws(()=>command.parseArgs(["--compare-cornerstone",...flags]),/comparison|--compare-cornerstone|--publish/);
+ for(const flag of ["--pseudo","--publish","--software"]) assert.throws(()=>command.parseArgs(flag==="--pseudo"?[flag,"/a/local/input"]:[flag]),/--compare-cornerstone/);
+});
+
+
+test("controlled colour selector stays explicit, closed and unpublished", () => {
+  const args = command.parseArgs(["--compare-cornerstone", "--pseudo", "/synthetic", "--colour-case", "rgb8"]);
+  assert.equal(args.colourCase, "rgb8");
+  for (const argv of [["--colour-case", "rgb8"], ["--compare-cornerstone", "--colour-case", "other"],
+    ["--compare-cornerstone", "--colour-case"], ["--compare-cornerstone", "--colour-case", "rgb8", "--publish"]]) {
+    assert.throws(() => command.parseArgs(argv), /colour|value/);
+  }
+});
+
+
+test("shell comparison refuses the missing oracle install before its Node entry", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "comparison-install-"));
+  try {
+    await mkdir(join(dir, "bin"));
+    await mkdir(join(dir, "tools", "bench", "node_modules"), { recursive: true });
+    const script = join(dir, "bin", "ocelli.sh");
+    await writeFile(script, await readFile(repoPath("bin", "ocelli.sh")));
+    await writeFile(join(dir, "tools", "bench", "run.mjs"), 'process.stdout.write("ENTRY_REACHED");\n');
+    const result = spawnSync("bash", [script, "bench", "--compare-cornerstone", "--pseudo", "synthetic"], { encoding: "utf8" });
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stderr, /cd tools\/oracle && npm ci/);
+    assert.equal(result.stdout.includes("ENTRY_REACHED"), false);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

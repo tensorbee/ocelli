@@ -15,8 +15,8 @@ use ocelli_pixel::{
     PresentationLutEvidence, Rgb, SampleLayout, VoiFunction, VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, ColourLut, ColourLutError, FrameOutcome, Pass, PresetId, RenderGraph, StackPass,
-    VoiParams,
+    BlendMode, ColourLut, ColourLutError, FrameOutcome, IccProfilePresence, Pass, PresetId,
+    RenderGraph, StackPass, VoiParams,
 };
 
 /// Not widened. The same bound `tests/upload.rs` and `tests/voi_shader.rs` use.
@@ -228,7 +228,8 @@ fn palette_first_mapped_input_10_clamps_stored_9_and_maps_stored_10() {
     let transform = require_ok!(palette_transform(lut.clone()));
     let colour = require_ok!(ColourLut::palette(
         lut,
-        PhotometricInterpretation::PaletteColor
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent
     ));
     let bytes = colour.texture_bytes();
 
@@ -274,7 +275,8 @@ fn a_palette_from_8192_stays_256_texels_wide() {
     let transform = require_ok!(palette_transform(lut.clone()));
     let colour = require_ok!(ColourLut::palette(
         lut,
-        PhotometricInterpretation::PaletteColor
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent
     ));
     let bytes = colour.texture_bytes();
     assert_eq!(bytes.len(), 256 * 4);
@@ -307,7 +309,8 @@ fn a_palette_below_zero_does_not_grow_up_to_stored_zero() {
     let lut = require_ok!(palette_channels(2, -4, vec![1.0, 2.0]));
     let colour = require_ok!(ColourLut::palette(
         lut,
-        PhotometricInterpretation::PaletteColor
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent
     ));
     let bytes = colour.texture_bytes();
     assert_eq!(bytes.len(), 8);
@@ -374,11 +377,19 @@ fn icc_and_a_palette_on_monochrome_and_a_preset_on_palette_are_unavailable() {
         Err(ColourLutError::Unavailable)
     );
     assert_eq!(
-        ColourLut::palette(lut.clone(), PhotometricInterpretation::Monochrome2),
+        ColourLut::palette(
+            lut.clone(),
+            PhotometricInterpretation::Monochrome2,
+            IccProfilePresence::Absent,
+        ),
         Err(ColourLutError::Unavailable)
     );
     assert_eq!(
-        ColourLut::palette(lut, PhotometricInterpretation::Monochrome1),
+        ColourLut::palette(
+            lut,
+            PhotometricInterpretation::Monochrome1,
+            IccProfilePresence::Absent,
+        ),
         Err(ColourLutError::Unavailable)
     );
     assert_eq!(
@@ -388,6 +399,32 @@ fn icc_and_a_palette_on_monochrome_and_a_preset_on_palette_are_unavailable() {
     assert_eq!(
         ColourLut::preset(PresetId::Stops, PhotometricInterpretation::PaletteColor),
         Err(ColourLutError::Unavailable)
+    );
+}
+
+/// D3. A GPU route given a profiled frame reports unavailable rather than
+/// baking device RGB. The palette bake refuses an accepted profile before
+/// any texel is built. A profile the subset refused is
+/// [`IccProfilePresence::Absent`], and the same palette bakes, so the
+/// refusal is the profile's and not the palette's.
+#[test]
+fn a_profiled_palette_is_not_baked_as_device_rgb() {
+    let lut = require_ok!(palette_lut());
+    assert_eq!(
+        ColourLut::palette(
+            lut.clone(),
+            PhotometricInterpretation::PaletteColor,
+            IccProfilePresence::Accepted
+        ),
+        Err(ColourLutError::Unavailable)
+    );
+    assert!(
+        ColourLut::palette(
+            lut,
+            PhotometricInterpretation::PaletteColor,
+            IccProfilePresence::Absent
+        )
+        .is_ok()
     );
 }
 
@@ -717,7 +754,8 @@ fn palette_stored_samples_read_back_the_descriptor_entries() {
     let lut = require_ok!(palette_lut());
     let colour = require_ok!(ColourLut::palette(
         lut,
-        PhotometricInterpretation::PaletteColor
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent
     ));
     assert!(
         graph
@@ -738,4 +776,61 @@ fn palette_stored_samples_read_back_the_descriptor_entries() {
     assert_colour_close(row.first().copied().unwrap_or([f32::NAN; 3]), FIRST_ENTRY);
     assert_colour_close(row.get(1).copied().unwrap_or([f32::NAN; 3]), FIRST_ENTRY);
     assert_colour_close(row.get(2).copied().unwrap_or([f32::NAN; 3]), SECOND_ENTRY);
+}
+
+/// F-239 item 11 through the GPU bake. Tiers A and B read a palette texel the
+/// CPU baked, so the bake must hold the scaled entry tier C draws.
+///
+/// ```text
+/// descriptors 5\0\16 for all three channels
+/// red   0 255 256 32768 65535 -> >> 8 -> 0 0 1 128 255
+/// green 65535 32768 256 255 0 -> >> 8 -> 255 128 1 0 0, blue the same
+/// texel i is (red i, green i, blue i, 255)
+/// ```
+///
+/// Before F-239 the bake refused this table, because 256 and above is not a
+/// display byte.
+#[test]
+fn the_gpu_bake_holds_sixteen_bit_entries_after_their_display_scale() {
+    let red = require_ok!(LutDescriptor::new(
+        5,
+        0,
+        16,
+        vec![0.0, 255.0, 256.0, 32_768.0, 65_535.0]
+    ));
+    let falling = vec![65_535.0, 32_768.0, 256.0, 255.0, 0.0];
+    let green = require_ok!(LutDescriptor::new(5, 0, 16, falling.clone()));
+    let blue = require_ok!(LutDescriptor::new(5, 0, 16, falling));
+    let colour = require_ok!(ColourLut::palette(
+        require_ok!(PaletteColorLut::new(red, green, blue)),
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent,
+    ));
+    assert_eq!(
+        colour.texture_bytes(),
+        [
+            0, 255, 255, 255, 0, 128, 128, 255, 1, 1, 1, 255, 128, 0, 0, 255, 255, 0, 0, 255,
+        ]
+    );
+}
+
+/// The R1 fallback through the GPU bake. All three channels are declared
+/// 16-bit and every entry fits in 8 bits, so the palette is read as 8-bit and
+/// its texels are the entries themselves.
+#[test]
+fn the_gpu_bake_reads_a_narrow_sixteen_bit_table_as_eight_bit() {
+    let entries = vec![10.0, 200.0];
+    let colour = require_ok!(ColourLut::palette(
+        require_ok!(PaletteColorLut::new(
+            require_ok!(LutDescriptor::new(2, 0, 16, entries.clone())),
+            require_ok!(LutDescriptor::new(2, 0, 16, entries.clone())),
+            require_ok!(LutDescriptor::new(2, 0, 16, entries)),
+        )),
+        PhotometricInterpretation::PaletteColor,
+        IccProfilePresence::Absent,
+    ));
+    assert_eq!(
+        colour.texture_bytes(),
+        [10, 10, 10, 255, 200, 200, 200, 255]
+    );
 }

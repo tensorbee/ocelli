@@ -10,6 +10,9 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The local viewer shows scoped DICOM conformance findings without exposing file values in findings or stopping display.
+- Compressed DICOM files with an empty Basic Offset Table open, including frames spanning fragments when their JPEG or JPEG 2000 markers prove the boundaries.
+
 - Frame open reads one Part 10 object into the existing LUT chain inputs. The example page shows the synthetic display value and the padding count.
 - Series assembly orders parsed frames by projected position and reads cine timing from the first frame. The example page shows the groups and Loop or Bounce.
 - Overlay planes are read from the top-level overlay groups, and display shutters from the shutter attributes. The example page shows the synthetic hit, the shutter hide, and an absent neutral value.
@@ -726,3 +729,4 @@ Repository bootstrap. Nothing is published.
   epoch and is refused with `CommitRefused` for a stale one, and a frame
   that also carries `content` is cached as a `writeFrame` commit is. A
   caller that sets none of the keys sees the earlier behaviour.
+- JPEG-LS flat runs decode correctly. The decoder refuses unsupported LSE presets and scans that run out of data or carry padding beyond their final partial byte.

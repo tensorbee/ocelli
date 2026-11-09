@@ -354,3 +354,105 @@ Made by the sprint lead on 2026-11-07 from read-only groundwork against `work/f-
 6. **Coordinates stay inside the image.** Moving a mark or a freeform handle clamps every point to the range PS3.3 Table C.18.6-1 allows, so every saved mark loads back. A test drags a mark past an edge, saves, loads and finds it.
 7. **The mandatory template content is written.** TID 1500 row 3 Observation Context, and the Type 2 attributes Referenced Performed Procedure Step Sequence and Manufacturer on both documents and Performed Procedure Code Sequence on the SR, are present, empty where unknown. The AC20 codes are as transcribed in the groundwork.
 8. **Citations and names.** The coordinate rule is PS3.3 Table C.18.6-1. New `inspect_json` UID reads use the non-failing form. Study Time comes from F-212's field. Ellipse axes use absolute widths. The page module is named so that its stem does not collide with `packages/core/src/marks.ts`. Line numbers in the docs are measured at implementation.
+
+### Lead rulings after review pass 1
+
+- **D1.** `readTid1500Groups` decodes text as the file's Specific Character Set says. Under ISO_IR 192 every string is re-decoded as UTF-8, and a multi-valued TextValue is joined with a backslash, so UT text comes back whole. A round-trip test writes and reads "Läsion", "肺" and "a\b" and requires them unchanged, red on today's reader.
+- **D2.** Deleting every mark of a study is saved. The page writes an SR whose Imaging Measurements container is empty and which names its predecessors, so the old marks do not come back on load. TID 1500 allows the empty container. A Key Object Selection cannot hold zero references, so the page and README say that unflagging the last key image of a study is not saved, and why. The amendment 3 test gains the delete-all case.
+- **D3.** The inspect reply carries the stored Study Time value, and the documents copy it verbatim. The display text is not the source.
+- **D4.** `part10` writes File Meta Information Version (0002,0001) and Implementation Class UID (0002,0012), PS3.10 Table 7.1-1. F-196's writer gains them too, through the same helper.
+- **D5.** README says which SR classes are read as documents, the four `DOCUMENT_CLASSES`, and that other SR, such as an X-Ray Radiation Dose SR, still shows as a series. `DOCUMENT_CLASSES` is not widened.
+- **D6.** The comment states the 1e-3 relative tolerance.
+- **S1.** A browser step drags a freeform grip past the image edge and requires it clamped, red with the clamp removed.
+- **S2.** A test where a foreign Key Object Selection is newer than Ocelli's requires Ocelli's to win, red under M16.
+- **S3.** Both Key Object writers write IMAGE only for an image storage class, and COMPOSITE otherwise, per TID 2010. A test covers a non-image reference.
+- **S4.** Every UID the writers make is a `2.25.` value below 2^128, from the same generator the page uses. A test draws many and checks each, red under dcmjs `uid()`.
+- **Nitpicks taken.** N2, the unit's code meaning is "millimeter" as CID 7460 gives it. N4, the README line is rewrapped. N5, the user docs say a key image reference must be in the evidence. N6, only an SR whose content was read is named as a predecessor. N1 and N3 stay as they are.
+- **AC19 and dciodvfy.** Carried to sprint close with the operator's click-through. dciodvfy is not installed on this host.
+
+### Lead rulings after review pass 2
+
+- **Pass 1's S2 restated.** A newer foreign Key Object Selection does not hide Ocelli's, and both are shown, which is what the code does and what amendment 4 asks. Only Ocelli's own are ranked.
+- **D1.** The reader takes the character set from the file's own (0008,0005) bytes, not from dcmjs's rewritten value. It turns each nested string back into its bytes, inverting the windows-1252 or Latin-1 decode the host used, and decodes them with that character set's label, PS3.5 6.1 and Annex D of PS3.3 C.12.1.1.2's defined terms. A group whose character set is unsupported, or uses code extensions, is counted unread rather than guessed. Tests: a vitest case reading an ISO_IR 100 file, one reading an ISO_IR 192 file, and a browser step that round-trips "肺" through save and Load marks in Chromium. Each is red on today's reader. `public-api.md` says what is now true.
+- **D2.** The test writes once and copies that one result.
+- **D3.** A study that held a key image in the session and is in the folder is counted before the early return, so flag, save, unflag, save shows why the unflag is not saved.
+- **D4.** Only studies in the current folder are counted.
+- **D5.** A report is named as a predecessor only when every group it holds was placed. An empty report is written only for a study whose read reports were all fully placed. A save in a partial folder never supersedes marks it could not place. A test covers the partial-folder path, red on today's code.
+- **D6.** The image class list follows one stated rule: every PS3.4 Table B.5-1 class whose IOD includes the Image Pixel Module, plus the retired image classes of PS3.6 Annex A. Each entry is checked against its IOD in PS3.3. That adds the three classes the review names and any others the rule reaches, including the retired Hardcopy classes. Height Map Segmentation is checked. The LLD states the rule, not a claim of completeness.
+- **S1.** A test requires the empty report to omit the Current Requested Procedure Evidence Sequence, red under X4.
+- **S2.** A waveform storage class is written WAVEFORM, per TID 2010 row 9, with a test.
+- **Nitpicks taken.** The README line is rewrapped to 79 columns. A Save with nothing to save, and only empty reports read, writes nothing. The `key-object.md` header is bumped. `secondary-capture.ts` goes through the same file meta helper.
+
+### Lead rulings after review pass 3
+
+- **D3, the lead's own ruling corrected.** The second sentence of the pass 2 D5 ruling is withdrawn. Its rule that an empty report is written only for a study whose read reports were all fully placed is gone. The predecessor rule alone satisfies D5: a report is named as a predecessor only when every group it holds was placed. Pass 3's page probe shows that rule keeps a partial report's marks and saves a delete-all. The `partialStudies` gate is dropped. The test at `mark-documents.test.ts:624` states the predecessor rule. A test covers the review's path, a study once placed in part and then whole, delete all, save, reload, and requires the deleted mark to stay gone, red on today's code.
+- **D1.** The parse is retried with `ignoreErrors` whenever the reader decodes the character set itself, so ISO_IR 203 is read. A vitest case requires `€` back from an ISO_IR 203 file. `public-api.md` and `use.html` name the sets that are read.
+- **D2.** When the raw walk cannot run and dcmjs's dataset has no Specific Character Set, the default repertoire is used. The walk also reads Explicit VR Big Endian. A regression test reads an ASCII report from a big endian file and from a deflated one with no groups unread.
+- **S1.** One vitest case for each of the C1 refusal, the multi-valued set refusal and the implicit VR walk, red under X1, X2 and X3.
+- **Nitpicks taken.** N1, the README line is 79 columns. N2, `ISO_IR 6` is read as the default repertoire, which other tools write. N3, the ISO_IR 166 comment gives 88 characters, and bytes TIS 620 leaves undefined are refused. N4, the byte-to-string step works in chunks, with a test at 200000 bytes.
+
+### Lead rulings after review pass 4
+
+- **D1.** Under ISO_IR 166, A0 is NO-BREAK SPACE, per the ISO-IR 166 registration and ISO 8859-11, and is read as U+00A0. Only DB to DE and FC to FF are refused. The comment says so, and the test loops the refusal over all eight bytes and expects A0 read.
+- **D2.** The parse is always retried with `ignoreErrors` when the first parse throws, so a deflated report in a set the walk cannot confirm is counted unread rather than skipped as no document. A regression test reads a deflated ISO_IR 203 file. `use.html` says a deflated file's text is decoded only when it carries no Specific Character Set.
+- **D3.** README and the status line say that a report placed only in part is kept, so the marks it holds come back after a delete-all and save.
+- **S1.** A vitest case reads a deflated ISO_IR 100 file of ASCII text and requires it counted unread, red under O2.
+- **N1** is covered by D1's loop. **N2** stays at module level.
+
+### Lead rulings after review pass 5
+
+- **D1.** `placeDocuments` returns the predecessor UIDs it found, and the page removes them from `sessionPartialReports`, so a partial report a later document replaces is not counted kept. README says such a report "is not replaced by a save from this page". The regression test places P in part, then Q naming P in a second call, and expects `kept` 0, red on today's code.
+- **D2.** The comment says a truncated file returns nothing, and a file damaged inside its content can read as fewer groups with or without the retry.
+- **Nitpicks taken.** N1, a test expects `kept` 2 for two partial reports in one study. N2, `public-api.md` names the C1 refusal and states the ISO_IR 166 rule once. N3, README names every cause of a report placed in part: an image not in the folder, an unread group, and a mark outside its image.
+
+### Lead rulings after review pass 6
+
+- **D1, and the replaced report placed again.** The page keeps one session-wide set of every SOP Instance UID any read has named as replaced. `placeDocuments` never places a report in that set, whichever order the reads come in, and `notePartialReports` never adds or keeps one. This also closes pass 6's concern outside the range, where a page that read Q and later read P whole placed P's marks again. Tests: Q read, then P read in part, expects `kept` 0. Q read, then P read whole, expects P's marks not placed. Both are red on today's code.
+- **D2.** The reason clause is deleted, leaving "A truncated file still returns nothing."
+- **D3.** README says a report is placed only in part when one of its marks is not placed or a group of it cannot be read, and names the folder lacking an image as the common case. It does not claim a complete list.
+- **N1 taken.** The D1 test holds a second partial report of the same study and expects it to stay recorded, red under pass 6's study-drop mutant.
+
+### Lead rulings after review pass 7
+
+- **D1.** An SR that `placeDocuments` skips as replaced is returned in `predecessors` with `empty: false`, so the page remembers it and the next save names it. PS3.3 Table C.17-2 allows a predecessor whose content is wholly or partially included. Each `partial` row also carries its `reference`, so a report the page removes from `sessionPartialReports` is still remembered. Regression test: read Q, then read P whole, delete every mark, save, then read P and the saved file alone and expect 0 marks. It is red on today's code. A page step in `marks.mjs` covers the two-folder path the review used.
+- **N1 taken.** A committed test reads R, Q and P in three calls, R naming Q and Q naming P, and expects neither P nor Q placed.
+- **N2 taken.** The `notePartialReports` comment drops the case that cannot happen.
+- **Not changed.** A foreign TID 1500 SR that names an Ocelli report hides it on load, which is the operator's skip-on-load answer to open question 3 applied across reads.
+
+### Lead rulings after review pass 8
+
+Pass 8 is clean in its range. Its model of every read order, 401 260 cases, has no failure at the tip. These rulings close what it found beside the range.
+
+- **A mark nobody deleted is never superseded.** Pass 8 found that opening folder A with Q, then folder B with no document, then saving writes an SR with no marks naming Q, so Q's length is lost though nobody deleted it. The rule is that a save names a report as a predecessor only when every mark that report holds is either in this save or was deleted by the user in this page load. The page records deletions, and the delete-all path names a report only under the same rule. Test: the review's folder A with Q, then folder B with no document, then save, then reopen with Q, expects Q's mark back. Red on today's code.
+- **N3, no change and no file.** A Save writes no document for a study when no mark of it was added, moved or deleted since its documents were read and since its last save. Test: a folder holding O and the empty SR that replaces it, Save twice, expects no file. Red on today's code.
+- **N1.** A page step covers the forward order through `page.html`'s loop: open `ct` with P alone, Load marks with Q, delete the length, save, then reopen `ct` with P and the new file, expecting 0 marks and no "kept" sentence. Red under pass 8's PA.
+- **N2.** A vitest case reads E, then P whole, saves with no entries, and expects one document naming P. Red under O1.
+- Pass 8's model, extended with these two rules, is re-run by the next reviewer.
+
+### Lead confirmation of the implementer's two readings of the pass 8 rulings
+
+- A report the page hid because a later document replaces it is already settled by that document, so a save names it whatever the page shows. Every other remembered report is named only when each of its marks is in the save or was deleted by the user in this page load. An SR this page saved is remembered with the marks it wrote.
+- For N3, a report hidden by a name an earlier read gave counts as a change to the study, because what the folder shows differs from its own files. A report hidden by a document in the same folder does not count as a change.
+
+### Lead rulings after review pass 9
+
+Pass 9's model, 280 420 cases, holds the two pass 8 invariants at zero failures and finds one new class: a deleted mark that returns with nothing saying so.
+
+- **D1, said, not silently lost.** A save does not carry marks it cannot show into a new SR. Instead `buildDocuments` counts every remembered report that is not replaced, not settled, and holds a mark the user deleted, and the status line names them: "N earlier reports still hold a mark you deleted, so that deletion is not saved. Open the folder holding them and save there." "Replaces the earlier one" is said only when no such report is left. A vitest case and a page step cover the review's trigger, folder A with T, delete one mark, folder B with no document, draw, save, red on today's code.
+- **D2.** A mark read from an SR with no Tracking Unique Identifier gets an identifier that is stable for the page load, keyed by the report's SOP Instance UID and the group's index, so reading the same report twice yields the same identifier and the report can be settled. A vitest case and a page step, folder FU twice, delete, save, reopen, red on today's code.
+- **D3.** README says the no-change rule as the code measures it: a study with no mark added, moved, deleted or edited, and no key image flagged or unflagged, since the page loaded or since its last save, writes nothing. The pass 8 ruling's wording is corrected to the same.
+- **Nitpicks taken.** N1, a page step pressing Save twice expects one file and the no-change sentence, red under PG and PD. N3, a vitest case reaches the deletion half of `settled`, red under O1. N2 and N4 are recorded and not changed.
+
+### Operator decision after review pass 10, 2026-11-08: state resets per folder
+
+Passes 9 and 10 found the same class in changing shapes, a deleted mark lost or returned with nothing said, and every case needed two or more folders opened in one page session. The operator chose to reset per folder. Opening a folder clears every remembered document, deletion, replacement, partial report, stable identifier and changed study. A save reasons only about the open folder's own files and any SR read into it by Load marks since the folder was opened. Nothing carries from one folder to the next. The rulings after passes 5 to 9 that exist only for state across folders are withdrawn where this makes them unreachable, and those within one folder stand. README says that a folder's marks are saved from that folder, and that opening another folder starts afresh. Pass 10's D1, D2 and D3 are judged under this rule: each is fixed if it still occurs within one folder, and its test is replaced by a one-folder case or removed if it needed two folders. The page steps that needed two folders are rewritten as one-folder steps where their behaviour still applies, or replaced by a step showing that a second folder carries nothing from the first.
+
+### Per-folder implementation clarification, 2026-11-08
+
+The cross-folder settlement and held-deletion records are removed. Within one folder, reports hidden by an earlier Load marks read still count as a change. Identifiers assigned to groups without Tracking Unique Identifiers remain stable within that folder and are cleared on the next folder open. Reading the same untracked group again does not add another visible mark.
+
+### Lead rulings after review pass 11, 2026-11-08
+
+- **D1.** Load the document module before taking the synchronous save snapshot, and discard a pending save if the folder generation changed during that load. Same-folder edits made during the load are included. Permanent browser cases cover both paths through the Save marks button and inspect the downloaded groups.
+- **D2.** A repeated untracked group is counted as already shown, not newly placed. The browser check requires one visible mark and the corresponding status counts.
+- **D3.** The within-folder predecessor rule applies to marks already displayed. A loaded note records its source report. Reading a later SR removes notes sourced from its predecessors before deduplication, preserving unrelated drawings. A successful save associates its saved marks with the new report, so a later read cannot discard that report's content merely by naming an older source. This defect predates the reset and is taken here because the retained read-order policy requires it.

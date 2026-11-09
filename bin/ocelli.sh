@@ -58,6 +58,7 @@ GATES=(
   "fmt|no|cargo fmt --all --check"
   "clippy|no|cargo clippy --workspace --all-targets -- -D warnings"
   "test|no|cargo test --workspace"
+  "vendor-tests|no|both vendored crates' library tests, offline and locked (F-239, D-31)"
   "bindgen|no|wasm-bindgen confined to ocelli-wasm (HLD 15.3, decision D2)"
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
@@ -65,7 +66,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs and changed.mjs (F-208, F-209, F-226, F-213, F-224)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, changed.mjs, marks.mjs, conformance.mjs colour.mjs and auto.mjs (F-208, F-209, F-226, F-213, F-224, F-215, F-225, F-239, F-227)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -106,6 +107,36 @@ run_gate() {
     fmt)         cargo fmt --all --check ;;
     clippy)      cargo clippy --workspace --all-targets -- -D warnings ;;
     test)        cargo test --workspace ;;
+    # F-239, D-31, the lead ruling after the codec part's review pass 4 (S1).
+    # The two vendored decoders are excluded from the workspace, so the `test`
+    # arm above never reaches their unit tests, and AC25's 1e-4 coefficient
+    # contract sat in tests no gate ran.
+    #
+    # `--offline` and `--locked` keep the build off the network and leave each
+    # published Cargo.lock byte-identical, which the sha256 in the story's
+    # evidence and the pins gate both prove. The fetch ahead of each test is
+    # the dependency supply, and it is in the arm because the workspace's own
+    # Cargo.lock does not carry everything the two crates' tests compile:
+    # `cargo fetch --locked` at the root downloads jpeg-decoder but not
+    # criterion, base64 or image, and a fresh CARGO_HOME holding only the
+    # workspace's supply refuses the test with "no matching package named
+    # `criterion` found". The step supplies its own dependencies rather
+    # than dropping --offline.
+    #
+    # The target directory is under $ROOT/target, outside `vendor/`, so no
+    # build artefact lands beside the pinned bytes.
+    vendor-tests) cargo fetch --locked \
+                    --manifest-path vendor/openjph-core-0.1.0/Cargo.toml &&
+                  CARGO_TARGET_DIR="$ROOT/target/vendor-tests" \
+                    cargo test --offline --locked \
+                    --manifest-path vendor/openjph-core-0.1.0/Cargo.toml \
+                    --lib &&
+                  cargo fetch --locked \
+                    --manifest-path vendor/ritk-codecs-0.6.0/Cargo.toml &&
+                  CARGO_TARGET_DIR="$ROOT/target/vendor-tests" \
+                    cargo test --offline --locked \
+                    --manifest-path vendor/ritk-codecs-0.6.0/Cargo.toml \
+                    --lib ;;
     bindgen)     ci/check-bindgen-isolation.sh ;;
     unsafe)      python3 scripts/unsafe_allowlist_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
@@ -179,7 +210,11 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/link.mjs &&
                  node examples/folder-viewer/tests/browser/forget.mjs &&
                  node examples/folder-viewer/tests/browser/window.mjs &&
-                 node examples/folder-viewer/tests/browser/changed.mjs ;;
+                 node examples/folder-viewer/tests/browser/changed.mjs &&
+                 node examples/folder-viewer/tests/browser/marks.mjs &&
+                 node examples/folder-viewer/tests/browser/conformance.mjs &&
+                 node examples/folder-viewer/tests/browser/colour.mjs &&
+                 node examples/folder-viewer/tests/browser/auto.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
@@ -190,12 +225,20 @@ run_gate() {
                    tools/bench/tests/run_test.mjs \
                    tools/bench/tests/state_test.mjs \
                    tools/bench/tests/cold_start_test.mjs \
+                   tools/bench/tests/comparison_test.mjs \
                    tools/bench/tests/decode_frame_test.mjs \
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs \
-                   tools/bench/tests/viewer_work_test.mjs ;;
+                   tools/bench/tests/viewer_work_test.mjs \
+                   tools/bench/tests/viewer_colour_frame_test.mjs \
+                   tools/bench/tests/viewer_icc_frame_guard_test.mjs \
+                   tools/bench/tests/comparison_page_test.mjs \
+                   tools/bench/tests/comparison_run_test.mjs \
+                   tools/bench/tests/comparison_sampler_context_test.mjs \
+                   tools/bench/tests/comparison_colour_test.mjs \
+                   tools/bench/tests/export_active_window_check_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_source_provenance_check.py ;;
@@ -241,7 +284,9 @@ run_gate() {
     # the backlog arm gives.
     native)      "$0" native &&
                  python3 -B -m unittest discover -s scripts/tests \
-                   -p test_simd_variant_check.py ;;
+                   -p test_simd_variant_check.py &&
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_shipped_native_check.py ;;
     device)      ci/check-device-ownership.sh ;;
     ci)          python3 scripts/ci_floor_check.py ;;
     # F-X009. A green run of the gates is not evidence that the gates work, it
@@ -294,7 +339,14 @@ run_gate() {
                  # Staged content, provenance and prose read the index blob.
                  # Named rather than globbed, for the same reason as above.
                  python3 -B -m unittest discover -s scripts/tests \
-                   -p test_staged_readers.py ;;
+                   -p test_staged_readers.py &&
+                 # F-237. The release script's comparison, driven red and
+                 # green on synthetic inputs. The real cold build runs when
+                 # /release runs the script, which no probe sandbox may wait
+                 # on. Named rather than globbed, for the same reason as
+                 # above.
+                 python3 -B -m unittest discover -s scripts/tests \
+                   -p test_release_wasm.py ;;
     # The level-3 runs that need a toolchain. NOT in the floor, and excluded
     # by name in the --floor arm below and in scripts/ci_floor_check.py's
     # NOT_IN_FLOOR. The two lists are compared for set equality there, so
@@ -590,7 +642,7 @@ case "$command" in
     # D2 honest over time: if the core stopped being WebAssembly-agnostic,
     # this is where it shows up first.
     #
-    # Thirteen steps, and each one's exit code is read from the command itself
+    # Fifteen steps, and each one's exit code is read from the command itself
     # rather than from the end of a pipe. `set -e` is on, so the first failure
     # ends the arm.
     #
@@ -600,7 +652,7 @@ case "$command" in
 
     # 1. The two entry points LINK, not merely type-check. A stub that only
     #    checks would hide a missing symbol until Phase 2.
-    echo "  1/13 native entry points link"
+    echo "  1/15 native entry points link"
     cargo build -p ocelli-native --bins
 
     # 2. Every crate HLD section 4 marks `wasm: yes` builds for wasm32.
@@ -614,14 +666,14 @@ case "$command" in
     #    to. What ships to a browser is the lib, so that is what is proved.
     #    Running the tests under wasm32 needs wasm-bindgen-test and a browser
     #    runner, which is F-101's and the oracle's ground, not this gate's.
-    echo "  2/13 eleven shared crates plus ocelli-wasm build for wasm32"
+    echo "  2/15 eleven shared crates plus ocelli-wasm build for wasm32"
     cargo check --workspace --exclude ocelli-native \
       --target wasm32-unknown-unknown
 
     # 3. Every crate the table marks `native: yes` builds natively.
     #    --all-targets IS right here: a native build runs the test suite, so
     #    the tests have to compile.
-    echo "  3/13 the same crates build natively, tests included"
+    echo "  3/15 the same crates build natively, tests included"
     cargo check --workspace --all-targets
 
     # 4. Resolved features agree across the two targets, or the difference is
@@ -629,19 +681,118 @@ case "$command" in
     #    both targets compiling while one quietly resolved a different feature
     #    set is the sprint's stated false-portability defect, and nothing goes
     #    red on its own.
-    echo "  4/13 resolved features agree across targets"
+    echo "  4/15 resolved features agree across targets"
     python3 scripts/target_feature_check.py
 
-    # 5. The Node executor's own refusals and control. Step 6 runs the
-    # production JPEG 2000 proof natively, and step 9 runs that exact source
+    # 5. F-238, AC1. The SHIPPED native build is ocelli-native with no default
+    #    features, which turns off its `metal` forwarding and with it wgpu's
+    #    Metal backend and every objc2 crate that backend reaches. The check
+    #    reads the RESOLVED graph for that feature set, not a manifest, so a
+    #    planted `metal` on any path the resolver still follows goes red. The
+    #    probe `shipped-native.metal-planted` in the guard catalogue drives
+    #    exactly that plant, in `gate guards-deep`.
+    echo "  5/15 the shipped native graph compiles no objc2 crate on Apple"
+    python3 scripts/shipped_native_check.py
+
+    # 6. F-238. The shipped configuration LINKS and RUNS, not merely resolves.
+    #    The graph check above answers what the resolver names; this answers
+    #    that the feature-off build still produces both entry points and that
+    #    the desktop one starts and reports. On macOS it links without Metal,
+    #    and the binary it produces is the one whose tier report AC4 reads:
+    #    it resolves tier C and prints the evidence rather than panicking
+    #    inside wgpu's `Instance::new`. So the binary is run ONCE here, and
+    #    the step refuses unless it exits 0 and prints a tier. On an Apple
+    #    host the report must say tier C decided by NoAdapter, because that
+    #    is the build D-33 describes: a guard removed from `probe.rs` comes
+    #    back as a startup panic, which is a non-zero exit and lands here.
+    #    The Apple branch also requires the `backends` cause line, so a
+    #    `probe.rs` that stops recording `no_backend_compiled` lands here
+    #    too: `NoAdapter` alone is also what a machine with backends and no
+    #    GPU attached prints, and the two must not read the same.
+    #    Off-Apple shipped builds keep backends, so any printed tier is
+    #    honest and only the ability to report is required.
+    echo "  6/15 the shipped native build links and its desktop binary reports"
+    shipped_build=$(cargo build -p ocelli-native --bins --release \
+      --no-default-features --message-format=json-render-diagnostics)
+    # The binary is the one the build above produced: the `executable` of the
+    # `compiler-artifact` message named `ocelli-desktop`, read from that
+    # build's own JSON output. Cargo emits one such message per requested
+    # target, so an output naming two or more of them is a build whose
+    # checked binary nothing here chooses, and the step refuses on that
+    # count as well as on none: exactly one is printed and run, anything
+    # else refuses and runs nothing. The count refusal is carried by the
+    # parse itself, and the step stops on its non-zero status the way it
+    # stops on a failing build above.
+    shipped_bin=$(printf '%s\n' "$shipped_build" | python3 -c '
+import json, sys
+named = []
+for line in sys.stdin:
+    try:
+        message = json.loads(line)
+    except ValueError:
+        continue
+    if message.get("reason") != "compiler-artifact":
+        continue
+    if message.get("target", {}).get("name") != "ocelli-desktop":
+        continue
+    if message.get("executable"):
+        named.append(message["executable"])
+if len(named) > 1:
+    sys.exit("FAIL: the shipped build named %d ocelli-desktop executables, "
+             "expected exactly one" % len(named))
+if named:
+    print(named[0])
+')
+    if [ -z "$shipped_bin" ]; then
+      echo "FAIL: the shipped build named no ocelli-desktop executable" >&2
+      exit 1
+    fi
+    shipped_status=0
+    # `env -u OCELLI_TIER`: the override is an operator input, and a value
+    # the caller exported must not reach the binary here. Under an override
+    # `detect` returns before the no-backend guard, so a leaked one would
+    # turn this step into a check of the override path instead of the
+    # shipped build it exists for.
+    shipped_report=$(env -u OCELLI_TIER "$shipped_bin" 2>&1) || shipped_status=$?
+    if [ "$shipped_status" -ne 0 ]; then
+      echo "FAIL: the shipped ocelli-desktop exited $shipped_status instead of reporting its tier" >&2
+      printf '%s\n' "$shipped_report" >&2
+      exit 1
+    fi
+    case "$(uname -s)" in
+      Darwin)
+        printf '%s\n' "$shipped_report" \
+          | grep -q "Tier Cpu, decided by NoAdapter" || {
+          echo "FAIL: the shipped ocelli-desktop did not report Tier Cpu, decided by NoAdapter on an Apple host" >&2
+          printf '%s\n' "$shipped_report" >&2
+          exit 1
+        }
+        printf '%s\n' "$shipped_report" \
+          | grep -q "backends  none compiled for this target" || {
+          echo "FAIL: the shipped ocelli-desktop reported NoAdapter without its no-backend cause line" >&2
+          printf '%s\n' "$shipped_report" >&2
+          exit 1
+        }
+        ;;
+      *)
+        printf '%s\n' "$shipped_report" | grep -q "^Tier " || {
+          echo "FAIL: the shipped ocelli-desktop printed no tier report" >&2
+          printf '%s\n' "$shipped_report" >&2
+          exit 1
+        }
+        ;;
+    esac
+
+    # 7. The Node executor's own refusals and control. Step 8 runs the
+    # production JPEG 2000 proof natively, and step 11 runs that exact source
     # as plain and SIMD-enabled wasm under Node.
-    echo "  5/13 codec wasm runner refusals and control"
+    echo "  7/15 codec wasm runner refusals and control"
     node --test scripts/tests/test_run_codec_wasm.mjs
 
-    echo "  6/13 JPEG 2000 production decoder executes natively"
+    echo "  8/15 JPEG 2000 production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_jpeg2000
 
-    # 7. The SIMD flag travels in
+    # 9. The SIMD flag travels in
     # CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS and not in `cargo rustc
     # --`, which hands its arguments to the final crate only, the example,
     # and compiles every dependency without them. With an explicit --target,
@@ -655,46 +806,46 @@ case "$command" in
     # profile is `lto = "fat"`, so every dependency's rlib carries bitcode
     # and all of it is code-generated once, at the example's link, under the
     # example's flags. docs/lld/build-targets.md records what was measured.
-    echo "  7/13 JPEG 2000 production decoder builds as plain and SIMD wasm"
+    echo "  9/15 JPEG 2000 production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
       cargo build -p ocelli-codec --release --example verify_jpeg2000 \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    # 8. The check reads the two linked modules. It refuses a SIMD module
+    # 10. The check reads the two linked modules. It refuses a SIMD module
     # holding no SIMD instruction the plain module lacks, and a plain module
     # holding any. It says nothing about which crate's code the SIMD
     # instructions came from, and the OK line names every one it found.
-    echo "  8/13 the SIMD JPEG 2000 module holds SIMD instructions, the plain one none"
+    echo "  10/15 the SIMD JPEG 2000 module holds SIMD instructions, the plain one none"
     python3 scripts/simd_variant_check.py \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
 
-    echo "  9/13 plain and SIMD JPEG 2000 wasm execute under Node"
+    echo "  11/15 plain and SIMD JPEG 2000 wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_jpeg2000.wasm
 
-    # 10 to 13 are the standing version of F-X013's central claim, that
+    # 12 to 15 are the standing version of F-X013's central claim, that
     # openjph-core produces identical samples on native, plain wasm and
     # +simd128 wasm. The spike that measured it once is deleted. D-22.
-    echo "  10/13 HTJ2K production decoder executes natively"
+    echo "  12/15 HTJ2K production decoder executes natively"
     cargo run -p ocelli-codec --release --example verify_htj2k
 
-    echo "  11/13 HTJ2K production decoder builds as plain and SIMD wasm"
+    echo "  13/15 HTJ2K production decoder builds as plain and SIMD wasm"
     cargo build -p ocelli-codec --release --example verify_htj2k \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-plain
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128" \
       cargo build -p ocelli-codec --release --example verify_htj2k \
       --target wasm32-unknown-unknown --target-dir target/codec-wasm-simd
 
-    echo "  12/13 the SIMD HTJ2K module holds SIMD instructions, the plain one none"
+    echo "  14/15 the SIMD HTJ2K module holds SIMD instructions, the plain one none"
     python3 scripts/simd_variant_check.py \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm
 
-    echo "  13/13 plain and SIMD HTJ2K wasm execute under Node"
+    echo "  15/15 plain and SIMD HTJ2K wasm execute under Node"
     node scripts/run_codec_wasm.mjs \
       target/codec-wasm-plain/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm \
       target/codec-wasm-simd/wasm32-unknown-unknown/release/examples/verify_htj2k.wasm
@@ -731,6 +882,15 @@ case "$command" in
       echo "See docs/lld/benchmarks.md for what it measures and what it does not." >&2
       echo "\`bench --list\`, \`bench --help\` and \`bench -h\` work without it." >&2
       exit 1
+    fi
+    comparison_mode=
+    for arg in "$@"; do
+      case "$arg" in --compare-cornerstone) comparison_mode=1 ;; esac
+    done
+    if [ -n "$comparison_mode" ] && [ -z "$bench_exempt" ] && [ ! -d tools/oracle/node_modules ]; then
+      echo "The comparison requires the pinned oracle install." >&2
+      echo "Run: (cd tools/oracle && npm ci)" >&2
+      exit 2
     fi
     node tools/bench/run.mjs "$@"
     ;;

@@ -146,3 +146,23 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+## Appended draft refinement, observable controls and lead questions
+
+This draft refinement is retained for the normal pre-implementation design round after independent non-author review. Status stays draft. It maps observable controls to the existing numbered acceptance inventory above and lists remaining lead questions. No existing AC row is rewritten or weakened, and no new policy, rounding, tolerance, equality, refusal, API, dependency, estimate, sprint or status choice is made here.
+
+**Observable controls mapped to existing ACs**
+
+- **AC1.** Two independently owned selections with exact typed item paths are compared in the same F-245 viewer that F-249 uses, covering equal, changed, absent, empty, null, multivalue and nested sequence results. Swapped asymmetric fixtures and a same-identifier case with changed selected metadata each alter the comparison as observed. Independent literal expected comparison strings come from the fixture. A pixel content change or an equal-side swap is not required to alter metadata equality.
+- **AC2.** An explicit actual clipboard gesture copies a selected tag, value or comparison. Proof is direct content observation of the copied text plus explicit success, refusal, denial or unavailable status and recovery. A resolved writeText Promise alone, or a DICOM pixel oracle alone, is not clipboard proof. A write already issued cannot be revoked through a post-resolution generation check.
+- **AC3.** Cancel, denied clipboard and switching either selection never copy stale content or claim success. Existing AC2 and AC3 rows remain authoritative. The exact intent snapshot, commit and cancel semantics are resolved by the normal lead before implementation. Pre-dispatch selection checks versus already-issued writes are distinguished as an open boundary question. Acceptance is not reduced to status text only and no automatic cleanup rewrite is assumed.
+- **AC4.** Repeat, pending source and viewport change, release and reopen use the generation-carrying lifecycle.
+- **AC5.** Existing S46 workflows remain reachable on the final stacked source.
+- **AC6.** Comparison and copy are renderer-tier independent. Tiers A, B and C each observe the declared result or precise unavailable reason, and S46 controls are preserved.
+- **AC8.** Unchanged metadata paths claim no new performance axis. A changed hot path uses the existing named benchmark subjects before and after.
+- **Privacy.** Values are safe text, never HTML. Real metadata appears only in the intended UI and user copy. No real values in logs, prompts, errors or telemetry. Synthetic fixture values are permitted.
+
+**Remaining lead questions, explicitly unresolved**
+
+- Raw spelling versus semantic view, NaN, signed zero, DS pads, sequence alignment and binary handling. These are lead decisions and are not derived from a PartialEq as policy.
+- Exact copy format, untruncated copy, equality ordering and alignment.

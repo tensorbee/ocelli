@@ -11,12 +11,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, statSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { DEFAULT_OUT, parseArgs } from "../run.mjs";
-import { FAULTS } from "../src/faults.mjs";
+import { FAULTS, faultedParams } from "../src/faults.mjs";
+import { resolveVoi } from "../src/voi.mjs";
 import { isInside, sameDirectory } from "../src/output.mjs";
 
 test("with no arguments, every check is on and the output is canonical", () => {
@@ -61,7 +63,7 @@ test("an unknown argument is refused rather than ignored", () => {
 // A flag whose value went missing would otherwise become `undefined` and
 // surface much later as an unrelated error.
 test("a flag with a missing or empty value is refused", () => {
-  for (const flag of ["--out", "--rows", "--inject"]) {
+  for (const flag of ["--out", "--rows", "--inject", "--colour-observation"]) {
     assert.throws(() => parseArgs([flag]), new RegExp(`${flag} needs a value`));
     assert.throws(() => parseArgs([flag, ""]), new RegExp(`${flag} needs a value`));
     assert.throws(
@@ -318,4 +320,70 @@ test("an unknown fault name is refused, and the message names the real ones", ()
     () => parseArgs(["--inject", "nonsense"]),
     new RegExp(Object.keys(FAULTS)[0]),
   );
+});
+
+
+test("colour observations cannot overwrite the default reference run", () => {
+  assert.throws(()=>parseArgs(["--colour-observation","rgb-window"]),/subset of the corpus/);
+  const options=parseArgs(["--colour-observation","rgb-window","--out",join(tmpdir(),"own-colour-observation")]);
+  assert.equal(options.colourObservation,"rgb-window");
+  assert.equal(options.rows,null);
+});
+
+
+test("bad-voi-source binds the declared fault to the actual invalid-source refusal", () => {
+  const fault = FAULTS["bad-voi-source"];
+  assert.equal(fault.boundary, "internal");
+  assert.equal(fault.expect, 'The only sources are "file", "none" and "explicit-colour"');
+  const params = faultedParams("bad-voi-source", { voi: { source: "file" } });
+  assert.deepEqual(params.voi, { source: "whatever" });
+  assert.throws(() => resolveVoi(params.voi, {}), (error) => {
+    assert(error instanceof Error);
+    assert(error.message.includes(fault.expect), "the injected refusal must satisfy its declared reason");
+    return true;
+  });
+});
+
+// Substitute only the child-driver transport. The actual self-test caller
+// must reject the wrong boundary even when it carries the identical text.
+test("bad-voi-source self-test requires its target row at the internal boundary", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "oracle-fault-boundary-"));
+  const sourceUrl = new URL("./faults.mjs", import.meta.url);
+  let response;
+  try {
+    globalThis.__oracleFaultDriverFixture = async (args) => {
+      assert.deepEqual(args.slice(0, 4), ["--inject", "bad-voi-source", "--rows", "syntax/reference_mono12.dcm"]);
+      return response;
+    };
+    let source = await readFile(sourceUrl, "utf8");
+    const declaration = "function runDriver(args, cwd)";
+    assert.equal(source.split(declaration).length, 2);
+    source = source.replace(declaration, "function unusedDriverTransport(args, cwd)")
+      .replace(/from "(\.[^"]+)"/g, (_match, name) => 'from "' + new URL(name, sourceUrl).href + '"');
+    source += "\nconst runDriver = globalThis.__oracleFaultDriverFixture;\n";
+    const path = join(temp, "self-test.mjs"); await writeFile(path, source);
+    const { runSelfTest } = await import(pathToFileURL(path).href);
+    const message = 'render-params.json declares VOI source "whatever". The only sources are "file", "none" and "explicit-colour".';
+    const failure = (boundary, row, reason) => `  ${boundary}: ${row} (1.2.840.10008.1.2.1) failed and unsupported.json does not account for it: ${reason}`;
+    const actual = failure("internal", "syntax/reference_mono12.dcm", message);
+    const cases = [
+      { label: "actual internal failure", code: 1, output: actual, accepted: true },
+      { label: "CRLF internal failure", code: 1, output: actual + "\r\n", accepted: true },
+      { label: "evaluation error with identical reason", code: 1, output: "page.evaluate: Error: " + message, accepted: false },
+      { label: "another boundary plus console text", code: 1, output: failure("presented", "syntax/reference_mono12.dcm", message) + "\n    [index.html] [log] internal: " + message, accepted: false },
+      { label: "another target row", code: 1, output: failure("internal", "syntax/another.dcm", message), accepted: false },
+      { label: "unrelated row failure plus console reason", code: 1, output: failure("internal", "syntax/reference_mono12.dcm", "another guard refused") + "\n    [index.html] [log] " + message, accepted: false },
+      { label: "successful process with failure text", code: 0, output: actual, accepted: false },
+    ];
+    for (const item of cases) {
+      response = { code: item.code, stdout: "", stderr: item.output };
+      const result = await runSelfTest("bad-voi-source");
+      assert.equal(result.ok, item.accepted, item.label);
+      assert.equal(result.observed.length, 1);
+      assert.equal(result.problems.length, item.accepted ? 0 : 1);
+    }
+  } finally {
+    delete globalThis.__oracleFaultDriverFixture;
+    await rm(temp, { recursive: true, force: true });
+  }
 });

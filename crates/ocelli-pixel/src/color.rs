@@ -15,9 +15,13 @@
 
 use ocelli_core::Stored;
 
+use glam::Vec2;
+use ocelli_core::Modality;
+
 use crate::{
     PixelError,
-    lut::LutDescriptor,
+    icc::IccTransform,
+    lut::{LutDescriptor, PresentationTransform, VoiFunction, VoiTransform},
     stored_pixel::{PhotometricInterpretation, PlanarConfiguration, SampleLayout},
 };
 
@@ -101,6 +105,12 @@ pub struct PaletteColorLut {
     red: LutDescriptor,
     green: LutDescriptor,
     blue: LutDescriptor,
+    /// Red, green and blue display scales. The identity for all three when
+    /// ruling R1 reads the palette as 8-bit, otherwise each channel's declared
+    /// depth minus 8.
+    scales: [DisplayScale; 3],
+    /// Ruling R1's fallback was taken, for all three channels together.
+    read_as_8_bit: bool,
 }
 
 impl PaletteColorLut {
@@ -112,26 +122,95 @@ impl PaletteColorLut {
     /// not agree on entry count and first mapped input. A palette whose
     /// channels mapped different input ranges would shift hue against
     /// luminance, which no shape check on the result reveals.
+    ///
+    /// Each channel's declared depth is its descriptor's container, 8 or 16,
+    /// and [`Self::with_entry_bits`] applies the one palette rule to it.
     pub fn new(
         red: LutDescriptor,
         green: LutDescriptor,
         blue: LutDescriptor,
     ) -> Result<Self, PixelError> {
+        let bits = [
+            u16::from(red.bits_per_entry()),
+            u16::from(green.bits_per_entry()),
+            u16::from(blue.bits_per_entry()),
+        ];
+        Self::with_entry_bits(red, green, blue, bits)
+    }
+
+    /// [`Self::new`] with each channel's declared entry depth given apart from
+    /// its container.
+    ///
+    /// F-239's display scale accepts `8 ..= 16` bits, the operator's answer to
+    /// its question 8, while [`LutDescriptor`] holds entries in an 8 or 16-bit
+    /// container. A descriptor declaring 12 bits therefore arrives as a 16-bit
+    /// container with `12` here.
+    ///
+    /// The one palette rule, ruling R1: the palette is read as 8-bit, and
+    /// [`Self::entries_read_as_8_bit`] is set, only when at least one channel
+    /// is declared above 8 bits and every entry of every such channel fits in
+    /// 8 bits. Otherwise each channel is shifted by its own declared depth
+    /// minus 8.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::UnsupportedColourDepth`] for a depth outside `8 ..= 16`.
+    /// [`PixelError::InvalidLutBits`] for a depth above the channel's own
+    /// container. [`PixelError::LutValueOutOfRange`] for an entry above
+    /// `2^bits - 1`, which is not a value of the declared depth. Then
+    /// [`PixelError::MismatchedPaletteDescriptors`] as [`Self::new`] documents.
+    pub fn with_entry_bits(
+        red: LutDescriptor,
+        green: LutDescriptor,
+        blue: LutDescriptor,
+        bits: [u16; 3],
+    ) -> Result<Self, PixelError> {
+        let [red_bits, green_bits, blue_bits] = bits;
+        let declared = [
+            channel_scale(&red, red_bits)?,
+            channel_scale(&green, green_bits)?,
+            channel_scale(&blue, blue_bits)?,
+        ];
+        // Ruling R1, decided once for the whole palette by the lead's ruling
+        // of 2026-11-07. The palette is read as 8-bit only when at least one
+        // channel is declared above 8 bits and every entry of every such
+        // channel fits in 8 bits. Deciding per channel would read a near-zero
+        // channel of a conforming 16-bit palette as 8-bit, about 256 times too
+        // bright beside its shifted neighbours, which is a quietly wrong colour.
+        let wide = [(&red, red_bits), (&green, green_bits), (&blue, blue_bits)];
+        let any_wide = wide.iter().any(|(_, bits)| *bits > 8);
+        let read_as_8_bit = any_wide
+            && wide
+                .iter()
+                .filter(|(_, bits)| *bits > 8)
+                .all(|(lut, _)| lut.values().iter().all(|value| *value <= 255.0));
+        let scales = if read_as_8_bit {
+            [DisplayScale::IDENTITY; 3]
+        } else {
+            declared
+        };
         let key =
             |descriptor: &LutDescriptor| (descriptor.entry_count(), descriptor.first_input_bits());
         if key(&red) != key(&green) || key(&red) != key(&blue) {
             return Err(PixelError::MismatchedPaletteDescriptors);
         }
-        Ok(Self { red, green, blue })
+        Ok(Self {
+            red,
+            green,
+            blue,
+            scales,
+            read_as_8_bit,
+        })
     }
 
     fn lookup(&self, stored: Stored) -> Rgb {
         // The three ramps are the same input mapping. Search once.
         let index = self.red.lookup_index(stored.0);
+        let [red, green, blue] = self.scales;
         Rgb {
-            r: self.red.values().get(index).copied().unwrap_or(0.0),
-            g: self.green.values().get(index).copied().unwrap_or(0.0),
-            b: self.blue.values().get(index).copied().unwrap_or(0.0),
+            r: red.apply(self.red.values().get(index).copied().unwrap_or(0.0)),
+            g: green.apply(self.green.values().get(index).copied().unwrap_or(0.0)),
+            b: blue.apply(self.blue.values().get(index).copied().unwrap_or(0.0)),
         }
     }
 
@@ -142,23 +221,279 @@ impl PaletteColorLut {
         self.red.entry_count()
     }
 
+    /// Capacity in bytes of the three channels' owned lookup storage.
+    /// Excludes this value itself, which its owner already counts.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.red
+            .heap_bytes()
+            .saturating_add(self.green.heap_bytes())
+            .saturating_add(self.blue.heap_bytes())
+    }
+
     /// PS3.3 C.7.6.3.1.5's first stored pixel value mapped.
-    ///
     /// Shared by the three channels. [`ColorTransform::map_into`] applies it.
     pub fn first_mapped_input(&self) -> i32 {
         self.red.first_mapped_input()
     }
 
-    /// Red, then green, then blue LUT entries.
+    /// Whether ruling R1 read the palette as 8-bit.
+    ///
+    /// True only when at least one channel is declared above 8 bits and every
+    /// entry of every such channel fits in 8 bits, so the whole palette was
+    /// taken as it is rather than shifted. That is how cornerstone3D 5.8.2
+    /// reads such a palette, and it departs from PS3.3 C.7.6.3.1.5's "scaled
+    /// across the full range", so a caller states it rather than hiding it.
+    #[must_use]
+    pub const fn entries_read_as_8_bit(&self) -> bool {
+        self.read_as_8_bit
+    }
+
+    /// Red, then green, then blue LUT entries, each after its display scale.
+    ///
+    /// These are the values [`ColorTransform::map_into`] emits, so a check of
+    /// them is a check of the stage's output rather than of the raw table.
     pub fn channel_entries(&self) -> impl Iterator<Item = f32> + '_ {
+        let [red, green, blue] = self.scales;
         self.red
             .values()
             .iter()
-            .copied()
-            .chain(self.green.values().iter().copied())
-            .chain(self.blue.values().iter().copied())
+            .map(move |value| red.apply(*value))
+            .chain(
+                self.green
+                    .values()
+                    .iter()
+                    .map(move |value| green.apply(*value)),
+            )
+            .chain(
+                self.blue
+                    .values()
+                    .iter()
+                    .map(move |value| blue.apply(*value)),
+            )
     }
 }
+
+/// One palette channel's display scale from its declared depth, refused when
+/// that depth does not describe the entries the container holds. Ruling R1's
+/// fallback is decided over the whole palette in
+/// [`PaletteColorLut::with_entry_bits`], not here.
+fn channel_scale(descriptor: &LutDescriptor, bits: u16) -> Result<DisplayScale, PixelError> {
+    let scale = DisplayScale::from_bits(bits)?;
+    if bits > u16::from(descriptor.bits_per_entry()) {
+        return Err(PixelError::InvalidLutBits);
+    }
+    // `bits` is at most 16 here, so `2^bits - 1` is at most 65,535 and is
+    // exact in `f32`. Built from a `u16` rather than cast.
+    let largest = f32::from(u16::MAX >> (16 - bits));
+    if descriptor.values().iter().any(|value| *value > largest) {
+        return Err(PixelError::LutValueOutOfRange);
+    }
+    Ok(scale)
+}
+
+/// The one display scaling rule for colour above 8 bits, F-239 item 11.
+///
+/// A colour sample or a palette entry of `n` bits is shifted right by
+/// `n - 8` for `9 <= n <= 16`, and taken as it is for `n = 8`. For a sample,
+/// `n` is Bits Stored `(0028,0101)`, PS3.3 C.7.6.3.1's range of each sample.
+/// For a palette entry, [`PaletteColorLut::with_entry_bits`] applies the one
+/// palette rule.
+///
+/// The shift truncates, as cornerstone's `>> 8` does, so every output code
+/// covers an equal share of the input range. Rounding is a separate decision
+/// made once at the render boundary, not here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DisplayScale {
+    shift: u8,
+}
+
+impl DisplayScale {
+    /// Eight bits, the identity.
+    pub const IDENTITY: Self = Self { shift: 0 };
+
+    /// The scale for an `n`-bit value.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::UnsupportedColourDepth`] for `n` outside `8 ..= 16`.
+    /// Below 8 there is nothing to shift and above 16 the value is not exact
+    /// through this crate's `f32` path, and both are refused by name rather
+    /// than clamped into range.
+    pub fn from_bits(bits: u16) -> Result<Self, PixelError> {
+        if !(8..=16).contains(&bits) {
+            return Err(PixelError::UnsupportedColourDepth);
+        }
+        // `bits - 8` is in `0 ..= 8` after the check above.
+        let shift = u8::try_from(bits - 8).map_err(|_| PixelError::UnsupportedColourDepth)?;
+        Ok(Self { shift })
+    }
+
+    /// How many bits the value is shifted right by.
+    #[must_use]
+    pub const fn shift(self) -> u8 {
+        self.shift
+    }
+
+    /// `floor(value / 2^shift)`, the right shift of an integer-valued `f32`.
+    ///
+    /// Division by a power of two is exact in `f32`, and so is the floor, for
+    /// every integer up to `2^24`, which covers the 16-bit range this rule
+    /// accepts. The identity returns the value untouched, so an 8-bit frame
+    /// is bit-identical to one that was never scaled.
+    #[must_use]
+    pub fn apply(self, value: f32) -> f32 {
+        if self.shift == 0 {
+            return value;
+        }
+        let divisor = f32::from(1_u16 << self.shift);
+        // `ocelli-pixel` is `no_std`, where scalar `f32::floor` is not
+        // available. glam's libm backend is the one `lut.rs` already uses.
+        Vec2::splat(value / divisor).floor().x
+    }
+}
+
+/// Deviation D-29, the colour window and invert, applied per channel after
+/// stage 4.
+///
+/// PS3.3 C.11.2 defines no window for a colour image, and D-23 keeps colour
+/// out of stages 1 to 3. The operator chose on 2026-11-07 to follow
+/// cornerstone3D 5.8.2, which applies one LINEAR window to each of R, G and B
+/// (`getVOILut.js:1` to `:7`) and inverts after it as `255 - y`
+/// (`generateColorLUT.js:13` to `:21`).
+///
+/// **No window arithmetic is written here.** cornerstone's function is
+/// PS3.3 C.11.2.1.2's LINEAR with output range `0 ..= 255`, so the window is
+/// [`VoiTransform`] with [`VoiFunction::Linear`] and the invert is
+/// [`PresentationTransform`]'s INVERSE over the same range, each applied to
+/// each channel. HLD section 18's rule that the arithmetic exists once holds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColourWindow(ColourWindowKind);
+
+#[derive(Clone, Debug, PartialEq)]
+enum ColourWindowKind {
+    /// cornerstone3D's skipped table, `renderColorImage.js:30` to `:36`.
+    Identity,
+    /// The LINEAR window, then INVERSE when inverted.
+    Window {
+        voi: VoiTransform,
+        invert: Option<PresentationTransform>,
+    },
+}
+
+impl ColourWindow {
+    /// Width 256 and centre 128 with invert off, every colour image's initial
+    /// window whatever the file says, `createImage.js:321` to `:324`.
+    ///
+    /// That window is the identity on `0 ..= 255` and is skipped.
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self(ColourWindowKind::Identity)
+    }
+
+    /// A LINEAR window over `0 ..= 255`, inverted after it when `invert`.
+    ///
+    /// The window is skipped, exactly as `renderColorImage.js:30` to `:36`
+    /// skips its table, when the width is 255 or 256, the centre is 127 or
+    /// 128 and invert is off. At width 255 and centre 127 the formula is not
+    /// the identity, so applying it there would differ from the reference by
+    /// a byte.
+    ///
+    /// # Errors
+    ///
+    /// [`VoiTransform::new`]'s refusals unchanged, so a width below 1 or a
+    /// non-finite centre is [`PixelError::InvalidWindow`].
+    pub fn new(center: f32, width: f32, invert: bool) -> Result<Self, PixelError> {
+        let voi = VoiTransform::new(
+            None,
+            &[center],
+            &[width],
+            0,
+            VoiFunction::Linear,
+            COLOUR_DISPLAY_MIN,
+            COLOUR_DISPLAY_MAX,
+        )?;
+        let skipped_width = [255.0_f32, 256.0]
+            .iter()
+            .any(|value| value.to_bits() == width.to_bits());
+        let skipped_center = [127.0_f32, 128.0]
+            .iter()
+            .any(|value| value.to_bits() == center.to_bits());
+        if skipped_width && skipped_center && !invert {
+            return Ok(Self::initial());
+        }
+        let invert = if invert {
+            Some(PresentationTransform::inverse_over(
+                COLOUR_DISPLAY_MIN,
+                COLOUR_DISPLAY_MAX,
+            )?)
+        } else {
+            None
+        };
+        Ok(Self(ColourWindowKind::Window { voi, invert }))
+    }
+
+    /// Whether this window is skipped, so a caller can skip the pass too.
+    #[must_use]
+    pub const fn is_identity(&self) -> bool {
+        matches!(self.0, ColourWindowKind::Identity)
+    }
+
+    /// One colour triple, each channel through the window and then the invert.
+    #[must_use]
+    pub fn apply(&self, rgb: Rgb) -> Rgb {
+        match &self.0 {
+            ColourWindowKind::Identity => rgb,
+            ColourWindowKind::Window { voi, invert } => {
+                // Each channel is a display sample, so it enters the LINEAR
+                // window as that stage's input and the INVERSE stage as its
+                // output. The type changes, the arithmetic is the stages'.
+                let channel = |value: f32| {
+                    let windowed = voi.apply(Modality(value));
+                    invert
+                        .as_ref()
+                        .map_or(windowed, |inverse| inverse.apply(windowed))
+                        .0
+                };
+                Rgb {
+                    r: channel(rgb.r),
+                    g: channel(rgb.g),
+                    b: channel(rgb.b),
+                }
+            }
+        }
+    }
+
+    /// Map caller-provided slices without allocating.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::DestinationLength`] before the first write when the two
+    /// slices differ in length.
+    pub fn map_into(&self, source: &[Rgb], destination: &mut [Rgb]) -> Result<(), PixelError> {
+        if source.len() != destination.len() {
+            return Err(PixelError::DestinationLength);
+        }
+        for (input, output) in source.iter().copied().zip(destination.iter_mut()) {
+            *output = self.apply(input);
+        }
+        Ok(())
+    }
+
+    /// [`Self::map_into`] over one buffer, for a caller with a single scratch.
+    pub fn apply_in_place(&self, rgb: &mut [Rgb]) {
+        if self.is_identity() {
+            return;
+        }
+        for value in rgb {
+            *value = self.apply(*value);
+        }
+    }
+}
+
+/// The colour window's output range, cornerstone3D's `0 ..= 255`.
+const COLOUR_DISPLAY_MIN: f32 = 0.0;
+const COLOUR_DISPLAY_MAX: f32 = 255.0;
 
 /// The colour space a frame's samples are actually in, after decoder evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,6 +531,12 @@ pub struct ColorTransform {
     /// Only consulted for a three-sample non-subsampled space.
     planar: PlanarConfiguration,
     palette: Option<PaletteColorLut>,
+    /// F-239's display scale for every stored sample entering a non-palette
+    /// space. [`DisplayScale::IDENTITY`] unless [`Self::with_sample_scale`].
+    sample_scale: DisplayScale,
+    /// F-240's profile transform, attached once per held frame by
+    /// [`Self::with_icc`]. `None` keeps the routes below byte for byte.
+    icc: Option<IccTransform>,
 }
 
 impl ColorTransform {
@@ -203,6 +544,16 @@ impl ColorTransform {
     #[must_use]
     pub fn palette(&self) -> Option<&PaletteColorLut> {
         self.palette.as_ref()
+    }
+
+    /// Heap storage retained by the palette and the attached ICC transform.
+    /// Inline fields belong to the owner, which counts them separately.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        self.palette
+            .as_ref()
+            .map_or(0, PaletteColorLut::heap_bytes)
+            .saturating_add(self.icc.as_ref().map_or(0, IccTransform::heap_bytes))
     }
 
     /// Resolve the colour space and sample layout, each from one rule.
@@ -285,7 +636,66 @@ impl ColorTransform {
             space,
             planar,
             palette,
+            sample_scale: DisplayScale::IDENTITY,
+            icc: None,
         })
+    }
+
+    /// Scale every stored sample by `scale` before stage 4, F-239 item 11.
+    ///
+    /// The shift happens at the one place a sample enters stage 4, so the
+    /// 8-bit YCbCr matrix and its `+ 128` offset of PS3.3 C.7.6.3.1.2 meet an
+    /// 8-bit value. [`Self::resolve`] leaves the identity, which is every
+    /// 8-bit frame.
+    ///
+    /// # Errors
+    ///
+    /// [`PixelError::SampleScaleNotApplicable`] for palette colour, whose
+    /// stored value is an index PS3.3 C.7.6.3.1.5 keys on the raw value.
+    /// Scaling it would read the wrong entry. A palette's entries are scaled
+    /// by [`PaletteColorLut`] instead.
+    pub fn with_sample_scale(mut self, scale: DisplayScale) -> Result<Self, PixelError> {
+        if self.space == ColorSpace::Palette {
+            return Err(PixelError::SampleScaleNotApplicable);
+        }
+        self.sample_scale = scale;
+        Ok(self)
+    }
+
+    /// The display scale applied to every stored sample before stage 4.
+    #[must_use]
+    pub const fn sample_scale(&self) -> DisplayScale {
+        self.sample_scale
+    }
+
+    /// Attach a profile's transform, decided once for the held frame.
+    ///
+    /// F-240. The device depths the transform normalises by come from the
+    /// frame, so `with_sample_scale` goes first for a frame above 8 bits:
+    /// the depth is that scale's own. A palette uses each channel's declared
+    /// entry depth, ruling R1 included, and the YCbCr routes use 8, because
+    /// their matrices consume 8-bit samples and return 8-bit device RGB. The
+    /// TRC tables are built here, once, for a sample or palette space. A YBR
+    /// route keeps the curves, because its device values leave the matrix
+    /// fractional and no table of codes covers them.
+    #[must_use]
+    pub fn with_icc(mut self, icc: IccTransform) -> Self {
+        let depths = match self.space {
+            // A palette transform always has its palette, `resolve` guaranteed
+            // it, so the fallback depth here is unreachable.
+            ColorSpace::Palette => self.palette.as_ref().map_or([8, 8, 8], palette_icc_depths),
+            ColorSpace::Rgb => {
+                let depth = u16::from(self.sample_scale.shift()) + 8;
+                [depth, depth, depth]
+            }
+            ColorSpace::YbrFull | ColorSpace::YbrFull422 | ColorSpace::YbrPartial422 => [8, 8, 8],
+        };
+        let icc = match self.space {
+            ColorSpace::YbrFull | ColorSpace::YbrFull422 | ColorSpace::YbrPartial422 => icc,
+            _ => icc.tabulated(&depths),
+        };
+        self.icc = Some(icc);
+        self
     }
 
     /// Map one frame of stored samples into caller-provided RGB storage.
@@ -356,10 +766,10 @@ impl ColorTransform {
     /// Every `get` below is inside a range `map_into` proved, and each falls
     /// back to zero rather than panicking because an exported path may not
     /// panic (HLD section 23) and a bounds proof carried in a comment is not
-    /// the same as one the compiler keeps. The palette arm's `map_or` default
-    /// is unreachable for the same kind of reason: [`ColorTransform::resolve`]
-    /// refuses a palette space with no palette, so the `None` branch describes
-    /// a state that cannot be constructed.
+    /// the same as one the compiler keeps. The palette arm's `Rgb::BLACK`
+    /// fallback is unreachable for the same kind of reason:
+    /// [`ColorTransform::resolve`] refuses a palette space with no palette,
+    /// so the `None` branch describes a state that cannot be constructed.
     ///
     /// Every arm names its variant. **No wildcard arm**, deliberately: a
     /// wildcard here would absorb a colour space added later and treat it as
@@ -367,14 +777,23 @@ impl ColorTransform {
     /// exactly the defect class this crate exists to prevent. The compiler
     /// refusing to build is the intended way to find out.
     fn pixel(&self, source: &[Stored], index: usize, pixels: usize) -> Rgb {
-        let at = |offset: usize| source.get(offset).copied().unwrap_or(Stored(0.0)).0;
-        // PS3.3 C.7.6.3.1.3. Interleaved is RGBRGB, planar is RRR GGG BBB.
+        // F-239 item 11. A palette transform keeps the identity, so its index
+        // is read raw, as `with_sample_scale` guarantees. With a profile the
+        // scale is bypassed instead: the profile normalises device values by
+        // the encoding range, so the codes must stay whole.
+        let raw_at = |offset: usize| source.get(offset).copied().unwrap_or(Stored(0.0)).0;
+        let at = |offset: usize| self.sample_scale.apply(raw_at(offset));
+        let addresses = |planar: PlanarConfiguration| match planar {
+            PlanarConfiguration::Interleaved => (index * 3, index * 3 + 1, index * 3 + 2),
+            PlanarConfiguration::Planar => (index, index + pixels, index + pixels * 2),
+        };
         let triple = |planar: PlanarConfiguration| {
-            let (first, second, third) = match planar {
-                PlanarConfiguration::Interleaved => (index * 3, index * 3 + 1, index * 3 + 2),
-                PlanarConfiguration::Planar => (index, index + pixels, index + pixels * 2),
-            };
+            let (first, second, third) = addresses(planar);
             (at(first), at(second), at(third))
+        };
+        let raw_triple = |planar: PlanarConfiguration| {
+            let (first, second, third) = addresses(planar);
+            (raw_at(first), raw_at(second), raw_at(third))
         };
         // PS3.3 C.7.6.3.1.2. Each pair of horizontally adjacent pixels is
         // stored Y1 Y2 Cb Cr, and both pixels of the pair share the one chroma
@@ -385,19 +804,70 @@ impl ColorTransform {
             (at(pair * 4 + index % 2), at(pair * 4 + 2), at(pair * 4 + 3))
         };
         match self.space {
-            ColorSpace::Palette => self
-                .palette
-                .as_ref()
-                .map_or(Rgb::BLACK, |palette| palette.lookup(Stored(at(index)))),
-            ColorSpace::Rgb => {
-                let (r, g, b) = triple(self.planar);
-                Rgb { r, g, b }
+            ColorSpace::Palette => {
+                let Some(palette) = self.palette.as_ref() else {
+                    return Rgb::BLACK;
+                };
+                let stored = Stored(at(index));
+                match &self.icc {
+                    // The device values are the raw entries. Each channel's
+                    // declared depth is the encoding range its entries are
+                    // normalised by, so the display scale is the profile's
+                    // replacement and not a step before it.
+                    Some(icc) => {
+                        let entry = palette.red.lookup_index(stored.0);
+                        let device = Rgb {
+                            r: palette.red.values().get(entry).copied().unwrap_or(0.0),
+                            g: palette.green.values().get(entry).copied().unwrap_or(0.0),
+                            b: palette.blue.values().get(entry).copied().unwrap_or(0.0),
+                        };
+                        icc.apply(device, palette_icc_depths(palette))
+                    }
+                    None => palette.lookup(stored),
+                }
             }
-            ColorSpace::YbrFull => ybr_to_rgb(triple(self.planar), &FULL_RANGE),
-            ColorSpace::YbrFull422 => ybr_to_rgb(subsampled_triple(), &FULL_RANGE),
-            ColorSpace::YbrPartial422 => ybr_to_rgb(subsampled_triple(), &PARTIAL_RANGE),
+            ColorSpace::Rgb => match &self.icc {
+                // Codes stay whole for the encoding-range normalisation.
+                Some(icc) => {
+                    let (r, g, b) = raw_triple(self.planar);
+                    let depth = u16::from(self.sample_scale.shift()) + 8;
+                    icc.apply(Rgb { r, g, b }, [depth, depth, depth])
+                }
+                None => {
+                    let (r, g, b) = triple(self.planar);
+                    Rgb { r, g, b }
+                }
+            },
+            ColorSpace::YbrFull => {
+                let rgb = ybr_to_rgb(triple(self.planar), &FULL_RANGE);
+                self.icc
+                    .as_ref()
+                    .map_or(rgb, |icc| icc.apply(rgb, [8, 8, 8]))
+            }
+            ColorSpace::YbrFull422 => {
+                let rgb = ybr_to_rgb(subsampled_triple(), &FULL_RANGE);
+                self.icc
+                    .as_ref()
+                    .map_or(rgb, |icc| icc.apply(rgb, [8, 8, 8]))
+            }
+            ColorSpace::YbrPartial422 => {
+                let rgb = ybr_to_rgb(subsampled_triple(), &PARTIAL_RANGE);
+                self.icc
+                    .as_ref()
+                    .map_or(rgb, |icc| icc.apply(rgb, [8, 8, 8]))
+            }
         }
     }
+}
+
+/// The depth each palette channel's entries are normalised by. Ruling R1's
+/// read-as-8-bit palettes keep the identity scale, so the shift plus 8 is 8
+/// there, and every other palette's shift plus 8 is its declared depth. One
+/// rule covers both, which is how `channel_scale` built the scales.
+fn palette_icc_depths(palette: &PaletteColorLut) -> [u16; 3] {
+    let [red, green, blue] = palette.scales;
+    let depth = |scale: DisplayScale| u16::from(scale.shift()) + 8;
+    [depth(red), depth(green), depth(blue)]
 }
 
 /// An inverse YCbCr matrix with the input offsets its forward form added.
@@ -428,7 +898,7 @@ struct YbrMatrix {
 /// to four decimals. Writing them as zero would be a second rounding decision
 /// this stage is not entitled to make.
 ///
-/// The exact rational inverse, for the reviewer checking these against PS3.3:
+/// Inverse coefficients shown rounded to nine decimal places for review:
 ///
 /// ```text
 /// R = 1.000000000 Y - 0.000036820 Cb' + 1.401987577 Cr'
@@ -436,16 +906,16 @@ struct YbrMatrix {
 /// B = 1.000000000 Y + 1.771978117 Cb' - 0.000134583 Cr'
 /// ```
 ///
-/// Each literal below is the shortest decimal that round-trips to the nearest
-/// `f32` to its exact value above. Carrying the extra digits in the literal
-/// would claim a precision `f32` does not have, which is what
-/// `clippy::excessive_precision` refuses, so the exact values live in this
-/// comment and the representable ones live in the code.
+/// Each literal below rounds the exact rational inverse once to the nearest
+/// `f32`, rather than rounding the decimal summaries above again. In
+/// particular, red-Cb is exactly `-870 / 23628469` and blue-Cr is exactly
+/// `-3180 / 23628469`. Their near-zero magnitude makes the extra digits
+/// significant even though the nine-place summaries look alike.
 const FULL_RANGE: YbrMatrix = YbrMatrix {
     offset: (0.0, 128.0, 128.0),
-    red: (1.0, -0.000_036_82, 1.401_987_6),
+    red: (1.0, -0.000_036_819_99, 1.401_987_6),
     green: (1.0, -0.344_113_3, -0.714_103_8),
-    blue: (1.0, 1.771_978_1, -0.000_134_583),
+    blue: (1.0, 1.771_978_1, -0.000_134_583_42),
 };
 
 /// Inverse of PS3.3 C.7.6.3.1.2's `YBR_PARTIAL_422` equations.
@@ -459,16 +929,19 @@ const FULL_RANGE: YbrMatrix = YbrMatrix {
 /// **The `+ 16` is the detail a full-range implementation omits.** Omitting it
 /// reads studio black as 18.63 of 255 rather than 0, on every channel.
 ///
-/// The exact rational inverse, for the reviewer checking these against PS3.3:
+/// Inverse coefficients shown rounded to nine decimal places for review:
 ///
 /// ```text
 /// R = 1.164415463 Y' - 0.000095036 Cb' + 1.596001878 Cr'
 /// G = 1.164415463 Y' - 0.391724564 Cb' - 0.813013368 Cr'
 /// B = 1.164415463 Y' + 2.017290682 Cb' - 0.000135273 Cr'
 /// ```
+/// As for FULL_RANGE, literals round the exact inverse directly to `f32`.
+/// Red-Cb is exactly `-310000 / 3261922071`. The source equations are in
+/// PS3.3 2017b C.7.6.3.1.2, where YBR_PARTIAL_422 was not yet retired.
 const PARTIAL_RANGE: YbrMatrix = YbrMatrix {
     offset: (16.0, 128.0, 128.0),
-    red: (1.164_415_5, -0.000_095_036, 1.596_001_9),
+    red: (1.164_415_5, -0.000_095_035_99, 1.596_001_9),
     green: (1.164_415_5, -0.391_724_56, -0.813_013_4),
     blue: (1.164_415_5, 2.017_290_6, -0.000_135_273),
 };

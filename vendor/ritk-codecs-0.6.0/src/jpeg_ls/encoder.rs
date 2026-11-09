@@ -107,7 +107,7 @@ pub fn encode_grayscale_jpeg_ls(
     Ok(out)
 }
 
-/// Forward error mapping (ISO 14495-1 §A.5.3): inverse of
+/// Forward error mapping (ISO 14495-1 §A.5.2): inverse of
 /// [`super::context::inverse_map`].
 #[inline(always)]
 fn forward_map(errval: i32) -> u32 {
@@ -179,12 +179,11 @@ fn encode_scan(samples: &[u16], rows: usize, cols: usize, bpp: u32, near: i32) -
                             ctx.run_index += 1;
                         }
                     } else if run_len == remaining {
-                        // Run reaches end-of-line mid-segment: one overshoot
-                        // hit; the decoder clamps `run_len` to `remaining`.
+                        // Run reaches end-of-line mid-segment: one hit that
+                        // only fills the line. ITU-T T.87 A.7.1 (code segment
+                        // A.16) leaves RUNindex unchanged for it (Ocelli
+                        // F-243).
                         bw.write_bit(1);
-                        if ctx.run_index < 31 {
-                            ctx.run_index += 1;
-                        }
                         break;
                     } else {
                         // Miss: remainder in J[idx] bits, then the interrupt
@@ -242,7 +241,7 @@ fn encode_scan(samples: &[u16], rows: usize, cols: usize, bpp: u32, near: i32) -
                 continue;
             }
 
-            // ── Regular mode (ISO 14495-1 §A.4–A.5) ──────────────────────────
+            // ── Regular mode (ISO 14495-1 §A.3 to §A.6) ──────────────────────
             let (nq1, nq2, nq3, sign) = sign_normalize(q1, q2, q3);
             let qi = context_index(nq1, nq2, nq3);
             let ctx_reg = &mut ctx.regular[qi];

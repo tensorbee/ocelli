@@ -229,6 +229,20 @@ const config = tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // F-227 acceptance helper runs as a classic script in the existing page.
+    // These are its actual browser and page lexical inputs, not new APIs.
+    files: ["tools/bench/export_active_window_check.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        window: "readonly", document: "readonly", URL: "readonly", Blob: "readonly",
+        setTimeout: "readonly", cacheGeneration: "readonly", activeViewport: "readonly",
+        seriesOf: "readonly", seriesWindowJobs: "readonly", currentImage: "readonly",
+        seriesWindowRefused: "readonly", seriesWindows: "readonly", seriesHeader: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
@@ -349,6 +363,32 @@ const config = tseslint.config(
     },
   },
   {
+    // F-228's CSP probes run under node and the callbacks they
+    // pass to Playwright run in the acceptance Chromium, so both sets of
+    // globals are named. It is not a wasm memory view and it does not touch
+    // the allowance list.
+    files: ["examples/viewer-react/csp-probe.mjs", "examples/folder-viewer/csp-probe.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+        document: "readonly",
+        window: "readonly",
+        fetch: "readonly",
+        DOMParser: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        currentGeneration: "readonly",
+        activeViewport: "readonly",
+        currentImage: "readonly",
+        imageToClient: "readonly",
+        dragWindow: "readonly",
+        notes: "readonly",
+        showIndex: "readonly",
+      },
+    },
+  },
+  {
     // The repository's own node scripts. Plain ESM JavaScript, run by
     // `bin/ocelli.sh`, never bundled and never shipped. The globals are listed
     // rather than pulled from a `globals` package, for the reason the oracle
@@ -431,6 +471,19 @@ const config = tseslint.config(
     },
   },
   {
+    // F-223 is a Node controller with callbacks serialized into the two real
+    // browser pages. These names describe those execution contexts only.
+    // No rule or wasm-memory allowance is changed.
+    files: ["tools/bench/src/comparison_run.mjs", "tools/bench/tests/comparison_page_test.mjs"],
+    languageOptions: { globals: {
+      window: "readonly", document: "readonly", fetch: "readonly",
+      CanvasRenderingContext2D: "readonly", MutationObserver: "readonly",
+      KeyboardEvent: "readonly", requestAnimationFrame: "readonly", btoa: "readonly",
+      activeViewport: "readonly", chooseWindow: "readonly", currentImage: "readonly",
+      CACHE_BYTE_BUDGET: "readonly",
+    } },
+  },
+  {
     // F-216's viewer workload driver. The file runs under node and takes the
     // node globals from the bench block above. The callbacks it hands to
     // Playwright run in Chromium against the folder viewer, so the browser
@@ -495,6 +548,32 @@ const config = tseslint.config(
         cache: "readonly",
         Event: "readonly",
         window: "readonly",
+        // F-215's marks.mjs reads the page's marks and key images, and
+        // fetches the synthetic study's slices under node.
+        notes: "readonly",
+        keyImages: "readonly",
+        fetch: "readonly",
+        // F-225's conformance.mjs times the page's paints and its report
+        // requests from an init script, and reads the page's checks state
+        // and its two busy counts when each request is sent. It raises and
+        // lowers each busy count once to observe the wait.
+        performance: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        checks: "readonly",
+        filePostsOpen: "writable",
+        thumbRuns: "writable",
+        // F-239's colour probe reads the page state and response headers.
+        Headers: "readonly",
+        location: "readonly",
+        currentGeneration: "readonly",
+        currentImage: "readonly",
+        viewports: "readonly",
+        chooseWindow: "readonly",
+        showIndex: "readonly",
+        clearTimeout: "readonly",
+        seriesOf: "readonly",
+        cacheKey: "readonly",
+        PLAIN_VIEW: "readonly",
       },
     },
   },

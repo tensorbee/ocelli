@@ -3096,7 +3096,7 @@
       ],
       "notes": "Found while designing F-220. Answered by the operator on 2026-11-06: change the release rule, the module ships outside the @ocelli/core tarball and a story in S47 decides where.",
       "milestone": "M20",
-      "sprint": "S47"
+      "sprint": "S46"
     },
     {
       "fid": "F-238",
@@ -3117,7 +3117,7 @@
       ],
       "notes": "Found by F-220's first review reading the objc2 LICENSE.md. Answered by the operator on 2026-11-06: a native build without wgpu's Metal backend, a story in S47.",
       "milestone": "M20",
-      "sprint": "S47"
+      "sprint": "S46"
     },
     {
       "fid": "F-239",
@@ -5902,6 +5902,141 @@
         "F-017"
       ],
       "notes": "New bounded waveform parser and same-viewer signal display, not a KOS reference or a library enum. Initial supported signed 16 ECG scope and calibration require detailed DICOM design before implementation. Lead scheduled S48 at a provisional 6 engineer-weeks on 2026-11-08 under the operator single-viewer parity instruction. No runtime parity or clinical interpretation claim."
+    },
+    {
+      "fid": "F-266",
+      "eid": "E38.61",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.27",
+        "E38.34"
+      ],
+      "story": "Built example viewer loads its core from its own output: a vite build with the wasm package present gives a dist whose worker reaches the bundled wasm chunk on any static host, with no absolute build-machine path left in any emitted file, proven by a headless Chromium run of the built dist on a plain static server that reads core ready, and the dev server's fs.allow decoded so a checkout path with a space, unicode or a percent sign serves the package",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "TS",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-217",
+        "F-228"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 1, with the scope kept. Read-only inspection of this tree at 31323a79 still finds examples/viewer-react/vite.config.ts building the wasm URL as /@fs plus the decoded pkg path, defining __OCELLI_WASM_URL__ from it and allowing the percent-encoded repoRoot.pathname, and the worker probing that URL before importing. The recovered drafting evidence records an /@fs probe answering 404 on a plain static server while the bundled chunk answered 200, and vite preview answering 200 text/html for the missing path. The real package was never exercised in a browser in that pass, so the browser run is an acceptance row and not a recorded observation. F-228's csp-probe.mjs serves the built dist by mapping /@fs paths to repository files, so it does not catch this. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Lands in S47 after F-237 packaging and beside F-245's one showcase distribution contract, because the built example viewer is the built front door and its dist must load its own core on any static host. No new viewer is created. Both dependencies must be DONE before implementation. If F-228 carries out of S46, this story follows its completion and does not concurrently edit its CSP probe."
+    },
+    {
+      "fid": "F-267",
+      "eid": "E38.62",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.22",
+        "E3.4"
+      ],
+      "story": "Folder viewer corners on enhanced multiframe CT and MR: slice thickness, kVp, mAs, TR and TE read from the shared and per-frame functional groups for the shown frame, FD values formatted by one rule with a fixture citing its PS3.3 macro, the top-level attribute first where both exist, and a field that is absent from both left empty rather than guessed",
+      "sprint": "S47",
+      "weeks": 2,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-212",
+        "F-019"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 3, the follow-up F-212's design question 4 asks the sprint lead to file. The operator answered on 2026-11-05 that enhanced multiframe acquisition fields stay empty in F-212 and a follow-up story is filed at /complete-feature, and AS_BUILT's F-212 notes record that it was not filed by that commit. Read-only inspection of this tree at 31323a79 confirms push_corner_fields in examples/folder-viewer/src/preview.rs reads slice location, slice thickness, kVp, repetition time and echo time through corner_decimal and exposure through corner_text on the top-level object only, so enhanced CT and MR corners are empty today. The exact functional group sequences and attributes are named by the story's design against PS3.3, not by this filing. The corner provider is shared and the fields surface through the existing viewer front door under the same contract F-245 and F-202 consumers use, never a new viewer page, and a Rust-side helper alone is not end-user acceptance. Estimate 2w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. S47 holds both dependencies done, beside the metadata work."
+    },
+    {
+      "fid": "F-268",
+      "eid": "E19.8",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "depends_eids": [],
+      "story": "Rustdoc links resolve: no public item's documentation links to a private item and no intra-doc link is unresolved in any workspace crate, the private and unresolved positions a fresh workspace doc run at implementation enumerates fixed in place, and a workspace cargo doc check with those two rustdoc lints denied proposed through the normal workflow",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Build",
+      "milestone": "M20",
+      "depends_fids": [],
+      "notes": "Filed from the recovered S46 close draft, original item 4, with its inherited count inconsistency resolved in the row. The drafting prose claimed eleven private errors plus one unresolved warning while its own location table enumerates ten private positions plus that warning, so the row carries no count and implementation runs a fresh workspace doc check with a scratch target directory. Raised at S46 close as four private intra-doc link errors in ocelli-render, widened by a workspace run in the same pass. No gate in bin/ocelli.sh, .github/workflows or scripts runs cargo doc, read at 31323a79, which is why none was caught. F-229 working pass 4 N2 found the same gap for --document-private-items in ocelli-codec. Both broken_intra_doc_links and private_intra_doc_links are proposed denied through explicit RUSTDOCFLAGS. Whether the check sits on the floor or the sprint profile remains a design decision, and floor integration is a PROPOSED choice needing normal workflow approval, never an existing gate or an authorized policy change. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Early S47 tooling so S48 to S50 additions inherit the approved documentation check."
+    },
+    {
+      "fid": "F-269",
+      "eid": "E4.14",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "depends_eids": [
+        "E4.13"
+      ],
+      "story": "Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87: every comment in vendor/ritk-codecs-0.6.0/src/jpeg_ls that states a fact about the code or the standard is checked against the code below it and the clause it names, each false one corrected or removed with the vendored pins refreshed, the four F-243 pass 8 listed first, and the cap on k recorded as resting on the in_coded_range refusal",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-243"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 5, the sprint-close audit story F-243's lead ruling names. F-243 review pass 8 lists four false or doubtful upstream comments under its audit backlog heading, on lines F-243 did not write, and records that the proof that the k cap never binds depends on F-243's in_coded_range refusal, a dependence written nowhere in the code. Comment and pin changes only, no decode change. The audit uses T.87 only and reads no CharLS source, as F-243's own reviews did not. Read-only inspection of this tree at 31323a79 finds the four comments present at vendor/ritk-codecs-0.6.0/src/jpeg_ls/context/mod.rs:1, :15 and :296 and scan.rs:164 to :166, the same positions as the F-243 tip pass 8 cites. Lands after F-243 because it edits the files F-243 patches, and its pin refresh coordinates with the reviewed F-239 vendor union so the vendored pins move once, with no new formal dependency declared. If F-243 carries out of S46, this story follows it. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-270",
+      "eid": "E4.15",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "depends_eids": [
+        "E4.4",
+        "E38.37"
+      ],
+      "story": "JPEG 2000 irreversible decode within a measured bound of OpenJPEG: the vendored ritk-codecs dequantisation and 9/7 reconstruction compared per channel against OpenJPEG on rate-truncated 8, 12 and 16-bit monochrome and colour .91 codestreams, the cause of the difference of thousands of codes at 16 bits found and fixed in the vendored decoder against ISO/IEC 15444-1 Annex E and F, and the remaining difference recorded as a D14 divergence",
+      "sprint": "S48",
+      "weeks": 3,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-026",
+        "F-239"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 6. Carried to the lead by F-239 codec review pass 3 as an out-of-range concern worth a backlog story. The MCT 0 controls show the inverse ICT is not the cause, so it is ritk's dequantisation or 9/7 reconstruction, which predates F-239. F-239 is what exposes it to colour .91 data, and monochrome .91 already takes the same path. OpenJPEG is compared by decoding through a host-side tool only, and its source is not read. Pass 3's limits carry into the story: a monochrome 16-bit .91 control was not run because the adapter refused that pass's opj_compress PGM output with UnsupportedPixelFormat, and ISO/IEC 15444-1 Annex G and OpenJPEG's mct.c were not read. Read-only inspection of this tree at 31323a79 finds step_size at vendor/ritk-codecs-0.6.0/src/jpeg_2000/quantization.rs:154, dequantize at :198 and inverse_dwt_9_7 at wavelet_9_7.rs:63, the starting points and not a finding. Retained in S48. Coordinates with F-202's decode consumer and with later S49 and S50 display stories if those workflows accept .91 files, without inventing a universal hard dependency where explicit format refusal remains supported. Estimate 3w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-271",
+      "eid": "E38.63",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.38"
+      ],
+      "story": "ICC PCS to sRGB inverse measured both ways: a D50 to linear sRGB matrix derived from the IEC 61966-2-1 primaries with Bradford adaptation compared with the printed-note inverse F-240 ships, both against Little CMS's transicc on every AC12 row, and the derived matrix adopted only if it is closer to Little CMS on every row, otherwise the measurement recorded and the printed matrix kept",
+      "sprint": "S48",
+      "weeks": 2,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-240"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 7, from F-240's lead rulings after pass 3: the matrix choice stays for F-240, and a backlog story is filed at sprint close to measure an inverse derived from the sRGB primaries with Bradford adaptation against Little CMS across every AC12 row and to adopt it only if it is closer on every row. The adoption rule is all or nothing, so a derived matrix closer on most rows and further on one is not adopted. Little CMS is the host-side transicc tool as AC12 uses it, and its source is not read. Read-only inspection of this tree at 31323a79 finds PCS_TO_SRGB at crates/ocelli-pixel/src/icc.rs:397. The experiment is not performed at filing. Retained in S48. Any adopted matrix propagates through ocelli-pixel stage 4 into the single viewer's colour contract before later fusion and export stories, and if the measurement keeps the printed matrix no dependency is claimed. Estimate 2w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-272",
+      "eid": "E2.8",
+      "phase": "P1",
+      "epic": "E2 Differential oracle & corpus",
+      "epic_key": "E2",
+      "depends_eids": [
+        "Y1.16"
+      ],
+      "story": "Oracle tests write nothing into the checkout: every produce.rs test that runs the producer when the reference run or the corpus is absent points its reference subset, candidate run and dispositions file at a per-process temporary directory, so cargo test never creates or overwrites tools/oracle/compare-out, with a test that fails if a test run changes that directory",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Test",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-X021"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 8. Found by S46 oracle test fix review pass 1 as N1 and left optional for the lead. Read-only inspection of this tree at 31323a79 still finds applicable_monochrome_rows_reach_the_comparator, uniform_slice_edge_matches_the_reference_within_one_lsb and rendered_pair passing checkout paths to the producer on the absent branch, whose reference-run-absent and corpus-absent returns both write dispositions into tools/oracle/compare-out, and a_missing_reference_run_is_unrun at produce.rs:2286 is the temp_dir pattern to copy. The path is gitignored, so git is unaffected, but a real compare-out/dispositions.json in a tree with no reference is overwritten with a reference-run-absent record, which the review observed in the ocelli-wt-f-223 worktree. This filing ran no test and touched no output directory. Early S47 test isolation, coordinated with F-244 and F-239 oracle evidence work so a test run does not replace a real comparison artifact. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
     }
   ]
 }

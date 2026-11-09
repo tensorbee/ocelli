@@ -1,0 +1,121 @@
+{
+  "$about": [
+    "The comparison mode's definitions, fixed now so the story that lands the run cannot move an endpoint. F-223, E38.32. The mode is --compare-cornerstone in tools/bench/run.mjs, and this file is what it reads: the two sides, the five workloads and the seven metrics with their units, trial counts and cold and warm availability.",
+    "The comparison is deliberately NOT a row in subjects.json. A comparison carries two sides, N trials each, a pixel precondition and inputs that exist on one machine, so a registry row would make the default bench run fail on every host without the pseudo-PHI folder or the oracle install, and it would write a baseline for an external library's figures. The mode writes no baseline and refuses --compare and --accept.",
+    "Every metric names the viewer.* subject in subjects.json it mirrors, so the two definitions cannot drift apart unseen. scripts/bench_check.py asserts that naming once its checker lands, and tools/bench/src/comparison.mjs's loadComparison refuses a metric whose unit disagrees with its own table.",
+    "The session is not a workload and selects nothing. It is the memory session the last two metrics run over: open pseudo full, first image, scroll pseudo CT, then 9 window changes on pseudo CT and on pseudo DX, in one page, with a fresh browser and server per session.",
+    "No figure is recorded here and none ever will be. An identical repeated run produces a new record, because each run is a new observation."
+  ],
+  "sides": ["ocelli", "cornerstone"],
+  "workloads": [
+    {
+      "id": "synthetic-ct",
+      "rule": "the synthetic CT series ensureWorkloads generated: 512 by 512 16-bit CT files with stored value 50 everywhere"
+    },
+    {
+      "id": "synthetic-dx",
+      "rule": "the synthetic DX object ensureWorkloads generated: 3000 by 2900 with stored value 50 everywhere"
+    },
+    {
+      "id": "pseudo-full",
+      "rule": "every file under the pseudo-PHI root"
+    },
+    {
+      "id": "pseudo-ct",
+      "rule": "the CT series with the most images among series whose every image is MONOCHROME2, 512 by 512, carrying Window Center and Window Width, ties broken by the smaller digest of the series' sorted content digests"
+    },
+    {
+      "id": "pseudo-dx",
+      "rule": "the DX object with the most pixels, ties broken by the smaller digest of the object's sorted content digests"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "page_ready",
+      "mirrors": null,
+      "unit": "ms",
+      "n": 9,
+      "workloads": [],
+      "cold": { "state": "yes" },
+      "warm": {
+        "state": "unavailable",
+        "reason": "a warm page load measures the browser cache, not either library"
+      },
+      "start": "Ocelli: spawn of the release binary. cornerstone3D: page.goto of the built page",
+      "end": "First rAF after the page reports ready: Ocelli load with #folder enabled, cornerstone3D __bench.ready() resolved after coreInit, loader init and enableElement"
+    },
+    {
+      "id": "open",
+      "mirrors": "viewer.open",
+      "unit": "ms",
+      "n": 9,
+      "workloads": ["synthetic-ct", "pseudo-full"],
+      "cold": { "state": "yes" },
+      "warm": { "state": "yes" },
+      "start": "setInputFiles on the side's folder input",
+      "end": "First rAF after the side's series sentence is written, which needs every file's header parsed and grouped"
+    },
+    {
+      "id": "first_image",
+      "mirrors": "viewer.first_image",
+      "unit": "ms",
+      "n": 9,
+      "workloads": ["synthetic-ct", "synthetic-dx", "pseudo-ct", "pseudo-dx"],
+      "cold": { "state": "yes" },
+      "warm": { "state": "yes" },
+      "start": "The series sentence",
+      "end": "First rAF after the first commit of the selected series' first image"
+    },
+    {
+      "id": "scroll",
+      "mirrors": "viewer.scroll_rate",
+      "unit": "frames_per_second",
+      "n": 5,
+      "workloads": ["synthetic-ct", "pseudo-ct"],
+      "cold": {
+        "state": "unavailable",
+        "reason": "scroll is measured after the first image"
+      },
+      "warm": { "state": "yes" },
+      "start": "First ArrowDown, one per rAF",
+      "end": "3 s or 150 keys, whichever is first, then 300 ms settle. Reports presented frames per second, keys delivered and blank samples. Fewer than 120 keys is invalid"
+    },
+    {
+      "id": "window_change",
+      "mirrors": "viewer.window_step",
+      "unit": "ms",
+      "n": 9,
+      "workloads": ["synthetic-ct", "synthetic-dx", "pseudo-ct", "pseudo-dx"],
+      "cold": {
+        "state": "unavailable",
+        "reason": "a window change needs a drawn image"
+      },
+      "warm": { "state": "yes" },
+      "start": "Harness performance.now() before the side's window entry point: Ocelli overrideWindow then showIndex(viewIndex), cornerstone3D setProperties({ voiRange, VOILUTFunction }) then render()",
+      "end": "First rAF after the commit",
+      "detail": "9 steps, centres 40 to 48, width 400, LINEAR"
+    },
+    {
+      "id": "peak_memory",
+      "mirrors": "viewer.resident_memory",
+      "unit": "bytes",
+      "n": 3,
+      "workloads": ["session"],
+      "cold": { "state": "yes" },
+      "warm": { "state": "n/a" },
+      "start": "Session start, before the page loads",
+      "end": "Session end: open pseudo full, first image, scroll pseudo CT, 9 window changes on pseudo CT and on pseudo DX, in one page"
+    },
+    {
+      "id": "session_cpu",
+      "mirrors": null,
+      "unit": "seconds",
+      "n": 3,
+      "workloads": ["session"],
+      "cold": { "state": "yes" },
+      "warm": { "state": "n/a" },
+      "start": "Same session",
+      "end": "Same session"
+    }
+  ]
+}

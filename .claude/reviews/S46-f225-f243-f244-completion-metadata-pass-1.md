@@ -1,0 +1,17 @@
+# F-225, F-243 and F-244 completion metadata review
+
+**Authors:** local GLM drafted the separate metadata proposals. Codex participants glm_codec_merge and f244_review corrected and composed the private five-path union. Root's later contributor-header, LLD-field and fixture-citation edits have their own non-author peer review.
+**Reviewer:** Codex root, independent of the original entries and combined proposal.
+**Result:** 0 remaining defects, 0 smells in the reviewed metadata, conditional on the actual final canonical verification and commit.
+
+The reviewed private union is `a160f38835d2f2ca3b44a923ed32f7a4844bac16ff5fa2961784a35c6c1dca70`. It appends three separate AS_BUILT entries and tracker rows, changes only those three backlog and current-sprint status cells, and adds three nonduplicate changelog notes under Unreleased. Actual effort is not measured. Every prior AS_BUILT byte is preserved. Dates, estimates, dependencies and other feature rows are unchanged.
+
+The source-readiness tree is `752a144459cc7d2cb950fb4de00e5313a9a0a805`. Its actual feature profile ran in the prepared checkout, with 29 floor gates and corpus passing. The complete canonical three-way source union was proved identical before metadata edits. That earlier receipt is readiness evidence, not a receipt for these changed records or a claim of canonical execution. No ledger was copied. The final canonical profile must run after staging all metadata, headers, handoff consumption and review records.
+
+F-243 retains the operator-approved AC13 host and instrument gap. The registered comparison is incomparable, with matching idle-host and instrument evidence still owed. Baseline and tolerances are unchanged. Three banded corpus rows mean one native reference and two compressed rows. The root checked the corrected JPEG-LS citation against DICOM PS3.5 A.4.3, separately from JPEG 2000 A.4.4. The initial citation error and its correction remain in the private proposal history.
+
+F-225 distinguishes scoped conformance findings from full certification, native route timing from browser latency and unchanged image budgets, and fresh AC35 counterfactual controls from unrecovered historical chronology. Its five empty-checker and four fault controls fail at the named assertions, with the restored 42-test suite green. F-244 distinguishes parser/index work from new pixel arithmetic, software reference observations from product tiers, unsupported-source reference rows from missing candidate coverage, and isolated feature wasm size from the later union. Its existing preview fixture separately cites RLE and the full-range window formula.
+
+The root checked the required LLD maps, current contributing-ID headers, user-facing document records, distinct completion rows, unchanged historical prefixes and the exact acceptance inventories. Missing contributor headers were repaired and independently reviewed before final staging. The final completion entries refer to their completion commit's hook-generated exact-tree receipt, avoiding a claim that the old 8f checkpoint verified new metadata.
+
+No successful Linux CI, scored colour quality, recovered test-first chronology, upstream publication, whole-sprint readiness or closure is supplied by this metadata. Other stories remain open. Commit only after the actual final canonical feature profile and corpus pass. The source integration and the three completion records may share that same final staged-tree receipt without relabelling earlier commands or skipping an acceptance requirement.

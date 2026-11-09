@@ -4,8 +4,8 @@
 **Normative source**: `docs/hld/13-core-types.md` sections 16 and 16.1,
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
-**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216, F-229
-**Last updated:** 2026-11-07
+**F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216, F-229, F-239, F-240, F-227
+**Last updated:** 2026-11-09
 
 Living current-state document. It describes what the code does today.
 
@@ -40,8 +40,9 @@ on the chain above, and deviation **D-23** records why: no arm of it takes a
 `Display` input. Palette colour maps the **stored** value through the palette
 descriptors, per C.7.6.3.1.5's "the first stored pixel value mapped", and the
 `RGB` and every `YBR_*` route map decoded samples that never entered the chain
-at all. ICC, which HLD section 18's table names beside palette, is not
-implemented.
+at all. ICC, which HLD section 18's table names beside palette, is implemented
+for the matrix and tone-curve subset by F-240 and described under The ICC
+subset below. Every other profile stays under deviation **D-30** until F-145.
 
 ```text
 decoded container bytes -> Stored -> Modality -> Display -> Display    stages 1 to 3
@@ -206,6 +207,76 @@ Window presets are not a stage and they do not live in this crate.
 `Presentation::apply_preset` and `Presentation::set_window` in
 `ocelli-viewport` call `VoiTransform::new` and keep the output range the chain
 already has. They add no formula.
+
+### The automatic window
+
+DICOM says nothing about a window for a frame that stores none, and
+`open_frame` still invents nothing: `WindowInput::Absent` means the caller
+chooses. `crates/ocelli-pixel/src/auto_window.rs` is the one implementation of
+that choice, F-227, from the operator's answers of 2026-11-05.
+
+- `series_sample(m)` picks `k = min(m, 16)` images at `i * (m - 1) / (k - 1)`
+  in integer division, first and last included. `m = 0` is refused.
+- `AutoWindowPool::new(k)` declares the frame count, and each frame's sample
+  budget is `2^20 / k`, so the pool never holds more than 2^20 values. A frame
+  of `n` samples is read at every `n.div_ceil(budget)`-th sample from index 0.
+  The stride depends on the size and the count only, never on content.
+- `add_frame` applies that frame's own `ModalityTransform`, PS3.3 C.11.1,
+  because a PT series carries a Rescale Slope per image. Stored zero and that
+  frame's padding range, PS3.3 C.7.5.1.1.2, are left out as stored-space
+  predicates before the rescale, so a CT with intercept -1024 leaves out air
+  outside the field of view and keeps water. A refused frame leaves the pool
+  as it was, so a caller skips it and continues.
+- `finish` takes the nearest ranks `ceil(n / 100)` and `ceil(99 n / 100)` of
+  the pooled values, with no interpolation, and returns a `LINEAR_EXACT`
+  window, PS3.3 C.11.2.1.3.2. The window is accepted only when the transform
+  that draws it maps the 1st percentile to the output minimum and the 99th to
+  the maximum, with each moved 16 f32 units toward the other. A narrowing
+  search finds that width and refuses with `UnverifiableWindow` when none
+  passes.
+- `AutoWindowBasis` names the three outcomes. `Percentile` is the ordinary
+  case. `Constant` takes percentiles fewer than three f32 units apart, draws
+  them within half a grey of the middle, grey 127 or 128, and refuses beyond
+  the measured magnitudes recorded on `finish`. `Background` is a pool of
+  left-out values only and draws its largest at the output minimum, which
+  is black on MONOCHROME2 and white on MONOCHROME1, whose presentation stage
+  inverts, PS3.3 C.7.6.3.1.2.
+- `auto_window` is a pool of one, the per-image window, the same code path.
+
+The folder viewer is the one caller today. It sends the series' images in
+the page's order to `POST /series-window`, pools the sampled ones that store no
+window and no VOI LUT Sequence, skips the rest without replacing them, and
+returns the centre and width as `f32` `Display` text that the page sends back
+unchanged. Each line carries the id the page already holds, or `-` for a file
+the page cannot offer, such as one F-224 marked changed, which is skipped when
+sampled. Every sampled id is checked before any is decoded, and a 410 names
+every one that is gone, so after a restart or F-216's eviction the page posts
+exactly those files again and asks once more, for as long as each round names
+an id it has not posted. Each sampled image is then read where the cache holds
+it, or decoded from its held bytes with a buffer that never evicts, and
+unpacked and folded into the pool in one decode job, under its permit. The
+frame is unpacked into the permit's own scratch, which the permit keeps for
+its next job inside F-216's permit term, as `GET /held` `workspace` reports.
+The decoded samples exist only inside the job, which parks them on the free
+list, inside `OCELLI_CACHE_MIB`, when cached and free bytes fit the budget,
+and frees them otherwise. The decoded frame is not stored, so a sampled image
+the page then shows is decoded again.
+
+The pool moves into each job and back. It reserves at most 2^20 `f32` values,
+4 MiB, when it is built, and keeps at most `2^20 / K` of them from each of
+`K` sampled images, whatever the frame size. Measured on two 20-file series
+of 1024 by 1024, one image kept between 209,712 and 209,716 bytes, under the
+262,144 the bound gives at `K = 16`. At most `P` rounds run at once, `P`
+F-216's permit count, and a round beyond them waits rather than being
+refused. The pools are therefore F-216's named term `P * 4 MiB`, outside
+`OCELLI_CACHE_MIB`. Four rounds asked for at once over four such series held
+8,388,608 bytes of pool at once, which is `P * 4 MiB` at `P = 2`, and left
+the cache's `used`, `files` and `frames` unchanged and `inflight` 0. When the
+sampled files cannot all be held at once the rounds stop and each image keeps
+its own window. An image with any window of its own always draws it. The
+oracle injects its own declared default window through `render-params.json`
+and the reference sidecar, so this policy changes no LUT chain verdict, and
+cornerstone3D 5.8.2's per-image minimum and maximum is not a parity target.
 
 ## Presentation stage
 
@@ -393,12 +464,36 @@ stage. `PixelRepresentation` already has this shape for the same reason.
 | `MONOCHROME1`, `MONOCHROME2` | refused, `ColorTransformNotApplicable` |
 
 PS3.3 permits `YBR_ICT` and `YBR_RCT` only with JPEG 2000, where the
-codestream's own multiple component transform carries them.
-`crates/ocelli-codec/src/jpeg2000.rs` refuses `mct != 0`, so neither can reach
-this stage still in that space. RCT is an integer lifting transform and not a
-matrix at all, so applying the full-range matrix to it would produce a plausible
-image in the wrong colours. Under a decoder reporting `Rgb` the question does
-not arise, because the resolution has already replaced the space.
+codestream's own multiple component transform carries them. Both JPEG 2000
+adapters invert that transform inside the decoder and report `Rgb` for the
+two codes, and refuse a codestream whose own transform contradicts the
+descriptor, so neither reaches this stage still in that space. RCT is an
+integer lifting transform and not a matrix at all, so applying the full-range
+matrix to it would produce a plausible image in the wrong colours. Under a
+decoder reporting `Rgb` the question does not arise, because the resolution
+has already replaced the space.
+
+**`XYB` is a recognised colour space that this crate owns no transform for.**
+PS3.3 C.7.6.3.1.2 defines it as the LMS-based model JPEG XL uses and gives no
+matrix to or from it, so `ColorTransform::resolve` refuses it with
+`CodecOwnedColorTransform` exactly as it refuses `YBR_ICT` and `YBR_RCT`.
+F-229 added the variant, which expects three samples like the other colour
+spaces. The one legitimate route is the codec's own conversion, reported
+through a decoder that answers `Rgb`: the JPEG XL adapter does that for every
+three-sample frame, because `jxl-oxide` renders XYB into the declared
+encoding before the adapter sees a grid. A decoder that answered `Preserved`
+for an `XYB` frame would be refused here rather than passed through as RGB.
+
+**`XYB` is a recognised colour space that this crate owns no transform for.**
+PS3.3 C.7.6.3.1.2 defines it as the LMS-based model JPEG XL uses and gives no
+matrix to or from it, so `ColorTransform::resolve` refuses it with
+`CodecOwnedColorTransform` exactly as it refuses `YBR_ICT` and `YBR_RCT`.
+F-229 added the variant, which expects three samples like the other colour
+spaces. The one legitimate route is the codec's own conversion, reported
+through a decoder that answers `Rgb`: the JPEG XL adapter does that for every
+three-sample frame, because `jxl-oxide` renders XYB into the declared
+encoding before the adapter sees a grid. A decoder that answered `Preserved`
+for an `XYB` frame would be refused here rather than passed through as RGB.
 
 **`XYB` is a recognised colour space that this crate owns no transform for.**
 PS3.3 C.7.6.3.1.2 defines it as the LMS-based model JPEG XL uses and gives no
@@ -462,6 +557,223 @@ arithmetic changes those two stages' behaviour at a fractional input. That is a
 change to validated pixel arithmetic and needs its own story and its own
 fixture.
 
+### Display scaling above 8 bits, F-239
+
+`DisplayScale` is the one rule that brings a colour sample or a palette entry
+above 8 bits to the display's 8. A value of `n` bits is shifted right by
+`n - 8` for `9 <= n <= 16` and taken as it is at 8. Every other depth is
+`PixelError::UnsupportedColourDepth`, by name. The shift truncates, as
+cornerstone3D 5.8.2's `>> 8` does, and is `floor(value / 2^(n - 8))` in `f32`,
+exact for every integer the rule accepts. The identity returns the value
+untouched, so an 8-bit frame is bit-identical to one that was never scaled.
+
+For a sample the depth comes from the header, the operator's answer to F-239's
+question 8. It is Bits Stored, PS3.3 C.7.6.3.1's range of each sample.
+`ColorTransform::with_sample_scale` applies it at the one place a sample
+enters stage 4, before the YCbCr matrix, so the 8-bit matrix and its `+ 128`
+offset meet an 8-bit value. It refuses a palette transform with
+`SampleScaleNotApplicable`, because a palette's stored value is an index
+C.7.6.3.1.5 keys on the raw value. `resolve` leaves the identity.
+
+For a palette, the one rule below decides the scale. `PaletteColorLut::new`
+takes each channel's declared depth from its `LutDescriptor`, and
+`with_entry_bits` takes a declared depth apart from the container, so a 12-bit
+descriptor arrives as a 16-bit container. It refuses a depth above the
+container with `InvalidLutBits` and an entry above `2^n - 1` with
+`LutValueOutOfRange`. `channel_entries` yields the scaled entries, which are
+the values the stage emits. cornerstone instead shifts all three channels by 8
+only when a red entry exceeds 255, which the fixtures in
+`crates/ocelli-pixel/tests/palette.rs` reject.
+
+**The one palette rule**, the operator's ruling R1 after F-239's library
+review pass 1, decided once for the whole palette by the lead's ruling: a
+palette is read as 8-bit only when at least one channel is declared above 8
+bits and every entry of every such channel fits in 8 bits, otherwise each
+channel is shifted by its own declared depth minus 8. `with_entry_bits` takes
+the identity for all three channels in the first case, as cornerstone reads
+such a palette, and `PaletteColorLut::entries_read_as_8_bit` reports it so the
+page can state it. Strictly by C.7.6.3.1.5 such a palette would shift to
+black. Decided per channel, a near-zero channel of a conforming 16-bit palette
+would be read as 8-bit, about 256 times too bright beside its shifted
+neighbours. A channel declared 8-bit takes no part in the decision.
+
+Before F-239 a 16-bit entry left stage 4 as its raw value, so tier C and the
+GPU bake refused any entry above 255 and drew one at or below it as itself.
+Both now read the scaled value, so a palette with an entry above 255 in a
+wide channel draws where it was refused, and a palette whose wide channels
+hold only entries of at most 255 draws as before. The corpus rows
+`synthetic/sc_palette_color.dcm` and `synthetic/sc_palette_color_16.dcm` both
+declare 16 bits and hold entries of at most 255. Measured on 2026-11-07 with
+`ocelli-compare produce`, base 699a5148 and the tip each built in its own
+source tree and target directory: 102 views, 0 bytes differ, the two palette
+views holding 634,212 and 649,735 non-zero RGB bytes on both sides.
+
+### The ICC subset, F-240
+
+`crates/ocelli-pixel/src/icc.rs` parses the matrix and tone-curve subset of
+ICC.1:2022 (profile version 4.4.0.0, the color.org PDF read before any
+fixture was written) and converts through it to sRGB, IEC 61966-2-1 as
+amended. The subset is a profile of class `mntr` or `scnr`, data colour space
+`RGB `, PCS `XYZ `, carrying all six of `rXYZ`, `gXYZ`, `bXYZ`, `rTRC`,
+`gTRC` and `bTRC`, each TRC a `curv` or a `para` of function type 0 to 4. The
+sRGB colourants of the fixtures are the ones the ICC's own sRGB
+characterisation note publishes for matrix/TRC profiles, and the columns sum
+to the D50 media white, so a neutral device code stays neutral.
+
+`IccProfile::parse` refuses every other shape by name, one `IccError` variant
+per kind: another class, a `Lab ` PCS, a `GRAY` device side, a missing tag, a
+`curv` whose entries do not fit their tag, a TRC that is neither a `curv` nor
+a supported `para`, bytes that do not parse at all, and a profile above the
+size constant. A profile that also carries a lookup-table tag (`A2B0` to
+`A2B2`, `D2B0` to `D2B3`) is refused as `LookupTableProfile` even when the six
+matrix tags are present, the operator's answer to F-240's question 2. A
+profile with a lookup table asks for the lookup-table answer, and applying
+the matrix would be a different transform from the one the profile asks for.
+The header and the tag table are read from any length, so a profile is
+classified for what it is before the size constant is held against it: a
+lookup-table profile above 16,384 bytes is named `LookupTableProfile`, and
+`TooLarge` is named only once a payload would be read. The size constant is
+`IccProfile::max_bytes`, 16,384 bytes, set from the largest matrix/TRC profile
+read on the developer host, the 3,144-byte sRGB profile that ships with
+macOS. The corpus retains F-239's 44-byte placeholder in
+`synthetic/sc_rgb_icc.dcm`, named malformed, and adds five generated matrix,
+tone-curve, colourant-swap and lookup profiles. The held colour recipe retains
+both an accepted transform and a refused profile's closed kind. A held redraw
+does not parse the profile again. The scan classifies the same bytes for
+`icc_applied` and `icc_kind` without tabulating device codes.
+
+`ColorTransform::with_icc` attaches the parsed transform once per held frame,
+after `with_sample_scale`. The place is item 4 of the plan: in place of
+F-239's display scaling, before the colour window. With a transform attached
+the sample scale is bypassed and the device codes are normalised by the
+encoding range `2^n - 1`, which is `n = Bits Stored` for an RGB frame, `8`
+for the YCbCr routes whose matrices consume 8-bit samples and return 8-bit
+device RGB, and each palette channel's declared entry depth for palette
+colour, ruling R1 included. The output is the linear sRGB encoding scaled by
+255 as `f32`, so the window and the tier C byte rule are unchanged. A frame
+without `(0028,2000)`, or with a refused one, keeps F-239's route byte for
+byte, and `resolve` leaves no transform attached.
+
+The PCS to linear sRGB matrix is the inverse of the D50 colourant matrix that
+the ICC's sRGB characterisation note publishes for matrix/TRC profiles, the
+same printed values the fixtures' colourant constants encode. The note derives
+and prints the device to PCS direction, the colourants themselves, by
+combining the recommended D65 to D50 chromatic adaptation with the inverse of
+A.7's matrix from `XN, YN, ZN` to `RL, GL, BL`. ICC.1:2022 Annex F.3 makes
+the PCS the colourant matrix times the linear device RGB, so inverting the
+published colourants is the PCS to sRGB direction, and a D50 PCS white maps
+to linear `1 1 1` within the printed matrix's own precision. The inverse is
+computed in `f64` from the printed values and rounded once to `f32`, as
+`color.rs` rounds its YCbCr inverse, and a unit test in `icc.rs` recomputes
+the inverse from the printed values and asserts the constant entry by entry.
+At parse time that matrix is multiplied once with the profile's own
+colourant columns. The colourants are s15Fixed16, so the product is not
+exactly the identity. For the note's colourants as the fixtures encode them,
+each entry of the product is within `1.34e-5` of the identity's entry, and
+the largest linear move the product gives a device triple in the unit cube is
+`2.66e-5`, at the white vertex, green channel. Encoded, the gap between the
+fixtures' hand values and the pipeline's replies reaches at most `0.0029` of
+255 over the sRGB-colourant rows they assert, `0.0026` where the only
+quantisation is the colourants and `0.0029` on the parametric rows, whose
+curve parameters are s15Fixed16 too. The wide-gamut Adobe rows carry more,
+`0.0054` of 255 at the red row's green channel: the quantisation moves that
+channel by only `1.6e-6` linear against the printed decimals, but it answers
+at `1.1e-4` from zero, where the `12.92` slope is `3294.6` codes per linear
+unit. The unit cube's worst case, a black channel beside two saturated ones,
+reaches about `0.044` of 255. The fixture tolerance is `0.05`, and the
+smallest wrong implementation it must reject moves a row by about `0.31`.
+
+The surviving, fully retained AC12 comparison is the 2026-11-09 re-observation of product tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`. It uses the current Rust fixture builders, not the recovered historical Python builder. All six actual profile headers encode version 4.4.0.0 as `04400000`. The same profile bytes go through the public `ColorTransform` consumer and the external tool. Each profile has 22 rows, 12 at 8 bits and 10 at 12 bits, giving 132 native triples and 264 references across both modes. Raw decimal tool output and exact native `f32` bits are retained.
+
+All fifteen recorded commands exit 0. Little CMS accepts the six minimal matrix/TRC profiles without adding tags or replacing profiles. The tool is `transicc` 5.1 over Little CMS 2.18, binary SHA-256 `8b54599cdced07536b7a8b882a2a63b508d42351b02433ac33ad244697d8c3eb`. Each invocation is `transicc -t1 -n [-s] -i <exact-profile> -o '*sRGB'`. Device inputs use the 0 to 255 tool scale, with 12-bit codes multiplied by 255/4095 and printed to ten decimal places. Tool, profiles, product inputs and the native test executable remain unchanged through the observation. The native executable SHA-256 is `8b9997a7f06573aea2dfa7088922cad2f5023dc0d2f28376f66405ea539c006c`.
+
+All 264 reference observations remain present, including six unbounded differences above one code. They are the Adobe-like primaries at both depths. The largest is 1312.3506 codes for the red channel of device green: the unbounded reference is negative while Ocelli clips to zero. Each of these six bounded tool replies exactly equals clipping its unbounded reply to 0 through 255. The installed tool's help identifies `-s` as bounded mode that clips negatives and highlights. Ocelli's linear sRGB clipping is the existing approved pass 1 ruling, not a new tolerance or exclusion. This resolves those six flags as a difference in output policy. Across all 132 bounded references the maximum remains 0.3534772098 codes, at Adobe-like red's green channel. The 84 rows whose unbounded replies are in gamut have maximum 0.0055186096, at table2's 12-bit grey 102. The printed-matrix divergence and its non-identity-window consequence below remain open facts under D14. F-271 measures the alternative matrix separately.
+
+The initial new helper failed compilation because it formatted a Debug-only error with Display. It produced no samples and remains a failed instrument attempt. A reviewed one-line private correction preceded this fresh observation. No product source, matrix, expected value or threshold changed. The complete run record SHA-256 is `fd44b6d5e6394a764a82488faa01c059fcc05222a0fc0b5850cb3e494798732b`, and the 264-row observation file SHA-256 is `397d7b49524328179c49a720818086f8b9c125456d6feb071fb92feb4f431997`. Root independently reparsed the native bits and all reference inputs and outputs, recomputed every error and investigated all six flags. This establishes the current comparison observation, with no timing, whole-story completion or alternative-matrix claim.
+
+Under `-s` the largest difference over the whole row set is `0.3535` of 255,
+at the Adobe-like profile's device red row's green channel at 8 and 12 bits
+alike. That row is a
+measured divergence from Little CMS under decision D14, stated with its
+cause. Adobe RGB 1998 and sRGB share the red chromaticity `0.64, 0.33`, so
+the colorimetric answer for Adobe device red in sRGB is green and blue
+exactly 0. The two engines answer on opposite sides of that zero because
+their PCS to sRGB matrices differ: Ocelli's is the note's printed matrix and
+Little CMS's is the one its built-in sRGB profile carries. On that row Ocelli's green is `+1.073e-4` linear,
+`0.3535` of 255 encoded, and Little CMS's is `-2.3e-6` linear, `-0.0077` of
+255 unbounded and `0.0000` under `-s`, both within `1.1e-4` linear of zero
+and Ocelli's the further side, the same near-zero class pass 1 recorded on
+the primary rows. The same row's blue differs by `0.102` of 255, `+3.8e-5`
+linear against `+7.1e-6`. No stored byte differs on any row at the identity
+window, which is below AC12's one-code investigation threshold there. A
+non-identity D-29 colour window does see the gap, because tier C's
+`map_colour` windows the unrounded `map_into` output before `rgb_bytes`:
+driven through `ocelli-render`'s `colour_bytes_into`, the window at centre
+10 width 20 stores Ocelli's red row as `[255, 5, 2]` and Little CMS's `-s`
+values, put through the same window and byte step, as `[255, 0, 0]`.
+
+Per draw, each pixel costs three table reads, one 3 by 3 product and three
+sRGB encodings. `IccTransform::tabulated` builds a table of each TRC over
+every `2^n` device code, at most three tables of 65,536 `f32` entries or 768
+KiB, measured by `IccTransform::heap_bytes` and aggregated by
+`ColorTransform::heap_bytes`. The folder viewer includes that storage in the
+colour recipe's exact allocation claim before cache admission. A channel
+reads its table when the sample is a whole code the channel's own table
+covers, and evaluates the curve continuously otherwise, which is the YBR
+routes' case because their device values leave the matrix fractional. The
+sRGB encoding is never tabulated: its input is continuous and a table would
+change the values. The linear value clips to 0 and 1 before the encoding, A.7
+of the ICC's sRGB note, so an out-of-gamut device colour, a wide-gamut
+profile such as ADOBERGB being an expected input of PS3.3 C.11.15.1.2, leaves
+display codes at `0 ..= 255` and the colour window and the readout act on
+values sRGB has.
+
+Tier A and tier B keep `ColourLut::icc` unavailable in `ocelli-render`, and a
+GPU route given a profiled frame reports unavailable rather than drawing
+device RGB: the palette bake takes the frame's profile presence,
+`IccProfilePresence`, and refuses an accepted profile before any texel is
+built. Tier C is full for the subset through `ColorTransform::map_into`.
+`docs/lld/feature-availability.md` carries the declaration.
+
+The fixtures are `crates/ocelli-pixel/tests/icc.rs`, hand computed from the
+two published texts with the editions named in their module comment. AC11's
+mutations were each run against a scratch copy of the sources rather than the
+tracked tree. Dropping the sRGB encoding turns thirteen of the sixteen
+fixtures red and transposing the colourant matrix turns fourteen red, the two
+refusals-only rows staying green in both, the colourant swap joining them
+under the dropped encoding because its strong channel is exactly `1.0`
+linear, which the dropped encoding maps to itself. Treating `para` type 3's
+`c` as type 4's `e` turns only the parametric fixture red. Three neighbouring
+mutations of the same kinds needed rows of their own before they died: an
+encode knee moved to `0.04045` needed the device `5` row, an encoding range
+of `2^depth` needed the unit test that compares the tables with the
+continuous curve over real colourants, and a lookup-table list missing
+`D2B0` needed the loop over all seven tags.
+
+### The colour window, deviation D-29
+
+`ColourWindow` windows and inverts a colour frame per channel after stage 4,
+as cornerstone3D 5.8.2 does, and adds no window arithmetic. The window is
+`VoiTransform` with `VoiFunction::Linear` over `0 ..= 255`, which is
+cornerstone's `getVOILut.js:3` character for character, and the invert is
+`PresentationTransform`'s INVERSE over the same range, `0 + 255 - y`, after
+the window. `PresentationTransform::new` still refuses every colour space, so
+the invert is reached through the crate-private `inverse_over`, which builds
+the same reflection without naming a photometric interpretation the frame
+does not have. `LutChain` stays monochrome.
+
+`initial` is width 256 and centre 128 with invert off, every colour image's
+first window in cornerstone whatever the file says. `new` returns that same
+skipped window when the width is 255 or 256, the centre is 127 or 128 and
+invert is off, which is `renderColorImage.js:30` to `:36`. At width 255 and
+centre 127 the formula is not the identity, so skipping matters there by a
+byte. A width below 1 is the existing `InvalidWindow`.
+
+The fixtures in `crates/ocelli-pixel/tests/color.rs` include the width 10 row,
+`125 128 130` to `56.666664 141.66667 198.33334`, which is what rejects `w` in
+place of `w - 1`, and an exact tie, `130` at width 511 and centre 128.5 to
+`128.5`, whose byte is decided by the render boundary's tie rule alone.
+
 ## Failure boundary
 
 `PixelError` reports malformed plane attributes, stored-pixel descriptors,
@@ -494,19 +806,31 @@ the greyscale normalisation.
 The index clamp is a table address. Values at or below 0 use the first texel.
 Values at or above the last texel use that texel. The clamp is not applied to
 the value `LutChain` returns. The greyscale path still emits the unclamped
-LINEAR value recorded above. ICC is unavailable and is not passed through as
-device RGB. A palette on a monochrome photometric interpretation is
-unavailable, matching `ColorTransform`'s refusal. A preset on a palette image
-is unavailable.
+LINEAR value recorded above. ICC stays unavailable on this GPU path and is
+not passed through as device RGB, F-240's declaration below. A palette on a
+monochrome photometric interpretation is unavailable, matching
+`ColorTransform`'s refusal. A preset on a palette image is unavailable.
 
 Tier C uses the same table bytes. A preset indexes them after
 `LutChain::map_into`. A palette goes through `ColorTransform::map_into`.
 There is no second palette formula. A palette entry that is not an integer
-in 0 to 255 is unavailable when the tier C colour transform is accepted,
-which is the same refusal as the GPU bake. A later draw does not walk the
-table again. A colour sample outside 0 to 255 is unavailable on tier C until a
-scale exists. An in-range sample still rounds to a byte, and a YBR result
-outside 0 to 255 still becomes 0 or 255. A tier B colour comparison was not run.
+in 0 to 255 after its display scale is unavailable when the tier C colour
+transform is accepted, which is the same refusal as the GPU bake. Since F-239
+no scaled entry can fail that test, so the refusal is a guard rather than a
+route. A later draw does not walk the table again. A colour sample whose value
+after the transform's sample scale is outside 0 to 255 is unavailable on tier
+C. An in-range sample still rounds to a byte, and a YBR result outside 0 to
+255 still becomes 0 or 255. The byte rule rounds to the nearest code and a tie
+to the even code since F-239, as `docs/lld/render-graph.md` records. A tier B
+colour comparison was not run.
+
+ICC on tier C is the F-240 subset above, through `ColorTransform::with_icc`
+and `map_into`. On tiers A and B `ColourLut::icc` still returns `Unavailable`,
+and a GPU route given a profiled frame reports unavailable rather than drawing
+device RGB: the palette bake takes the frame's profile presence,
+`IccProfilePresence`, and refuses an accepted profile before any texel is
+built. A profile the subset refuses keeps the CPU route's own bytes, which is
+D-30, and is not a pass-through of device RGB through a colour table.
 
 `bin/ocelli.sh gate native` proves native linkage and shared-crate wasm
 compilation. The focused `cargo check -p ocelli-pixel --all-targets --target
@@ -514,3 +838,21 @@ wasm32-unknown-unknown` isolates the pixel crate's wasm compile proof.
 `bin/ocelli.sh gate wasm` builds `ocelli-wasm`. That crate depends on
 `ocelli-render`, and `ocelli-render` depends on this crate, so the build
 compiles `ocelli-pixel`. The gate does not execute this crate's tests.
+
+
+## Folder viewer colour consumer
+
+The folder viewer resolves its colour recipe once before sample admission,
+including the decoder's actual output layout and length, palette scaling and
+ICC disposition. It draws through `colour_bytes_into` in whole-row bands of
+at most 65,536 pixels. Planar bands gather each plane's corresponding rows.
+The three packed display bytes are windowed RGB, with the same pre-window
+stage-four output supplying pointer values and each channel's region statistics.
+Monochrome retains its single-byte reply and its modality chain.
+
+The page uses the channel header for images, thumbnails, prefetch and tiles.
+Colour starts at centre 128 and width 256, offers no file windows or presets,
+and links a window only to the same kind. Mixed-kind tiles and prefetches use
+their own defaults. An applied matrix/TRC profile has no omission sentence.
+Every profile outside that subset retains device RGB and displays its closed
+kind. Palette, ICC and retained conversion capacities are charged explicitly.

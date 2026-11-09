@@ -31,6 +31,14 @@ pub struct TileComp {
     pub lines: Vec<Vec<i32>>,
     /// Decoded image lines (decode path).
     pub decoded_lines: Vec<Vec<i32>>,
+    /// Decoded image lines kept as sample-domain floats (decode path).
+    ///
+    /// Populated only when a pending inverse colour transform needs the
+    /// unrounded reconstruction: rounding before the transform would
+    /// quantize its inputs. Empty once the level shift is finished.
+    pub decoded_lines_f32: Vec<Vec<f32>>,
+    /// Whether `perform_idwt` left the DC level shift for the tile to undo.
+    pub level_shift_deferred: bool,
     /// Next line to pull for the decode path.
     pub cur_pull_line: u32,
 }
@@ -47,6 +55,8 @@ impl Default for TileComp {
             is_signed: false,
             lines: Vec::new(),
             decoded_lines: Vec::new(),
+            decoded_lines_f32: Vec::new(),
+            level_shift_deferred: false,
             cur_pull_line: 0,
         }
     }
@@ -105,6 +115,8 @@ impl TileComp {
             is_signed,
             lines: Vec::new(),
             decoded_lines: Vec::new(),
+            decoded_lines_f32: Vec::new(),
+            level_shift_deferred: false,
             cur_pull_line: 0,
         }
     }
@@ -246,7 +258,16 @@ impl TileComp {
     }
 
     /// Perform inverse DWT, reconstructing decoded_lines from subband coefficients.
-    pub fn perform_idwt(&mut self) -> Result<()> {
+    ///
+    /// `defer_level_shift` leaves the DC level shift undone and, for the
+    /// irreversible wavelet, the reconstruction unrounded, so an inverse
+    /// colour transform can run first. ISO/IEC 15444-1 Annex G applies the
+    /// forward transform after the DC level shift, so the inverse runs before
+    /// the shift is undone. RCT's chroma spans one bit more than the image
+    /// depth, which the shift's clamp would otherwise cut. The tile finishes
+    /// the deferred state through [`Self::finish_deferred_level_shift`].
+    pub fn perform_idwt(&mut self, defer_level_shift: bool) -> Result<()> {
+        self.level_shift_deferred = defer_level_shift;
         let num_decomps = self.num_resolutions - 1;
         let w = self.width() as usize;
         let h = self.height() as usize;
@@ -270,6 +291,21 @@ impl TileComp {
                 // Irreversible: dequantized floats in coeffs_f32, denormalize
                 let coeffs_f32 = &self.resolutions[0].subbands[0].coeffs_f32;
                 let denorm = (1u32 << self.bit_depth) as f32;
+                if defer_level_shift {
+                    self.decoded_lines_f32 = (0..h)
+                        .map(|y| {
+                            let mut row = vec![0.0f32; w];
+                            for (x, row_val) in row.iter_mut().enumerate().take(w.min(sb_w)) {
+                                let idx = y * sb_w + x;
+                                if idx < coeffs_f32.len() {
+                                    *row_val = coeffs_f32[idx] * denorm;
+                                }
+                            }
+                            row
+                        })
+                        .collect();
+                    return Ok(());
+                }
                 let mut lines = Vec::with_capacity(h);
                 for y in 0..h {
                     let mut row = vec![0i32; w];
@@ -283,14 +319,18 @@ impl TileComp {
                 }
                 self.decoded_lines = lines;
             }
-            self.undo_level_shift();
+            if !defer_level_shift {
+                self.undo_level_shift();
+            }
             return Ok(());
         }
 
         if self.reversible {
             self.decoded_lines =
                 synthesize_resolution_reversible(&self.resolutions, num_decomps as usize);
-            self.undo_level_shift();
+            if !defer_level_shift {
+                self.undo_level_shift();
+            }
             return Ok(());
         }
 
@@ -346,12 +386,41 @@ impl TileComp {
 
         // Denormalize: multiply by 2^bit_depth (inverse of the forward normalization)
         let denorm = (1u32 << self.bit_depth) as f32;
+        if defer_level_shift {
+            self.decoded_lines_f32 = current_f32
+                .iter()
+                .map(|row| row.iter().map(|&v| v * denorm).collect())
+                .collect();
+            return Ok(());
+        }
         self.decoded_lines = current_f32
             .iter()
             .map(|row| row.iter().map(|&v| (v * denorm).round() as i32).collect())
             .collect();
         self.undo_level_shift();
         Ok(())
+    }
+
+    /// Finish a decode whose level shift was deferred for a colour transform.
+    ///
+    /// Rounds any float reconstruction the tile-component is still holding
+    /// and then undoes the DC level shift. Called by the tile after the
+    /// inverse colour transform has run across the components, and a no-op
+    /// when `perform_idwt` already finished the shift itself.
+    pub fn finish_deferred_level_shift(&mut self) {
+        if !self.level_shift_deferred {
+            return;
+        }
+        self.level_shift_deferred = false;
+        if !self.decoded_lines_f32.is_empty() {
+            self.decoded_lines = self
+                .decoded_lines_f32
+                .iter()
+                .map(|row| row.iter().map(|&v| v.round() as i32).collect())
+                .collect();
+            self.decoded_lines_f32 = Vec::new();
+        }
+        self.undo_level_shift();
     }
 
     /// Undo level shift for unsigned components.
@@ -732,7 +801,7 @@ fn f32_slice_to_2d(data: &[f32], w: usize, h: usize) -> Vec<Vec<f32>> {
     out
 }
 
-fn wrap_i32_line(data: &[i32]) -> crate::mem::LineBuf {
+pub(crate) fn wrap_i32_line(data: &[i32]) -> crate::mem::LineBuf {
     crate::mem::LineBuf {
         size: data.len(),
         pre_size: 0,
@@ -741,7 +810,7 @@ fn wrap_i32_line(data: &[i32]) -> crate::mem::LineBuf {
     }
 }
 
-fn wrap_i32_line_mut(data: &mut [i32]) -> crate::mem::LineBuf {
+pub(crate) fn wrap_i32_line_mut(data: &mut [i32]) -> crate::mem::LineBuf {
     crate::mem::LineBuf {
         size: data.len(),
         pre_size: 0,

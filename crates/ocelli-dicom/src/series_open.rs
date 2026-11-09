@@ -288,6 +288,53 @@ pub fn declared_frame_count(parsed: &ParsedDicom) -> Result<u32, SeriesOpenError
         .map_err(|_| SeriesOpenError::new(SeriesOpenReason::Metadata, 0))
 }
 
+/// The cine timing of one object, read alone.
+///
+/// `metadata` is the object's projection, as [`MetadataSet::from_object`]
+/// makes it. The order of sources and the refusal of an unusable value are
+/// those of [`DisplaySeries::timing`], with the object's declared frame count
+/// as the length a Frame Time Vector must have. Preferred Playback Sequencing
+/// is not read, so a bad value there never hides a good Frame Time.
+///
+/// PS3.3 C.7.6.5.1.1 defines Frame Time as the interval between frames of a
+/// multi-frame image. One frame has no such interval, so a Frame Time of
+/// zero on an object of one frame is [`CineTiming::Unavailable`] and not an
+/// error.
+///
+/// # Errors
+///
+/// Returns [`SeriesOpenReason::Metadata`] when the frame declaration or the
+/// functional-group sequences are malformed, and [`SeriesOpenReason::Cine`]
+/// when the first present timing source is not usable. The index is zero.
+pub fn cine_timing(metadata: &MetadataSet) -> Result<CineTiming, SeriesOpenError> {
+    let multi = MultiframeMetadata::new(metadata).map_err(|error| map_multi(error, 0))?;
+    let frames = multi.frame_count();
+    if frames < 2
+        && frame_time_vector(metadata, frames, 0)?.is_none()
+        && frame_time_is_zero(metadata)
+    {
+        return Ok(CineTiming::Unavailable);
+    }
+    read_timing(metadata, frames, 0)
+}
+
+/// Whether Frame Time is present as DS with one value that is exactly zero.
+fn frame_time_is_zero(metadata: &MetadataSet) -> bool {
+    let Some(element) = metadata.get(FRAME_TIME) else {
+        return false;
+    };
+    if element.vr() != VR::DS {
+        return false;
+    }
+    let Ok(Some(parts)) = present_text(element, 0, SeriesOpenReason::Cine) else {
+        return false;
+    };
+    let [value] = parts.as_slice() else {
+        return false;
+    };
+    parse_decimal_string(value).is_some_and(|number| number == 0.0)
+}
+
 /// Order `frames` into display groups.
 ///
 /// Grouping uses the Series Instance UID, the Frame of Reference UID, row and

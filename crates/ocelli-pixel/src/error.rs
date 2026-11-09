@@ -67,4 +67,8 @@ pub enum PixelError {
     MismatchedPaletteDescriptors,
     /// A 4:2:2 chroma pair would be split by an odd Columns or an odd pixel count.
     SubsampledChromaAlignment,
+    /// A colour sample or palette entry depth is outside 8 to 16 bits, F-239.
+    UnsupportedColourDepth,
+    /// A sample display scale was asked of a palette frame, whose stored value is an index.
+    SampleScaleNotApplicable,
 }

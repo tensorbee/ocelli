@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { changedProblems } from "../../../examples/folder-viewer/tests/browser/changed.mjs";
 
 import {
   assertCanvasCheck,
@@ -26,6 +27,11 @@ import {
   median,
   mono16Part10,
   pageHeapBound,
+  PET_COUNT,
+  PET_EDGE,
+  petPart10,
+  petPixels,
+  petSlope,
   profileFromHeld,
   readRetainedHeap,
   serverRssBound,
@@ -52,8 +58,9 @@ test("serverRssBound matches the stated slack for the named radiograph", () => {
   // 4 * 17400516 = 69602064
   // 2 * 17400516 + 5 * 8700000 = 34801032 + 43500000 = 78301032
   // 2 * 78301032 = 156602064
-  // 32 MiB = 33554432
-  // 69602064 + 156602064 + 33554432 = 259758560
+  // F-227's pool term, P * 4 MiB = 2 * 4194304 = 8388608
+  // 24 MiB = 25165824, the constant the operator lowered from 32 MiB
+  // 69602064 + 156602064 + 8388608 + 25165824 = 259758560
   assert.equal(serverRssBound(0, 17400516, 8700000), 259758560);
 });
 
@@ -251,4 +258,55 @@ test("mono16Part10 is a Part 10 preamble and constant stored samples", () => {
     pixels,
   });
   assert.equal(bytes.subarray(128, 132).toString("ascii"), "DICM");
+});
+
+/** The offset of the first element `(group,element)` in `bytes`, or -1. */
+function tagAt(bytes, group, element) {
+  const tag = Buffer.alloc(4);
+  tag.writeUInt16LE(group, 0);
+  tag.writeUInt16LE(element, 2);
+  return bytes.indexOf(tag, 132);
+}
+
+test("the pet_no_window workload stores no window, signed samples and a slope per file", () => {
+  // F-227. PS3.3 C.7.6.3.1: Pixel Representation 1 is signed. PS3.3 C.11.2:
+  // with no Window Center, no Window Width and no VOI LUT Sequence the file
+  // gives no VOI stage, which is what the automatic window is for.
+  assert.equal(PET_COUNT, 267);
+  const first = petPart10(0);
+  assert.equal(first.subarray(128, 132).toString("ascii"), "DICM");
+  assert.equal(tagAt(first, 0x0028, 0x1050), -1);
+  assert.equal(tagAt(first, 0x0028, 0x1051), -1);
+  assert.equal(tagAt(first, 0x0028, 0x3010), -1);
+  const representation = tagAt(first, 0x0028, 0x0103);
+  assert.ok(representation > 0);
+  assert.equal(first.readUInt16LE(representation + 8), 1);
+  // Slopes 0.5 + 0.125 (i mod 7): file 0 is 0.5, file 1 is 0.625, file 7 is 0.5 again.
+  assert.equal(petSlope(0), 0.5);
+  assert.equal(petSlope(1), 0.625);
+  assert.equal(petSlope(7), 0.5);
+  const slopeAt = tagAt(petPart10(1), 0x0028, 0x1053);
+  assert.equal(petPart10(1).subarray(slopeAt + 8, slopeAt + 13).toString("latin1"), "0.625");
+  // The corner (0, 0) is 90.5 from the centre (64, 64), outside the radius
+  // 50, so stored 0. The centre is 1 + (3 * 64 + 5 * 64 + 0) mod 900 = 513.
+  const pixels = petPixels(0);
+  assert.equal(pixels.length, PET_EDGE * PET_EDGE * 2);
+  assert.equal(pixels.readInt16LE(0), 0);
+  assert.equal(pixels.readInt16LE((64 * PET_EDGE + 64) * 2), 513);
+});
+
+// The concurrency amendment chooses one worker while retaining the independent
+// ceiling of four. These exercise the actual browser-result validator.
+test("changed-file probe permits serial reads within the independent ceiling", () => {
+  for (const peak of [1, 4]) {
+    const problems = changedProblems({ probe: { files: 1693, reads: 1693, bytes: 1693, peak, ms: 500 } });
+    assert.deepEqual(problems.filter((line) => line.startsWith("the probe ") && line.includes("reads in flight")), []);
+  }
+});
+
+test("changed-file probe still refuses five in flight and invalid observed peaks", () => {
+  for (const peak of [0, 2.5, 5, Number.NaN]) {
+    const problems = changedProblems({ probe: { files: 1693, reads: 1693, bytes: 1693, peak, ms: 500 } });
+    assert(problems.some((line) => line.startsWith("the probe ") && line.includes("reads in flight")));
+  }
 });

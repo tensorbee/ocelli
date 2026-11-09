@@ -5,10 +5,11 @@
 //! [`ColorTransform`]. It does not open a device and it does not allocate
 //! while shading.
 
-use ocelli_core::{Canvas, Index, Pt, Stored, Transform};
+use ocelli_core::{Canvas, Index, Pt, Stored, Transform, exact_f32_integer};
 use ocelli_pixel::{
-    ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PhotometricInterpretation,
-    PixelDataEncoding, PixelError, PlanarConfiguration, Rgb, SampleLayout,
+    ColorTransform, ColourWindow, DecodedLayout, DecodedPhotometric, LutChain,
+    PhotometricInterpretation, PixelDataEncoding, PixelError, PlanarConfiguration, Rgb,
+    SampleLayout,
 };
 use ocelli_viewport::presentation::{Colormap, Presentation};
 use ocelli_viewport::view::{CoordinateError, INDEX_TO_IMAGE_CENTRE, View};
@@ -102,6 +103,9 @@ pub struct AcceptedColor<'a> {
 }
 
 /// A resolved colour transform, or a space this raster will not invent.
+///
+/// Reuse this descriptor while its immutable transform borrow remains valid.
+#[derive(Clone, Copy)]
 pub enum RasterColor<'a> {
     /// Decoder-reported space [`AcceptedColor`] already accepted.
     Supported(AcceptedColor<'a>),
@@ -385,7 +389,8 @@ impl CpuRaster {
             return Ok(done);
         }
         // A palette was checked when it was accepted. A stored colour sample
-        // outside 0 to 255 has no scale yet, and the samples change per draw.
+        // is tested after the transform's sample scale, so a 12-bit 4095 is
+        // the display byte 255. The samples change per draw.
         if !stored_colour_is_a_display_byte(transform, stored) {
             return Err(RasterError::Unavailable);
         }
@@ -593,9 +598,13 @@ impl CpuRaster {
         let Some(destination) = self.rgb_scratch.get_mut(..pixels) else {
             return Err(RasterError::Extent);
         };
-        transform
-            .map_into(stored, destination, columns)
-            .map_err(color_error)
+        map_colour(
+            transform,
+            &ColourWindow::initial(),
+            stored,
+            destination,
+            columns,
+        )
     }
 
     fn write_mono(
@@ -874,6 +883,86 @@ impl CpuRaster {
     }
 }
 
+/// Three display bytes per pixel, `R G B` row major, for one band of rows.
+///
+/// F-239. The same accept, map and byte steps as
+/// [`CpuRaster::raster_color_into`], with no view, no resampling and no
+/// generation, and `window` applied per channel between the map and the byte
+/// step, which is deviation D-29's place for it. `stored` is the band's
+/// samples for the resolved colour space and `out` is three bytes for each of
+/// its pixels, so a band is `out.len() / 3` pixels and must be whole rows of
+/// `columns`. `scratch` is grown to the band when it is smaller and is never
+/// shrunk, so a caller drawing a frame band by band allocates once.
+///
+/// # Errors
+///
+/// Nothing is written to `out` on any refusal.
+/// [`RasterError::Unavailable`] for [`RasterColor::Unsupported`], or a stored
+/// colour sample that is not a display byte after the transform's sample
+/// scale. [`RasterError::OutputLength`] when `out` is not three bytes per
+/// pixel. [`RasterError::Extent`] for an empty band, zero columns, a band
+/// that is not whole rows, or scratch that cannot be reserved.
+/// [`RasterError::Length`] when `stored` is not the band for the resolved
+/// space.
+pub fn colour_bytes_into(
+    color: RasterColor<'_>,
+    window: &ColourWindow,
+    stored: &[Stored],
+    columns: u32,
+    scratch: &mut Vec<Rgb>,
+    out: &mut [u8],
+) -> Result<(), RasterError> {
+    let transform = match color {
+        RasterColor::Unsupported => return Err(RasterError::Unavailable),
+        RasterColor::Supported(accepted) => accepted.transform,
+    };
+    if !out.len().is_multiple_of(3) {
+        return Err(RasterError::OutputLength);
+    }
+    let pixels = out.len() / 3;
+    let columns = usize::try_from(columns).map_err(|_| RasterError::Extent)?;
+    if pixels == 0 || columns == 0 || !pixels.is_multiple_of(columns) {
+        return Err(RasterError::Extent);
+    }
+    transform
+        .accept_source(stored, pixels, columns)
+        .map_err(color_error)?;
+    if !stored_colour_is_a_display_byte(transform, stored) {
+        return Err(RasterError::Unavailable);
+    }
+    if scratch.len() < pixels {
+        scratch
+            .try_reserve_exact(pixels - scratch.len())
+            .map_err(|_| RasterError::Extent)?;
+        scratch.resize(pixels, Rgb::BLACK);
+    }
+    let destination = scratch.get_mut(..pixels).ok_or(RasterError::Extent)?;
+    map_colour(transform, window, stored, destination, columns)?;
+    for (rgb, bytes) in destination.iter().zip(out.chunks_exact_mut(3)) {
+        bytes.copy_from_slice(&rgb_bytes(*rgb));
+    }
+    Ok(())
+}
+
+/// Stage 4, then the colour window, into caller-provided RGB.
+///
+/// The map step both colour entries share. [`CpuRaster::raster_color_into`]
+/// passes [`ColourWindow::initial`], which is skipped, so its frame is the
+/// stage 4 output as it was before F-239.
+fn map_colour(
+    transform: &ColorTransform,
+    window: &ColourWindow,
+    stored: &[Stored],
+    destination: &mut [Rgb],
+    columns: usize,
+) -> Result<(), RasterError> {
+    transform
+        .map_into(stored, destination, columns)
+        .map_err(color_error)?;
+    window.apply_in_place(destination);
+    Ok(())
+}
+
 fn interleaved_native_rgb() -> Result<ColorTransform, RasterError> {
     let layout = match SampleLayout::new(
         3,
@@ -946,21 +1035,33 @@ fn rgba_of_preset(
 }
 
 fn rgba_from_rgb(rgb: Rgb) -> [u8; 4] {
+    let [r, g, b] = rgb_bytes(rgb);
+    [r, g, b, 255]
+}
+
+/// The byte step both colour entries share.
+fn rgb_bytes(rgb: Rgb) -> [u8; 3] {
     [
         byte_from_channel(rgb.r),
         byte_from_channel(rgb.g),
         byte_from_channel(rgb.b),
-        255,
     ]
 }
 
+/// Whether every stored colour sample enters stage 4 as a display byte.
+///
+/// The test is on the value after the transform's F-239 sample scale, which
+/// is the value stage 4 reads, so a 12-bit sample of 4095 is accepted as 255
+/// and an unscaled 4095 is refused. A palette was checked when it was
+/// accepted, and its stored value is an index rather than a sample.
 fn stored_colour_is_a_display_byte(transform: &ColorTransform, stored: &[Stored]) -> bool {
     if transform.palette().is_some() {
         return true;
     }
+    let scale = transform.sample_scale();
     stored
         .iter()
-        .all(|sample| (0.0..=255.0).contains(&sample.0))
+        .all(|sample| (0.0..=255.0).contains(&scale.apply(sample.0)))
 }
 
 fn color_error(error: PixelError) -> RasterError {
@@ -1043,15 +1144,21 @@ fn write_pixel(out: &mut [u8], index: usize, rgba: [u8; 4]) -> Result<(), Raster
     Ok(())
 }
 
-/// Nearest byte in `0..=255`. Ties pick the higher byte.
+/// Nearest byte in `0..=255`. A tie picks the EVEN byte.
 ///
-/// The comparison is `value >= code - 0.5`. That half is exact. It is not
-/// `value + 0.5` in f32. That addition rounds the float just below a tie up
-/// to the next code, which is what `display_index` does so the address matches
-/// the shader. The float just below `0.5` stays `0` here.
+/// Round half to even is the operator's decision of 2026-11-07 in F-239's
+/// plan. It is `Uint8ClampedArray`'s rule, so cornerstone3D 5.8.2 stores the
+/// same byte for every colour channel it windows. It was "ties pick the
+/// higher byte" until then. Tier C's monochrome draws reach this function
+/// only with a preset table's own bytes, which are whole codes, so the
+/// monochrome tie decision is the table address in `colour.rs` and not this.
 ///
-/// Values outside that range become 0 or 255 because the destination is an
-/// 8-bit channel. The display value itself is not clamped before this store.
+/// The pinned standard library rounds to the nearest integer with ties to
+/// even. The guards keep every non-finite channel at zero, including positive
+/// infinity. For the remaining positive value below 255, the rounded integer
+/// is exactly representable and lies in 0 through 255. The shared exact-integer
+/// reader and checked conversion therefore preserve that integer unchanged.
+/// This final store does not change the separate monochrome table address.
 fn byte_from_channel(value: f32) -> u8 {
     if !value.is_finite() || value <= 0.0 {
         return 0;
@@ -1059,20 +1166,10 @@ fn byte_from_channel(value: f32) -> u8 {
     if value >= 255.0 {
         return 255;
     }
-    // Greatest code whose preceding half is still at or below the value.
-    // That is the higher neighbor when the two distances are equal.
-    let mut lo = 0_u8;
-    let mut hi = 255_u8;
-    while lo < hi {
-        let mid = (u16::from(lo) + u16::from(hi)).div_ceil(2);
-        let code = u8::try_from(mid).unwrap_or(255);
-        if value >= f32::from(code) - 0.5 {
-            lo = code;
-        } else {
-            hi = code.saturating_sub(1);
-        }
+    match exact_f32_integer(value.round_ties_even()) {
+        Ok(integer) => u8::try_from(integer.magnitude).unwrap_or(0),
+        Err(_) => 0,
     }
-    lo
 }
 
 fn f64_from_u32(value: u32) -> f64 {
@@ -1086,17 +1183,61 @@ mod tests {
     use super::byte_from_channel;
 
     #[test]
-    fn a_tie_picks_the_higher_channel_byte() {
-        // 0.5 is the same distance from 0 and from 1, so the higher byte is 1.
-        assert_eq!(byte_from_channel(0.5), 1);
+    fn non_finite_channels_keep_the_final_byte_policy() {
+        // The existing store policy sends every non-finite value to zero.
+        // Positive infinity distinguishes this from a saturating byte cast
+        // or a clamp performed before the non-finite guard.
+        for bits in [
+            0x7f80_0000,
+            0xff80_0000, // positive and negative infinity
+            0x7fc0_0000,
+            0xffc0_0000, // quiet NaNs, both signs
+            0x7f80_0001,
+            0xff80_0001, // nonzero signalling NaN payloads
+        ] {
+            assert_eq!(byte_from_channel(f32::from_bits(bits)), 0);
+        }
+        // IEEE-754 zero, subnormal and finite endpoints, with no float cast.
+        for bits in [0x0000_0000, 0x8000_0000, 0x0000_0001, 0x8000_0001] {
+            assert_eq!(byte_from_channel(f32::from_bits(bits)), 0);
+        }
+        assert_eq!(byte_from_channel(f32::MAX), 255);
+        assert_eq!(byte_from_channel(-f32::MAX), 0);
+    }
+
+    /// Nearest code, and a tie to the EVEN code, the operator's decision of
+    /// 2026-11-07 in F-239's plan, which is `Uint8ClampedArray`'s rule and so
+    /// cornerstone3D 5.8.2's for the colour bytes its CPU path stores. Tier C
+    /// monochrome reaches this rule only with whole table bytes.
+    ///
+    /// ```text
+    /// tie    0.5 -> 0    1.5 -> 2    2.5 -> 2    3.5 -> 4
+    ///      127.5 -> 128  128.5 -> 128  253.5 -> 254  254.5 -> 254
+    /// ```
+    ///
+    /// Each tie is paired with the float either side of it, which is not a tie
+    /// and goes to the nearer code whatever the tie rule says.
+    #[test]
+    fn a_tie_rounds_to_the_even_channel_byte() {
+        // (tie, the even code it stores, the code just below it, just above)
+        for (tie, even, lower, upper) in [
+            (0.5_f32, 0_u8, 0_u8, 1_u8),
+            (1.5, 2, 1, 2),
+            (2.5, 2, 2, 3),
+            (3.5, 4, 3, 4),
+            (127.5, 128, 127, 128),
+            (128.5, 128, 128, 129),
+            (253.5, 254, 253, 254),
+            (254.5, 254, 254, 255),
+        ] {
+            assert_eq!(byte_from_channel(tie), even, "tie {tie}");
+            let below = f32::from_bits(tie.to_bits() - 1);
+            let above = f32::from_bits(tie.to_bits() + 1);
+            assert_eq!(byte_from_channel(below), lower, "below {tie}");
+            assert_eq!(byte_from_channel(above), upper, "above {tie}");
+        }
         assert_eq!(byte_from_channel(1.0), 1);
-        assert_eq!(byte_from_channel(1.5), 2);
-        assert_eq!(byte_from_channel(254.5), 255);
-        // The float just below a tie is closer to the lower byte.
-        let below_half = f32::from_bits(0.5_f32.to_bits() - 1);
-        assert_eq!(byte_from_channel(below_half), 0);
-        let below_one_and_a_half = f32::from_bits(1.5_f32.to_bits() - 1);
-        assert_eq!(byte_from_channel(below_one_and_a_half), 1);
+        assert_eq!(byte_from_channel(254.6), 255);
         assert_eq!(byte_from_channel(-0.0), 0);
         assert_eq!(byte_from_channel(f32::NAN), 0);
         assert_eq!(byte_from_channel(-1.0), 0);
