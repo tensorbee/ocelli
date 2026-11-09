@@ -6037,6 +6037,25 @@
         "F-X021"
       ],
       "notes": "Filed from the recovered S46 close draft, original item 8. Found by S46 oracle test fix review pass 1 as N1 and left optional for the lead. Read-only inspection of this tree at 31323a79 still finds applicable_monochrome_rows_reach_the_comparator, uniform_slice_edge_matches_the_reference_within_one_lsb and rendered_pair passing checkout paths to the producer on the absent branch, whose reference-run-absent and corpus-absent returns both write dispositions into tools/oracle/compare-out, and a_missing_reference_run_is_unrun at produce.rs:2286 is the temp_dir pattern to copy. The path is gitignored, so git is unaffected, but a real compare-out/dispositions.json in a tree with no reference is overwritten with a reference-run-absent record, which the review observed in the ocelli-wt-f-223 worktree. This filing ran no test and touched no output directory. Early S47 test isolation, coordinated with F-244 and F-239 oracle evidence work so a test run does not replace a real comparison artifact. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-273",
+      "eid": "E38.64",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Reference scalar normalization for the equipped comparison: implement a reviewed scalar and upload route that preserves full-range signed values, then use that same declared route for pixel precheck and the complete timed protocol without changing the native pixel arithmetic or acceptance thresholds",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-216"
+      ],
+      "notes": "Filed under the approved F-223 pixel-refusal follow-up rule. Future route choice requires normal design approval and remains draft. Provisional 3w GLM-proposed estimate, not measured effort. F-223 AC18 and AC19 remain open and named here in carry prose, without a structural dependency cycle. Stock and diagnostic refusal evidence remains retained, with no native arithmetic, package, tolerance, baseline or timing change at filing.",
+      "milestone": "M20",
+      "sprint": "S47"
     }
   ]
 }

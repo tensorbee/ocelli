@@ -318,3 +318,7 @@ F-119 generates the coarser levels by downsampling level 0. `append_level` store
 ## Acceptance observations still pending
 
 The current status of F-208, F-209, F-212 and F-213 is reopened after reconciling their approved plans with their historical delivery notes. Their implementation is integrated and reviewed. The remaining numbered observations are F-208 AC8 to AC12, F-209 AC16 to AC20 and AC22, F-212 AC12 and F-213 AC13. F-209 AC21 is a mutation control with recorded evidence, not an operator click-through. The original tracker and AS_BUILT entries are preserved and qualified by the dated acceptance correction. No observation, carry or scope waiver is inferred from keeping the checklist pending.
+
+## Carried forward from S46
+
+- **F-223** carried to F-273 S47 E38.64: pixel refusal is a recorded outcome and not passing AC18, open ACs 18 and 19 stay open under the named actual operator-root refused-pixels verdict story, no timings, the refused report is retained privately, F-223 remains S46 allocation and backlog pending with the F-216 dependency, and no table or status action is taken, while the IGNORED runstate becomes carried upon root's adoption of the F273 filing.
