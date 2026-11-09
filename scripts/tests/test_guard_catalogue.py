@@ -215,6 +215,84 @@ class WorkspaceExcludeProbeBuilder(unittest.TestCase):
         )
         self.assertEqual(updated.count("\nexclude = "), 1)
 
+    def test_multiline_exclusions_comments_and_quoted_brackets_stay_valid(self) -> None:
+        manifest = (            '[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n'
+            'exclude = [\n "vendor/a]", # a comment containing ]\n'
+            ' "vendor/b",\n] # closing comment\n'
+            '[workspace.package]\nversion = "0.1.0"\n')
+        updated = _workspace_manifest_with_exclusion(manifest, "tools/oracle")
+        before = tomllib.loads(manifest)
+        after = tomllib.loads(updated)
+        before["workspace"]["exclude"].append("tools/oracle")
+        self.assertEqual(after, before)
+        self.assertEqual(_workspace_manifest_with_exclusion(updated, "tools/oracle"), updated)
+
+    def test_missing_empty_and_single_line_lists_preserve_other_tables(self) -> None:
+        for row in ["", "exclude = []\n", 'exclude = ["vendor/a"] # comment\n']:
+            with self.subTest(row=row):
+                manifest = ('[workspace]\nmembers = ["member"]\n' + row +
+                            '[package]\nname = "other"\nexclude = ["leave-alone"]\n')
+                expected = tomllib.loads(manifest)
+                expected["workspace"].setdefault("exclude", []).append("tools/oracle")
+                self.assertEqual(tomllib.loads(_workspace_manifest_with_exclusion(
+                    manifest, "tools/oracle")), expected)
+
+    def test_current_workspace_multiline_list_is_retained(self) -> None:
+        manifest = (ROOT / "Cargo.toml").read_text()
+        expected = tomllib.loads(manifest)
+        excluded = expected["workspace"].setdefault("exclude", [])
+        if "tools/oracle" not in excluded:
+            excluded.append("tools/oracle")
+        self.assertEqual(tomllib.loads(_workspace_manifest_with_exclusion(
+            manifest, "tools/oracle")), expected)
+
+    def test_unsupported_fixture_layouts_fail_before_a_duplicate_key(self) -> None:
+        cases = [
+            ('workspace = { members = [] }\n', r'no \[workspace\] table'),
+            ('[workspace]\n"exclude" = []\n', 'unsupported spelling'),
+            ('[workspace]\nexclude = ["""vendor/\n[fixture]\n"""]\n',
+             'could not be delimited'),
+        ]
+        for manifest, message in cases:
+            with self.subTest(manifest=manifest):
+                tomllib.loads(manifest)  # Valid TOML can still be an unsupported fixture layout.
+                with self.assertRaisesRegex(AssertionError, message):
+                    _workspace_manifest_with_exclusion(manifest, "tools/oracle")
+
+
+class LintModuleProbeWitness(unittest.TestCase):
+    def test_exact_increment_is_independent_of_repository_module_count(self) -> None:
+        from guards.catalogue import _one_added_lint_path, _record_lint_path_baseline
+        import subprocess
+        for baseline in [0, 3, 41]:
+            box = mock.Mock()
+            text = f"OK: {baseline} `#[path]` module(s) followed"
+            box.run.return_value = subprocess.CompletedProcess([], 0, text, "")
+            _record_lint_path_baseline(box)
+            box.write.assert_called_once_with("probe-shared/baseline-path-count.json", str(baseline))
+            box.read.return_value = str(baseline)
+            for offset in [0, 1, 2]:
+                box.run.return_value = subprocess.CompletedProcess(
+                    [], 0, f"OK: {baseline + offset} `#[path]` module(s) followed", "")
+                result = _one_added_lint_path(box)
+                self.assertEqual(result.returncode, 0 if offset == 1 else 1)
+                self.assertEqual("one additional `#[path]` module followed" in result.stdout,
+                                 offset == 1)
+
+    def test_guard_failure_propagates_and_countless_success_has_no_witness(self) -> None:
+        from guards.catalogue import _one_added_lint_path, _record_lint_path_baseline
+        import subprocess
+        box = mock.Mock()
+        failure = subprocess.CompletedProcess([], 1, "actual guard refusal", "detail")
+        box.run.return_value = failure
+        self.assertIs(_one_added_lint_path(box), failure)
+        with self.assertRaisesRegex(AssertionError, "baseline guard failed"):
+            _record_lint_path_baseline(box)
+        box.run.return_value = subprocess.CompletedProcess([], 0, "OK: no count", "")
+        box.read.return_value = "0"
+        with self.assertRaisesRegex(AssertionError, "did not report followed"):
+            _one_added_lint_path(box)
+
 
 class ExampleDevControlKeepsBackgroundChild(unittest.TestCase):
     def test_the_control_observes_its_background_pid_and_exported_url(self) -> None:

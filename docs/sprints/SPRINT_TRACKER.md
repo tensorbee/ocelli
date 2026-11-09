@@ -222,3 +222,14 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-237 | @ocelli/wasm npm packaging with release preflight tooling | S46 | 1w | not measured | 2026-11-09 |
 | F-239 | Folder viewer colour frames through the library's colour stage | S46 | 12w | not measured | 2026-11-09 |
 | F-240 | Matrix and tone-curve ICC profiles in stage 4 | S46 | 5w | not measured | 2026-11-09 |
+
+## S46 acceptance status correction, 2026-11-09
+
+F-208, F-209, F-212 and F-213 have delivered and reviewed implementation, but their original completion notes explicitly leave numbered final-tree browser observations open. Their current backlog state is corrected to `in-progress`, with reviewed implementation and acceptance pending. `/complete-feature` requires those observations or an explicitly approved scope change. The operator kept the checklist pending, which supplies no observation, waiver or carry decision.
+
+- F-208, AC8 to AC12, final-tree viewport observations.
+- F-209, AC16 to AC20 and AC22, final-tree linking observations. AC21 is an implementation mutation with existing recorded evidence.
+- F-212, AC12, the three scale-bar browser measurements.
+- F-213, AC13, the synthetic CT and MR preset click-through.
+
+All earlier implementation entries, source, reviews, durations and delivery dates remain historical evidence. They do not establish these still-unperformed acceptance rows. No source capability is removed or rescheduled. The existing operator checklist remains the observation procedure.

@@ -4076,22 +4076,36 @@ def _workspace_manifest_with_exclusion(manifest: str, member: str) -> str:
     must retain those exclusions and remain valid TOML, or the probe measures
     the parser's refusal instead of the lint policy it declares.
     """
+    document = tomllib.loads(manifest)
+    excluded = document["workspace"].get("exclude", [])
+    if member in excluded:
+        return manifest
     block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", manifest,
                       re.M | re.S)
-    row = re.search(r"^[ \t]*exclude[ \t]*=[ \t]*(\[.*\])[ \t]*$",
-                    block.group(1), re.M)
-    if row is None:
-        insertion = block.start(1)
-        return (manifest[:insertion] +
-                f"\nexclude = {json.dumps([member])}" +
-                manifest[insertion:])
-
-    excluded = tomllib.loads(f"exclude = {row.group(1)}\n")["exclude"]
-
-    start = block.start(1) + row.start()
-    end = block.start(1) + row.end()
+    if block is None:
+        raise AssertionError("the fixture has no [workspace] table")
+    row = re.search(r"^[ \t]*exclude[ \t]*=", block.group(1), re.M)
     replacement = f"exclude = {json.dumps([*excluded, member])}"
-    return manifest[:start] + replacement + manifest[end:]
+    if row is None:
+        if "exclude" in document["workspace"]:
+            raise AssertionError("the fixture exclude key has an unsupported spelling")
+        insertion = block.start(1)
+        return manifest[:insertion] + "\n" + replacement + manifest[insertion:]
+
+    # Let TOML find the complete value, including multiline arrays, quoted
+    # brackets and comments. A line-shaped regex cannot delimit this value.
+    start = block.start(1) + row.start()
+    fragment = ""
+    for line in manifest[start:block.end(1)].splitlines(keepends=True):
+        fragment += line
+        try:
+            parsed = tomllib.loads(fragment)
+        except tomllib.TOMLDecodeError:
+            continue
+        if parsed == {"exclude": excluded}:
+            suffix = "\n" if fragment.endswith("\n") else ""
+            return manifest[:start] + replacement + suffix + manifest[start + len(fragment):]
+    raise AssertionError("the fixture exclude value could not be delimited")
 
 
 def _member_directories(box: Sandbox) -> list[Path]:
@@ -4581,6 +4595,37 @@ def _a_module_outside_the_member(box: Sandbox) -> None:
                f'\n#[path = "{relative}"]\npub mod probe_shared;\n')
 
 
+def _lint_followed_path_count(stdout: str) -> int:
+    found = re.search(r"\b(\d+) `#\[path\]` module\(s\) followed", stdout)
+    if found is None:
+        raise AssertionError("the lint guard did not report followed path modules")
+    return int(found.group(1))
+
+
+def _record_lint_path_baseline(box: Sandbox) -> None:
+    result = box.run(["python3", "scripts/lint_policy_check.py"])
+    if result.returncode != 0:
+        raise AssertionError("the lint module fixture's baseline guard failed")
+    box.write("probe-shared/baseline-path-count.json",
+              json.dumps(_lint_followed_path_count(result.stdout)))
+
+
+def _one_added_lint_path(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    result = box.run(["python3", "scripts/lint_policy_check.py"])
+    if result.returncode != 0:
+        return result
+    baseline = json.loads(box.read("probe-shared/baseline-path-count.json"))
+    followed = _lint_followed_path_count(result.stdout)
+    if followed != baseline + 1:
+        return subprocess.CompletedProcess(
+            result.args, 1, result.stdout +
+            f"\nFAIL: expected baseline {baseline} plus one path module, got {followed}\n",
+            result.stderr)
+    return subprocess.CompletedProcess(
+        result.args, 0, result.stdout +
+        "\nOK: one additional `#[path]` module followed\n", result.stderr)
+
+
 def _a_clean_module_outside_the_member(box: Sandbox) -> None:
     """The same layout with nothing switched off, which must be accepted.
 
@@ -4588,6 +4633,7 @@ def _a_clean_module_outside_the_member(box: Sandbox) -> None:
     nothing about lint levels on its own, so following `#[path]` must not turn
     the layout itself into a refusal.
     """
+    _record_lint_path_baseline(box)
     outside, relative = _a_module_source_outside_the_member(box)
     box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.append(_a_crate_root(box),
@@ -4627,9 +4673,10 @@ def _a_clean_cfg_attr_module_outside_the_member(box: Sandbox) -> None:
     Rust and says nothing about lint levels, and the guard now resolves the
     file it names and REFUSES a `#[path]` it cannot resolve, so an over-tight
     read of the wrapper would refuse a crate that moves a module behind a
-    feature. The `.rs` file count in the OK line is what proves the file was
-    read rather than skipped: it moves from 46 to 47, measured.
+    feature. The probe compares the actual followed-path count before and
+    after planting this module, independent of the repository's other modules.
     """
+    _record_lint_path_baseline(box)
     outside, relative = _a_module_source_outside_the_member(box)
     box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.append(_a_crate_root(box),
@@ -14184,22 +14231,24 @@ GUARDS: tuple[Guard, ...] = (
                   needs="cargo", profile="deep"),
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
-                  script("python3", "scripts/lint_policy_check.py"),
-                  "3 `#[path]` module(s) followed",
+                  Invoke("lint-policy.one-added-path", _one_added_lint_path),
+                  "one additional `#[path]` module followed",
                   polarity="accept",
+                  control=script("python3", "scripts/lint_policy_check.py"),
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
                        "lint levels, so following `#[path]` must not turn the "
-                       "layout itself into a refusal. The expect fragment "
-                       "carries the COUNT since the S03 review's tenth pass. "
+                       "layout itself into a refusal. Since the S03 review's "
+                       "tenth pass, traversal evidence uses an actual count. "
                        "The OK line named the four keys in a fixed string, so "
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
-                       "The tree follows two `#[path]` modules, `produce` "
-                       "and `held.rs`, so the planted module is the "
-                       "third. The count is the one measured on the F-232 "
-                       "tree.",
+                       "The fixture records the real guard's baseline and "
+                       "requires exactly one additional followed path after "
+                       "planting the module. Other repository modules do not "
+                       "set this expectation. The group-allow companion "
+                       "challenges reading the planted file's content.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -14232,19 +14281,20 @@ GUARDS: tuple[Guard, ...] = (
                   needs="cargo", profile="deep"),
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
-                  script("python3", "scripts/lint_policy_check.py"),
-                  "3 `#[path]` module(s) followed",
+                  Invoke("lint-policy.one-added-path", _one_added_lint_path),
+                  "one additional `#[path]` module followed",
                   polarity="accept",
+                  control=script("python3", "scripts/lint_policy_check.py"),
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
                        "levels, and the guard REFUSES a `#[path]` it cannot "
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
-                       "The count in the expect is what proves the file was "
-                       "read. The tree follows two `#[path]` modules, "
-                       "`produce` and `held.rs`, so the planted "
-                       "module is the third. The count is the one measured "
-                       "on the F-232 tree.",
+                       "The expect witness is emitted only after comparing "
+                       "actual counts. The fixture records the baseline "
+                       "and requires exactly one additional followed path "
+                       "after planting this module. The group-allow companion "
+                       "challenges reading the planted file's content.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
@@ -15062,10 +15112,18 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/guards/catalogue.py",
         gate="guards",
         spec="`.claude/plans/F-X009-design.md` section 2",
-        refuses="A probe builder that mutated nothing, and a fixture drawn "
-                "from a citation that has gone away.",
+        refuses="A probe builder that mutated nothing, a fixture drawn "
+                "from a citation that has gone away, an unsupported fixture "
+                "exclusion layout, or missing successful traversal evidence.",
         claims=("*",),
         covered_by=("scripts/tests/test_guard_catalogue.py",),
+        limit="Fixture exclusion and traversal setup errors are exercised "
+              "directly by WorkspaceExcludeProbeBuilder and "
+              "LintModuleProbeWitness in the named unit suite. They are "
+              "harness preconditions, not additional repository policy. "
+              "The positive traversal probes also require the real guard's "
+              "baseline plus exactly one followed path, and their negative "
+              "companions require the planted file's group allow to refuse.",
     ),
     Guard(
         id="event-catalogue",

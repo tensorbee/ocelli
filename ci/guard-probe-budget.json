@@ -282,7 +282,7 @@
     "bench.tier-startup": 1,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 85,
+    "catalogue": 90,
     "census": 35,
     "census-runbook": 3,
     "ci-floor": 27,
