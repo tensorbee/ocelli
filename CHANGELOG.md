@@ -685,6 +685,7 @@ Repository bootstrap. Nothing is published.
 
 ### Changed
 
+- Shipped native builds now compile no Metal backend and no objc2 crate, proven per Apple target by the resolved dependency graph, and the desktop reports an explicit no-backend result instead of panicking when no backend is compiled. Development builds keep Metal for the tier A gate.
 - Every public options and request object in `@ocelli/core` now refuses an
   unknown key with `OcelliError` code `UnknownOption`, naming the key, before
   any fetch or write. A misspelt option used to be ignored.

@@ -37,7 +37,7 @@
 | F-234 | E3.9 | Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression | Rust | 1w | done |
 | F-236 | E16.7 | acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels | TS | 1w | done |
 | F-237 | E19.6 | The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place | Build | 1w | done |
-| F-238 | E19.7 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | Build | 2w | pending |
+| F-238 | E19.7 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | Build | 2w | done |
 | F-239 | E38.37 | Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name | All | 12w | done |
 | F-240 | E38.38 | Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145 | All | 5w | done |
 | F-243 | E4.13 | JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81 | Rust | 3w | done |
@@ -93,15 +93,9 @@ The operator decided on 2026-11-07 to pull bounded S47 stories forward while imp
 
 ## Questions for the operator
 
-- **F-238 recorded host gaps and owed Linux proof.**
-  AC4's Windows execution and tier report and AC1's Intel Mac build and
-  runtime observation remain unverified for want of those hosts, as the
-  approved plan records. The resolved Intel Mac dependency graph is observed.
-  Linux still requires an actual `ubuntu-latest` native step 6 build and run.
-  The lead's acceptance-stage clarification permits that observation on an
-  authorized qualification ref before completion. Run `42576164087` at
-  `8fdee914` failed before that step, which was skipped. It supplies no Linux
-  acceptance.
+- **F-238 native Metal-free shipped build with the Linux qualification observed.** The shipped native graph resolves no objc2 crate for aarch64-apple-darwin and x86_64-apple-darwin, development keeps Metal for the tier A gate, and step 6 reports an explicit no-backend result instead of panicking. Completed-source CI evidence: run 42635328935, workflow_dispatch attempt 1 on exact head 1d627bd93f0c0e3b44231be9a0f3e76607a8eeb9 on verify/s46-linux-1d627bd9, all seven jobs SUCCESS. The native arm resolves both Apple graphs without objc2 at step 5, compiles the shipped graph in release at step 6, all 15 native steps green, and the tier-report predicate passed, with no Linux tier label, artifact path or binary hash retained. Mac source capability is not Linux host substitution.
+
+  Prior failures remain recorded: runs 42576164087 and 42590597505 failed before native step 6, and c27 run 42607216734 failed at native step 5 on missing locked block2 plus three deep fixture failures with step 6 skipped, repaired at 1d and old results remain failed. Windows AC4 and Intel Mac AC1 beyond cargo-tree are accepted named UNVERIFIED gaps.
 
 - **F-237 qualification CI observation.** The TypeScript job, including
   `gate packages`, passed in that same exact-head run. The overall workflow

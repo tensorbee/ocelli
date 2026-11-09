@@ -2,7 +2,7 @@
 
 **Status**: approved
 **Epic ref**: E19.7
-**Sprint**: S47
+**Sprint**: S46
 **Estimate**: 2w
 
 Story row, `docs/sprints/BACKLOG.md`: "Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate". Layer Build, depends on F-220 and F-233, milestone M20.
@@ -193,3 +193,7 @@ The operator authorized publication of exact `8fdee9143dc09891f5540619dc0ee4cee9
 The separately authorized c27 qualification run `42607216734` passed the repaired workspace test stage. Its Rust job `129126141139` then failed at native step 5 because the offline Apple graph could not download locked `block2 v0.6.2`. Step 6 did not run. This is missing dependency provisioning, not a Linux execution observation or evidence that objc2 reached the shipped graph.
 
 The Rust CI job fetches locked workspace dependencies before Cross-target proof. With no target filter, [Cargo fetch](https://doc.rust-lang.org/cargo/commands/cargo-fetch.html) fetches dependencies for all targets. The existing locked, offline Apple graph check and every native proof step remain unchanged. An unavailable download still fails the job. A new observed Linux run is required after this repair, and the failed c27 run remains recorded.
+
+### 2026-11-09 F-238 Linux qualification, independent CI observation
+
+Workflow_dispatch run 42635328935 attempt 1 on exact head 1d627bd93f0c0e3b44231be9a0f3e76607a8eeb9, branch verify/s46-linux-1d627bd9, completed SUCCESS with all seven jobs SUCCESS (Rust, Guards, Viewer browser, TypeScript, wasm size budget, Corpus tooling, Verification evidence). Rust job 129221862749 on ubuntu-latest passed workspace, JPEG and vendored tests and explicitly fetched block2 v0.6.2, and the native arm ran all 15 steps green, internal step 5 resolving both Apple graphs without objc2 and step 6 compiling the shipped native graph in release in a logged 55.12s. Guards job 129221862595 passed normal (refusal 485, accept 45, controls 127, known open 0) and deep (refusal 546, accept 60, controls 134, known open 0) suites, and the three formerly failing fixtures show their intended outcomes. Prior failed runs 42576164087, 42590597505 and 42607216734 remain recorded failures. The success arm prints no tier report, artifact path or binary hash, so no Linux tier label is claimed and none is invented. Windows AC4 and Intel Mac AC1 beyond cargo-tree remain named unverified gaps. No new waiver. Completion remains root-owned, with final metadata feature verification and the completion commit's actual Ocelli-Verify receipt still required. Primary observation JSON SHA256 6138bd93312037d51c5ec9b183e72b28ac1b0e945da4008e1a9913ba41d7f426, Rust log SHA256 3d804419cc3b3c8bb4e55511c64b7dcafaa3f1906644478d85fe3525c6245c87.

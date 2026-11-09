@@ -222,6 +222,7 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-237 | @ocelli/wasm npm packaging with release preflight tooling | S46 | 1w | not measured | 2026-11-09 |
 | F-239 | Folder viewer colour frames through the library's colour stage | S46 | 12w | not measured | 2026-11-09 |
 | F-240 | Matrix and tone-curve ICC profiles in stage 4 | S46 | 5w | not measured | 2026-11-09 |
+| F-238 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | S46 | 2w | not measured | 2026-11-09 |
 
 ## S46 acceptance status correction, 2026-11-09
 
