@@ -171,3 +171,24 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+## Appended draft refinement, observable controls and lead questions
+
+This draft refinement is retained for the normal pre-implementation design round after independent non-author review. Status stays draft. It maps observable controls to the existing numbered acceptance inventory above and lists remaining lead questions. No existing AC row is rewritten or weakened, and no new policy, rounding, tolerance, equality, refusal, API, dependency, estimate, sprint or status choice is made here.
+
+**Observable controls mapped to existing ACs**
+
+- **AC1.** The same canonical viewer shows image and selected-ROI histograms with literal expected bin counts and labelled modality units, served by `ocelli-geom/src/stats.rs` histogram and region sampling from the active source, frame, viewport and ROI identity. No JavaScript recreation of the provider arithmetic and no detached text or demo panel.
+- **AC2.** Interior bin boundaries, a constant image, padding and an empty valid region are checked against an independent fixture using the existing finite-sample bin, boundary, maximum and constant rules. Existing monochrome sampling excludes padding in STORED space before modality LUT. An extrema-only window consumer cannot rebuild counts, so observation goes through the actual histogram provider.
+- **AC3.** Frame change and ROI edit, delete, close and reopen cancel or discard stale counts before any visible commit, with injected failure before publication followed by retry. Empty and all-padding provider refusal is existing behaviour and stays a refusal that preserves the prior usable view, not a zero-count result presented as new data. If the last valid graph is retained, its association and status are truthful and it is not presented as the current selection.
+- **AC4.** Repeat, pending source, frame and viewport change, release and reopen use the generation-carrying lifecycle, so no stale buffer, settled cache or late reply commits.
+- **AC5.** Existing S46 workflows, including region-window behaviour, remain reachable. Preservation is behavioural, not a literal byte freeze.
+- **AC6.** Tiers A, B and C each produce the declared result or the precise unavailable reason. F-128 GPU compute remains later work and is not required by this story.
+- **AC8.** A changed hot path keeps its existing named benchmark before and after observations. No new performance axis is claimed without an instrument.
+- **Privacy.** Real values appear in the intended local histogram UI. No real values in logs, prompts, errors or telemetry. Synthetic fixtures are permitted for all evidence.
+
+**Remaining lead questions, explicitly unresolved**
+
+- Bin count, bin range and histogram presentation UX, including whether an optional padding tally is visible and how. The padding tally is one observable and not a mandatory new widget or API.
+- Colour and ICC sampling domain and channel scope, with truthful units from the existing modality metadata.
+- Exact retained-graph presentation after ROI deletion, empty region or failed replacement.

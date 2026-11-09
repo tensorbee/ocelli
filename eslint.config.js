@@ -229,6 +229,20 @@ const config = tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // F-227 acceptance helper runs as a classic script in the existing page.
+    // These are its actual browser and page lexical inputs, not new APIs.
+    files: ["tools/bench/export_active_window_check.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        window: "readonly", document: "readonly", URL: "readonly", Blob: "readonly",
+        setTimeout: "readonly", cacheGeneration: "readonly", activeViewport: "readonly",
+        seriesOf: "readonly", seriesWindowJobs: "readonly", currentImage: "readonly",
+        seriesWindowRefused: "readonly", seriesWindows: "readonly", seriesHeader: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {

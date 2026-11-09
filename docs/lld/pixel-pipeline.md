@@ -5,7 +5,7 @@
 `docs/hld/15-lut-chain.md` sections 18 through 18.3, DICOM PS3.3 C.7.6.2,
 C.7.6.3, C.7.9 and C.11
 **F-IDs that contributed:** F-018, F-029, F-030, F-041, F-044, F-046, F-216, F-229, F-239, F-240, F-227
-**Last updated:** 2026-11-08
+**Last updated:** 2026-11-09
 
 Living current-state document. It describes what the code does today.
 
@@ -683,19 +683,13 @@ unit. The unit cube's worst case, a black channel beside two saturated ones,
 reaches about `0.044` of 255. The fixture tolerance is `0.05`, and the
 smallest wrong implementation it must reject moves a row by about `0.31`.
 
-AC12's independent comparison ran against this matrix on 2026-11-08 with
-Little CMS 2.18's `transicc`, reported by the tool as version 5.1 over
-LittleCMS 2.18, run as a host tool only, its source never read. Six of the
-fixture profiles were rebuilt as `.icc` files in Python from the ICC.1:2022
-text (gamma 1.0, gamma `0x0233`, the two-entry table, `para` type 3, the
-colourant swap and the Adobe-like wide gamut), and the same bytes went to
-`IccProfile::parse` and to `transicc -t1 -n -i <profile> -o '*sRGB'`, once
-unbounded and once with `-s`. 22 device rows per profile, nine greys and the
-three primaries at 8 bits and seven greys and the three primaries at 12
-bits, the 12-bit codes mapped to the same device values. A row counts as in
-gamut when every channel of both engines' unbounded replies is inside
-`0 ..= 255`. In gamut, the largest per-channel difference from Ocelli's
-`f32` replies is `0.0055` of 255, at the two-entry table's 12-bit grey 102.
+The surviving, fully retained AC12 comparison is the 2026-11-09 re-observation of product tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`. It uses the current Rust fixture builders, not the recovered historical Python builder. All six actual profile headers encode version 4.4.0.0 as `04400000`. The same profile bytes go through the public `ColorTransform` consumer and the external tool. Each profile has 22 rows, 12 at 8 bits and 10 at 12 bits, giving 132 native triples and 264 references across both modes. Raw decimal tool output and exact native `f32` bits are retained.
+
+All fifteen recorded commands exit 0. Little CMS accepts the six minimal matrix/TRC profiles without adding tags or replacing profiles. The tool is `transicc` 5.1 over Little CMS 2.18, binary SHA-256 `8b54599cdced07536b7a8b882a2a63b508d42351b02433ac33ad244697d8c3eb`. Each invocation is `transicc -t1 -n [-s] -i <exact-profile> -o '*sRGB'`. Device inputs use the 0 to 255 tool scale, with 12-bit codes multiplied by 255/4095 and printed to ten decimal places. Tool, profiles, product inputs and the native test executable remain unchanged through the observation. The native executable SHA-256 is `8b9997a7f06573aea2dfa7088922cad2f5023dc0d2f28376f66405ea539c006c`.
+
+All 264 reference observations remain present, including six unbounded differences above one code. They are the Adobe-like primaries at both depths. The largest is 1312.3506 codes for the red channel of device green: the unbounded reference is negative while Ocelli clips to zero. Each of these six bounded tool replies exactly equals clipping its unbounded reply to 0 through 255. The installed tool's help identifies `-s` as bounded mode that clips negatives and highlights. Ocelli's linear sRGB clipping is the existing approved pass 1 ruling, not a new tolerance or exclusion. This resolves those six flags as a difference in output policy. Across all 132 bounded references the maximum remains 0.3534772098 codes, at Adobe-like red's green channel. The 84 rows whose unbounded replies are in gamut have maximum 0.0055186096, at table2's 12-bit grey 102. The printed-matrix divergence and its non-identity-window consequence below remain open facts under D14. F-271 measures the alternative matrix separately.
+
+The initial new helper failed compilation because it formatted a Debug-only error with Display. It produced no samples and remains a failed instrument attempt. A reviewed one-line private correction preceded this fresh observation. No product source, matrix, expected value or threshold changed. The complete run record SHA-256 is `fd44b6d5e6394a764a82488faa01c059fcc05222a0fc0b5850cb3e494798732b`, and the 264-row observation file SHA-256 is `397d7b49524328179c49a720818086f8b9c125456d6feb071fb92feb4f431997`. Root independently reparsed the native bits and all reference inputs and outputs, recomputed every error and investigated all six flags. This establishes the current comparison observation, with no timing, whole-story completion or alternative-matrix claim.
 
 Under `-s` the largest difference over the whole row set is `0.3535` of 255,
 at the Adobe-like profile's device red row's green channel at 8 and 12 bits

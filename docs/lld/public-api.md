@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231, F-236
-**Last updated:** 2026-11-08
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231, F-236, F-225
+**Last updated:** 2026-11-09
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -31,6 +31,57 @@ rather than restating them. `VIEWPORT_STATE_BYTES` is
 that struct, so the 96-byte readback and its offsets are the layout rather
 than a second description of it. The ring's 48-byte stride and field offsets
 come from `RingEvent` the same way.
+
+## Conformance report reader
+
+The index exports `readConformanceReport(text: string)`, `CONFORMANCE_RULES`,
+`CONFORMANCE_SCOPE` and `SOP_CLASS_NOTES`, and the types
+`ConformanceFinding`, `ConformanceMeasure`, `ConformanceModules`,
+`ConformanceReport` and `ConformanceSopClassNote`. `ReadConformanceResult`
+and `ConformanceRefusal` are not re-exported from the index. The returned
+discriminated union is described inline. It is `{ ok: true, report }` on
+success and `{ ok: false, reason }` on refusal, with `reason` one of
+`json`, `scope`, `rule` and `shape`.
+
+`@ocelli/core` validates the report JSON, not file values. There is no
+TypeScript DICOM checker and no wasm memory access in this path. Invalid
+JSON is `json`. A scope string that is not the catalogue sentence is
+`scope`, and that check runs before findings, so a wrong sentence wins
+over an unknown rule. An unknown rule id is `rule`. Any other mismatch is
+`shape`. `edition` must be a string. It is not forced to `2026d`. No
+promise is made that all extra unknown keys are refused. Each finding's
+`section` is resolved from the catalogue, and the section on the wire is
+ignored. The returned report has `scope`, `edition`, `findings`,
+`modules` and `counts`. The wire `rules` array is not part of it.
+
+`ConformanceModules` is discriminated by `evaluated`. When true it names
+the IOD, table, module list and conditions not checked. When false the
+module presence rules were not evaluated, and value findings can still be
+present. The SOP class selector and its note have the privacy limits
+[described in DICOM ingest](dicom-ingest.md#conformance-report).
+`counts.elements` counts visited elements. `counts.notCheckedUn` counts
+UN elements whose values were not checked.
+
+`crates/ocelli-dicom/tests/conformance_typegen.rs` generates
+`packages/core/src/conformance.generated.ts`, distinct from the boundary
+`generated.ts`. `SOP_CLASS_NOTES` is the closed
+set `not a valid UID` and `not a DICOM UID`. The scope sentence, exactly
+as generated, is:
+
+> This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM.
+
+The rule ids, grouped by family, are:
+
+- Length: `VALUE-LENGTH`, `FIXED-LENGTH` and `BINARY-LENGTH`
+- VR and repertoire: `VR-MISMATCH`, `REPERTOIRE` and `CHARSET-UNDECLARED`
+- Multiplicity: `MULTIPLICITY`
+- Text formats: `AE-SPACES`, `AS-FORMAT`, `DA-FORMAT`, `TM-FORMAT`,
+  `DT-FORMAT`, `DS-FORMAT`, `DS-RANGE`, `IS-FORMAT`, `IS-RANGE`,
+  `UI-FORMAT`, `PN-FORMAT` and `UR-FORMAT`
+- Presence: `TYPE1-ABSENT`, `TYPE1-EMPTY`, `TYPE1C-ABSENT`,
+  `TYPE1C-EMPTY`, `TYPE2-ABSENT` and `TYPE2C-ABSENT`
+
+The generated file is the authoritative list, not this section.
 
 ## The boundary wire this file documents
 

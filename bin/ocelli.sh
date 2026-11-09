@@ -237,7 +237,8 @@ run_gate() {
                    tools/bench/tests/comparison_page_test.mjs \
                    tools/bench/tests/comparison_run_test.mjs \
                    tools/bench/tests/comparison_sampler_context_test.mjs \
-                   tools/bench/tests/comparison_colour_test.mjs ;;
+                   tools/bench/tests/comparison_colour_test.mjs \
+                   tools/bench/tests/export_active_window_check_test.mjs ;;
     provenance)  python3 scripts/source_provenance_check.py &&
                  python3 -B -m unittest discover -s scripts/tests \
                    -p test_source_provenance_check.py ;;

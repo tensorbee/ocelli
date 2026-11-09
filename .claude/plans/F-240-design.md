@@ -327,3 +327,19 @@ comparison, amend AC14, change a tolerance or call improvements within noise.
 It removes two known differences but does not isolate every remaining product
 change as ICC cost. Any substitution for AC14 remains a separate explicit
 plan decision.
+
+
+### Lead ruling, explicit colour census declarations, 2026-11-09
+
+The first post-citation oracle gate reached the reference identity comparison and failed its coverage census. Eleven newly added synthetic colour views were correctly unmeasured under existing D-16 but absent from the declared inventory. The four compressed YBR views and saturated RGB reference belong to F-239. The six RGB ICC views belong to F-239 and F-240. Every one is absent from the canonical pre-integration manifest and has three components with eight stored bits in the actual reference sidecar. No previously scored view is demoted.
+
+The lead adopts an explicit addition of those eleven identifiers with only `unstated-threshold` to `tools/oracle/compare-expectations.json`, subject to independent review like a tolerance change. All 48 prior entries and qualifiers remain unchanged. This applies the approved unscored-colour scope and existing HLD 25.1/D-16, with no new metric, numerical tolerance, class rule, pixel gold, gate bypass or passed-colour claim. It does not absorb an unexpected scored failure. The exact identifiers, provenance and review are recorded in the existing feature review series. The failed gate remains failed. The corrected tree must pass the actual identity and mutation consumers and a fresh named oracle gate before a passing receipt is recorded. Native candidate parity remains a separate production comparison.
+
+
+### Lead ruling, untagged reductions satisfy non-regression, 2026-11-09
+
+The original literal phrase "within its noise" is not met by the large observed reductions. Under the operator's direction to avoid making the system slower and the normal design authority of this run, the lead adopts the following independently reviewed clarification. The literal story base and all observations remain intact. The required first-image repair is complete within every existing monochrome band and absolute limit, with no exception.
+
+> AC14's untagged colour non-regression clause accepts the measured reductions against the literal F-239 base as non-regression. Record the actual observations as reductions, without calling them within noise. Preserve all original and normalized-control data and their distinct roles. All monochrome limits, registered baseline bands, budgets, sample counts, gates and pixel tolerances remain unchanged. This disposition supplies no colour pixel parity, isolated ICC cost, other acceptance row, operator check or sprint closure.
+
+Current RGB8 first request and window median are 2171.469/2699.735 ms against literal-base 4955.386/4728.307 ms. Palette16 is 2503.991/3087.126 ms against 19287.031/19257.557 ms. These combined-stack observations include the palette-validation and exact-byte-store changes and do not isolate ICC cost. Their shared fixture and measurement helper hashes agree. The original raw SHA-256 is `61c638f921c418c6a19dbe3207c2930ec28ad6f7d81e6b7c33d21897c576f4fd`, current `6f32db8e4cc0b525a28c95bb973747973ae9bed1a774440300d13bcfaeabd3c4`. Independent factual and authority review is retained with the feature evidence. The earlier proposal's extra operator-condition wrapper was not adopted. This ruling applies only to untagged reductions against the literal base, with no substitution by the normalized control. Genuine Cornerstone target misses and the separate incompatible JPEG-LS host remain separately qualified.

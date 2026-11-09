@@ -119,7 +119,12 @@ function firstOrNull(values) {
 function readAttributes(bytes) {
   let dataSet;
   try {
-    dataSet = dicomParser.parseDicom(bytes);
+    // Only metadata below (7FE0,0001), including 5200 functional groups,
+    // is queried here. PS3.5 7.1 orders those tags before the EOT. The pinned
+    // parser misreads OV's long length, so stop at that exact bulk-data tag.
+    // Its sentinel value is unused. Files without EOT retain the full parse,
+    // and earlier parse errors still refuse below, without partial recovery.
+    dataSet = dicomParser.parseDicom(bytes, { untilTag: "x7fe00001" });
   } catch (error) {
     return { attributes: null, error: String(error?.message ?? error) };
   }

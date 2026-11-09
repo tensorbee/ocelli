@@ -1,7 +1,7 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-227, F-239, F-240
-**Last updated:** 2026-11-08
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-224, F-225, F-227, F-239, F-240, F-243
+**Last updated:** 2026-11-09
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -468,6 +468,19 @@ the frame in regular mode, which is the defect rather than a speed-up.
 in has no benchmark browser installed, and on this host class it would report
 incomparable. `ci/bench-baseline.json` is unedited and the comparison is owed.
 
+A later serial four-row observation on the same Darwin 27 host is retained separately. Each base and tip command used the release runner with one warm-up followed by 31 samples of four decodes. All eight commands exited 0. The base lossless range, 0.1532 to 0.6489 ms, was broad, so these observations do not establish a stable speedup. Independent CharLS pixel checks qualify each row.
+
+| Synthetic row | Later base ms | Later tip ms | Pixel qualification |
+| --- | ---: | ---: | --- |
+| lossless | 0.2581 | 0.1188 | Both exact CharLS |
+| near lossless | 0.1092 | 0.1020 | Both exact CharLS, within NEAR |
+| banded lossless | 0.1014 | 0.0091 | Base invalid, tip exact CharLS |
+| banded near lossless | 0.1098 | 0.0089 | Base invalid, tip exact CharLS |
+
+The two banded base times measure incorrect work. Those pixel checks do not show that the separate ramp cases or the immutable historical baseline decoded incorrectly. Eleven named current adapter, provider, runner and fixture payloads match the measured `0c327dd72326758516ec8bda41687554486311be` source byte-for-byte at current tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`. This source binding does not prove an identical full dependency graph, compiler output, binary or current timing.
+
+The registered comparison subsequently ran and recorded 0.1215 ms, with verdict `incomparable`. Darwin 27 differs from recorded Darwin 25.5.0, and observed Node 26.6 with null Chromium also differs from recorded Node 24.13.0 with Chromium 151. Numerical inclusion within 0.1156 plus or minus 15 percent is context, not an AC13 pass. Host labels, baseline and band are unchanged. A matching host and instrument observation and the idle-host qualification remain owed, pending an explicit approved disposition. No formal completion is claimed here. Primary receipts and raw identities are retained under the local F-243 acceptance handoff.
+
 Paired spike release wasm modules were 222,226 bytes with upstream defaults
 and 222,166 bytes with the no-Rayon manifest patch, a 60-byte reduction.
 Dependency graph absence and linked binary size are separate evidence.
@@ -716,6 +729,18 @@ figures of record are measured at sprint close on an idle host and kept in a
 surviving run file. The implementer's runs during the story are informational
 only, taken on a loaded host.
 
+F-227's sampled-frame preview cost was observed separately on 2026-11-09. Three fresh release servers each received the existing 267-file synthetic no-window PET workload. The default cache was 256 MiB. `/held` reported zero decoded frames before and after `/series-window`. The first preview of sampled frame 0 reported `decoded`, and the identical next request reported `held`. Bodies and frame, dimensions and window headers matched, including the exact series-window strings sent.
+
+| Pair | Second-decode-inclusive preview ms | Held preview ms | Difference ms |
+| --- | ---: | ---: | ---: |
+| 1 | 1.055917 | 0.645625 | 0.410292 |
+| 2 | 1.094375 | 0.670916 | 0.423459 |
+| 3 | 1.006416 | 0.645083 | 0.361333 |
+
+These are informational monotonic HTTP request-to-complete-body durations, including scheduling, cache, rendering and transport. Fixed decoded-then-held order conditions the observations. They do not isolate decoder CPU cost, establish idle-host timing or replace the registered PET first-image observation. No threshold was introduced. The single invocation exited 0. All three owned servers stopped, and the observation procedure, binary and all 267 copied input hashes remained unchanged. The release binary matches root's source-0fad producer receipt. Historical progress-only 1.25/0.88 ms remains a separate observation with unrecovered primary evidence.
+
+F-227's independent AC16 acceptance instrument is now [the pydicom calculator](../../tools/bench/auto_window_reference.md), paired with [the private viewer-order export helper](../../tools/bench/export_active_window_check.md). It compares exact binary32 window strings from an independently sampled pool. The standalone helper downloads local caller input and adds no product control or endpoint. Its one cached route observation is separate from manual first/middle/last, scrolling and labels. The explicit Python suite contains 42 synthetic controls. The 11 VM controls run in the benchmark gate through both registered runner lists. Actual native and Chromium download/CLI composition checks remain separate. They establish instrument readiness, not the still-owed actual-study or idle-host observations.
+
 Playwright's `postDataBuffer` is empty for these fetch bodies. The window
 subject also records the byte length of the body the page passes to `fetch`.
 A preview body that is not empty fails the run. After the timed steps the
@@ -723,6 +748,48 @@ same subject asks for one more id-form preview and compares sixteen canvas
 pixels with that reply. A listener started after the draw does not see the
 reply that already arrived. The restart step clears the page grey cache
 before the next key, so the stale id is sent and the file is posted again.
+
+### F-225 conformance-route observation
+
+On 2026-11-09, Node 24.13.0 recorded 27 native HTTP observations on two fresh release servers at the default 256 MiB cache. Producer tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`, binary `85b4baaf65f5fe139dc9cc4f8e93a8bc1b5b400607103989f23175fc8fce082a`, and measured index `435a0ad410546550a11ad7f4b501e81be8039e63` are separately bound. Source, sent fixtures, helper, reader and binary identities matched before/after. Both owned servers stopped. Failed or incomplete observations invalidate medians.
+
+| Route | N | Median ms | Range ms |
+| --- | ---: | ---: | --- |
+| CT encoded-held ID200 control before preview | 9 | 0.382875 | 0.239208 to 0.841167 |
+| CT after untimed preview, ID410/body200 | 9 | 0.535041 | 0.476291 to 0.609709 |
+| DX after untimed preview, ID410/body200 | 9 | 4.779375 | 4.641583 to 7.369375 |
+
+All 45 legs remain, with no discarded warmup. Each fixture was posted once. The fallback sends its body directly without reposting `/file`. Page report caching normally deduplicates requests, while this instrument repeats each stratum nine times.
+
+The clock spans ID request through complete final JSON. Each leg is fully drained, with artifact I/O and validation outside timing. The keepalive Agent uses maxSockets 1 per fixture, without guaranteeing socket reuse. Browser fetch does not explicitly drain 410 similarly. These are native-route figures, not exact browser latency, isolated checker CPU, idle-host or whole-AC34 evidence. Image benchmarks remain separate. No latency threshold applies.
+
+Table values are rounded. Raw SHA256 `4033f47912aeea582325460e43fa9987eae22597af033b2f4f49c9ff23f312f4`.
+
+### Current colour comparison cost distinctions
+
+These controlled synthetic observations record the F239 AC32 and F240 AC16 target comparisons. They do not establish colour pixel parity, clinical representativeness or isolated causal costs. The informative calibration is CT only. Ocelli applies ICC while cornerstone draws device RGB.
+
+The table gives Ocelli minus cornerstone median milliseconds. N is 9 per cold/warm timing and 9 window steps. A dagger marks overlapping IQRs, including touching endpoints: no demonstrated difference at this N under F223 AC6. It does not erase the numerical comparison or claim the target met. All IQRs, extrema and raw record hashes remain in [the saved comparison summaries](../benchmarks/s46-colour-comparison.json).
+
+| Case | Open cold/warm delta | First cold/warm delta | Window delta |
+|---|---:|---:|---:|
+| rgb8 | +39.8 / +42.8 | -9.9 / -7.6 | +2.2† |
+| ybr422 | +36.5 / +35.6 | -1.8† / +2.4† | +0.3† |
+| palette16 | +45.8 / +45.4 | +8.7 / +7.4 | +16.9 |
+| icc8-gamma22 | +71.5 / +63.0 | +4911.7 / +4983.7 | +6714.4 |
+| icc16-table | +144.5 / +143.5 | +5065.2 / +5011.7 | +6946.6 |
+
+Twenty-two latency medians are numerically above the comparator: 19 have separated IQRs and 3 overlap. Every case has higher open medians. RGB8 first-image medians are below with separated spreads. YBR422 first-cold is below with overlapping spreads.
+
+The source shows different work placement. Ocelli redraws the complete colour frame in native CPU bands, transfers its three-channel byte response over loopback, expands RGB to RGBA and publishes ImageData on a 2D canvas. The comparator updates VOI properties on its retained WebGL viewport and renders. No backend/HTTP/canvas/GPU partition was measured, so quantitative attribution remains unisolated. Internal avoided texture-upload savings are not established by the consumer excerpt.
+
+ICC recipe and device tables are retained per held frame, while channel lookups, matrix arithmetic and sRGB encoding execute per pixel per draw. Changed windows add a VOI pass that the initial identity window skips. That difference does not prove why window medians exceed first-image medians, and does not indicate table rebuilding.
+
+Open ends at the first rAF after header grouping and the series sentence. First-image starts at that sentence, so intervals may overlap. Later draw-path excerpts do not isolate the open excess. Its specific quantitative cause remains unknown.
+
+All 10 memory medians have no observed target miss, with N=3 sessions. Sampled concurrent physical footprint is a lower bound. Summed noncoincident process peaks are a separate upper bound. Neither establishes true simultaneous peak dominance. These target observations and unresolved attribution remain recorded, not converted to a blanket pass.
+
+The saved summaries bind each matrix to its raw SHA-256, measurement index, producer binary, benchmark page and comparator. All five commands exited 0. Product source is tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`, measured index is `a601d30620b727abda7225b3b215dea76e31d358`, and the binary is the same release recorded above. The controlled recipes use 200 frames of 512 square for RGB, YBR and palette, and one 8192-square frame for each ICC case, with a 512 MiB server cache for ICC16. These equipped browser comparator observations remain separate from the registered native four-case HTTP workload. No numeric target or baseline was changed.
 
 ## What is deliberately absent
 
@@ -750,6 +817,8 @@ those axes.
 
 
 ## Local viewer comparison, F-223
+
+The current [generated comparison](../benchmarks/cornerstone-comparison.md) is a controlled synthetic instrument observation on 2026-11-09, not the operator-study acceptance. Its historical metric labels `pseudo-full`, `pseudo-ct` and `pseudo-dx` contain 201, 200 and 1 controlled files. The approved actual-root run, AC18/AC19 and decision 12 remain owed. The direct command exited 0 in 232.442 seconds with producer tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4` and the release binary recorded above. Independent review reconstructed all 44 statistic cells and 31 report rows. Raw SHA-256 is `30121e5b223951c6aeb635376b6373ac1079fdda3a4ed153ed51342fa10a806b`. No synthetic input is substituted for the required operator study.
 
 `bin/ocelli.sh bench --compare-cornerstone --pseudo <local-root>` runs the two
 local viewers with the same pinned full Chromium build and real inputs. It
@@ -883,17 +952,14 @@ Each first request decodes, and each following window request uses the held
 frame. Nine complete window replies per case were checked against literal
 hand markers. These are native HTTP observations, not browser frame rates.
 
-The integrated source tree is `c1fe30375cdd8d8a0767ff7a941fe2fc4d80dd06`.
-Node 24.13.0 ran the registered instrument. Its release binary SHA-256 is
-`b32c96cf33a3c719b49150b98040db4ffce8a02f82fe0e8e724be51ddaac2d59`.
-No threshold was introduced.
+The current observation uses measurement index `a601d30620b727abda7225b3b215dea76e31d358`, with product source from verified tree `0fad23dfbd206135c1dfd51d1123e04df2b79bf4`, HEAD `d34d9baff2477fae9f98e904dae643a4edcbb5f5`. The index differs only by the generated default comparison pair. Node 24.13.0 ran the unchanged registered instrument. Its release binary SHA-256 is `85b4baaf65f5fe139dc9cc4f8e93a8bc1b5b400607103989f23175fc8fce082a`. The direct command ran from 01:51:38 to 01:54:50 UTC on 2026-11-09 and exited zero in 192.331 seconds. The generic run record's `started` field is its record-assembly timestamp, so command times come from the direct receipt. No threshold was introduced.
 
 | Input | First request ms | Median of nine window requests ms | Window range ms | Peak native RSS bytes | RSS samples |
 | --- | ---: | ---: | --- | ---: | ---: |
-| rgb8 | 2231.128 | 2751.412 | 2709.600 to 2838.806 | 614203392 | 1247 |
-| palette16 | 2577.263 | 3128.093 | 3112.358 to 3145.082 | 484638720 | 1421 |
-| icc8 | 6190.263 | 6685.115 | 6666.811 to 6701.147 | 614236160 | 3057 |
-| icc16 | 6458.714 | 6817.156 | 6783.150 to 6838.736 | 1017888768 | 3129 |
+| rgb8 | 2171.469 | 2699.735 | 2641.377 to 2728.456 | 614170624 | 1221 |
+| palette16 | 2503.991 | 3087.126 | 3055.817 to 3182.705 | 484605952 | 1391 |
+| icc8 | 6080.290 | 6567.662 | 6547.578 to 6579.278 | 614187008 | 3000 |
+| icc16 | 6369.414 | 6748.776 | 6737.565 to 6766.356 | 1017839616 | 3088 |
 
 Every RSS series has positive samples and zero collection failures. The
 held-cache budget is 256 MiB except for the explicitly declared 512 MiB ICC16
@@ -923,7 +989,8 @@ The records retain every sample and exact build identity. Raw run SHA-256:
 
 - Before hoist: `631c8f5d7cc703494f7c8f4609054832a1dc03cbca65491402a32beb01c6a38e`.
 - After hoist, Node 26: `e3886ccbecccaa3987d60ec6e8d005c716b009c9e640e83cdb81996d6326cd64`.
-- Current byte store, Node 24: `3b5fc0eb00d6173d45792745c91f4c110f64bdc84b351abcce19ea85051f48a9`.
+- Earlier assembled byte store, Node 24: `3b5fc0eb00d6173d45792745c91f4c110f64bdc84b351abcce19ea85051f48a9`.
+- Current source, Node 24: `6f32db8e4cc0b525a28c95bb973747973ae9bed1a774440300d13bcfaeabd3c4`.
 
 The equipped Cornerstone comparison and the declared monochrome regression
 runs remain separate acceptance observations. No relative cost claim follows
@@ -1010,7 +1077,10 @@ and cost of the combined stack on untagged frames. They do not isolate the
 cost of adding ICC support. Other agent builds and browser jobs were held,
 while external desktop activity remained, so no fully idle host is claimed.
 These measured untagged cases improve on the pre-ICC observations. The
-separate monochrome relative-band misses remain open and are not waived.
+earlier monochrome relative-band misses remain preserved. The later remediation
+restores all five registered bands, as recorded below.
+
+The current release re-observation above retains the same two untagged fixture and measurement helpers. It records RGB first 2171.469 ms and window median 2699.735 ms, palette first 2503.991 ms and window median 3087.126 ms, against the literal pre-ICC observations above. These are observed reductions, not values called within noise. The independently reviewed lead ruling in F-240 accepts these measured reductions as non-regression, while retaining that the literal noise wording was not met. The supplementary normalized control remains diagnostic and does not replace the story base.
 
 Pre-ICC raw run SHA-256:
 `61c638f921c418c6a19dbe3207c2930ec28ad6f7d81e6b7c33d21897c576f4fd`.

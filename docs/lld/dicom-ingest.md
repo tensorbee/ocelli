@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211, F-234
-**Last updated:** 2026-11-07
+**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211, F-234, F-225
+**Last updated:** 2026-11-09
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -186,6 +186,89 @@ constructor.
 typed value for PS3.18 F.2.5. It retains total multiplicity and ordered null
 positions without weakening the existing value constructors. SQ nulls and
 binary carriers cannot use the wrapper.
+
+## Conformance report
+
+`ocelli_dicom::check_conformance(&ParsedDicom)` produces the report, and
+`to_json` owns its wire form. The check is advisory and on demand. It runs
+after a successful parse, performs no decode, and never gates image
+display. Producing a report in the browser would need a wasm build that
+links the parser, and this build does not supply one. Measurements are
+recorded in [the benchmark LLD](benchmarks.md).
+
+The rule catalogue is produced by
+`crates/ocelli-dicom/tests/conformance_typegen.rs`, which writes
+`conformance.generated.ts` into `packages/core/src`. That file is distinct
+from the boundary `generated.ts`. The VM source is `conformance/vm.rs`, 47
+tags transcribed from PS3.6 2026d Table 6-1. It is not the full PS3.6
+dictionary, and it is cross-checked against the dictionary VRs. Encoded UN
+content is counted and is not value checked. The
+[public report reader](public-api.md#conformance-report-reader) lists the
+rule identifiers by family. `DS-RANGE` names the binary64 range limit, not
+a violation of the decimal-string grammar.
+
+The report carries this exact `CONFORMANCE_SCOPE` sentence:
+
+> This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM.
+
+Module presence covers Patient, General Study, General Series, General
+Image, Image Plane, Image Pixel and SOP Common for the four IODs below.
+Classic CR Image Storage has six, all but Image Plane. Classic CT, MR and PET Image Storage
+have all seven. Other SOP classes, including the Enhanced variants, do not
+evaluate module presence. Their value, VR and limited VM rules still
+apply. This is not full DICOM conformance.
+
+The decidable 1C and 2C conditions are the ones the approved plan names.
+`PlanarConfiguration` when `SamplesPerPixel` is greater than 1. The six
+palette elements for PALETTE COLOR. `PixelData` when `PixelDataProviderURL`
+is absent. The EOT lengths when EOT is present. `SpecificCharacterSet`
+when relevant text uses the expanded or replacement repertoire.
+`PatientPosition` for CT and MR when (0054,0410) is absent.
+`PatientOrientation` for CR. Not checked are `Laterality`, `ContentDate`
+and `ContentTime`, `AnatomicalOrientationType`, `PixelAspectRatio`,
+`PixelPaddingRangeLimit` and the `PixelDataProviderURL` condition itself,
+plus the nonhuman, alternative calendar, deidentification, encryption,
+HL7, `QueryRetrieveView` and conversion rows. The distinction matters. An
+absent URL decides `PixelData`, while the condition that requires a URL is
+not decided.
+
+A finding carries tag, keyword, path, rule and section, with an optional
+value ordinal and an optional measure. It never carries the original
+attribute value, a substring of it or a character code from it. `path` is a
+list of sequence steps. Each step's `item` and a finding's `value` are
+1-based item and value ordinals, not contents. A character measure carries
+a 0-based `index` and a character `class`. Retained numeric lengths and
+counts are actionable. The module scope of an unevaluated SOP class may
+repeat a well-formed UID under the DICOM root. Invalid UIDs and UIDs
+outside that root are not repeated. The field is null with a closed note, or just null
+when absent or empty. This selector is separate from a finding's value
+ordinal and does not permit arbitrary attribute contents in findings.
+
+`POST /conformance` accepts the original raw Part 10 body, or an
+`X-Ocelli-File` id with an empty body. Both together are a 400. An unknown
+id, or one whose encoded bytes have retired, answers 410. Bytes that are
+not Part 10 get the
+refusal `/headers` gives. The route performs no decode and touches no held
+frame. Encoded bytes can retire after decode, for CT and DX alike, while
+the decoded held frames remain. The viewer asks with the id first. On 410
+it retries once with the original File as the `/conformance` body. It does
+not repost to `/file` and does not create a new held id.
+
+The page asks for the report of the file the active viewport shows once
+that file has stayed stable for 300 ms. Delayed background requests wait
+during file posts and thumbnails. One request is in flight at a time. Reports are cached
+against the File object, not against a retired native id, at most 512 per
+folder, oldest dropped first. A new folder resets the cache, and replies
+from a stale generation are dropped. A sheet open can request immediately.
+Findings never gate display. The badge stays hidden until the shown file
+has findings above zero, and an absent badge is not a conformance
+certificate. A missing library build shows:
+
+> The checks need the library build. Run npm run build in the repository, then start the viewer again.
+
+If the library entry is served but the library cannot load, it shows:
+
+> The checks need dcmjs, which the library imports. Run npm ci in the repository, then start the viewer again.
 
 ## Derived frame geometry
 

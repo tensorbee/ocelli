@@ -783,3 +783,10 @@ effects under other windows. Actual native and wasm checks, candidate
 observations and the source-independent review remain required before
 completion. This repairs the declared arithmetic rather than changing
 a tolerance or substituting the textbook inverse.
+
+
+### Lead ruling, explicit colour census declarations, 2026-11-09
+
+The first post-citation oracle gate reached the reference identity comparison and failed its coverage census. Eleven newly added synthetic colour views were correctly unmeasured under existing D-16 but absent from the declared inventory. The four compressed YBR views and saturated RGB reference belong to F-239. The six RGB ICC views belong to F-239 and F-240. Every one is absent from the canonical pre-integration manifest and has three components with eight stored bits in the actual reference sidecar. No previously scored view is demoted.
+
+The lead adopts an explicit addition of those eleven identifiers with only `unstated-threshold` to `tools/oracle/compare-expectations.json`, subject to independent review like a tolerance change. All 48 prior entries and qualifiers remain unchanged. This applies the approved unscored-colour scope and existing HLD 25.1/D-16, with no new metric, numerical tolerance, class rule, pixel gold, gate bypass or passed-colour claim. It does not absorb an unexpected scored failure. The exact identifiers, provenance and review are recorded in the existing feature review series. The failed gate remains failed. The corrected tree must pass the actual identity and mutation consumers and a fresh named oracle gate before a passing receipt is recorded. Native candidate parity remains a separate production comparison.

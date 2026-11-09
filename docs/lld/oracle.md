@@ -1,8 +1,8 @@
 # The oracle, reference half
 
 **F-IDs that contributed:** F-010, F-012, F-013, F-014, F-X006, F-X007, F-X008,
-F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229, F-244
-**Last updated:** 2026-11-08
+F-X009, F-X012, F-X013, F-X003, F-026, F-X021, F-229, F-239, F-240, F-244
+**Last updated:** 2026-11-09
 
 HLD section 11 names cornerstone3D as the reference the differential harness
 measures against, and decision D7 makes the oracle the thing that exists before
@@ -1176,6 +1176,22 @@ rather than adding a second one. The claim that matters about that tag is that
 it is ABSENT from every member of both synthetic series, and
 `check_sidecars.py` asserts that directly against the files under pydicom, which
 is where an absence can actually be checked.
+
+## Current oracle evidence, 2026-11-09
+
+Root executed the source repair at staged tree `d73cc1a8e53af777a767ca3f8de47f40ca29e2d6`. The reviewer independently inspected the three approved file objects and retained synthetic metadata and results, and did not run hardware.
+
+**Reference identity.** The current reference named oracle exited 0 in 170.431266292s with 29 mutation controls and zero undetected. The original old-reference/new-truth semantic control exited 1 in 2.778195667s, with 133 views, 74 pass, 1 fail, 58 unmeasured and 0 absent. Its sole failure is the EOT view at the metadata-truth rung, answered before pixel bytes were read, and the retained old sidecar has `attributes: null`. Six metadata-fixture cases passed separately. Separately executed File Meta merge and shared-FG stop implementation mutants are not claimed. Before/after run records preserve all source-row identities and all 133 digest values, including nine null refusal hashes. All 133 non-null rendered digests agree across 124 source images plus nine volume reformats, and manifest and render-parameter identities agree. This compares retained digest evidence, not unretained old raw pixel bodies. The EOT sidecar's changed metadata hash is `8b4ebea4ca67bbea39ddf7c9497d7d1b194693afb1982758e10acf8d357ebca9`.
+
+**Current native candidate.** This is the production candidate comparison, separate from reference identity. Candidate produce exited 0 in 7.783573167s with 133 written, zero omitted and nine declared unsupported inputs. The actual candidate gate exited 0 in 3.327361208s with 133 views, 74 pass, 0 fail, 59 unmeasured and 0 absent. The EOT view is present and unmeasured solely for its existing weak-content qualifier. Unmeasured is not a pass, and weak content is not inflated into scored pixel parity.
+
+**Narrow EOT metadata prefix fix.** Pinned MIT dicom-parser 1.8.21 mishandles OV long VL. Reference `readAttributes` now calls exactly `parseDicom(bytes,{untilTag:'x7fe00001'})`, stopping at the top-level Extended Offset Table before value traversal, with FileMeta merged after the normal prefix return. All 31 queried attributes and FG selectors precede EOT, max `x52009230`, and nested SQ parsing does not forward the top-level stop. Earlier parse errors remain refusal/null, with no `error.dataSet` recovery, no Ocelli metadata substitution, no dependency patch and no generic OV support. The bulk-data tail is not validated by this. Ordinary files without EOT retain traversal. One explicit truth entry, `syntax/j2k_lossless_multiframe_eot.dcm`, asserts 17 generator facts including the `.90` transfer syntax, 64x96, 3 frames, mono16, shared rescale 1/0 and VOI 40/400/LINEAR, and existing truth entries are unchanged. The EOT sidecar now carries 17 generator-derived truth fields with five shared-FG source pointers and no attributes error.
+
+**Eleven explicit class-two colour census additions, no threshold.** The existing 48 entries and qualifiers are byte-identical, and 59 entries are declared after exactly 11 additions, each with the sole `unstated-threshold` qualifier, so no prior pass is demoted. All 11 synthetic rows are new since canonical `7f6a3e908eac21b2959bd5a1ad255bf4f3cbac8d`, with 8 stored bits and 3 components: `syntax__htj2k_lossless_ybr_rct`, `syntax__htj2k_lossy_ybr_ict`, `syntax__j2k_lossless_ybr_rct`, `syntax__j2k_lossy_ybr_ict`, `syntax__reference_rgb8_saturated`, `synthetic__sc_rgb_icc`, `synthetic__sc_rgb_icc_gamma1`, `synthetic__sc_rgb_icc_gamma22`, `synthetic__sc_rgb_icc_lut`, `synthetic__sc_rgb_icc_srgb_para`, `synthetic__sc_rgb_icc_swap`. HLD 25.1 supplies no colour perceptual metric or threshold, and D-16 and the approved F239 unscored scope require observations/unmeasured, not pass. F240 does not claim Cornerstone applies ICC. No numerical policy, tolerance, pixel gold, CSV or gate bypass changed. Root's dated 11-09 lead rulings in both plans and the tracked `F-239-F-240-oracle-census-pass-1` review approve the census amendment subject to actual identity, mutation and named consumers, now run. Existing colour/ICC differences remain observations, not scored colour parity.
+
+Receipts under `/private/tmp/ocelli-s46-codex`: `f244-eot-prefix-repaired-oracle.json/log`, `f244-eot-prefix-current-candidate-produce.json/log`, `f244-eot-prefix-current-candidate-gate.json/log`, comparison `f244-eot-prefix-current-candidate-comparison/compare.json`, and `reference-frame-stability.json` under `f244-eot-reference-metadata-remediation`.
+
+These results support the narrow metadata-prefix repair and restore the missing candidate observation. The dated F-244 observation below remains a historical record. Formal acceptance, the final verification profile and sprint closure remain separate.
 
 ## F-244 empty-table reference observation
 

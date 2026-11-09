@@ -16218,6 +16218,31 @@ GUARDS: tuple[Guard, ...] = (
 
     # -- declared out of scope, with the reason -----------------------------
     Guard(
+        id="bench.auto-window-reference",
+        file="tools/bench/window_reference.py",
+        gate="-",
+        spec="F-227 AC16 and its approved finite-binary32 reference clarification",
+        refuses="A missing or non-finite excluded maximum, invalid percentile "
+                "endpoints, an overflowing initial window, or a bounded "
+                "candidate search with no verified window.",
+        claims=("unverifiable-window", "empty-or-nonfinite-pool",
+                "invalid-percentiles", "nonfinite-window"),
+        covered_by=("tools/bench/tests/test_auto_window_scalar.py",),
+        kind="not-a-guard",
+        owner="F-227",
+        reason="An offline independent acceptance calculator invoked by the "
+               "operator procedure tools/bench/auto_window_reference.md, "
+               "not a repository verification gate. Its permanent synthetic "
+               "scalar controls run through the explicit local command "
+               "`.venv/bin/python -m unittest discover -s tools/bench/tests "
+               "-p 'test_auto_window_*.py' -v`. No floor or CI execution of "
+               "that NumPy and pydicom dependent command is claimed. All four "
+               "closed refusals have exact permanent assertions, including "
+               "hand-derived finite search exhaustion. Actual study "
+               "comparison and manual browser observations remain separate "
+               "operator acceptance, never a census result.",
+    ),
+    Guard(
         id="bootstrap-importer",
         file="scripts/import_backlog_xlsx.py",
         gate="-",

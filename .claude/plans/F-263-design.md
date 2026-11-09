@@ -176,3 +176,20 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+
+## Reviewed draft refinement
+
+Additive to the F-263 draft only. Status, sprint, estimate and dependencies stay unchanged. No implementation, acceptance, new API, policy, math or tolerance is selected.
+
+Same-viewer consumer controls:
+
+1. Inventory implemented library providers and reachable canonical-viewer controls, including missing links, and record each required create, edit, select, delete, undo and export route with independently expected geometry. A registry entry, serializer or display list is not a per-tool control.
+2. Keep current not-saved status truthful for angle, Cobb, bidirectional, arrow and probe. That honest scope never waives the approved export and action acceptance. Any deliberate exception needs an explicit reviewed disposition.
+3. Send a measurement request and observe it carries file and frame identity alongside shape and points. Shape alone is not privacy proof, and fixed refusals expose no patient fields or metadata in logs.
+4. Match a revision guard, then change folder, source and viewport during pending requests. A matching revision alone proves neither folder nor viewport safety, and no stale value or mark is committed.
+5. Read out a measurement under changed display windowing. Patient-mm, detector-plane-mm and pixel labels stay preserved and quantitative values do not follow display changes.
+6. Exercise pointer, keyboard, touch and a deliberate binding conflict, plus selection, lock, visibility, editing and undo across two viewports of the same image. Invalid geometry preserves the prior usable state.
+7. Observe each tier A, B and C, separating precise unsupported behaviour from missing-host evidence, and rerun standing S46 mono, colour, ICC, links, marks, presets and conformance suites. More names real same-viewer workflows, not library-only completion.
+
+Unresolved lead questions: the complete missing-tool and action set, which persistence gaps need implementation, stale-identity ownership and the exact permanent observer controls.
