@@ -484,6 +484,21 @@ try {
   }
 }</code></pre>
     <p>That sink is the caller's, because the wasm session has no <code>commit_dicomweb_response</code> export yet. The Rust parser for these bodies exists as <code>ocelli_dicom::DicomwebSource</code>, shown in the Rust chapter, but no wasm export joins the two today.</p>
+    <p><code>DicomwebProvider</code> is the higher level wrapper the example viewer uses. It wraps a <code>DicomwebClient</code> and is also exported from <code>@ocelli/core</code>. Its constructor takes <code>studiesServiceUrl</code>, <code>wadoUriUrl</code> and <code>fetch</code>, and it needs the viewer's native <code>/dicweb/qido</code> and <code>/dicweb/instance</code> routes to reach the native backend.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Method</th><th>Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td><code>searchStudies()</code></td><td>searches studies through the configured service</td></tr>
+        <tr><td><code>searchSeries(studyUid)</code></td><td>searches series of one study</td></tr>
+        <tr><td><code>searchInstances(studyUid, seriesUid)</code></td><td>searches instances of one series</td></tr>
+        <tr><td><code>fetchSelectedInstance({ studyUid, seriesUid, instanceUid })</code></td><td>fetches one selected instance and stages its metadata</td></tr>
+        <tr><td><code>takeStagedInstance(expected)</code></td><td>returns the staged instance when it matches <code>expected</code></td></tr>
+        <tr><td><code>readStagedInfo()</code></td><td>reads the metadata of the staged instance</td></tr>
+        <tr><td><code>releaseStaged()</code></td><td>releases the staged instance</td></tr>
+        <tr><td><code>cancelPending()</code></td><td>cancels a pending request</td></tr>
+        <tr><td><code>dispose()</code></td><td>releases everything the provider holds</td></tr>
+      </tbody>
+    </table></div>
     <p><code>postWadoInstance</code> wraps exactly this pattern for one instance. The example viewer uses it to hand a WADO-RS body to its worker.</p>
     <p>It takes eight options, and an option it does not know is refused with <code>OcelliError</code> code <code>UnknownOption</code>.</p>
     <div class="table-wrap"><table>
