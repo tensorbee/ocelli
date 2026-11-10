@@ -166,7 +166,7 @@ impl Volume {
         self.fill_oblique(plane, false)
     }
 
-    /// Nearest patient plane. The index is rounded, then [`Self::sample_at`] reads that voxel.
+    /// Nearest patient plane. The index is rounded, then `Self::sample_at` reads that voxel.
     ///
     /// Half away from zero on a positive index. A negative index at or below
     /// `-0.5` is absent. This is the `NEAREST` sample the volume viewport asks
