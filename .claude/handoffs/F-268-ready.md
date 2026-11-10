@@ -1,0 +1,20 @@
+# F-268 prepared feature handoff
+
+**Branch**: `work/f-268-glm`
+**Base**: `1f2809c020c147b73219eada4e55c3556aa3e2d2`
+**Head**: `188dfd61332fbac3cd3f3438355546872033dde7`
+**Files touched**: .agents/skills/verify/SKILL.md, .claude/WORKFLOW.md, .claude/commands/verify.md, .claude/plans/F-268-design.md, .claude/reviews/F-268-doc-comments-pass-1.md, .claude/reviews/F-268-final-union-pass-1.md, .claude/reviews/F-268-final-union-pass-2.md, .claude/reviews/F-268-final-union-pass-3.md, .claude/reviews/F-268-policy-pass-1.md, .github/workflows/ci.yml, .opencode/commands/verify.md, CHANGELOG.md, bin/ocelli.sh, ci/guard-probe-budget.json, crates/ocelli-geom/src/lib.rs, crates/ocelli-native/src/lib.rs, crates/ocelli-render/src/graph.rs, crates/ocelli-render/src/interpolation.rs, crates/ocelli-viewport/src/snapshot.rs, crates/ocelli-volume/src/ortho.rs, docs/lld/README.md, docs/lld/build-targets.md, docs/runbooks/guard-verification.md, docs/sprints/BACKLOG.md, examples/folder-viewer/src/measure.rs, scripts/guards/catalogue.py, scripts/tests/test_guard_catalogue.py
+**Review**: .claude/reviews/F-268-final-union-pass-3.md, 0 defects, 0 smells and 2 nonblocking nitpicks
+**Verify tree**: `d64199303861ad2fe18cfc6db9ffa6b648b1f2f8`
+
+The named Head is the reviewed and feature-profile-verified source commit. A subsequent commit adds only this transport handoff. No implementation follows the named Head. The transport tree has no separate full feature receipt and is not push-ready. Integration must use the complete three-way source union and verify the final integrated tree.
+
+GLM authored the semantic documentation, policy, fixture repair and own qualified microscopes. Codex coordinated execution, and root independently reviewed the doc slice, policy and complete union. Enabled hooks wrote the source commit's provenance from its exact-tree receipt, naming glm-via-codex. No trailer was written by hand. The separate partial doc and policy checkpoints remain in the source history.
+
+The final feature floor passed all 30 gates with direct exit 0 in 419.646 seconds. Corpus verification passed with direct exit 0 in 16.135 seconds. Staged and tracked working content matched before and after both commands. The paired-denial workspace docs gate ran in the floor. Separate focused deep-probe receipts supply the actual inherited encoded-override private-link, broken-link and healthy controls, rather than claiming their execution from default floor discovery. The catalogue suite has 68 tests, including the permanent shape-selector regression. Root separately challenged the count-only selector shortcut. Earlier mutations and exact raw exits remain preserved.
+
+The first feature floor remains a failed attempt, with 29 gates passed and one guards failure. Its two fixture-construction defects were repaired without changing the docs arm, parser policy, intended diagnostics, gate membership, budgets or generated runbook. The reviewed second run supplies the final verification. No old success was reused after the repair.
+
+Public APIs and runtime pixel behavior are unchanged. Private helper identifiers retain meaningful doc descriptions, and the existing public constructor link is qualified. The new docs gate normalizes encoded flags only in its Cargo child and preserves the caller target. The permanent evidence harness owns its fresh synthetic workspaces and targets. Its contract does not claim a generic gate signal manager or all-feature and all-target rustdoc coverage.
+
+S46 stays open. This worker does not change shared sprint totals, mark canonical F-268 completed, integrate into S46 or push. Its local BACKLOG row remains in progress pending canonical reconciliation. F-266's newer shared-provider changes are absent from this branch base and must be preserved through the later three-way integration. Raw evidence, failures and rejected GLM outputs remain under /private/tmp/ocelli-s46-codex/f268-doc-comment-implementation-glm. No native, browser, GPU or model job remains running.
