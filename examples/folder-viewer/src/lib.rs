@@ -11,6 +11,7 @@
 
 mod colour;
 mod corners;
+mod dicomweb;
 mod link;
 mod measure;
 mod preview;

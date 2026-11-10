@@ -99,11 +99,20 @@
     padding: 0 10px;
   }
   .segment button + button { border-left: 0; border-radius: 0 6px 6px 0; }
+  #source-folder:has(+ #source-dicomweb:not([hidden])) { border-radius: 0; }
+  #source-dicomweb { border-left: 0; border-radius: 0 6px 6px 0; }
+  #source-dicomweb[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--on); }
   .segment button:first-child { border-radius: 6px 0 0 6px; }
   .segment button:hover { background: var(--hover); }
   .segment button.active, .segment button.active:hover { background: var(--on); color: var(--on-ink); border-color: var(--on); }
   nav { display: flex; gap: 14px; padding: 0 4px; }
   nav a { color: var(--muted); text-decoration: none; }
+  #remote { position: fixed; top: 52px; right: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 140px); overflow: auto; z-index: 6; background: var(--raised); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+  #remote h2 { margin: 0 0 4px; font-size: 13px; }
+  #remote p { margin: 4px 0; color: var(--muted); }
+  #remote ol { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+  #remote ol li { overflow-wrap: anywhere; }
+  #remote button { overflow-wrap: anywhere; width: 100%; text-align: left; }
   nav a:hover { color: var(--ink); }
   nav a[aria-current="page"] { color: var(--ink); }
   .icon {
@@ -730,6 +739,7 @@
   <div class="segment" id="source">
     <button type="button" id="source-synthetic">Synthetic study</button>
     <button type="button" id="source-folder">Folder</button>
+    <button type="button" id="source-dicomweb" aria-expanded="false" aria-controls="remote" hidden>DICOMweb</button>
   </div>
   <nav>
     <a href="/" aria-current="page">Images</a>
@@ -738,6 +748,11 @@
   </nav>
   <button type="button" class="icon" id="toggle-inspector" aria-label="Tools panel" data-key="]"><svg class="i"><use href="#i-right"/></svg></button>
 </header>
+<section id="remote" hidden aria-label="DICOMweb studies">
+  <h2>DICOMweb studies</h2>
+  <p id="remote-state"></p>
+  <ol id="remote-list"></ol>
+</section>
 <aside id="series">
   <div class="panel-head">SERIES</div>
   <div id="series-list"></div>
@@ -1031,6 +1046,7 @@ const SENTENCE = {
   "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
   "source-folder": "Open a folder of DICOM files. The files stay where they are.",
+  "source-dicomweb": "Search the configured DICOMweb service. The open local study stays as it is.",
   "toggle-series": "Hide or show the series list.",
   "toggle-inspector": "Hide or show the window list, marks and key list."
 };
@@ -1163,6 +1179,7 @@ let currentGeneration = 0;
 let seriesList = [];
 const seriesByKey = new Map();
 let sourceMode = "";
+let remoteConfig = null;
 const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
@@ -1403,6 +1420,154 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") probeActive();
 });
 document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
+// A configured remote service only adds a source choice. Discovery or valid
+// staging never resets local state, marks, cache or reports. Any other
+// outcome, including a 404 or malformed JSON, stays silent.
+async function probeRemoteSource() {
+  let config = null;
+  try {
+    const response = await fetch("/dicweb/config", { method: "GET", cache: "no-store" });
+    if (response.status === 200) {
+      const json = await response.json();
+      if (json && typeof json === "object" && !Array.isArray(json)
+        && Object.keys(json).length === 2
+        && typeof json.studiesServiceUrl === "string" && json.studiesServiceUrl.length
+        && typeof json.wadoUriUrl === "string" && json.wadoUriUrl.length) {
+        config = Object.freeze({ studiesServiceUrl: json.studiesServiceUrl, wadoUriUrl: json.wadoUriUrl });
+      }
+    }
+  } catch {}
+  if (config) {
+    remoteConfig = config;
+    document.getElementById("source-dicomweb").hidden = false;
+  }
+}
+probeRemoteSource();
+
+let remoteProvider = null;
+let remoteProviderPromise = null;
+async function remoteProviderFor() {
+  if (remoteProvider) return remoteProvider;
+  if (!remoteProviderPromise) {
+    remoteProviderPromise = (async () => {
+      const core = await loadLibrary();
+      if (!core || typeof core.DicomwebProvider !== "function") return null;
+      remoteProvider = new core.DicomwebProvider({
+        studiesServiceUrl: remoteConfig.studiesServiceUrl,
+        wadoUriUrl: remoteConfig.wadoUriUrl,
+        fetch: (input, init) => fetch(input, init)
+      });
+      return remoteProvider;
+    })();
+  }
+  return remoteProviderPromise;
+}
+
+function remoteState(text) {
+  document.getElementById("remote-state").textContent = text;
+}
+
+function remoteError(error) {
+  if (error && error.code === "Aborted") return;
+  if (!remoteProvider) {
+    remoteState("The DICOMweb library is not available.");
+    return;
+  }
+  let text = "The DICOMweb request was refused.";
+  if (error && typeof error.code === "string") text += " Code " + error.code + ".";
+  remoteState(text);
+}
+
+function remoteShow(rows, label, onPick) {
+  const list = document.getElementById("remote-list");
+  const items = [];
+  for (const row of rows) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label(row);
+    button.addEventListener("click", () => onPick(row));
+    item.appendChild(button);
+    items.push(item);
+  }
+  list.replaceChildren(...items);
+}
+
+function remoteBackItem() {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Back to studies";
+  button.addEventListener("click", () => remoteOpenStudies());
+  item.appendChild(button);
+  return item;
+}
+
+async function remoteOpenStudies() {
+  let provider = null;
+  try {
+    provider = await remoteProviderFor();
+  } catch (error) {
+    remoteState("The DICOMweb library is not available.");
+    return;
+  }
+  if (!provider) {
+    remoteState("The DICOMweb library is not available.");
+    return;
+  }
+  remoteState("Searching studies.");
+  try {
+    const result = await provider.searchStudies();
+    remoteShow(result.rows, (row) => row.studyUid, (row) => remoteOpenSeries(row.studyUid));
+    remoteState(result.rows.length ? "Choose a study." : "No studies were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteOpenSeries(studyUid) {
+  const provider = remoteProvider;
+  remoteState("Searching series.");
+  try {
+    const result = await provider.searchSeries(studyUid);
+    remoteShow(result.rows, (row) => row.seriesUid, (row) => remoteOpenInstances(studyUid, row.seriesUid));
+    document.getElementById("remote-list").prepend(remoteBackItem());
+    remoteState(result.rows.length ? "Choose a series." : "No series were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteOpenInstances(studyUid, seriesUid) {
+  const provider = remoteProvider;
+  remoteState("Searching instances.");
+  try {
+    const result = await provider.searchInstances(studyUid, seriesUid);
+    remoteShow(result.rows, (row) => row.instanceUid, (row) => remoteFetchInstance(studyUid, seriesUid, row.instanceUid));
+    document.getElementById("remote-list").prepend(remoteBackItem());
+    remoteState(result.rows.length ? "Choose an instance." : "No instances were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteFetchInstance(studyUid, seriesUid, instanceUid) {
+  const provider = remoteProvider;
+  remoteState("Fetching the instance.");
+  try {
+    await provider.fetchSelectedInstance({ studyUid, seriesUid, instanceUid });
+    remoteState("The remote instance is fetched and validated. Remote image display is not available yet. The local image is unchanged.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+document.getElementById("source-dicomweb").addEventListener("click", () => {
+  const section = document.getElementById("remote");
+  section.hidden = !section.hidden;
+  document.getElementById("source-dicomweb").setAttribute("aria-expanded", section.hidden ? "false" : "true");
+  if (!section.hidden && !document.getElementById("remote-list").childElementCount) remoteOpenStudies();
+});
 for (const button of document.querySelectorAll("[data-open]")) {
   button.addEventListener("click", () => {
     if (button.dataset.open === "folder") folderInput.click();

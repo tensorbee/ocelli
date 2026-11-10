@@ -7,6 +7,7 @@
  */
 
 import { OcelliError } from "./ocelli-error.js";
+import type { DicomwebProviderOptions } from "./dicomweb-viewer.js";
 import type { FrameCommitMeta } from "./bulk.js";
 import type { CursorControllerOptions } from "./cursor.js";
 import type {
@@ -55,6 +56,20 @@ type MissingDicomwebBoundedDelivery = Exclude<
 const dicomwebBoundedDeliveryComplete: [MissingDicomwebBoundedDelivery] extends [
   never,
 ]
+  ? true
+  : never = true;
+
+export const DICOMWEB_PROVIDER_OPTION_KEYS = [
+  "studiesServiceUrl",
+  "wadoUriUrl",
+  "fetch",
+] as const satisfies readonly (keyof DicomwebProviderOptions)[];
+
+type MissingDicomwebProvider = Exclude<
+  keyof DicomwebProviderOptions,
+  (typeof DICOMWEB_PROVIDER_OPTION_KEYS)[number]
+>;
+const dicomwebProviderComplete: [MissingDicomwebProvider] extends [never]
   ? true
   : never = true;
 
@@ -183,6 +198,7 @@ export const OPTION_LISTS_COMPLETE =
   dicomwebClientComplete &&
   dicomwebBoundedDeliveryComplete &&
   qidoSearchComplete &&
+  dicomwebProviderComplete &&
   pointerDispatchComplete &&
   cursorControllerComplete &&
   wadoInstanceComplete &&
@@ -196,6 +212,7 @@ export const OPTION_KEY_LISTS: Readonly<Record<string, readonly string[]>> = {
   DicomwebBoundedDeliveryOptions: DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS,
   DicomwebClientOptions: DICOMWEB_CLIENT_OPTION_KEYS,
   QidoSearchOptions: QIDO_SEARCH_OPTION_KEYS,
+  DicomwebProviderOptions: DICOMWEB_PROVIDER_OPTION_KEYS,
   PointerDispatchOptions: POINTER_DISPATCH_OPTION_KEYS,
   CursorControllerOptions: CURSOR_CONTROLLER_OPTION_KEYS,
   WadoInstanceRequest: WADO_INSTANCE_REQUEST_KEYS,

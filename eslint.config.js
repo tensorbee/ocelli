@@ -553,6 +553,11 @@ const config = tseslint.config(
         // fetches the synthetic study's slices under node.
         notes: "readonly",
         keyImages: "readonly",
+        // F-245 dicomweb.mjs hashes the canvas with crypto.subtle and reads the
+        // page documents and cache generation to prove remote steps keep them.
+        crypto: "readonly",
+        sessionDocuments: "readonly",
+        cacheGeneration: "readonly",
         fetch: "readonly",
         // F-225's conformance.mjs times the page's paints and its report
         // requests from an init script, and reads the page's checks state

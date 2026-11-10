@@ -52,6 +52,19 @@ export { DicomwebClient, DicomwebError } from "./dicomweb.js";
 export { OcelliError } from "./ocelli-error.js";
 export { postWadoInstance } from "./instance-bytes.js";
 export type { WadoInstanceRequest } from "./instance-bytes.js";
+export { DicomwebProvider } from './dicomweb-viewer.js';
+export type { DicomwebProviderOptions } from './dicomweb-viewer.js';
+export type { QidoStudyRow, InstanceIdentity, StagedMetadata, OwnedEncodedInstance } from './dicomweb-viewer.js';
+export type { QidoSeriesRow } from './dicomweb-viewer.js';
+export type { QidoInstanceRow } from './dicomweb-viewer.js';
+export type { QidoStudyCapturedScope } from './dicomweb-viewer.js';
+export type { QidoSeriesCapturedScope } from './dicomweb-viewer.js';
+export type { QidoInstanceCapturedScope } from './dicomweb-viewer.js';
+export type { QidoEnvelopeCommon } from './dicomweb-viewer.js';
+export type { QidoStudyEnvelope } from './dicomweb-viewer.js';
+export type { QidoSeriesEnvelope } from './dicomweb-viewer.js';
+export type { QidoInstanceEnvelope } from './dicomweb-viewer.js';
+export type { QidoEnvelope } from './dicomweb-viewer.js';
 export type {
   DicomwebBoundedDeliveryOptions,
   DicomwebBoundedReceive,

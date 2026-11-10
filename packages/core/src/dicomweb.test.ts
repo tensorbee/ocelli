@@ -855,12 +855,13 @@ it('preserves the exact rejected OcelliError object identity from the awaited re
   if (readyHolder.resolver === undefined || gateHolder.resolver === undefined) {
     throw new Error('synthetic latch resolvers must exist before use');
   }
+  const stableReadyResolver = readyHolder.resolver;
   const client = new DicomwebClient({
     studiesServiceUrl: 'https://example.invalid/studies',
     wadoUriUrl: 'https://example.invalid/wado',
     fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/dicom+json' } }),
     receive: async (): Promise<void> => {
-      readyHolder.resolver();
+      stableReadyResolver();
       await gate;
       throw refusal;
     },

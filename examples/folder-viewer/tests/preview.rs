@@ -812,6 +812,22 @@ fn require(page: &str, needles: &[&str], what: &str) -> Result<(), String> {
 }
 
 #[test]
+fn the_page_offers_a_hidden_dicomweb_source() -> Result<(), String> {
+    let page = served_page("/")?;
+    require(
+        &page,
+        &[
+            "id=\"source-dicomweb\" aria-expanded=\"false\" aria-controls=\"remote\" hidden",
+            "id=\"remote\" hidden",
+            "/dicweb/config",
+            "probeRemoteSource",
+        ],
+        "the page has no hidden DICOMweb source",
+    )?;
+    Ok(())
+}
+
+#[test]
 fn the_page_offers_mouse_profiles() -> Result<(), String> {
     let page = served_page("/")?;
     // AC1. The three profiles of the F-214 plan, by id and by name.
