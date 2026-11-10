@@ -275,6 +275,16 @@ All files are EXISTING. Both `tools/bench/package.json` scripts.test and `bin/oc
   - All capture occurs outside any timed clocks.
 
 
+### Amendment: Node component controls for `reference_loader.mjs` (host, resolution, evidence class)
+
+**Decision.** Add one new-file entry to this map: `tools/bench/tests/reference_loader_component_test.mjs` (NEW, PLANNED). It hosts the four exported-module controls (registration positive, registration failure surfaces, request positive with an actual DataSet and public scaleArray/getMinMax, hidden-NUL slope refusal) and the five killing controls (CPU rendering refusal, window equality, utility reference identity, post-scale non-finite overflow, pure hidden-VM slope with a passing space-padded twin). It is Node only, not browser, GPU or pixel proof.
+
+**Registrations (exactly two).** The new file is appended to `tools/bench/package.json` `scripts.test` and to the `bin/ocelli.sh` bench arm test list. All other entries in both lists are unchanged. The map sentence "No new file or registration" is superseded by this amendment for this file only.
+
+**Dependency resolution.** The test imports `dicom-parser` via `createRequire(new URL('../../oracle/package.json', import.meta.url))` and imports the `@cornerstonejs/core` utility modules resolved through that same require's `resolve`, never through an absolute worker path.
+
+**Evidence class.** These nine controls are labelled Node component evidence only. They kill named mutants of the helper's exported behavior. They do not satisfy AC17 or AC22. Those acceptance criteria still require their browser cases BR-CTX and BR-MUT in `comparison_page_test.mjs`, which remain unchanged in this section.
+
 ## Caller compatibility and scoped observation write map
 
 Add to the existing comparison_run write map, scoped to the new scalar comparison path only, after colour outputs which remain written as today under their existing format:
