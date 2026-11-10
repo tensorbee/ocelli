@@ -367,3 +367,9 @@ All 5 wrappers live under tools/bench/src/, existing collectors stay unmodified,
 ## Lead design approval, 2026-11-10
 
 Independent root pass 2 approves the selected design with no open defects or smells. The original draft narrative above records its intake history. This approval sets the plan status and authorizes the normal isolated S47 claim and implementation under the operator's existing work-order exception while S46 remains open. Dependencies and acceptance obligations remain in force. No runtime observation, canonical implementation integration, publication or sprint completion is claimed. The final GLM candidate is 5a6029540259310feab3d5b8b417a21a12d0c7595fd3c419e0a80b3e7efe8abb. Root changed only approval metadata and the two recorded editorial typos when adopting it.
+
+## Lead write-map amendment, 2026-11-10
+
+The named write set also includes `Cargo.lock`, solely to add `serde_json` and `uriparse` to the `ocelli-folder-viewer` package dependency array. These are the two workspace dependencies already selected in the approved Cargo.toml design above. The existing locked versions are serde_json 1.0.151 and uriparse 0.6.4. No new package, version, checksum or unrelated lock entry is authorized by this amendment. The actual lock diff must be checked after resolution.
+
+Independent bookkeeping review by `/root/glm_codec_merge` found 0 defects and 0 smells against the unchanged plan, manifests and lock. This records the existing dependency choice in the generated lock graph. It does not approve the unimplemented viewer consumer or complete F-245.
