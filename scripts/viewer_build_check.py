@@ -17,14 +17,19 @@ repository, once with no pkg and once with a stand-in pkg, builds each with
 the repository's own Vite, and reads what was emitted.
 
 Absent: the build passes, no wasm chunk or asset is emitted, and the worker
-chunk keeps the runtime `import()` of the pkg URL and the `fetch()` in front
-of it. The core is reported not built because that runtime import fails. The
-`fetch()` does not decide it, because Vite's dev and preview servers answer the
-missing path with the HTML fallback and a 200, so the probe passes. The
-`fetch()` is required here only as part of the worker's emitted shape.
+chunk keeps the runtime `import()` of the encoded pkg URL. The core is
+reported not built because that runtime import fails. F-266 removed the
+worker's preflight `fetch()` of that URL, so the check no longer expects one:
+Vite's dev and preview servers answer a missing path with the HTML fallback
+and a 200, so a fetch never decided anything, and a plain static host answers
+404 only for a reach the build should not emit.
 
 Present: the build passes and the wasm glue and the `.wasm` are emitted as
-their own files, and the worker no longer imports the `/@fs` URL at runtime.
+their own files, and the worker references its own emitted chunk. Any reach
+at the build machine's absolute `/@fs` pkg path is refused, in a fetch, an
+import or any other position, including the spellings where one path segment
+is decoded and the rest stays encoded. The intentional absent-state external
+encoded import is the one exemption.
 
 The stand-in pkg is two files, a glue module that references its `.wasm`
 through `new URL(..., import.meta.url)` as `wasm-pack --target web` output
@@ -102,12 +107,37 @@ TREE_PREFIX = "viewer build-"
 
 
 def wasm_url(base: Path) -> str:
-    """The URL the config defines for a tree rooted at `base`.
+    """The encoded browser URL, `'/@fs' + wasmPackage.pathname`.
 
-    `vite.config.ts` decodes `new URL(..., import.meta.url).pathname`, so the
-    URL is the plain path behind `/@fs`, a space included.
+    `URL.pathname` encodes exactly once, so a real space is `%20`, a literal
+    percent is `%25` and a unicode name is its UTF-8 percent form. The
+    browser re-encodes nothing: the value is already the encoded form. The
+    check reads the emitted worker for that exact string. The encoding is
+    Node's own, computed by the same engine that builds the viewer, not a
+    Python approximation: `+`, `!`, `$`, `&` and other punctuation encode
+    differently, and guessing here would desynchronize the expected string
+    from what the build emits.
     """
-    return f"/@fs{(base / PKG / 'ocelli_wasm.js').as_posix()}"
+    return f"/@fs{_node_url_pathname(base / PKG / 'ocelli_wasm.js')}"
+
+
+def _node_url_pathname(path: Path) -> str:
+    """`require('node:url').pathToFileURL(path).pathname`, via `node -e`.
+
+    `pathToFileURL` is the single source of truth for the encoding Node and
+    the browser agree on. Running it through `node -e` keeps the check's
+    expectation produced by the same runtime that runs Vite; `node` is
+    already a hard requirement of every build this gate performs. Only the
+    pathname is printed, with no trailing newline, so the caller receives
+    the exact emitted form.
+    """
+    return subprocess.run(
+        ["node", "-e",
+         "process.stdout.write("
+         "require('node:url').pathToFileURL(process.argv[1]).pathname)",
+         str(path)],
+        check=True, capture_output=True, text=True).stdout
+
 
 
 def make_tree(base: Path, with_pkg: bool) -> Path:
@@ -137,15 +167,37 @@ def build(viewer: Path) -> subprocess.CompletedProcess[str]:
                           check=False)
 
 
-def emitted(viewer: Path) -> tuple[list[str], str]:
-    """The emitted asset names, and the worker chunk's text."""
-    assets = viewer / "dist" / "assets"
-    names = sorted(p.name for p in assets.iterdir()) if assets.is_dir() else []
-    workers = _workers(names)
-    text = ""
-    if len(workers) == 1:
-        text = (assets / workers[0]).read_text(encoding="utf-8")
-    return names, text
+def emitted(viewer: Path) -> tuple[list[str], dict[str, bytes]]:
+    """Every emitted file under dist/, and each file's raw bytes.
+
+    The names are the map's keys: dist-relative, sorted, recursive. The map
+    is the raw-byte view the contract names; nothing is decoded here. The
+    worker chunk is resolved by basename against the keys, and its text is
+    decoded only when a checker actually reads it.
+    """
+    dist = viewer / "dist"
+    if not dist.is_dir():
+        return [], {}
+    raw = {p.relative_to(dist).as_posix(): p.read_bytes()
+           for p in sorted(dist.rglob("*")) if p.is_file()}
+    return sorted(raw), raw
+
+
+def _text(raw: dict[str, bytes], name: str) -> str | None:
+    """One emitted file's decoded text, for a worker-role read.
+
+    Returns None for a file that is not valid UTF-8. A valid WASM binary is
+    carried raw and is never decoded; a `.map` is normally JSON text and
+    decodes the same bounded way. No blanket non-UTF-8 refusal and no claim
+    about obfuscated JS lives here.
+    """
+    blob = raw.get(name)
+    if blob is None:
+        return None
+    try:
+        return blob.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def _calls(text: str, callee: str, url: str) -> bool:
@@ -155,55 +207,143 @@ def _calls(text: str, callee: str, url: str) -> bool:
 
 
 def _workers(names: list[str]) -> list[str]:
+    """The worker chunks, matched by basename against dist-relative keys."""
     return [n for n in names
-            if n.startswith("core-worker-") and n.endswith(".js")]
+            if n.rsplit("/", 1)[-1].startswith("core-worker-")
+            and n.rsplit("/", 1)[-1].endswith(".js")]
 
 
-def absent_problems(names: list[str], worker: str, url: str) -> list[str]:
-    """What is wrong with a build made with no pkg present."""
+
+def absent_problems(
+        names: list[str], raw: dict[str, bytes], url: str,
+        base: Path) -> list[str]:
+    """What is wrong with a build made with no pkg present.
+
+    F-266 drops the old fetch-shape expectation deliberately: the worker's
+    preflight `fetch()` of the package URL before its import was removed with
+    the import-only loading change, so no absence refusal names a fetch. The
+    intentional external encoded `/@fs` import stays, and is the one shape
+    exempt from the pkg-present absolute-path ban: the absence refusal never
+    bans the legitimate external import, only a wrong chunk set or a missing
+    runtime import. `base` is the actual temporary build root, kept explicit
+    so no hidden canonical ROOT exists.
+    """
     problems: list[str] = []
     if len(_workers(names)) != 1:
         problems.append(
             f"with the pkg absent the build emitted "
             f"{len(_workers(names))} core-worker chunk(s), expected one")
         return problems
-    wasm = [n for n in names if n.startswith("ocelli_wasm")]
+    wasm = [n for n in names
+            if n.rsplit("/", 1)[-1].startswith("ocelli_wasm")]
     if wasm:
         problems.append(
             f"with the pkg absent the build emitted {', '.join(wasm)}, "
             f"which has no source to come from")
-    if not _calls(worker, "import", url):
+    worker = _worker_text(raw)
+    if worker is None or not _calls(worker, "import", url):
         problems.append(
             f"with the pkg absent the worker chunk does not keep a runtime "
             f"import() of {url}, so it cannot report the core as not built")
-    if not _calls(worker, "fetch", url):
-        problems.append(
-            f"with the pkg absent the worker chunk does not probe {url} with "
-            f"fetch() before importing it")
     return problems
 
 
-def present_problems(names: list[str], worker: str, url: str) -> list[str]:
-    """What is wrong with a build made with the pkg present."""
+def _worker_text(raw: dict[str, bytes]) -> str | None:
+    """The single worker chunk's decoded text, or None.
+
+    Resolution is by basename against the dist-relative keys, per the
+    approved contract. A dist with zero or several worker chunks has no one
+    text; the worker-count refusals name that before this matters.
+    """
+    workers = _workers(list(raw))
+    if len(workers) != 1:
+        return None
+    return _text(raw, workers[0])
+
+
+def _known_roots(base: Path) -> tuple[bytes, bytes]:
+    """The build base's known-root byte patterns: raw and once-URL-encoded.
+
+    `base` is the actual temporary build root. The raw form is the resolved
+    POSIX path's UTF-8 bytes; the encoded form is exactly what
+    `URL.pathname` yields per `wasm_url`, one encoding, computed by Node's
+    `pathToFileURL` for the same reason `wasm_url` uses it: Python's `quote`
+    would disagree with the build's own encoding on `+` and other
+    punctuation. They are separate patterns, not one concatenated with
+    `/@fs`.
+    """
+    root = base.resolve().as_posix().encode("utf-8")
+    encoded = _node_url_pathname(base.resolve()).encode("utf-8")
+    return root, encoded
+
+
+def _absolute_reach(raw: dict[str, bytes], base: Path) -> str | None:
+    """The first file reaching the build machine's absolute path, named.
+
+    Scans every emitted file's raw bytes, binaries included, for three
+    separate patterns: the raw UTF-8 root bytes, their once-URL-encoded
+    form, and the standalone `/@fs` loader prefix. The root patterns come
+    from the actual build `base`, not from the URL. The WASM never decodes
+    and a valid binary is never refused for its encoding; the actual WASM
+    carries a `/Users/` registry marker that matches none of these.
+    """
+    root, encoded = _known_roots(base)
+    fs_marker = b"/@fs"
+    for name in sorted(raw):
+        blob = raw[name]
+        if root in blob:
+            return f"{name} (raw root)"
+        if encoded in blob:
+            return f"{name} (encoded root)"
+        if fs_marker in blob:
+            return f"{name} (/@fs)"
+    return None
+
+
+
+def present_problems(
+        names: list[str], raw: dict[str, bytes], url: str,
+        base: Path) -> list[str]:
+    """What is wrong with a build made with the pkg present.
+
+    The worker must reference the emitted glue chunk, and no emitted file
+    may reach the build machine's absolute path, in any position, across
+    every recursive output. The pkg-ABSENT build's external encoded import
+    is the deliberate exemption checked by `absent_problems`, and the
+    decoded build specifier that Rollup itself rewrites is not a runtime
+    reach: what lands in the emitted worker is the rewritten chunk
+    specifier. `base` is the actual temporary build root the caller built.
+    """
     problems: list[str] = []
     if len(_workers(names)) != 1:
         problems.append(
             f"with the pkg present the build emitted "
             f"{len(_workers(names))} core-worker chunk(s), expected one")
         return problems
-    if not any(re.fullmatch(r"ocelli_wasm-[\w-]+\.js", n) for n in names):
+    if not any(re.fullmatch(r"ocelli_wasm-[\w-]+\.js", n.rsplit("/", 1)[-1])
+               for n in names):
         problems.append(
             "with the pkg present the build emitted no ocelli_wasm chunk, so "
             "the wasm glue was not bundled")
-    if not any(re.fullmatch(r"ocelli_wasm_bg-[\w-]+\.wasm", n)
-               for n in names):
+    glue = [n.rsplit("/", 1)[-1] for n in names
+            if re.fullmatch(r"ocelli_wasm-[\w-]+\.js", n.rsplit("/", 1)[-1])]
+    worker_text = _worker_text(raw)
+    if worker_text is None or not any(
+            _calls(worker_text, "import", f"./{g}") for g in glue):
+        problems.append(
+            "with the pkg present the emitted worker does not import the "
+            "emitted ocelli_wasm glue chunk, so the wasm glue would not load")
+    if not any(re.fullmatch(r"ocelli_wasm_bg-[\w-]+\.wasm",
+                            n.rsplit("/", 1)[-1]) for n in names):
         problems.append(
             "with the pkg present the build emitted no ocelli_wasm_bg .wasm "
             "asset")
-    if _calls(worker, "import", url):
+    reach = _absolute_reach(raw, base)
+    if reach is not None:
         problems.append(
-            f"with the pkg present the worker chunk still imports {url} at "
-            f"runtime, so the pkg was left external")
+            f"with the pkg present the emitted file {reach} reaches the "
+            f"build machine's absolute path, so the dist depends on the "
+            f"machine that built it")
     return problems
 
 
@@ -230,9 +370,9 @@ def main() -> int:
                     f"vite build failed with the pkg {state}:\n"
                     f"{built.stderr.strip() or built.stdout.strip()}")
                 continue
-            names, worker = emitted(viewer)
+            names, raw = emitted(viewer)
             check = present_problems if with_pkg else absent_problems
-            problems += check(names, worker, wasm_url(base))
+            problems += check(names, raw, wasm_url(base), base)
 
     if problems:
         print("FAIL: the example viewer build")

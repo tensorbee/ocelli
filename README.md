@@ -224,9 +224,11 @@ npm run build -w @ocelli/example-viewer
 node examples/viewer-react/csp-probe.mjs
 ```
 
-The probe serves the built example and the built wasm package through
-Playwright routes on invented origins, so it binds no port and starts no
-server. The policy exists once in
+The probe first exercises the unmodified built dist as a genuine positive on
+a real plain static HTTP server bound to localhost, then serves the built
+example and the built wasm package for the remaining policy cases through
+Playwright routes on invented origins, so those cases bind no port and start
+no server. The policy exists once in
 `examples/viewer-react/src/csp-policy.ts`. Its test checks marked policy
 blocks in this document, `docs/lld/typescript-packaging.md` and the Use page.
 Each block contains exactly one expected header, inside a Markdown text fence

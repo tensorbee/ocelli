@@ -7679,50 +7679,101 @@ print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 
-# The viewer build check's two states, as emitted names and worker text. The
+# The viewer build check's two states, per the F-266 amendment: every
+# fixture passes the raw-byte emitted map and the explicit build base. The
 # inputs come from the refusal sentences, a clean-clone build that keeps the
-# runtime import and its probe and a pkg build that emits its own wasm files,
-# and not from the regular expressions the check uses to read them.
+# runtime import and a pkg build that emits its own wasm files with no reach
+# at the build machine's absolute path, and not from the regular expressions
+# the check uses to read them. F-266 removed the worker's preflight fetch, so
+# the healthy shapes import only and the fetched-URL shapes are refusals.
 _VIEWER_URL = "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js"
 _VIEWER_ABSENT_BUNDLED = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
-         'ocelli_wasm_bg-d4.wasm']
-worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
-bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'import("./ocelli_wasm-c3.js")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.absent_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_ABSENT_HEALTHY = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js']
-worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
-bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js']
+worker = 'import("{_VIEWER_URL}")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry'}}
+bad = v.absent_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_PRESENT_EXTERNAL = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js']
-worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
-bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js']
+worker = 'import("{_VIEWER_URL}")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_PRESENT_HEALTHY = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
-         'ocelli_wasm_bg-d4.wasm']
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'import("./ocelli_wasm-c3.js")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_MISSING_GLUE = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+from pathlib import Path
+import viewer_build_check as v
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'const booted=true;'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_FETCH = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+from pathlib import Path
+import viewer_build_check as v
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
 worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
-bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
@@ -13281,15 +13332,20 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/viewer_build_check.py",
         gate="packages",
         spec="F-217 AC18 in `.claude/plans/F-217-design.md`, the viewer's "
-             "`vite build` passing in CI, and the lead decision that a build "
+             "`vite build` passing in CI, the lead decision that a build "
              "without `crates/ocelli-wasm/pkg` passes and leaves the import "
-             "to runtime, where it fails and the core reads as not built",
+             "to runtime, where it fails and the core reads as not built, "
+             "and F-266 in `.claude/plans/F-266-design.md`: the worker's "
+             "prefetch is gone, the emitted surface is inspected in raw "
+             "bytes across every recursive dist output, and no emitted file "
+             "may reach the build machine's absolute path.",
         refuses="A viewer build that fails with the wasm pkg absent, or that "
                 "then emits a wasm file or drops the runtime import of the "
-                "pkg URL or the fetch probe in front of it. A viewer build "
-                "that fails with a pkg present, or that then emits no wasm "
-                "glue chunk or no `.wasm` asset, or still imports the pkg URL "
-                "at runtime.",
+                "pkg URL. A viewer build that fails with a pkg present, or "
+                "that then emits no wasm glue chunk or no `.wasm` asset, or "
+                "whose worker does not import the emitted wasm glue chunk, or "
+                "where any emitted file reaches the build machine's absolute "
+                "`/@fs` path, in a fetch, an import or any other position.",
         claims=("*",),
         probes=(
             Probe(
@@ -13305,7 +13361,7 @@ GUARDS: tuple[Guard, ...] = (
                      "bundled chunk and which emitted wasm files, which is "
                      "what a build that found a pkg it should not have "
                      "looks like. The control keeps the runtime import and "
-                     "the probe and emits no wasm file."),
+                     "emits no wasm file."),
             Probe(
                 "viewer-build.present-external", None,
                 python_snippet("viewer_build_check.present_problems",
@@ -13319,6 +13375,40 @@ GUARDS: tuple[Guard, ...] = (
                      "external, which is what a config that always marks it "
                      "external produces. The control emits the glue chunk and "
                      "the `.wasm` and imports the chunk."),
+            Probe(
+                "viewer-build.present-missing-glue-import", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_MISSING_GLUE),
+                "does not import the emitted ocelli_wasm glue chunk",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1, F-266. A pkg-present build whose worker "
+                     "does not import the emitted ocelli_wasm glue chunk, so "
+                     "the wasm glue would not load. The fixture keeps every "
+                     "healthy name and byte except the worker body, so only "
+                     "the missing-glue-import refusal causes the RED; the "
+                     "healthy control is the same emission set with the "
+                     "hashed glue import in place."),
+            Probe(
+                "viewer-build.present-absolute-fetch", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_FETCH),
+                "reaches the build machine's absolute path",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1, F-266. A pkg-present build whose worker "
+                     "prefetches the absolute `/@fs` pkg URL ahead of its "
+                     "bundled import, the removed preflight shape. The "
+                     "fixture keeps the valid glue and `.wasm` names and the "
+                     "hashed import, so only the absolute-reach refusal "
+                     "causes the RED; the healthy control is the same "
+                     "emission set with the fetch line gone. The scan covers "
+                     "every emitted file in raw bytes, so the refusal is not "
+                     "worker-only."),
         ),
         limit="The two builds need an npm install, and `node_modules` is "
               "ignored and therefore absent from the `git ls-files` sandbox, "
