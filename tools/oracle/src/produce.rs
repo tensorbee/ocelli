@@ -2236,8 +2236,50 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::{ProducePaths, produce_applicable, stack_selection_reason};
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeSet;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitStatus;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Creates a unique scratch directory for a single produce invocation.
+    ///
+    /// The name only implies ownership once exclusive creation succeeds. A
+    /// pre-existing path is never deleted, the caller retries with a fresh
+    /// name instead.
+    fn produce_test_scratch_dir() -> ProduceScratchDirGuard {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let pid = std::process::id();
+        for attempt in 0..1024u32 {
+            let name = format!(
+                "ocelli-produce-scratch-{}-{}-{}",
+                pid,
+                attempt,
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            let path = std::env::temp_dir().join(name);
+            match fs::create_dir(&path) {
+                Ok(()) => {
+                    return ProduceScratchDirGuard { path };
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => unreachable!("failed to create unique scratch directory"),
+            }
+        }
+        unreachable!("exhausted retry attempts creating unique scratch directory");
+    }
+
+    /// Removes an owned scratch directory on scope exit, including unwind.
+    struct ProduceScratchDirGuard {
+        path: PathBuf,
+    }
+
+    impl Drop for ProduceScratchDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
         let mut categories = vec!["synthetic".to_owned()];
@@ -2284,9 +2326,8 @@ mod tests {
 
     #[test]
     fn a_missing_reference_run_is_unrun() {
-        let dir =
-            std::env::temp_dir().join(format!("ocelli-produce-missing-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = produce_test_scratch_dir();
+        let dir = dir.path.clone();
         let summary = produce_applicable(&ProducePaths {
             reference_run: dir.join("reference"),
             corpus_root: dir.join("corpus"),
@@ -2303,7 +2344,6 @@ mod tests {
         assert_eq!(summary.collector, "not-run-by-producer");
         assert_eq!(summary.host_measurement, "unavailable");
         assert!(summary.accounts());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2311,7 +2351,9 @@ mod tests {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
-        let out = root.join("tools/oracle/compare-out");
+        let scratch = produce_test_scratch_dir();
+        let scratch = scratch.path.clone();
+        let out = scratch;
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
@@ -3136,12 +3178,14 @@ mod tests {
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let scratch = produce_test_scratch_dir();
+            let scratch = scratch.path.clone();
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
                 corpus_root: corpus,
-                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
-                candidate_run: root.join("tools/oracle/compare-out/candidate"),
-                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+                reference_subset: scratch.join("reference-selected"),
+                candidate_run: scratch.join("candidate"),
+                dispositions: scratch.join("dispositions.json"),
             });
             assert_eq!(summary.resources, "reference-run-absent");
             return;
@@ -3213,12 +3257,14 @@ mod tests {
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let scratch = produce_test_scratch_dir();
+            let scratch = scratch.path.clone();
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
                 corpus_root: corpus,
-                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
-                candidate_run: root.join("tools/oracle/compare-out/candidate"),
-                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+                reference_subset: scratch.join("reference-selected"),
+                candidate_run: scratch.join("candidate"),
+                dispositions: scratch.join("dispositions.json"),
             });
             assert_eq!(summary.resources, "reference-run-absent");
             return None;
@@ -3320,5 +3366,755 @@ mod tests {
             }
         }
         assert_eq!(over, 0, "{id} worst {worst} at {at:?}");
+    }
+
+    fn f272_tree_digest(dir: &Path) -> ([u8; 32], BTreeSet<String>) {
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut notes: BTreeSet<String> = BTreeSet::new();
+        let mut unsupported = false;
+        f272_walk(dir, dir, &mut paths, &mut notes, &mut unsupported);
+        paths.sort();
+        let mut hasher = Sha256::new();
+        hasher.update(b"f272-tree-v1");
+        for path in &paths {
+            let relative = path.strip_prefix(dir).unwrap_or(path);
+            hasher.update(relative.to_string_lossy().as_bytes());
+            hasher.update([0]);
+            let metadata = match fs::symlink_metadata(path) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    unsupported = true;
+                    notes.insert("metadata-unreadable".to_owned());
+                    hasher.update(b"metadata-unreadable");
+                    hasher.update([0]);
+                    continue;
+                }
+            };
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                unsupported = true;
+                notes.insert("symlink".to_owned());
+                hasher.update(b"symlink");
+                hasher.update([0]);
+            } else if file_type.is_dir() {
+                hasher.update(b"dir");
+                hasher.update([0]);
+            } else if file_type.is_file() {
+                hasher.update(b"file");
+                hasher.update([0]);
+                match fs::File::open(path) {
+                    Ok(mut file) => {
+                        let mut sink = Sha256::new();
+                        if std::io::copy(&mut file, &mut sink).is_ok() {
+                            hasher.update(sink.finalize());
+                        } else {
+                            unsupported = true;
+                            notes.insert("content-unreadable".to_owned());
+                            hasher.update(b"content-unreadable");
+                        }
+                        hasher.update([0]);
+                    }
+                    Err(_) => {
+                        unsupported = true;
+                        notes.insert("content-unreadable".to_owned());
+                        hasher.update(b"content-unreadable");
+                        hasher.update([0]);
+                    }
+                }
+            } else {
+                unsupported = true;
+                notes.insert("other-entry".to_owned());
+                hasher.update(b"other-entry");
+                hasher.update([0]);
+            }
+        }
+        for note in &notes {
+            hasher.update(b"note");
+            hasher.update([0]);
+            hasher.update(note.as_bytes());
+            hasher.update([0]);
+        }
+        if unsupported {
+            hasher.update(b"unsupported-entries-present");
+        } else {
+            hasher.update(b"clean");
+        }
+        (hasher.finalize().into(), notes)
+    }
+
+    /// Depth-first walk that never follows symlinks out of the tree. A symlink
+    /// is recorded as a note and counts as unsupported, so fail-closed holds
+    /// even if it points at an escape target. Unreadable entries are fail
+    /// closed, never silently skipped.
+    ///
+    /// The protected tree root itself must be a readable directory; otherwise
+    /// the walk fails closed. Exactly one top-level entry named "node_modules"
+    /// under the declared dependency cache root is excluded, and only when it
+    /// is an actual directory. Nothing else is skipped: nested node_modules
+    /// directories outside the cache root and all files, locks, references,
+    /// and outputs are still hashed, and every symlink outside the exclusion
+    /// still fails closed. The exclusion is positional, not name-based: the
+    /// caller supplies the protected root; exclusion applies only to an
+    /// immediate real node_modules child of the protected root.
+    fn f272_walk(
+        root: &Path,
+        dir: &Path,
+        paths: &mut Vec<PathBuf>,
+        notes: &mut BTreeSet<String>,
+        unsupported: &mut bool,
+    ) {
+        let is_root = dir == root;
+        let read = match fs::read_dir(dir) {
+            Ok(read) => read,
+            Err(_) => {
+                *unsupported = true;
+                notes.insert("read-dir-failed".to_owned());
+                return;
+            }
+        };
+        for entry in read {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    *unsupported = true;
+                    notes.insert("entry-unreadable".to_owned());
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => {
+                    paths.push(path);
+                    *unsupported = true;
+                    notes.insert("file-type-unreadable".to_owned());
+                    continue;
+                }
+            };
+            if is_root
+                && path.file_name().and_then(|name| name.to_str()) == Some("node_modules")
+                && file_type.is_dir()
+            {
+                continue;
+            }
+            paths.push(path.clone());
+            if file_type.is_symlink() {
+                *unsupported = true;
+                notes.insert("symlink".to_owned());
+                continue;
+            }
+            if file_type.is_dir() {
+                f272_walk(root, &path, paths, notes, unsupported);
+            }
+        }
+    }
+
+    /// Normalize one line from a libtest listing into a bare Rust test name.
+    /// Accepts the terse form `<full test name>: test` and the plain form with
+    /// no colon/whitespace. Returns `None` for empty input, summary lines, and
+    /// anything else that does not name a test, so malformed listings fail
+    /// closed downstream instead of silently inflating counts.
+    fn f272_normalize_list_line(line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if trimmed.starts_with("running ") || trimmed.ends_with("test result:") {
+            return None;
+        }
+        if let Some((name, suffix)) = trimmed.split_once(": ") {
+            if suffix == "test" && !name.contains(char::is_whitespace) {
+                return Some(name.to_owned());
+            }
+            return None;
+        }
+        if trimmed.contains(char::is_whitespace) {
+            return None;
+        }
+        Some(trimmed.to_owned())
+    }
+
+    /// Ask the current test binary to list its full inventory and, in a second
+    /// child run, the filtered selection under the namespace with skip names
+    /// applied. Both invocations run the real binary via `current_exe` and both
+    /// exit statuses are captured and checked. The excluded count is derived as
+    /// full inventory minus the selected inventory; the selection must be a
+    /// nonempty subset of the full inventory or the function fails closed with
+    /// an empty selection and the filtered list status. No hard-coded totals.
+    fn f272_list_selected_tests() -> (Vec<String>, usize, ExitStatus) {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe must resolve the test binary"),
+        };
+
+        let full = match std::process::Command::new(&exe)
+            .args(["--list", "--format", "terse"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => unreachable!("the test binary must be spawnable"),
+        };
+        let full_status = full.status;
+        if !full_status.success() {
+            return (Vec::new(), 0, full_status);
+        }
+        eprintln!(
+            "f272: full inventory listed, count: {}, exit status: {}",
+            String::from_utf8_lossy(&full.stdout)
+                .lines()
+                .filter(|line| line.trim().ends_with(": test"))
+                .count(),
+            full_status
+        );
+
+        let filtered = match std::process::Command::new(&exe)
+            .args([
+                "--list",
+                "--format",
+                "terse",
+                "--skip",
+                "produce::tests::guard_no_checkout_write",
+                "produce::tests::",
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => unreachable!("the test binary must be spawnable"),
+        };
+        let status = filtered.status;
+        eprintln!("f272: filtered list exit status: {}", status);
+
+        let full_names: BTreeSet<String> = String::from_utf8_lossy(&full.stdout)
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .collect();
+        let selected_inventory: BTreeSet<String> = String::from_utf8_lossy(&filtered.stdout)
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .collect();
+
+        let selected: Vec<String> = selected_inventory
+            .iter()
+            .filter(|name| name.starts_with("produce::tests::"))
+            .cloned()
+            .collect();
+
+        if selected.is_empty() || full_status.success() && full_names.is_empty() {
+            return (Vec::new(), 0, status);
+        }
+
+        let is_subset = selected.iter().all(|name| full_names.contains(name));
+        if !is_subset {
+            return (Vec::new(), 0, status);
+        }
+
+        let actual_excluded = full_names.len() - selected.len();
+        (selected, actual_excluded, status)
+    }
+
+    /// Validate the selection: zero selected tests or a missing required
+    /// producer test is a permanent semantic RED control and never passes.
+    fn f272_validate_selection(tests: &[String]) {
+        assert!(
+            !tests.is_empty(),
+            "the producer selection selected zero tests, the filter is stale or nonmatching and cannot pass"
+        );
+        for required in [
+            "produce::tests::a_missing_reference_run_is_unrun",
+            "produce::tests::applicable_monochrome_rows_reach_the_comparator",
+        ] {
+            assert!(
+                tests.iter().any(|test| test == required),
+                "required test {required} is missing from the filtered list, the selection cannot pass"
+            );
+        }
+    }
+
+    /// Actual protected oracle tree beside this manifest, no surrogate.
+    fn f272_protected_tree() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("tools/oracle")
+            .components()
+            .collect::<PathBuf>()
+    }
+
+    #[test]
+    fn guard_no_checkout_write() {
+        let (tests, filtered_out, list_status) = f272_list_selected_tests();
+        assert!(
+            list_status.success(),
+            "the test binary list run exited nonzero, failing closed"
+        );
+        let selected_count = tests.len();
+        println!(
+            "F272 list selected_count={} filtered_out={} status={:?} tests={:?}",
+            selected_count, filtered_out, list_status, tests
+        );
+        f272_validate_selection(&tests);
+
+        let tree = f272_protected_tree();
+        let (before_digest, before_notes) = f272_tree_digest(&tree);
+        assert!(
+            before_notes.is_empty(),
+            "the protected oracle tree snapshot failed closed on unsupported or unreadable entries before the run"
+        );
+
+        let child_status = match std::process::Command::new(match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe resolves the test binary"),
+        })
+        .args(["produce::tests::"])
+        .args(["--skip", "produce::tests::guard_no_checkout_write"])
+        .status()
+        {
+            Ok(child_status) => child_status,
+            Err(_) => unreachable!("the suite child must spawn"),
+        };
+        assert!(
+            child_status.success(),
+            "the producer suite child exited unsuccessfully, {child_status}"
+        );
+
+        let (after_digest, after_notes) = f272_tree_digest(&tree);
+        assert!(
+            after_notes.is_empty(),
+            "the protected oracle tree snapshot failed closed on unsupported or unreadable entries after the run"
+        );
+        assert_eq!(
+            before_digest, after_digest,
+            "the protected oracle tree changed during the producer run, checkout writes are exposed"
+        );
+        println!(
+            "selected {selected_count}, filtered out {filtered_out}, list exit {list_status}, child exit {child_status}"
+        );
+    }
+
+    /// Permanent control: a stale or nonmatching filter must yield zero
+    /// selected tests. The current binary itself is asked to list with a
+    /// genuinely nonmatching filter, so this is real child evidence rather
+    /// than a local filter of a good list or a hand-made empty vector. This
+    /// uses only --list and never runs the suite recursively.
+    #[test]
+    fn f272_stale_selection_is_a_permanent_red_control() {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe must resolve the test binary"),
+        };
+        let output = match std::process::Command::new(&exe)
+            .args([
+                "--list",
+                "--format",
+                "terse",
+                "produce::tests::definitely-not-a-real-test::",
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => {
+                unreachable!("the test binary must be spawnable for the stale filter control")
+            }
+        };
+        let status = output.status;
+        assert!(
+            status.success(),
+            "the list run must exit cleanly to be evidence, {status}"
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        let selected: Vec<String> = text
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .filter(|name| name.starts_with("produce::tests::"))
+            .filter(|name| name != "produce::tests::guard_no_checkout_write")
+            .collect();
+        assert!(
+            selected.is_empty(),
+            "an impossible filter selected tests, which contradicts the permanent zero-selected control"
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let empty: Vec<String> = Vec::new();
+                f272_validate_selection(&empty)
+            })
+            .is_err(),
+            "an empty selection must fail closed and never pass"
+        );
+    }
+
+    fn fixture_worker(
+        panic_before_produce: bool,
+    ) -> (PathBuf, Option<(ProduceScratchDirGuard, Vec<u8>)>) {
+        let owner = produce_test_scratch_dir();
+        let path_witness = owner.path.clone();
+        let outcome = std::panic::catch_unwind(move || {
+            if panic_before_produce {
+                unreachable!("closed unreachable before produce_applicable");
+            }
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: owner.path.join("reference"),
+                corpus_root: owner.path.join("corpus"),
+                reference_subset: owner.path.join("subset"),
+                candidate_run: owner.path.join("candidate"),
+                dispositions: owner.path.join("dispositions.json"),
+            });
+            assert_eq!(summary.resources, "reference-run-absent");
+            assert_eq!(summary.compared, 0);
+            assert_eq!(summary.unrun, 1);
+            assert_eq!(summary.selected, 0);
+            assert_eq!(summary.tier_a, "unrun");
+            assert_eq!(summary.instruments, "not-run-by-producer");
+            assert_eq!(summary.collector, "not-run-by-producer");
+            assert_eq!(summary.host_measurement, "unavailable");
+            assert!(summary.accounts());
+            let bytes = match fs::read(owner.path.join("dispositions.json")) {
+                Ok(bytes) => bytes,
+                Err(_) => unreachable!("dispositions.json must exist on disk after produce"),
+            };
+            (owner, bytes)
+        });
+        match outcome {
+            Ok((owner, bytes)) => (path_witness, Some((owner, bytes))),
+            Err(_payload) => (path_witness, None),
+        }
+    }
+
+    #[test]
+    fn concurrent_fixture_invocations_use_distinct_paths() {
+        let (first, second) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| fixture_worker(false));
+            let right = scope.spawn(|| fixture_worker(false));
+            let left_result = left.join();
+            let right_result = right.join();
+            let left = match left_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("fixture worker thread must not panic"),
+            };
+            let right = match right_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("fixture worker thread must not panic"),
+            };
+            (left, right)
+        });
+        let (left_witness, left_outcome) = first;
+        let (right_witness, right_outcome) = second;
+        let (left_owner, left_bytes) = match left_outcome {
+            Some(pair) => pair,
+            None => unreachable!("first fixture worker must produce"),
+        };
+        let (right_owner, right_bytes) = match right_outcome {
+            Some(pair) => pair,
+            None => unreachable!("second fixture worker must produce"),
+        };
+        assert!(
+            left_witness != right_witness,
+            "fixture invocations must use distinct witness paths"
+        );
+        let left_exists = match fs::metadata(&left_witness) {
+            Ok(meta) => meta.is_dir(),
+            Err(_) => unreachable!("first scratch directory must still exist"),
+        };
+        assert!(left_exists);
+        let right_exists = match fs::metadata(&right_witness) {
+            Ok(meta) => meta.is_dir(),
+            Err(_) => unreachable!("second scratch directory must still exist"),
+        };
+        assert!(right_exists);
+        let left_actual = match fs::read(left_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("first dispositions.json must be readable"),
+        };
+        let right_actual = match fs::read(right_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("second dispositions.json must be readable"),
+        };
+        assert!(
+            left_actual == left_bytes,
+            "first dispositions.json bytes must match"
+        );
+        assert!(
+            right_actual == right_bytes,
+            "second dispositions.json bytes must match"
+        );
+        drop(left_owner);
+        drop(right_owner);
+        let left_gone = match fs::symlink_metadata(&left_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("first scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(left_gone);
+        let right_gone = match fs::symlink_metadata(&right_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("second scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(right_gone);
+    }
+
+    #[test]
+    fn one_sided_fixture_failure_is_bounded_and_cleans_up() {
+        let (healthy, failed) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| fixture_worker(false));
+            let right = scope.spawn(|| fixture_worker(true));
+            let left_result = left.join();
+            let right_result = right.join();
+            let left = match left_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("healthy fixture worker thread must not panic"),
+            };
+            let right = match right_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("failing fixture worker thread must be contained"),
+            };
+            (left, right)
+        });
+        let (healthy_witness, healthy_outcome) = healthy;
+        let (failed_witness, failed_outcome) = failed;
+        let (healthy_owner, healthy_bytes) = match healthy_outcome {
+            Some(pair) => pair,
+            None => unreachable!("healthy fixture worker must produce"),
+        };
+        assert!(failed_outcome.is_none());
+        let failed_gone = match fs::symlink_metadata(&failed_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("failed scratch directory must already be absent"),
+            },
+            Ok(_) => false,
+        };
+        assert!(failed_gone);
+        let healthy_actual = match fs::read(healthy_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("healthy dispositions.json must be readable"),
+        };
+        assert!(
+            healthy_actual == healthy_bytes,
+            "healthy dispositions.json bytes must match"
+        );
+        drop(healthy_owner);
+        let healthy_gone = match fs::symlink_metadata(&healthy_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("healthy scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(healthy_gone);
+        assert!(failed_gone);
+    }
+
+    #[test]
+    fn private_refusal_fixtures_reach_their_actual_branches() {
+        for overlap in [false, true] {
+            let dir = produce_test_scratch_dir();
+            let dir = dir.path.clone();
+            let reference = dir.join("reference");
+            match std::fs::create_dir_all(&reference) {
+                Ok(()) => {}
+                Err(_) => unreachable!("reference dir must create"),
+            }
+            match std::fs::write(reference.join("run.json"), "{\"rows\":[]}") {
+                Ok(()) => {}
+                Err(_) => unreachable!("run.json must write"),
+            }
+            let loaded = crate::sidecar::Run::load(&reference);
+            assert!(loaded.is_ok(), "reference run with empty rows must load");
+            let subset = dir.join("subset");
+            let candidate = dir.join("candidate");
+            let dispositions = dir.join("dispositions.json");
+            let reference_subset = if overlap { reference.clone() } else { subset };
+            let candidate_run = if overlap {
+                reference.clone()
+            } else {
+                candidate
+            };
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: reference.clone(),
+                corpus_root: dir.join("corpus"),
+                reference_subset: reference_subset.clone(),
+                candidate_run: candidate_run.clone(),
+                dispositions: dispositions.clone(),
+            });
+            if !overlap {
+                assert_eq!(summary.resources, "corpus-absent");
+                assert_eq!(summary.selected, 0);
+                assert_eq!(summary.produced, 0);
+                assert_eq!(summary.compared, 0);
+                assert_eq!(summary.recorded, 0);
+                assert_eq!(summary.unrun, 0);
+                assert!(summary.accounts());
+            } else {
+                assert_eq!(summary.resources, "output-directory-refused");
+                assert_eq!(summary.selected, 0);
+                assert_eq!(summary.produced, 0);
+                assert_eq!(summary.compared, 0);
+                assert_eq!(summary.recorded, 0);
+                assert_eq!(summary.unrun, 1);
+                assert!(summary.accounts());
+            }
+            assert!(dispositions.is_file(), "dispositions must be written");
+        }
+    }
+    #[test]
+    fn scratch_owner_cleans_up_on_finish_and_unwind() {
+        // Normal cleanup: guard dropped at scope end, path cloned out first.
+        let finished_path = {
+            let owned = produce_test_scratch_dir();
+            assert!(owned.path.exists());
+            owned.path.clone()
+        };
+        assert!(!finished_path.exists());
+
+        // Unwind cleanup: guard moved into the closure and dropped on unwind.
+        let unwind_path = {
+            let owned = produce_test_scratch_dir();
+            assert!(owned.path.exists());
+            let path = owned.path.clone();
+            let outcome = std::panic::catch_unwind(move || {
+                let _guard = owned;
+                unreachable!("synthetic unwind control");
+            });
+            assert!(outcome.is_err());
+            path
+        };
+        assert!(!unwind_path.exists());
+    }
+    #[test]
+    fn actual_inventory_accounting_matches_binary() {
+        let (selected, excluded, status) = f272_list_selected_tests();
+        assert!(status.success(), "filtered listing process did not succeed");
+        f272_validate_selection(&selected);
+
+        let exe = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => unreachable!("current_exe unavailable"),
+        };
+        let out = match std::process::Command::new(exe)
+            .args(["--list", "--format", "terse"])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => unreachable!("binary spawn failed"),
+        };
+        assert!(out.status.success(), "full listing process did not succeed");
+
+        let raw = match String::from_utf8(out.stdout) {
+            Ok(s) => s,
+            Err(_) => unreachable!("non-utf8 stdout"),
+        };
+        let count = raw.lines().filter(|line| line.ends_with(": test")).count();
+
+        let expected = selected.len() + excluded;
+        assert_eq!(
+            count, expected,
+            "raw libtest inventory count mismatch: actual {} expected {}",
+            count, expected
+        );
+    }
+    #[test]
+    fn exact_node_cache_exclusion_preserves_real_outputs() {
+        let owner = produce_test_scratch_dir();
+        let root = owner.path.clone();
+        let node_modules = root.join("node_modules");
+        let nested_node_modules = root.join("nested").join("node_modules");
+        let out = root.join("out");
+        let compare_out = root.join("compare-out");
+        for dir in [
+            node_modules.clone(),
+            nested_node_modules.clone(),
+            out.clone(),
+            compare_out.clone(),
+        ] {
+            match fs::create_dir_all(&dir) {
+                Ok(()) => {}
+                Err(_) => unreachable!("fixture directory creation failed"),
+            }
+        }
+        let cache_path = node_modules.join("cache.bin");
+        let protected: Vec<PathBuf> = vec![
+            root.join("Cargo.lock"),
+            root.join("package-lock.json"),
+            out.join("reference.raw"),
+            compare_out.join("dispositions.json"),
+            nested_node_modules.join("kept.txt"),
+        ];
+        let mut contents: Vec<PathBuf> = protected.clone();
+        contents.push(cache_path.clone());
+        for path in &contents {
+            match fs::write(path, b"initial") {
+                Ok(()) => {}
+                Err(_) => unreachable!("fixture file creation failed"),
+            }
+        }
+        let (initial, notes) = f272_tree_digest(&root);
+        assert!(notes.is_empty());
+        match fs::write(&cache_path, b"cache-changed") {
+            Ok(()) => {}
+            Err(_) => unreachable!("cache file write failed"),
+        }
+        let (after_cache, notes) = f272_tree_digest(&root);
+        assert!(notes.is_empty());
+        assert_eq!(after_cache, initial);
+        for path in &protected {
+            match fs::write(path, b"protected-changed") {
+                Ok(()) => {}
+                Err(_) => unreachable!("protected file write failed"),
+            }
+            let (changed, notes) = f272_tree_digest(&root);
+            assert!(notes.is_empty());
+            assert_ne!(changed, initial);
+            match fs::write(path, b"initial") {
+                Ok(()) => {}
+                Err(_) => unreachable!("protected file restore failed"),
+            }
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn installed_cache_symlink_is_accepted() {
+        let owner = produce_test_scratch_dir();
+        let bin_dir = owner.path.join("node_modules").join(".bin");
+        match fs::create_dir_all(&bin_dir) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create node_modules/.bin directory"),
+        }
+        let tool_js = owner.path.join("node_modules").join("tool.js");
+        match fs::write(&tool_js, b"export default 1;\n") {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to write tool.js"),
+        }
+        let link_path = bin_dir.join("tool");
+        match std::os::unix::fs::symlink("../tool.js", &link_path) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create relative symlink"),
+        }
+        let (_, notes) = f272_tree_digest(&owner.path);
+        assert!(notes.is_empty());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlink_outside_dependency_cache_is_refused() {
+        let owner = produce_test_scratch_dir();
+        let file = owner.path.join("entry.txt");
+        let link = owner.path.join("entry-link");
+        match fs::File::create(&file) {
+            Ok(_) => {}
+            Err(_) => unreachable!("failed to create private scratch file"),
+        }
+        let (_, notes) = f272_tree_digest(&owner.path);
+        assert!(notes.is_empty());
+        match std::os::unix::fs::symlink(&file, &link) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create symlink beside the private file"),
+        }
+        let (_, notes_after) = f272_tree_digest(&owner.path);
+        assert!(
+            !notes_after.is_empty(),
+            "symlink outside the dependency cache must be refused with a note"
+        );
     }
 }
