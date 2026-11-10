@@ -139,7 +139,7 @@ The proposed endpoint `POST /dicweb/qido` carries raw DICOM JSON. Headers are `X
 export interface QidoStudyRow { readonly studyUid: string; }
 export interface QidoSeriesRow { readonly seriesUid: string; readonly returnedStudyUid?: string; }
 export interface QidoInstanceRow { readonly instanceUid: string; readonly returnedStudyUid?: string; readonly returnedSeriesUid?: string; }
-export interface QidoStudyCapturedScope {}
+export type QidoStudyCapturedScope = Readonly<Record<string, never>>;
 export interface QidoSeriesCapturedScope { readonly studyUid: string; }
 export interface QidoInstanceCapturedScope { readonly studyUid: string; readonly seriesUid: string; }
 export interface QidoEnvelopeCommon { readonly sourceNonce: string; readonly generation: number; readonly rawBodySha256: string; }
