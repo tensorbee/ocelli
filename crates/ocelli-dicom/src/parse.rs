@@ -11,6 +11,8 @@ use std::{
     rc::Rc,
 };
 
+const DEFAULT_SCRATCH_CAPACITY: usize = 64 * 1024;
+
 use dicom_encoding::transfer_syntax::{Codec, TransferSyntax};
 use dicom_object::{
     DefaultDicomObject, DicomCollectorOptions, FileMetaTable, InMemDicomObject, Tag,
@@ -209,6 +211,22 @@ pub enum ParseError {
     /// The data set nests sequences deeper than this build reads.
     #[error("the DICOM data set nests sequences deeper than this build reads")]
     SequenceTooDeep,
+    /// The decoded data set exceeds the caller-supplied byte cap.
+    #[error("the decoded DICOM data set exceeds the requested size limit")]
+    SizeLimit,
+}
+
+/// Caller-supplied bounds for decoding a DICOM data set.
+///
+/// `decoded_dataset_max` caps the raw decoded data-set bytes that this crate
+/// materialises. File Meta Information and the private completion sentinel
+/// are excluded. This is a cap on decoded bytes read from the input, not a
+/// guarantee about object heap size, resident set size, or allocator
+/// behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseLimits {
+    /// Maximum number of decoded data-set bytes allowed.
+    pub decoded_dataset_max: usize,
 }
 
 /// Parse one DICOM Part 10 file from memory.
@@ -224,6 +242,34 @@ pub enum ParseError {
 /// unavailable transfer syntax, or a data set that is invalid under the
 /// declared syntax.
 pub fn parse_part10(bytes: &[u8]) -> Result<ParsedDicom, ParseError> {
+    parse_part10_inner(bytes, None)
+}
+
+/// Parse one DICOM Part 10 file from memory with a decoded data-set cap.
+///
+/// This behaves exactly like [`parse_part10`] except that the decoded data
+/// set is refused with [`ParseError::SizeLimit`] before it is allowed to
+/// grow past `limits.decoded_dataset_max` bytes. File Meta Information and
+/// the private completion sentinel are not counted against the cap. The cap
+/// bounds decoded bytes materialised by this crate and is not a guarantee
+/// about object heap size or resident set size.
+///
+/// # Errors
+///
+/// Returns a [`ParseError`] for a malformed Part 10 envelope, an unknown or
+/// unavailable transfer syntax, a data set that is invalid under the
+/// declared syntax, or a decoded data set larger than the supplied cap.
+pub fn parse_part10_with_limits(
+    bytes: &[u8],
+    limits: &ParseLimits,
+) -> Result<ParsedDicom, ParseError> {
+    parse_part10_inner(bytes, Some(limits.decoded_dataset_max))
+}
+
+fn parse_part10_inner(
+    bytes: &[u8],
+    decoded_dataset_max: Option<usize>,
+) -> Result<ParsedDicom, ParseError> {
     if bytes.len() < PART10_PREFIX_END {
         return Err(ParseError::TruncatedPart10);
     }
@@ -250,7 +296,7 @@ pub fn parse_part10(bytes: &[u8]) -> Result<ParsedDicom, ParseError> {
     let encoded_data_set = bytes
         .get(data_set_start..)
         .ok_or(ParseError::InvalidDataSet)?;
-    let mut data_set = adapt_data_set(encoded_data_set, transfer_syntax)?;
+    let mut data_set = adapt_data_set(encoded_data_set, transfer_syntax, decoded_dataset_max)?;
     validate_data_set_structure(&data_set, transfer_syntax)?;
     append_completion_sentinel(&mut data_set, info.dispatch_path());
 
@@ -316,37 +362,95 @@ fn map_meta_error(error: dicom_object::meta::Error) -> ParseError {
 fn adapt_data_set(
     encoded: &[u8],
     transfer_syntax: &'static TransferSyntax,
+    decoded_dataset_max: Option<usize>,
 ) -> Result<Vec<u8>, ParseError> {
     match transfer_syntax.codec() {
         Codec::Dataset(Some(_)) if transfer_syntax.uid() == DEFLATED_EXPLICIT_VR_LITTLE_ENDIAN => {
             let mut decoded = Vec::new();
             let mut decoder = flate2::read::DeflateDecoder::new(encoded);
-            decoder.read_to_end(&mut decoded).map_err(|error| {
-                if error.kind() == std::io::ErrorKind::UnexpectedEof {
-                    ParseError::TruncatedDataSet
-                } else {
-                    ParseError::InvalidDataSet
+            match decoded_dataset_max {
+                None => {
+                    decoder.read_to_end(&mut decoded).map_err(|error| {
+                        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                            ParseError::TruncatedDataSet
+                        } else {
+                            ParseError::InvalidDataSet
+                        }
+                    })?;
                 }
-            })?;
+                Some(cap) => {
+                    read_decoded_with_cap(&mut decoder, &mut decoded, cap)?;
+                }
+            }
             validate_deflated_stream_end(encoded, decoder.total_in())?;
             Ok(decoded)
         }
         Codec::Dataset(Some(adapter)) => {
             let mut decoded = Vec::new();
-            adapter
-                .adapt_reader(Box::new(Cursor::new(encoded)))
-                .read_to_end(&mut decoded)
-                .map_err(|error| {
-                    if error.kind() == std::io::ErrorKind::UnexpectedEof {
-                        ParseError::TruncatedDataSet
-                    } else {
-                        ParseError::InvalidDataSet
-                    }
-                })?;
+            let mut reader = adapter.adapt_reader(Box::new(Cursor::new(encoded)));
+            match decoded_dataset_max {
+                None => {
+                    reader.read_to_end(&mut decoded).map_err(|error| {
+                        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                            ParseError::TruncatedDataSet
+                        } else {
+                            ParseError::InvalidDataSet
+                        }
+                    })?;
+                }
+                Some(cap) => {
+                    read_decoded_with_cap(&mut reader, &mut decoded, cap)?;
+                }
+            }
             Ok(decoded)
         }
         Codec::Dataset(None) => Err(ParseError::UnsupportedDataSetTransferSyntax),
-        Codec::None | Codec::EncapsulatedPixelData(..) => Ok(encoded.to_vec()),
+        Codec::None | Codec::EncapsulatedPixelData(..) => match decoded_dataset_max {
+            None => Ok(encoded.to_vec()),
+            Some(cap) => {
+                if encoded.len() > cap {
+                    return Err(ParseError::SizeLimit);
+                }
+                Ok(encoded.to_vec())
+            }
+        },
+    }
+}
+
+/// Read a decoded data set in fixed scratch chunks, refusing before the
+/// decoded vector grows past `cap` bytes. One extra read is issued at an
+/// exactly-full buffer so a truncated stream is still reported as
+/// `TruncatedDataSet` rather than passing the cap check silently.
+fn read_decoded_with_cap<R: Read>(
+    reader: &mut R,
+    decoded: &mut Vec<u8>,
+    cap: usize,
+) -> Result<(), ParseError> {
+    let mut scratch = vec![0u8; DEFAULT_SCRATCH_CAPACITY];
+    loop {
+        let room = cap
+            .checked_sub(decoded.len())
+            .ok_or(ParseError::SizeLimit)?;
+        let to_read = scratch.len().min(room.max(1));
+        let window = scratch
+            .get_mut(..to_read)
+            .ok_or(ParseError::InvalidDataSet)?;
+        let n = match reader.read(window) {
+            Ok(n) => n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Err(ParseError::TruncatedDataSet);
+            }
+            Err(_) => return Err(ParseError::InvalidDataSet),
+        };
+        if n == 0 {
+            return Ok(());
+        }
+        if n > room {
+            return Err(ParseError::SizeLimit);
+        }
+        let chunk = scratch.get(..n).ok_or(ParseError::InvalidDataSet)?;
+        decoded.extend_from_slice(chunk);
     }
 }
 
@@ -663,7 +767,9 @@ fn error_chain_has_unexpected_eof(error: &(dyn std::error::Error + 'static)) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ParseError, classify_transfer_syntax};
+    use super::{ParseError, classify_transfer_syntax, read_decoded_with_cap};
+    use std::io::{Cursor, ErrorKind, Read};
+    use std::slice;
 
     #[test]
     fn a_known_syntax_without_a_data_set_reader_is_refused() {
@@ -680,5 +786,82 @@ mod tests {
                 .map(|info| info.dispatch_path()),
             Err(ParseError::UnsupportedDataSetTransferSyntax)
         );
+    }
+    /// Fixture: serves at most one byte per read over a cursor of b"abcd",
+    /// optionally delivering one initial Interrupted error first.
+    struct OneByteReader {
+        inner: Cursor<Vec<u8>>,
+        pending_interrupt: bool,
+    }
+
+    impl OneByteReader {
+        fn new(data: &[u8], interrupt_first: bool) -> Self {
+            Self {
+                inner: Cursor::new(data.to_vec()),
+                pending_interrupt: interrupt_first,
+            }
+        }
+    }
+
+    impl Read for OneByteReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.pending_interrupt {
+                self.pending_interrupt = false;
+                return Err(ErrorKind::Interrupted.into());
+            }
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            let Some(slot) = buf.get_mut(0) else {
+                return Err(std::io::Error::other("fixture slice unavailable"));
+            };
+            self.inner.read(slice::from_mut(slot))
+        }
+    }
+
+    #[test]
+    fn f245_fragmented_short_reads_yield_exact_abcd() {
+        let mut reader = OneByteReader::new(b"abcd", false);
+        let mut decoded = Vec::new();
+        let expected: Vec<u8> = b"abcd".to_vec();
+        assert_eq!(read_decoded_with_cap(&mut reader, &mut decoded, 4), Ok(()));
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn f245_initial_interrupted_is_retried_to_same_abcd() {
+        let mut reader = OneByteReader::new(b"abcd", true);
+        let mut decoded = Vec::new();
+        let expected: Vec<u8> = b"abcd".to_vec();
+        assert_eq!(read_decoded_with_cap(&mut reader, &mut decoded, 4), Ok(()));
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn f245_cap_three_returns_size_limit_with_abc() {
+        let mut reader = OneByteReader::new(b"abcd", false);
+        let mut decoded = Vec::new();
+        let expected: Vec<u8> = b"abc".to_vec();
+        let outcome = read_decoded_with_cap(&mut reader, &mut decoded, 3);
+        assert_eq!(outcome, Err(ParseError::SizeLimit));
+        assert_eq!(decoded, expected);
+        assert_ne!(decoded.len(), 4);
+    }
+
+    #[test]
+    fn f245_cap_zero_empty_ok_and_nonempty_refuses() {
+        let mut empty_reader = OneByteReader::new(b"", false);
+        let mut decoded = Vec::new();
+        assert_eq!(
+            read_decoded_with_cap(&mut empty_reader, &mut decoded, 0),
+            Ok(())
+        );
+        assert!(decoded.is_empty());
+
+        let mut full_reader = OneByteReader::new(b"abcd", false);
+        let mut refused = Vec::new();
+        let outcome = read_decoded_with_cap(&mut full_reader, &mut refused, 0);
+        assert_eq!(outcome, Err(ParseError::SizeLimit));
+        assert!(refused.is_empty());
     }
 }

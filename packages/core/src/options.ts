@@ -9,7 +9,11 @@
 import { OcelliError } from "./ocelli-error.js";
 import type { FrameCommitMeta } from "./bulk.js";
 import type { CursorControllerOptions } from "./cursor.js";
-import type { DicomwebClientOptions, QidoSearchOptions } from "./dicomweb.js";
+import type {
+  DicomwebBoundedDeliveryOptions,
+  DicomwebClientOptions,
+  QidoSearchOptions,
+} from "./dicomweb.js";
 import type { WadoInstanceRequest } from "./instance-bytes.js";
 import type { PointerDispatchOptions } from "./pointer.js";
 import type { ResidentFrameRequest } from "./frame-cache.js";
@@ -32,6 +36,27 @@ type MissingDicomwebClient = Exclude<
   (typeof DICOMWEB_CLIENT_OPTION_KEYS)[number]
 >;
 const dicomwebClientComplete: [MissingDicomwebClient] extends [never] ? true : never = true;
+
+export const DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS = [
+  "studiesServiceUrl",
+  "wadoUriUrl",
+  "fetch",
+  "cache",
+  "maxResponseBytes",
+  "receive",
+  "wasm",
+  "sink",
+] as const satisfies readonly (keyof DicomwebBoundedDeliveryOptions)[];
+
+type MissingDicomwebBoundedDelivery = Exclude<
+  keyof DicomwebBoundedDeliveryOptions,
+  (typeof DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS)[number]
+>;
+const dicomwebBoundedDeliveryComplete: [MissingDicomwebBoundedDelivery] extends [
+  never,
+]
+  ? true
+  : never = true;
 
 export const QIDO_SEARCH_OPTION_KEYS = [
   "filters",
@@ -156,6 +181,7 @@ const residentFrameComplete: [MissingResidentFrame] extends [never] ? true : nev
 /** True when every key list names every field of its type. */
 export const OPTION_LISTS_COMPLETE =
   dicomwebClientComplete &&
+  dicomwebBoundedDeliveryComplete &&
   qidoSearchComplete &&
   pointerDispatchComplete &&
   cursorControllerComplete &&
@@ -167,6 +193,7 @@ export const OPTION_LISTS_COMPLETE =
 
 /** Type name to the keys `refuseUnknownOptions` allows for that type. */
 export const OPTION_KEY_LISTS: Readonly<Record<string, readonly string[]>> = {
+  DicomwebBoundedDeliveryOptions: DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS,
   DicomwebClientOptions: DICOMWEB_CLIENT_OPTION_KEYS,
   QidoSearchOptions: QIDO_SEARCH_OPTION_KEYS,
   PointerDispatchOptions: POINTER_DISPATCH_OPTION_KEYS,
