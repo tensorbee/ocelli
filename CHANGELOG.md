@@ -682,6 +682,30 @@ Repository bootstrap. Nothing is published.
   `@ocelli/core` under `/lib/` from an allowlist, so the region window needs
   `npm run build -w @ocelli/core` and reads unavailable without it. The
   bottom right corner names the window shown.
+- The local folder viewer offers three mouse profiles in its MOUSE section.
+  Ocelli, the default, starts the left button on Scroll with the middle
+  button zooming and the right button panning. Scroll on left drags the
+  window with the middle button and zooms with the right. Window on left
+  starts on W/L, pans with the middle button and zooms with the right.
+  Control with the left button pans in all three. The profile, the play
+  rate and the two hidden side columns are kept in this browser for the
+  page's address. Between two frames of one multi-frame file, Play waits
+  that file's Frame Time `(0018,1063)`, and the FPS control otherwise, with
+  a line saying which and Use the slider to take the rate back.
+  `ocelli-dicom` gains `cine_timing`, which reads one object's cine timing
+  alone through the same rules as `assemble_display`.
+- The local folder viewer saves its marks. Save marks downloads one DICOM
+  SR TID 1500 file per study for the Freeform, Rectangle, Ellipse, Length
+  and Text marks, and one Key Object Selection per study for the key
+  images. Nothing is written into the opened folder. Opening the folder
+  again with those files in it, or Load marks, places each mark and key
+  image on its image by SOP Instance UID and frame. A save names the
+  reports it replaces in Predecessor Documents Sequence. Angle, Cobb,
+  Bidirectional, Arrow and Probe marks are not saved and are counted.
+  `@ocelli/core` gains `writeTid1500Groups`, `readTid1500Groups`,
+  `writeKeyObjects` and `readKeyObjects`, `GraphicType` gains `ELLIPSE`, and
+  an `IMAGE` item gains an optional `frame`. Save marks and Load marks need
+  `npm run build` first.
 
 ### Changed
 
