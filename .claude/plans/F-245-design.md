@@ -265,7 +265,7 @@ The folder viewer keeps one ordinary HTML page at examples/folder-viewer/src/pag
 
 ### Core export and dist
 
-A NEW flat core module packages/core/src/dicomweb-viewer.ts is exported from packages/core/src/index.ts. Generated tsc dist output is not tracked in git. LIBRARY_FILES lists the basename dicomweb-viewer without extension or URL, plus the closure test entry. The existing import map entry @ocelli/core=/lib/ocelli-core/index.js is unchanged. The main HTML keeps the actual source chooser and discovery wiring from Half 1.
+A NEW flat core module packages/core/src/dicomweb-viewer.ts is exported from packages/core/src/index.ts. Generated tsc dist output is not tracked in git. LIBRARY_FILES lists the basename dicomweb-viewer without extension or URL, plus the closure test entry. The existing import map entry @ocelli/core=/lib/ocelli-core/index.js is unchanged. The main canonical HTML gains the new source chooser and discovery wiring. The single-page and F202 remote-display boundary are unchanged.
 
 ### Configuration and policy
 
