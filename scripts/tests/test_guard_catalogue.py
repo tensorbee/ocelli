@@ -343,6 +343,49 @@ class DocProbeHarnessPreconditions(unittest.TestCase):
         self.assertEqual(str(caught.exception), 'docs gate passed without real rendered docs')
 
 
+from guards import catalogue
+
+
+class UnextractableGateProbeSelection(unittest.TestCase):
+    def test_selector_picks_joined_arm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            box = sandbox.Sandbox(path=Path(directory))
+            box.write(
+                "scripts/ci_floor_check.py",
+                "NOT_IN_FLOOR = {}\n",
+            )
+            box.write(
+                ".github/workflows/ci.yml",
+                "jobs:\n"
+                "  synth:\n"
+                "    steps:\n"
+                "      - run: bin/ocelli.sh gate wrapped\n"
+                "      - run: bin/ocelli.sh gate inline\n"
+                "      - run: bin/ocelli.sh gate joined\n",
+            )
+            box.write(
+                "bin/ocelli.sh",
+                "GATES=(\n"
+                '  "wrapped|no|fixture"\n'
+                '  "inline|no|fixture"\n'
+                '  "joined|no|fixture"\n'
+                ")\n"
+                "run_gate() { local name=$1; case \"$name\" in\n"
+                "  wrapped) env FLAG=x cargo doc --no-deps ;;\n"
+                "  inline) env FLAG=x cargo doc --no-deps &&\n"
+                "    python3 later.py ;;\n"
+                "  joined) python3 first.py &&\n"
+                "    python3 second.py &&\n"
+                "    node --test synthetic.mjs ;;\n"
+                "esac; }\n"
+                "skip() { return 3; }\n",
+            )
+            runner_before = box.read('bin/ocelli.sh')
+            selected = catalogue._a_gate_with_an_unextractable_arm_command(box)
+            self.assertEqual(selected, "joined")
+            self.assertEqual(box.read('bin/ocelli.sh'), runner_before)
+
+
 class CatalogueIsWellFormed(unittest.TestCase):
     def test_the_skills_gate_names_its_checker_and_suite_exactly(self) -> None:
         """The named CI gate must not lose either executable check."""

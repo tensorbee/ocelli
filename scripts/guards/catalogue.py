@@ -5462,6 +5462,7 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
     runner = box.read("bin/ocelli.sh")
     unseen = ci_floor_check.unseen_commands(runner)
     visible = ci_floor_check.gate_commands(runner)
+    bodies = ci_floor_check.arm_bodies(runner)
     excluded = _not_in_floor(box)
     workflow = box.read(".github/workflows/ci.yml")
     for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', runner, re.M):
@@ -5474,6 +5475,18 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
         # with every command wrapped, and picking it turned this builder
         # into a StopIteration the probe reported as its own error.
         if not any(command in runner for command in visible[gate]):
+            continue
+        # The substitution needs a surviving visible command next to the one
+        # it removes, and the expansion needs the first unseen command to sit
+        # on its own physical line after a line ending in `&&` so the edit
+        # stays inside one arm without touching a wrapped first statement.
+        if len(visible[gate]) < 2:
+            continue
+        body = bodies.get(gate, "")
+        head = unseen[gate][0].split()[0]
+        lines = body.split("\n")
+        index = next((i for i, line in enumerate(lines) if line.lstrip().startswith(head + " ")), None)
+        if index is None or index == 0 or not lines[index - 1].rstrip().endswith("&&"):
             continue
         if f"bin/ocelli.sh gate {gate}" in workflow:
             return gate

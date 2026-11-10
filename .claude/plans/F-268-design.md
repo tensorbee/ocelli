@@ -136,6 +136,8 @@ AC1's run is both the evidence and the fix list. The feature profile covers
 the changed crates. Evidence invalidates on any later link-affecting edit,
 which is what the proposed check exists to catch.
 
+Full native/default workspace docs gate exits 0. A tiny two-member fixture gate exits healthy 0, private 1, broken 1. Raw Cargo baseline EXIT 101 was fixed to 0, not 101 failures. 68 unit tests total including 3 new stdlib tests, including the selector-ordering regression. Two deep refusal probes and a healthy control are green. Three wrong-gate mutants are semantic RED. Staged feature floor/corpus and independent final union review are pending. No whole-feature completion.
+
 ## Boundary and tier
 
 - wasm-bindgen: not touched
@@ -171,7 +173,9 @@ accepts it.
 
 ## User-facing documentation impact
 
-`README.md` no change. The workspace docs are the deliverable.
+`README.md`, `use.html`, and `more.html` no change, because the edit set
+introduces no viewer, runtime, or API behavior change. The workspace docs
+are the deliverable.
 
 ## Gate providers and mandatory controls
 
