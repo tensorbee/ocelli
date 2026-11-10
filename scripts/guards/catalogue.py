@@ -49,6 +49,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -703,6 +704,104 @@ def _shift_openjph_ict_coefficient(box: Sandbox) -> None:
     box.substitute("vendor/openjph-core-0.1.0/src/transform/colour.rs",
                    "pub const GAMMA_CB2G: f32 = 0.34413;",
                    "pub const GAMMA_CB2G: f32 = 0.35413;")
+
+
+def _write_docs_fixture(box: Sandbox, fault: str) -> None:
+    if fault == "healthy":
+        subject_src = (
+            "/// Detailed documentation links to [std::option::Option].\n"
+            "pub fn f268_healthy_fn() -> u32 {\n"
+            "    1\n"
+            "}\n"
+        )
+    elif fault == "private":
+        subject_src = (
+            "/// Detailed documentation links to [f268_private_target].\n"
+            "pub fn f268_subject_fn() -> u32 {\n"
+            "    f268_private_target()\n"
+            "}\n"
+            "\n"
+            "fn f268_private_target() -> u32 {\n"
+            "    2\n"
+            "}\n"
+        )
+    elif fault == "broken":
+        subject_src = (
+            "/// Detailed documentation links to [f268_missing_target].\n"
+            "pub fn f268_subject_fn() -> u32 {\n"
+            "    3\n"
+            "}\n"
+        )
+    else:
+        raise ValueError(f"unknown fault: {fault!r}")
+    box.write(
+        "Cargo.toml",
+        "[workspace]\n"
+        "members = [\"docs-healthy\", \"docs-subject\"]\n"
+        "default-members = [\"docs-healthy\"]\n"
+        "resolver = \"2\"\n",
+    )
+    box.write(
+        "Cargo.lock",
+        "version = 4\n"
+        "\n"
+        "[[package]]\n"
+        "name = \"f268-healthy\"\n"
+        "version = \"0.1.0\"\n"
+        "\n"
+        "[[package]]\n"
+        "name = \"f268-subject\"\n"
+        "version = \"0.1.0\"\n",
+    )
+    box.write(
+        "docs-healthy/Cargo.toml",
+        "[package]\n"
+        "name = \"f268-healthy\"\n"
+        "version = \"0.1.0\"\n"
+        "edition = \"2021\"\n",
+    )
+    box.write(
+        "docs-healthy/src/lib.rs",
+        "/// Detailed documentation links to [std::option::Option].\n"
+        "pub fn f268_healthy_fn() -> u32 {\n"
+        "    1\n"
+        "}\n",
+    )
+    box.write(
+        "docs-subject/Cargo.toml",
+        "[package]\n"
+        "name = \"f268-subject\"\n"
+        "version = \"0.1.0\"\n"
+        "edition = \"2021\"\n",
+    )
+    box.write("docs-subject/src/lib.rs", subject_src)
+
+
+def _run_docs_gate(box: Sandbox, fault: str) -> subprocess.CompletedProcess[str]:
+    _write_docs_fixture(box, fault)
+    prior_encoded = os.environ.get('CARGO_ENCODED_RUSTDOCFLAGS')
+    prior_rustdoc = os.environ.get('RUSTDOCFLAGS')
+    prior_target = os.environ.get('CARGO_TARGET_DIR')
+    encoded = chr(31).join(['-A', 'rustdoc::private_intra_doc_links', '-A', 'rustdoc::broken_intra_doc_links'])
+    child_env = {
+        'CARGO_ENCODED_RUSTDOCFLAGS': encoded,
+        'RUSTDOCFLAGS': '-A rustdoc::private_intra_doc_links -A rustdoc::broken_intra_doc_links',
+        'CARGO_BUILD_JOBS': '2',
+    }
+    with tempfile.TemporaryDirectory(prefix='ocelli-docs-probe-') as target:
+        child_env['CARGO_TARGET_DIR'] = target
+        done = box.run(['bin/ocelli.sh', 'gate', 'docs'], env=child_env, timeout=300)
+        if done.returncode == 0:
+            doc_dir = Path(target) / 'doc'
+            healthy = doc_dir / 'f268_healthy' / 'index.html'
+            subject = doc_dir / 'f268_subject' / 'index.html'
+            if not (healthy.is_file() and subject.is_file()):
+                raise AssertionError('docs gate passed without real rendered docs')
+    assert not Path(target).exists()
+    assert os.environ.get('CARGO_ENCODED_RUSTDOCFLAGS') == prior_encoded
+    assert os.environ.get('RUSTDOCFLAGS') == prior_rustdoc
+    assert os.environ.get('CARGO_TARGET_DIR') == prior_target
+    return done
 
 
 def _run_vendor_tests_gate(box: Sandbox) -> "subprocess.CompletedProcess[str]":
@@ -9796,6 +9895,50 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
 
+    Guard(
+        id='docs',
+        file='bin/ocelli.sh',
+        gate='docs',
+        spec="Approved design .claude/plans/F-268-design.md, acceptance criteria AC4, AC5, AC8.",
+        refuses="Rejects public doc links whose target is private or missing, even when inherited encoded allow flags are present.",
+        claims=(),
+        probes=(
+            Probe(
+                id='docs.private-link-encoded-override',
+                mutate=None,
+                invoke=Invoke(
+                    'docs private encoded override',
+                    lambda box: _run_docs_gate(box, 'private'),
+                ),
+                expect='f268_private_target',
+                needs='cargo',
+                profile='deep',
+                level=3,
+                control=Invoke(
+                    'docs healthy encoded override',
+                    lambda box: _run_docs_gate(box, 'healthy'),
+                ),
+            ),
+            Probe(
+                id='docs.broken-link-encoded-override',
+                mutate=None,
+                invoke=Invoke(
+                    'docs broken encoded override',
+                    lambda box: _run_docs_gate(box, 'broken'),
+                ),
+                expect='f268_missing_target',
+                needs='cargo',
+                profile='deep',
+                level=3,
+                control=Invoke(
+                    'docs healthy encoded override',
+                    lambda box: _run_docs_gate(box, 'healthy'),
+                ),
+            ),
+        ),
+        silent="Rustdoc diagnostic text is owned by Cargo, not a refusal literal stored in or discoverable from repository source.",
+    ),
+
     # -- the vendored coefficient contract, F-239 D-31 ----------------------
     Guard(
         id="vendor-tests",
@@ -15123,7 +15266,8 @@ GUARDS: tuple[Guard, ...] = (
               "harness preconditions, not additional repository policy. "
               "The positive traversal probes also require the real guard's "
               "baseline plus exactly one followed path, and their negative "
-              "companions require the planted file's group allow to refuse.",
+              "companions require the planted file's group allow to refuse. "
+              "DocProbeHarnessPreconditions covers harness preconditions only: _write_docs_fixture refusing an unknown fault and _run_docs_gate rejecting a zero-output no-op transport that reports success without rendered docs.",
     ),
     Guard(
         id="event-catalogue",

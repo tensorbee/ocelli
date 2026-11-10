@@ -32,7 +32,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS, _close_preflight,
+                              GUARDS, _close_preflight, _run_docs_gate,
+                              _write_docs_fixture,
                               _example_dev_reaches_a_url, _write_close_state,
                               _workspace_manifest_with_exclusion)
 
@@ -319,6 +320,27 @@ class ExampleDevControlKeepsBackgroundChild(unittest.TestCase):
             self.assertIn("example helper http://127.0.0.1:9", done.stderr)
             self.assertIn("fixture: child PID and URL observed", done.stdout)
         self.assertEqual((ROOT / "bin/example-dev.sh").read_bytes(), launcher)
+
+
+class DocProbeHarnessPreconditions(unittest.TestCase):
+    """Harness preconditions: helper input refusal and no-op transport rejection."""
+
+    def test_write_docs_fixture_rejects_unknown_fault(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdirectory:
+            box = sandbox.Sandbox(path=Path(tempdirectory))
+            with self.assertRaises(ValueError) as caught:
+                _write_docs_fixture(box, 'unsupported-arm')
+        self.assertEqual(str(caught.exception), "unknown fault: 'unsupported-arm'")
+
+    def test_run_docs_gate_rejects_noop_transport(self) -> None:
+        import subprocess
+        with tempfile.TemporaryDirectory() as tempdirectory:
+            box = sandbox.Sandbox(path=Path(tempdirectory))
+            with mock.patch.object(box, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as fake_run:
+                with self.assertRaises(AssertionError) as caught:
+                    _run_docs_gate(box, 'healthy')
+            fake_run.assert_called_once()
+        self.assertEqual(str(caught.exception), 'docs gate passed without real rendered docs')
 
 
 class CatalogueIsWellFormed(unittest.TestCase):
