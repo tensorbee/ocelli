@@ -1,6 +1,6 @@
 # F-268, rustdoc links resolve, with a workspace doc check proposed through the normal workflow
 
-**Status**: draft
+**Status**: approved
 **Epic ref**: E19.8
 **Sprint**: S47
 **Estimate**: 1w
@@ -33,6 +33,10 @@ The floor is what CI runs, and `bin/ocelli.sh gate --floor` is compared for
 set equality against `scripts/ci_floor_check.py`'s `NOT_IN_FLOOR` by the `ci`
 gate, so changing the floor is a workflow change. This filing makes no such
 change and proposes the check through the normal workflow.
+
+For the docs Cargo child only, remove CARGO_ENCODED_RUSTDOCFLAGS from the child environment (unset, never set to an empty string) and set RUSTDOCFLAGS to the exact existing authoritative paired denial. Precedence follows current Cargo docs: encoded flags would override raw ones, so an inherited encoded -A for both lints would defeat the paired denial. Do not mutate the caller or global environment and do not alter other gates.
+
+Ordinary Cargo command examples are baseline invocations assuming CARGO_ENCODED_RUSTDOCFLAGS is absent, not retrospective proof of an old environment. The actual docs gate must apply the separately declared child-only normalization before invoking Rustdoc.
 
 ## Problem and evidence
 
@@ -90,11 +94,12 @@ make an error go away, and any policy or floor edit inside this filing.
 |----|-------------------------------|---------------------|-------------------------------|---------------|
 | AC1 | A fresh `RUSTDOCFLAGS="-D rustdoc::private_intra_doc_links" cargo doc --workspace --no-deps --keep-going` with a scratch target dir exits 0 at the story tip | The recorded command and exit | Fixing the draft's table rows only | implementation |
 | AC2 | The same run with both `private_intra_doc_links` and `broken_intra_doc_links` denied exits 0 | The recorded command and exit | A check that passes with unresolved links silently | implementation |
-| AC3 | Each enumerated position is fixed in place, by making the target visible or the link correct, never by deleting the doc comment | Diff review | Silencing by removal | implementation, reviewer |
+| AC3 | Every freshly enumerated doc reference is fixed in place with its meaningful description unchanged. Private helper names appear as code identifiers where needed. The public constructor link is fully qualified as `ocelli_pixel::LutChain::new`. API, visibility, signatures, and reexports remain unchanged. | Diff review | Silencing by removal | implementation, reviewer |
 | AC4 | The proposed check runs `cargo doc` for the workspace with the lints denied and fails with the link named | The check run before and after planting one private link | A check that greps source instead of building docs | implementation |
 | AC5 | Negative controls. Reintroducing one private intra-doc link turns AC1 red, and planting an unresolved link turns AC2 red | Recorded in the review | A suite that passes on the wrong tree | implementation, reviewer |
 | AC6 | Public API unchanged. `cargo check --workspace` and the existing suites pass | The feature profile at the tree | A rename smuggled in as a fix | implementation |
 | AC7 | The check's profile placement is decided through the normal workflow and recorded where the workflow keeps it, never asserted by this filing | The workflow record | This filing claiming an authorized gate or floor change | operator, workflow |
+| AC8 | Run the actual bin/ocelli.sh gate docs target on a valid synthetic Rust fixture while CARGO_ENCODED_RUSTDOCFLAGS is inherited carrying -A for both lints, with a private link planted, then repeat with an unresolved link planted, then restore the healthy fixture and run once more under the same inherited override. No mock wrapper is substituted for the real child spawn. This is a permanent control, not a one-off diagnostic. | The gate must reject the private-link fixture with its intended paired-denial diagnostic (nonzero exit), reject the unresolved-link fixture with its intended diagnostic (nonzero exit), and then pass with exit 0 on the restored healthy fixture despite the inherited encoded override. The gate record must show its own child exits and that the caller environment, including CARGO_ENCODED_RUSTDOCFLAGS and RUSTDOCFLAGS in the caller shell, is unchanged after each run. | A wrong implementation sets CARGO_ENCODED_RUSTDOCFLAGS to an empty string or appends to it, mutates the caller or global environment, touches other gates, swaps in a Cargo-only invocation or a mock wrapper instead of the actual gate, or accepts the private or unresolved fixture because the inherited encoded -A masked the paired denial. | implementation, reviewer |
 
 Unrun ownership. No doc build, gate or test ran for this filing. AC1's fresh
 run is the story's first act, with a scratch `CARGO_TARGET_DIR`, and its list
@@ -116,8 +121,7 @@ may differ from the draft's table in both directions.
    an untested `[workspace.lints.rustdoc]` shape. No manifest-table API is
    proposed by this draft.
 
-Rejected: `#![allow]` at the call sites, rewriting docs to avoid linking, and
-a grep-based check, which reads source rather than what rustdoc resolves.
+Rejected: deleting or weakening meaningful doc comments, exposing private helpers, changing visibility or API surface, adding lint allow/suppress attributes, and substituting source-grep checks for actual rustdoc resolution. Allowed: referencing a private helper as a plain code identifier in prose and linking an existing public contract. No blanket prohibition applies to those allowed edits.
 
 ## Dependencies, write ownership and resources
 
@@ -149,7 +153,7 @@ compute.
 
 | Category | What it proves | Where |
 |----------|----------------|-------|
-| unit | The planted-link negative controls | AC5, recorded in the review |
+| integration | The planted-link negative controls | AC5, recorded in the review |
 | integration | The workspace doc build exits clean | AC1, AC2 |
 
 ## Parity surface covered
@@ -169,9 +173,19 @@ accepts it.
 
 `README.md` no change. The workspace docs are the deliverable.
 
+## Gate providers and mandatory controls
+
+- Doc-only fixes land in the actual lib source files: crates/ocelli-geom/src/lib.rs, crates/ocelli-native/src/lib.rs, crates/ocelli-render/src/graph.rs, crates/ocelli-render/src/interpolation.rs, crates/ocelli-viewport/src/snapshot.rs, crates/ocelli-volume/src/ortho.rs and examples/folder-viewer/src/measure.rs.
+- The named docs arm plus GATES registry go in bin/ocelli.sh.
+- The actual CI invocation goes in the Rust job of .github/workflows/ci.yml.
+- Guard registration goes through scripts/guards/catalogue.py.
+- Workflow edits cover .claude/WORKFLOW.md, the affected .claude/commands/verify.md and generated adapters via scripts/sync_agent_skills.py, as a separate reviewed policy commit.
+- Any new refusal, budget or generated runbook delta follows the existing guard process and is never reset.
+- docs/lld/build-targets.md is written only when the check is actually implemented.
+- No new forwarding module, generic framework, trait or dependency is introduced.
+
+Otherwise valid fresh source with a healthy link must pass the actual check. Separately, one private-target link must RED with its actual named diagnostic and own exit, then restore GREEN. Separately, one unresolved link must RED with its named diagnostic and own exit, then restore GREEN. Full workspace and default-selection scope, the fresh unique target, source, tool and effective flag identity, and cleanup and failure-exit preservation all stay in force. Existing correct paired flags remain untouched.
+
 ## Open questions
 
-1. Floor or sprint profile? Affects AC4 and AC7. Owner: the operator through
-   the normal workflow. This filing proposes and never authorizes. Both
-   lints denied is this draft's proposed command contract, not an authorized
-   profile or workflow change.
+The lead settled the additive docs check placement in the floor because no GPU or corpus is needed. A normal separately reviewed WORKFLOW, affected-command, and adapter-sync change is neither implemented nor adopted. No other material doc-fix choice remains. Independent design approval is recorded in `.claude/reviews/F-268-design-pass-2.md`. Open question owner: Codex lead (parent integrator) is the assigned independent design review owner, distinct from the GLM author.
