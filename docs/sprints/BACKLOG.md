@@ -395,6 +395,12 @@ beside F-119.
 | F-271 | E38.63 | S48 | ICC PCS to sRGB inverse measured both ways: a D50 to linear sRGB matrix derived from the IEC 61966-2-1 primaries with Bradford adaptation compared with the printed-note inverse F-240 ships, both against Little CMS's transicc on every AC12 row, and the derived matrix adopted only if it is closer to Little CMS on every row, otherwise the measurement recorded and the printed matrix kept | Rust | 2w | F-240 | pending |
 | F-272 | E2.8 | S47 | Oracle tests write nothing into the checkout: every produce.rs test that runs the producer when the reference run or the corpus is absent points its reference subset, candidate run and dispositions file at a per-process temporary directory, so cargo test never creates or overwrites tools/oracle/compare-out, with a test that fails if a test run changes that directory | Test | 1w | F-X021 | pending |
 | F-273 | E38.64 | S47 | Reference scalar normalization for the equipped comparison: implement a reviewed scalar and upload route that preserves full-range signed values, then use that same declared route for pixel precheck and the complete timed protocol without changing the native pixel arithmetic or acceptance thresholds | All | 3w | F-216 | pending |
+| F-274 | E38.65 | S48 | Window link sends the numeric window: a linked viewport receives the source viewport's window centre and width, as cornerstone3D 5.8.2's VOI synchronizer sends them, instead of the index of a window in the file, so linked series whose files carry different windows show the same values | TS | 2w | F-209, F-245 | pending |
+| F-275 | E38.66 | S48 | Pooled series window after a file changes: when F-224 refuses a changed file in a series whose window F-227 pooled, the folder viewer applies one designed rule to that window, and the window is never recomputed from the refused file | All | 1w | F-224, F-227, F-245 | pending |
+| F-277 | E38.67 | S48 | Per-image auto window memory bounded: the full-frame allocation the folder viewer's local process makes for a per-image automatic window, outside the counted resident term, measured at the largest frame the viewer admits and then either counted in that term or bounded by a named limit with a test at the limit | Rust | 1w | F-227, F-216 | pending |
+| F-278 | E38.68 | S47 | Comparison page states what it is: the generator of docs/benchmarks/cornerstone-comparison.md writes that the figures are a synthetic controlled observation, with its date and host conditions, says the equipped acceptance is open, and writes each unavailable-cell bullet once | TS | 1w | F-273 | pending |
+| F-279 | E38.69 | S48 | S46 review hygiene: a linked region window drops its region label, the region window tool says by name that it does not apply to a colour frame, the palette ICC arm looks its profile up once, and ContentId refuses a sample shape that disagrees with the frame description | All | 1w | F-209, F-213, F-224, F-239, F-240, F-245 | pending |
+| F-280 | E38.70 | S48 | Viewer window has one owner: every folder viewer window setter, the pump, a preset, a drag, Reset, a linked copy, the region window and the series window, goes through one window change entry point that owns the latest choice, so a late reply never overwrites a newer window, with a real browser control per setter that holds the late request | All | 1w | F-208, F-209, F-213, F-227 | pending |
 
 ### M21, One showcase viewer and usable feature completion
 
@@ -443,12 +449,13 @@ Bounded GPU residency on unbounded data. The first of the three checkable claims
 | F-ID | Epic ref | Sprint | Story | Layer | Est | Depends on | Status |
 |------|----------|--------|-------|-------|-----|------------|--------|
 | F-119 | E30.1 | S46 | Brick decomposition and multiscale pyramid generation | Rust | 10w | F-058 | done |
-| F-120 | E30.2 | S51 | Frustum and LOD chunk selection | Rust | 8w | F-119 | pending |
+| F-120 | E30.2 | S51 | Frustum and LOD chunk selection | Rust | 8w | F-119, F-276 | pending |
 | F-121 | E30.3 | S52 | Adaptive per-LOD sample count with opacity correction | Rust | 8w | F-120 | pending |
 | F-122 | E30.4 | S52 | Residency budget, prefetch and eviction policy | Rust | 8w | F-120 | pending |
 | F-123 | E30.5 | S53 | Chunk-cost indicator surface | Rust | 3w | F-122 | pending |
 | F-124 | E30.6 | S53 | 4D and time-series as a first-class chunked axis | Rust | 12w | F-122 | pending |
 | F-222 | E30.7 | S46 | Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero | Rust | 1w | F-119 | done |
+| F-276 | E30.8 | S50 | Pyramid means across differing rescales and padding: a coarser ocelli-volume level either refuses a box whose slices carry different Rescale Slope or Intercept or averages each slice through its own rescale, chosen at design, and samples in the Pixel Padding Value range never enter a level mean, with hand-computed fixtures citing PS3.3 C.11.1 and C.7.5.1.1.2 | Rust | 2w | F-119, F-222 | pending |
 
 ### M15, The WebGPU compute subsystem
 

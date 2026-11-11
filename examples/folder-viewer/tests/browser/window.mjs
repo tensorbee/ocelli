@@ -556,6 +556,231 @@ export async function observeWindows(url, chromium, folder) {
   }
 }
 
+// Waits until no request is in flight and the main pump is idle.
+async function settled(page) {
+  await page.waitForFunction(() => inflight.size === 0 && !activeViewport().mainBusy, null, { timeout: 8000 });
+  await page.waitForTimeout(50);
+}
+
+// A reply fetched for Lung while Bone was pressed must not be painted under
+// the Bone label (PS3.3 C.11.2.1.2.1 gold, Bone 83 and 0, Lung 236 and 94).
+export async function observeOutOfOrderPresets(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await settle(page, EXPECTED[3]);
+    let held = 0;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let armed = true;
+    let heldPreset = '';
+    await page.route('**/preview', (route) => {
+      const req = route.request();
+      const preset = req.headers()['x-ocelli-window-preset'] || '';
+      if (armed && req.url().endsWith('/preview') && preset) {
+        armed = false;
+        heldPreset = preset;
+        held += 1;
+        return gate.then(() => route.continue());
+      }
+      return route.continue();
+    });
+    await page.keyboard.press('2');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('3');
+    await settle(page, EXPECTED[2]);
+    let waited = 0;
+    while (held < 1 && waited < 3000) { await page.waitForTimeout(25); waited += 25; }
+    const heldUrlPromise = page.waitForResponse((r) => r.url().endsWith('/preview') && (r.request().headers()['x-ocelli-window-preset'] || '') === heldPreset);
+    release();
+    await heldUrlPromise;
+    await settled(page);
+    await settle(page, EXPECTED[2]);
+    return { ...(await sample(page)), held, heldPreset };
+  } finally {
+    await browser.close();
+  }
+}
+
+function outOfOrderPresetProblems(seen) {
+  const problems = [];
+  if (seen.held !== 1) problems.push('the held preset case did not hold exactly one preview request');
+  if (!seen.heldPreset) problems.push('the held preset case did not record an x-ocelli-window-preset request header');
+  const corner = String(seen.corner).split("\n")[0];
+  if (!corner.endsWith('  ' + EXPECTED[2].word) || seen.soft !== EXPECTED[2].soft || seen.lung !== EXPECTED[2].lung) {
+    problems.push(`the held preset corner is ${JSON.stringify(corner)} with greys ${seen.soft} and ${seen.lung}, not the Bone line with greys ${EXPECTED[2].soft} and ${EXPECTED[2].lung}`);
+  }
+  return problems;
+}
+
+export async function observeHeldPresetThenReset(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await settle(page, EXPECTED[3]);
+    let held = 0;
+    let heldPreset = '';
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let armed = true;
+    await page.route('**/preview', (route) => {
+      const req = route.request();
+      const preset = req.headers()['x-ocelli-window-preset'] || '';
+      if (armed && req.url().endsWith('/preview') && preset) {
+        armed = false;
+        heldPreset = preset;
+        held += 1;
+        return gate.then(() => route.continue());
+      }
+      return route.continue();
+    });
+    await page.keyboard.press('2');
+    let waited = 0;
+    while (held < 1 && waited < 3000) { await page.waitForTimeout(25); waited += 25; }
+    await page.click('#reset');
+    await settle(page, EXPECTED[3]);
+    const done = page.waitForResponse((r) => r.url().endsWith('/preview') && (r.request().headers()['x-ocelli-window-preset'] || '') === heldPreset);
+    release();
+    await done;
+    await settled(page);
+    return { ...(await sample(page)), held, heldPreset };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function observeHeldPresetDuringDrag(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await settle(page, EXPECTED[3]);
+    let held = 0;
+    let heldPreset = '';
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let armed = true;
+    await page.route('**/preview', (route) => {
+      const req = route.request();
+      const preset = req.headers()['x-ocelli-window-preset'] || '';
+      if (armed && req.url().endsWith('/preview') && preset) {
+        armed = false;
+        heldPreset = preset;
+        held += 1;
+        return gate.then(() => route.continue());
+      }
+      return route.continue();
+    });
+    await page.keyboard.press('2');
+    let waited = 0;
+    while (held < 1 && waited < 3000) { await page.waitForTimeout(25); waited += 25; }
+    await page.keyboard.press('w');
+    // Drag the active cell while the preset request is still held.
+    const box = await page.locator('.cell.active canvas.view').boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    for (let step = 1; step <= 6; step += 1) {
+      await page.mouse.move(box.x + box.width / 2 + step * 10, box.y + box.height / 2);
+    }
+    const done = page.waitForResponse((r) => r.url().endsWith('/preview') && (r.request().headers()['x-ocelli-window-preset'] || '') === heldPreset);
+    release();
+    await done;
+    await settled(page);
+    await page.mouse.up();
+    await settled(page);
+    return { held, ...(await sample(page)) };
+  } finally {
+    await browser.close();
+  }
+}
+
+export function heldPresetDuringDragProblems(seen) {
+  const problems = [];
+  if (seen.held !== 1) {
+    problems.push(`the Lung preset was held ${seen.held} times instead of once`);
+  }
+  const first = (seen.corner || "").split("\n")[0];
+  if (first.includes("Lung")) {
+    problems.push("the corner still names Lung after the drag");
+  }
+  if (first.startsWith("WW 1500  WL -600")) {
+    problems.push("the corner still shows the preset window after the drag");
+  }
+  return problems;
+}
+
+function heldPresetThenResetProblems(seen) {
+  const problems = [];
+  if (seen.held !== 1) problems.push('the held preset then reset case did not hold exactly one preview request');
+  if (!seen.heldPreset) problems.push('the held preset then reset case did not record an x-ocelli-window-preset request header');
+  const corner = String(seen.corner).split("\n")[0];
+  if (!corner.endsWith('  ' + EXPECTED[3].word) || seen.soft !== EXPECTED[3].soft || seen.lung !== EXPECTED[3].lung) {
+    problems.push(`the reset corner is ${JSON.stringify(corner)} with greys ${seen.soft} and ${seen.lung}, not the ${EXPECTED[3].word} line with greys ${EXPECTED[3].soft} and ${EXPECTED[3].lung}, because the reset window must not be replaced by the late Lung reply`);
+  }
+  return problems;
+}
+
+export async function observeHeldLoad(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const idOf = new Map();
+    await page.route("**/file", async (route) => {
+      const body = route.request().postDataBuffer() || Buffer.alloc(0);
+      const response = await route.fetch();
+      const id = response.headers()["x-ocelli-file"] || "";
+      for (const k of [0, 1, 2]) if (body.includes(Buffer.from(`2.25.21301${k}`))) idOf.set(id, k);
+      await route.fulfill({ response });
+    });
+    const sliceOf = (req) => { const id = req.headers()["x-ocelli-file"]; if (id) return idOf.get(id);
+      const b = req.postDataBuffer() || Buffer.alloc(0);
+      for (const k of [0, 1, 2]) if (b.includes(Buffer.from(`2.25.21301${k}`))) return k; return undefined; };
+    let held = 0;
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    await page.route("**/preview", async (route) => {
+      const req = route.request();
+      if (sliceOf(req) === 1 && !req.headers()["x-ocelli-window-preset"]) { held += 1; await gate; }
+      await route.continue().catch(() => {});
+    });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await settle(page, EXPECTED[3]);
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('3');
+    await settle(page, EXPECTED[2]);
+    release();
+    await page.waitForResponse((r) => r.url().endsWith('/preview'), { timeout: 5000 }).catch(() => null);
+    await settled(page);
+    return { ...(await sample(page)), held };
+  } finally {
+    await browser.close();
+  }
+}
+
+function heldLoadProblems(seen) {
+  const problems = [];
+  // The thumbnail fetch of the middle slice and its prefetch are held.
+  // pumpMain's request for that slice joins the held thumbnail promise.
+  // The preset's own trial request passes, so only the repaired key check keeps the stale WINDOW1 reply off the Bone label.
+  if (seen.held !== 2) problems.push('the held load case did not hold exactly two preview requests');
+  const corner = String(seen.corner).split("\n")[0];
+  if (!corner.endsWith('  Bone') || seen.soft !== 83 || seen.lung !== 0) {
+    problems.push(`the held load corner is ${JSON.stringify(corner)} with greys ${seen.soft} and ${seen.lung}, not the Bone line with greys 83 and 0, because the held slice reply fetched at WINDOW1 must not be painted under the Bone label`);
+  }
+  return problems;
+}
+
 /** The profile control, then a key, then a reload on Window on left. */
 export async function observeProfileKeys(url, chromium) {
   const browser = await chromium.launch({ headless: true });
@@ -622,6 +847,61 @@ export function profileProblems(seen) {
   return problems;
 }
 
+/** Hold the region request, switch to Bone, then release and sample. */
+export async function observeHeldRegionThenPreset(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("2 series."));
+    await settle(page, EXPECTED[3]);
+    const served = await page.evaluate(async () => (await window.fetch("/lib/ocelli-core/index.js")).ok);
+    if (!served) return { served: false };
+    let held = 0;
+    let release = null;
+    const gate = new Promise((r) => release = r);
+    await page.route("**/region", async (route) => {
+      held += 1;
+      await gate;
+      await route.continue();
+    });
+    await page.keyboard.press("y");
+    await dragImage(page, [8, 8], [24, 24]);
+    const deadline = Date.now() + 5000;
+    while (held < 1) {
+      if (Date.now() > deadline) throw new Error("region request was never held");
+      await page.waitForTimeout(50);
+    }
+    await page.keyboard.press("3");
+    await settle(page, EXPECTED[2]);
+    const done = page.waitForEvent("requestfinished", (r) => r.url().endsWith("/region"));
+    release();
+    await done;
+    // The region reply is read and its trial queued before settled reads inflight.
+    await page.waitForTimeout(300);
+    await settled(page);
+    return { served: true, held, ...(await sample(page)) };
+  } finally {
+    await browser.close();
+  }
+}
+
+export function heldRegionThenPresetProblems(seen) {
+  if (!seen.served) return [];
+  // The preset waits behind the held region, so the reply must show Bone.
+  const problems = [];
+  if (seen.held !== 1) problems.push("the region request was not held");
+  const line = (seen.corner || "").split("\n")[0];
+  if (!line.startsWith("WW 1500  WL 300  Bone")) {
+    problems.push("the corner did not show WW 1500  WL 300  Bone after the preset");
+  }
+  if (seen.soft !== EXPECTED[2].soft || seen.lung !== EXPECTED[2].lung) {
+    problems.push("the Bone greys did not match the expected values");
+  }
+  return problems;
+}
+
 async function main() {
   const { chromium } = await loadPlaywright();
   const binary = await ensureViewerBinary("release", true);
@@ -640,6 +920,11 @@ async function main() {
     }
   };
   let seen;
+  let heldPreset;
+  let heldLoad;
+  let heldPresetThenReset;
+  let heldRegion;
+  let heldDrag;
   let frames;
   let tiles;
   let lateFrames;
@@ -651,6 +936,11 @@ async function main() {
     writeTiles(tiled);
     writeLate(late);
     seen = await alone((url) => observeWindows(url, chromium, folder));
+    heldPreset = await alone((url) => observeOutOfOrderPresets(url, chromium, folder));
+    heldPresetThenReset = await alone((url) => observeHeldPresetThenReset(url, chromium, folder));
+    heldRegion = await alone((url) => observeHeldRegionThenPreset(url, chromium, folder));
+    heldDrag = await alone((url) => observeHeldPresetDuringDrag(url, chromium, folder));
+    heldLoad = await alone((url) => observeHeldLoad(url, chromium, folder));
     frames = await alone((url) => observeMultiframe(url, chromium, multi));
     tiles = await alone((url) => observeTiles(url, chromium, tiled));
     delayed = await alone((url) => observeTiles(url, chromium, tiled, 2500));
@@ -666,6 +956,7 @@ async function main() {
     console.log(`${step.name}: ${JSON.stringify(step.corner.split("\n")[0])}, grey ${step.soft} and ${step.lung}`);
   }
   console.log(`the MR lists ${seen.mrRows} window rows`);
+  console.log(heldRegion.served ? `held region then preset: ${JSON.stringify(heldRegion.corner.split("\n")[0])}, grey ${heldRegion.soft} and ${heldRegion.lung}` : "held region then preset: library missing");
   console.log(seen.region.served
     ? `region window: ${JSON.stringify(String(seen.region.corner).split("\n")[0])}`
     : `region window, no library build: ${JSON.stringify(seen.region.sentence)}`);
@@ -674,13 +965,20 @@ async function main() {
   console.log(`tiles, lists held back: ${delayed.interim.map((tile) => `${JSON.stringify(tile.label)} ${tile.soft}/${tile.lung}`).join(", ")}`);
   console.log(`late: key 5 ${JSON.stringify(lateFrames.before.line)} grey ${lateFrames.before.soft} and ${lateFrames.before.lung}, ArrowDown ${JSON.stringify(lateFrames.after.line)} grey ${lateFrames.after.soft} and ${lateFrames.after.lung}, ${lateFrames.faults.length} faults seen, ${lateFrames.posts} file posts`);
   console.log(`profile: W after a choice ${JSON.stringify(profiles.chosen)}, P on the control ${JSON.stringify(profiles.focusedKey)}, reload ${JSON.stringify(profiles.reloaded)}, keyboard choice ${JSON.stringify(profiles.keyboardChoice)}, key then press then choice ${JSON.stringify(profiles.pressedChoice)}`);
+  console.log(`out of order presets: ${JSON.stringify(heldPreset.corner.split("\n")[0])}, grey ${heldPreset.soft} and ${heldPreset.lung}, held ${heldPreset.held}`);
+  console.log(`held load: ${JSON.stringify(heldLoad.corner.split("\n")[0])}, grey ${heldLoad.soft} and ${heldLoad.lung}, held ${heldLoad.held}`);
   const problems = windowProblems(seen).concat(
+    heldPresetThenResetProblems(heldPresetThenReset),
+    heldRegionThenPresetProblems(heldRegion),
+    heldPresetDuringDragProblems(heldDrag),
     multiframeProblems(frames),
     tileProblems(tiles),
     multiframeProblems(lateFrames, LATE),
     interimProblems(delayed.interim),
     tileProblems(delayed.settled),
     profileProblems(profiles),
+    outOfOrderPresetProblems(heldPreset),
+    heldLoadProblems(heldLoad),
   );
   if (problems.length) {
     for (const problem of problems) console.error(problem);

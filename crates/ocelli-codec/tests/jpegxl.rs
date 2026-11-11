@@ -429,6 +429,8 @@ enum DeclaredColourEncoding {
     AllDefault,
     Xyb,
     Unknown,
+    /// RGB with the Linear transfer function, D65 and sRGB primaries.
+    RgbLinear,
 }
 
 /// Rewrites the declared colour encoding of `jpegxl_lossless_rgb8.jxl`.
@@ -491,6 +493,18 @@ fn rewrite_colour_encoding(
             push_small_enum(&mut writer, 13);
             push_small_enum(&mut writer, 1);
         }
+        DeclaredColourEncoding::RgbLinear => {
+            // all_default 0, want_icc 0, colour space RGB, the D65 white point,
+            // sRGB primaries, the Linear transfer function, relative intent.
+            writer.push_bit(false);
+            writer.push_bit(false);
+            push_small_enum(&mut writer, 0);
+            push_small_enum(&mut writer, 1);
+            push_small_enum(&mut writer, 1);
+            writer.push_bit(false);
+            push_small_enum(&mut writer, 8);
+            push_small_enum(&mut writer, 1);
+        }
     }
     // The metadata tail: extensions and default_m.
     writer.append_bits_from(fixture, 35, 3)?;
@@ -500,10 +514,12 @@ fn rewrite_colour_encoding(
 }
 
 #[test]
-fn codestream_colour_space_other_than_rgb_or_grey_refuses() -> TestResult {
+fn codestream_colour_encodings_the_decoder_does_not_report_refuse() -> TestResult {
     // PS3.5 8.2.15 and PS3.3 C.7.6.3.1.2. The codestream's own colour encoding
     // is what the decoder must produce, and XYB has no matrix to get there, so
-    // anything but RGB or greyscale refuses before a sample is written. The
+    // an encoding the decoder does not report refuses: a colour space other
+    // than RGB or grey, and RGB other than D65 sRGB primaries with the sRGB
+    // transfer. The
     // rewriter is proved against the original bytes first.
     let fixture = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
     let reproduced = rewrite_colour_encoding(fixture, DeclaredColourEncoding::AllDefault)?;
@@ -513,8 +529,13 @@ fn codestream_colour_space_other_than_rgb_or_grey_refuses() -> TestResult {
     );
     let xyb = rewrite_colour_encoding(fixture, DeclaredColourEncoding::Xyb)?;
     let unknown = rewrite_colour_encoding(fixture, DeclaredColourEncoding::Unknown)?;
+    let rgb_linear = rewrite_colour_encoding(fixture, DeclaredColourEncoding::RgbLinear)?;
     let desc = colour(ROWS, COLUMNS, 8, 8, "RGB")?;
-    for (name, src) in [("xyb", &xyb), ("unknown", &unknown)] {
+    for (name, src) in [
+        ("xyb", &xyb),
+        ("unknown", &unknown),
+        ("rgb_linear", &rgb_linear),
+    ] {
         assert_refused(
             &JpegXlDecoder::lossless(),
             src,

@@ -87,6 +87,33 @@ with design, review and finalisation in Claude. Closing this sprint does not pub
   answers 403 because `server.fs.allow` is percent-encoded. F-266 is the
   draft follow-up filed for S47.
 
+## Review follow-ups filed
+
+The S46 whole-sprint review's carried findings are either filed as backlog
+stories below or dispositioned in the last bullet, so none is left open in a
+review file alone.
+
+- **F-274, S48**, from pass 1 S1. The window link sends the numeric window as
+  cornerstone3D 5.8.2's VOI sync does, under the cornerstone-floor rule.
+- **F-275, S48**, from pass 1 S2. The F-227 pooled series window gets a
+  designed rule for a file F-224 refuses as changed.
+- **F-276, S50**, from pass 1 S3 and pass 2 S3. Pyramid levels refuse or
+  account for differing rescales and keep padding out of level means. F-120
+  depends on it.
+- **F-277, S48**, from pass 1 S5. The per-image auto window allocation is
+  measured at the largest frame and bounded or counted.
+- **F-278, S47**, from pass 1 S8 and N5. The generated comparison page states
+  it is a synthetic controlled observation, its date, host conditions and the
+  open equipped acceptance, and writes no duplicate bullet. It follows F-273.
+- **F-279, S48**, from pass 1 N1, N2, N3 and N4. One hygiene story.
+- **F-280, S48**, from pass 3. Three passes running found a late window
+  reply overwriting a newer choice, each in a different setter, so every
+  folder viewer window setter goes through one entry point that owns the
+  latest choice. Pass 3 N3, a double tile paint, folds in.
+- **Dispositioned, not filed.** Pass 1 N7 is a count in the F-238 AS_BUILT
+  entry, which is append-only, so it stays as written. Pass 1 N6, pass 2 N1 to
+  N4 and pass 3 N1, N2 and N4 are corrected in the tree.
+
 ## Pulled forward from S47
 
 The operator decided on 2026-11-07 to pull bounded S47 stories forward while implementer slots are idle. F-237 and F-238 are approved and implemented in S46 worktrees, F-237 on F-228's branch and F-238 on F-233's. F-236 is approved on 2026-11-07 after F-231 integrated at `eb0f81b3`, re-read against that head in its plan's lead amendments, implemented from the sprint head, and integrated on 2026-11-08. It forwards `stackIndex`, `stackEpoch` and `content` from `acceptTransferredFrame` into the existing commit routes, and writes `packages/core/src/bulk.ts` and its two test files. This close proposal moves the allocation of F-237 and F-238 from S47 to S46 beside F-236. It does not mark either story done or supply CI or host acceptance. F-241's full video story remains S47.
@@ -317,8 +344,8 @@ F-119 generates the coarser levels by downsampling level 0. `append_level` store
 
 ## Acceptance observations
 
-The operator's Chrome observations for the S46 folder viewer stories were performed and recorded as passed on 2026-11-10: F-208 AC8 to AC12, F-209 AC16 to AC20 and AC22, F-212 AC12, F-213 AC13, F-214 AC12 and F-215 AC18. F-209 AC21 is a mutation control with recorded evidence, not an operator click-through. F-215 AC19, the optional second reader, was not chosen and claims nothing. F-208, F-209, F-212, F-213, F-214 and F-215 are `done`. The 2026-11-09 status correction and the original tracker and AS_BUILT entries are preserved, and the closure is a dated AS_BUILT entry. F-227 AC16 was confirmed by the operator on 2026-11-10 on a release build in Chromium, for the five PT series and the MG Secondary Capture series with the independent calculator's match, and for a windowed CT and MR with no `Auto window`. F-227 AC17 was run on 2026-11-11 on a release build on F-216's host class with `thresholds_met` true, on a host that was not otherwise idle, and its figures are in the F-227 AS_BUILT entry. F-227 is `done`. Its AC18 oracle verdicts ride on `bin/ocelli.sh gate --sprint`, which is still to run once at sprint end. F-223 is the one S46 row not `done`, carried as below.
+The operator's Chrome observations for the S46 folder viewer stories were performed and recorded as passed on 2026-11-10: F-208 AC8 to AC12, F-209 AC16 to AC20 and AC22, F-212 AC12, F-213 AC13, F-214 AC12 and F-215 AC18. F-209 AC21 is a mutation control with recorded evidence, not an operator click-through. F-215 AC19, the optional second reader, was not chosen and claims nothing. F-208, F-209, F-212, F-213, F-214 and F-215 are `done`. The 2026-11-09 status correction and the original tracker and AS_BUILT entries are preserved, and the closure is a dated AS_BUILT entry. F-227 AC16 was confirmed by the operator on 2026-11-10 on a release build in Chromium, for the five PT series and the MG Secondary Capture series with the independent calculator's match, and for a windowed CT and MR with no `Auto window`. F-227 AC17 was run on 2026-11-11 on a release build on F-216's host class with `thresholds_met` true, on a host that was not otherwise idle, and its figures are in the F-227 AS_BUILT entry. F-227 is `done`. Its AC18 oracle verdicts ride on `bin/ocelli.sh gate --sprint`, which passed with oracle on tree 87b959607d75 before the whole-sprint review. Each review remediation needs a fresh sprint profile, and the closing tree's run is the one the close preflight reads from the verify ledger. F-223 is the one S46 row not `done`, carried as below.
 
 ## Carried forward from S46
 
-- **F-223** carried to F-273 S47 E38.64: pixel refusal is a recorded outcome and not passing AC18, open ACs 18 and 19 stay open under the named actual operator-root refused-pixels verdict story, no timings, the refused report is retained privately, F-223 remains S46 allocation and backlog pending with the F-216 dependency, and no table or status action is taken, while the IGNORED runstate becomes carried upon root's adoption of the F273 filing.
+- **F-223** carried to F-273 S47 E38.64: F-223's pixel precheck refused, so its AC18 and AC19 equipped acceptance could not be claimed, and that work continues as S47 F-273 Reference scalar normalization for equipped comparison.
