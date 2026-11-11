@@ -3,7 +3,16 @@
 //            on a free port, with the viewer pointed at it by URL
 //   refused  an instance whose stored SOP Instance UID contradicts the
 //            requested instance is refused by the native identity check
-//   local    the local synthetic image stays byte-identical throughout
+//   local    the local synthetic image, an SR document read back through the
+//            load path, marks, key images, checks and cache stay unchanged
+//            throughout
+//
+// The remote path resolves no tier and adds no GPU path. The tier-independent
+// observable asserted here is that the remote panel never shows a canvas and
+// the fixed unavailable status holds in the one browser this suite runs,
+// while the local render stays byte-identical. All three tiers answer the
+// same, per the plan's boundary section and docs/lld/feature-availability.md.
+// The served More matrix row is snapshotted against overstated claims.
 //
 // The buffers are wholly synthetic Part 10 files written by this script, carry
 // no patient attributes, and live only in memory. It starts the viewer with
@@ -13,7 +22,10 @@
 // script is run directly, after aspect.mjs.
 
 import { Buffer } from "node:buffer";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { ensureViewerBinary, longEl, shortEl, startViewer } from "../../../../tools/bench/src/viewer_work.mjs";
@@ -247,6 +259,7 @@ async function readLocal(page) {
       cacheGeneration: cacheGeneration,
       checksToken: checks.token,
       checksReports: checks.reports.size,
+      canvases: document.querySelectorAll("canvas").length,
       wrap: { width: Math.round(wrapBox.width), height: Math.round(wrapBox.height) },
       pixels,
     };
@@ -254,7 +267,7 @@ async function readLocal(page) {
 }
 
 function sameLocal(before, after) {
-  return before.status === after.status && before.series === after.series && before.marks === after.marks && before.keys === after.keys && before.documents === after.documents && before.cacheSize === after.cacheSize && before.cacheGeneration === after.cacheGeneration && before.checksToken === after.checksToken && before.checksReports === after.checksReports && before.wrap.width === after.wrap.width && before.wrap.height === after.wrap.height && before.pixels === after.pixels;
+  return before.status === after.status && before.series === after.series && before.marks === after.marks && before.keys === after.keys && before.documents === after.documents && before.cacheSize === after.cacheSize && before.cacheGeneration === after.cacheGeneration && before.checksToken === after.checksToken && before.checksReports === after.checksReports && before.canvases === after.canvases && before.wrap.width === after.wrap.width && before.wrap.height === after.wrap.height && before.pixels === after.pixels;
 }
 
 async function client(page, x, y) {
@@ -318,10 +331,11 @@ async function main() {
     OCELLI_VIEWER_WADO_URI_URL: `${upstream.url}/wado`,
   });
   const browser = await chromium.launch();
+  const downloads = mkdtempSync(join(tmpdir(), "f245-dicomweb-docs-"));
   const pageRequests = [];
   const problems = [];
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ acceptDownloads: true });
     page.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
       pageRequests.push(`${request.method()} ${pathname}`);
@@ -338,9 +352,35 @@ async function main() {
 
     await page.waitForFunction(() => !checks.busy && checks.due === null && checks.reports.size > 0);
 
+    // An SR document is loaded through the real read path before the remote
+    // flow, so its preservation through remote stages is a counted claim and
+    // not a zero against zero.
+    const saved = [];
+    const saving = [];
+    page.on("download", (download) => {
+      const path = join(downloads, download.suggestedFilename());
+      saved.push(path);
+      saving.push(download.saveAs(path).then(() => path));
+    });
+    await page.click("#save-marks");
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("Saved"));
+    for (let wait = 0; wait < 50 && saved.length < 2; wait += 1) await page.waitForTimeout(100);
+    if (saved.length < 2) {
+      problems.push(`the save produced ${saved.length} documents, 2 expected`);
+    }
+    const paths = await Promise.all(saving);
+    await page.locator("#marks-file").setInputFiles(paths);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("Read "));
+
     const local = await readLocal(page);
     if (local.marks < 1 || local.keys < 1) {
       problems.push("the first local snapshot lacks a mark or a key image");
+    }
+    if (local.documents < 1) {
+      problems.push("the first local snapshot has no loaded document");
+    }
+    if (local.canvases === 0) {
+      problems.push("the page showed no canvas at the first local snapshot");
     }
 
     await page.waitForSelector("#source-dicomweb", { state: "visible" });
@@ -410,6 +450,10 @@ async function main() {
     if (!sameLocal(local, afterFetch)) {
       problems.push("the fetched instance changed the local image");
     }
+    const shownAfterFetch = await page.evaluate(() => document.querySelectorAll("canvas").length);
+    if (shownAfterFetch !== local.canvases) {
+      problems.push(`the page held ${shownAfterFetch} canvases after the validated fetch, ${local.canvases} before, so a display appeared`);
+    }
 
     const got = (method, path) => upstream.requests.some((request) => request.method === method && request.path.split('?')[0] === path);
     if (!got("GET", "/dicom-web/studies")) problems.push("the upstream saw no studies request");
@@ -422,6 +466,17 @@ async function main() {
     const instanceCount = pageRequests.filter((request) => request === "POST /dicweb/instance").length;
     if (instanceCount < 2) problems.push(`the page made ${instanceCount} POST /dicweb/instance requests, at least 2 expected`);
 
+    // The served More matrix row is a snapshot. It must state the actual
+    // partial status and must not claim remote display.
+    const more = await page.evaluate(async () => {
+      const response = await fetch("/more", { cache: "no-store" });
+      return response.ok ? response.text() : "";
+    });
+    const row = '<td><span class="viewer-state part">Partial</span>The viewer searches studies, series and instances over DICOMweb and fetches one instance the native backend validates, remote image display is not available yet, and local folders open as before</td>';
+    if (!more.includes(row)) {
+      problems.push("the served More matrix does not carry the truthful DICOMweb sources row");
+    }
+
     if (problems.length) {
       for (const problem of problems) console.error(problem);
       process.exitCode = 1;
@@ -432,6 +487,7 @@ async function main() {
     await browser.close();
     await stopByPid(server.pid);
     await upstream.close();
+    rmSync(downloads, { recursive: true, force: true });
   }
 }
 
