@@ -2285,12 +2285,15 @@ mod tests {
 
     /// Environment variable through which the checkout-write guard points a
     /// child producer run at its temporary mirror root. It is set only on
-    /// the guard's child process and read only by `producer_repo_root`.
+    /// the guard's child process and read by `producer_repo_root` and by
+    /// the child-side working-directory pin.
     const F272_REPO_ROOT_OVERRIDE: &str = "F272_PRODUCER_REPO_ROOT";
 
     /// The repository root the producer tests read reference and corpus data
-    /// from. Producer tests obtain the root only through this helper, so the
-    /// guard can point a child run at a mirror root through the override.
+    /// from. Producer tests that read those trees obtain the root only
+    /// through this helper, so the guard can point a child run at a mirror
+    /// root through the override. The module's source scan enforces that
+    /// this helper holds the test module's only manifest-dir read.
     fn producer_repo_root() -> PathBuf {
         match std::env::var_os(F272_REPO_ROOT_OVERRIDE) {
             Some(root) => PathBuf::from(root),
@@ -2302,6 +2305,49 @@ mod tests {
     /// override. The guard digests it and copies the mirror from it.
     fn f272_real_repo_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// The one-root rule. A producer test that reads reference or corpus
+    /// data must obtain the repository root only through
+    /// `producer_repo_root`, so no writer can bypass the guard's mirror
+    /// override with its own real-root computation. Guard infrastructure
+    /// takes the real root from the whitelisted helper. The scan reads
+    /// this file's own test module and requires the single manifest-dir
+    /// read to sit inside the real-root helper. Both markers are built
+    /// through `concat` so this test's own source carries no second read
+    /// and no second module boundary.
+    #[test]
+    fn manifest_dir_is_read_only_in_the_real_root_helper() {
+        let marker = concat!("CARGO", "_MANIFEST_DIR");
+        let module_marker = concat!("mod", " tests {");
+        let source = include_str!("produce.rs");
+        let module = match source.rsplit_once(module_marker) {
+            Some((_, module)) => module,
+            None => unreachable!("the test module must exist in this source file"),
+        };
+        let helper_at = match module.find("fn f272_real_repo_root") {
+            Some(at) => at,
+            None => unreachable!("the real-root helper must exist in the test module"),
+        };
+        let next_fn = module[helper_at..]
+            .find("\n    fn ")
+            .map(|at| helper_at + at)
+            .unwrap_or(module.len());
+        let reads: Vec<usize> = module.match_indices(marker).map(|(at, _)| at).collect();
+        assert_eq!(
+            reads.len(),
+            1,
+            "{marker} must be read in exactly one place in the test module, found {}",
+            reads.len()
+        );
+        let read = match reads.first() {
+            Some(read) => *read,
+            None => unreachable!("the count assertion guarantees exactly one read"),
+        };
+        assert!(
+            read > helper_at && read < next_fn,
+            "the single {marker} read must sit inside the real-root helper body"
+        );
     }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
@@ -3662,10 +3708,14 @@ mod tests {
             .collect::<PathBuf>()
     }
 
-    /// Populates the guard's temporary mirror root with only what the
-    /// producer tests read from the real tree, and with none of the
-    /// protected paths. The protected oracle directory is created even when
-    /// there is nothing to copy, so its digest is always defined.
+    /// Populates the guard's temporary mirror root with the read side the
+    /// producer tests need. The real `tools/oracle/out` reference run is
+    /// copied, because the mirror digest must see a write inside it.
+    /// `corpus/data` is never copied: the mirror holds a directory symlink
+    /// to the real corpus root, which `open_corpus` canonicalises back to
+    /// the same directory, so the child reads the same bytes and no corpus
+    /// file is ever duplicated. The protected oracle directory is created
+    /// even when there is nothing to copy, so its digest is always defined.
     fn f272_populate_mirror_root(mirror_root: &Path) {
         match fs::create_dir_all(mirror_root.join("tools/oracle")) {
             Ok(()) => {}
@@ -3677,13 +3727,67 @@ mod tests {
         }
         let corpus = f272_real_repo_root().join("corpus/data");
         if corpus.is_dir() {
-            f272_mirror_copy(&corpus, &mirror_root.join("corpus/data"));
+            match fs::create_dir_all(mirror_root.join("corpus")) {
+                Ok(()) => {}
+                Err(_) => unreachable!("the mirror's corpus parent directory must create"),
+            }
+            let target = match corpus.canonicalize() {
+                Ok(target) => target,
+                Err(_) => unreachable!("the real corpus directory must canonicalise"),
+            };
+            #[cfg(unix)]
+            match std::os::unix::fs::symlink(&target, mirror_root.join("corpus/data")) {
+                Ok(()) => {}
+                Err(_) => unreachable!("the mirror's corpus directory symlink must create"),
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = &target;
+                unreachable!(
+                    "the mirror requires a directory symlink to the real corpus, which this platform cannot create"
+                );
+            }
         }
     }
 
-    /// Recursive copy used to build the mirror. A symlinked source entry is
-    /// copied as the content it points at, so the mirror never contains a
-    /// symlink and its digest stays clean.
+    /// Collects every file path under a directory, names only, no content
+    /// read. Used by the mirror corpus proof to compare file identities.
+    #[cfg(unix)]
+    fn f272_collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => unreachable!("directory {} must be readable", dir.display()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    unreachable!("a directory entry under {} must be readable", dir.display())
+                }
+            };
+            let path = entry.path();
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("corpus entry {} must be statable", path.display()),
+            };
+            if metadata.file_type().is_symlink() {
+                unreachable!(
+                    "corpus entry {} is a symlink and the proof stats real corpus files only",
+                    path.display()
+                );
+            }
+            if metadata.is_dir() {
+                f272_collect_files(&path, files);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+
+    /// Recursive copy used to build the mirror. A source entry that is a
+    /// symlink, dangling or not, is refused with a named condition instead
+    /// of followed, so the mirror never copies through a link and a broken
+    /// link cannot reach the digest as a silent stat failure.
     fn f272_mirror_copy(source: &Path, destination: &Path) {
         match fs::create_dir_all(destination) {
             Ok(()) => {}
@@ -3700,10 +3804,16 @@ mod tests {
             };
             let from = entry.path();
             let to = destination.join(entry.file_name());
-            let metadata = match fs::metadata(&from) {
+            let metadata = match fs::symlink_metadata(&from) {
                 Ok(metadata) => metadata,
                 Err(_) => unreachable!("mirror source entry {} must be statable", from.display()),
             };
+            if metadata.file_type().is_symlink() {
+                unreachable!(
+                    "mirror source {} is a symlink, dangling or not, and the mirror copies real entries only",
+                    from.display()
+                );
+            }
             if metadata.is_dir() {
                 f272_mirror_copy(&from, &to);
             } else {
@@ -3723,18 +3833,23 @@ mod tests {
     /// producer test that writes a protected `tools/oracle` path during the
     /// child run, whatever the parent process did before the guard and
     /// however deterministic the written bytes are, because the mirror
-    /// holds only the read side copies, so a protected write lands in it
-    /// as a new entry or a changed copy. The digest of the real protected
-    /// tree across the child run is a backstop for a root computed without
-    /// `producer_repo_root` when the child's bytes differ from the state the
-    /// parent's own run left behind. A deterministic write that bypasses the
-    /// helper is caught by neither digest and is prevented by the rule that
-    /// producer tests obtain the root only through the helper. Neither
-    /// check observes the parent process's own writes before the guard, and
-    /// neither observes an identical rewrite of an existing file, so the
-    /// guarantee is new protected entries and changed content during the
-    /// child run. It is never a claim about transient writes restored
-    /// before a digest, and never about the parent's own state.
+    /// holds the read side copy of the real `out` run, so a protected
+    /// write lands in it as a new entry or a changed copy. The child also
+    /// runs with its working directory inside the mirror's protected
+    /// oracle tree, so a relative output path lands in the digested mirror
+    /// too. The digest of the real protected tree across the child run is
+    /// a backstop for a root computed without `producer_repo_root` when
+    /// the child's bytes differ from the state the parent's own run left
+    /// behind. A deterministic write is caught for new entries and changed
+    /// copies only, and an identical rewrite of an existing file, in the
+    /// real tree or inside the mirrored `out` copy, changes no digest and
+    /// is caught by neither check. Bypassing the helper is prevented at
+    /// the source by the rule that producer tests obtain the root only
+    /// through it, which the module's own source scan enforces by allowing
+    /// exactly one manifest-dir read. Neither check observes the parent
+    /// process's own writes before the guard. It is never a claim about
+    /// transient writes restored before a digest, and never about the
+    /// parent's own state.
     #[test]
     fn guard_no_checkout_write() {
         let (tests, filtered_out, list_status) = f272_list_selected_tests();
@@ -3771,6 +3886,7 @@ mod tests {
         })
         .args(["produce::tests::"])
         .args(["--skip", "produce::tests::guard_no_checkout_write"])
+        .current_dir(&mirror_tree)
         .env(F272_REPO_ROOT_OVERRIDE, &mirror.path)
         .status()
         {
@@ -3803,6 +3919,40 @@ mod tests {
         );
         println!(
             "selected {selected_count}, filtered out {filtered_out}, list exit {list_status}, child exit {child_status}"
+        );
+    }
+
+    /// The guard's child must run with its working directory inside the
+    /// mirror's protected oracle tree, so a relative output path lands in
+    /// the digested mirror. Pointing the child at the mirror root instead
+    /// would let a relative path escape the digest, and this test fails
+    /// that form. Outside a guard child there is no override and nothing
+    /// to prove.
+    #[test]
+    fn the_guard_child_runs_inside_the_mirror_tree() {
+        let root = match std::env::var_os(F272_REPO_ROOT_OVERRIDE) {
+            Some(root) => PathBuf::from(root),
+            None => return,
+        };
+        // The temporary directory on macOS is reached through /var, a
+        // symlink to /private/var, and current_dir reports the physical
+        // form. Both sides are canonicalised so the comparison is about
+        // the tree and not about the spelling of the path.
+        let cwd = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
+            Ok(cwd) => cwd,
+            Err(_) => unreachable!("the guard child must have a readable working directory"),
+        };
+        let protected = match root.join("tools/oracle").canonicalize() {
+            Ok(protected) => protected,
+            Err(_) => {
+                unreachable!("the mirror's protected oracle tree must exist during the child run")
+            }
+        };
+        assert!(
+            cwd.starts_with(&protected),
+            "the guard child must run inside the mirror's protected oracle tree, cwd {} mirror root {}",
+            cwd.display(),
+            root.display()
         );
     }
 
@@ -3854,6 +4004,103 @@ mod tests {
             })
             .is_err(),
             "an empty selection must fail closed and never pass"
+        );
+    }
+
+    /// The mirror's corpus side is a directory symlink to the canonical real
+    /// corpus root, and no corpus file under it is a copy. Each file reached
+    /// through the link has the same device and inode as the real file,
+    /// which a copied tree would not. The corpus is stat'd through the link
+    /// and never read, so no file content is opened. On a tree without a
+    /// real corpus the mirror holds no corpus side at all, and that absence
+    /// is asserted instead.
+    #[cfg(unix)]
+    #[test]
+    fn mirror_corpus_side_is_a_symlink_and_never_a_copy() {
+        use std::os::unix::fs::MetadataExt;
+
+        let corpus = f272_real_repo_root().join("corpus/data");
+        let mirror = produce_test_scratch_dir();
+        f272_populate_mirror_root(&mirror.path);
+        let link = mirror.path.join("corpus/data");
+        if !corpus.is_dir() {
+            assert!(
+                fs::symlink_metadata(&link).is_err(),
+                "a mirror corpus side exists while the real corpus is absent"
+            );
+            return;
+        }
+        let link_metadata = match fs::symlink_metadata(&link) {
+            Ok(metadata) => metadata,
+            Err(_) => unreachable!("the mirror corpus side must exist when the real corpus does"),
+        };
+        assert!(
+            link_metadata.file_type().is_symlink(),
+            "the mirror corpus side must be a directory symlink, not a copied directory"
+        );
+        let canonical_real = match corpus.canonicalize() {
+            Ok(path) => path,
+            Err(_) => unreachable!("the real corpus directory must canonicalise"),
+        };
+        let canonical_link = match link.canonicalize() {
+            Ok(path) => path,
+            Err(_) => unreachable!("the mirror corpus symlink must resolve"),
+        };
+        assert_eq!(
+            canonical_link, canonical_real,
+            "the mirror corpus symlink must resolve to the canonical real corpus root"
+        );
+        let mut files = Vec::new();
+        f272_collect_files(&canonical_real, &mut files);
+        assert!(
+            !files.is_empty(),
+            "the real corpus holds no files, so the no-copy proof compares nothing"
+        );
+        for file in &files {
+            let relative = file.strip_prefix(&canonical_real).unwrap_or(file);
+            let through_link = link.join(relative);
+            let real = match fs::metadata(file) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("corpus file {} must be statable", file.display()),
+            };
+            let linked = match fs::metadata(&through_link) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!(
+                    "corpus file {} must be statable through the mirror link",
+                    relative.display()
+                ),
+            };
+            assert_eq!(
+                (real.dev(), real.ino()),
+                (linked.dev(), linked.ino()),
+                "corpus file {} is a copy in the mirror rather than the linked real file",
+                relative.display()
+            );
+        }
+        // The child's corpus reads go through open_corpus, which
+        // canonicalises the root before it opens anything. The link path
+        // canonicalises to the asserted root, so a read through the mirror
+        // lands on the same directory as a read through the real path.
+        // Proven with an absent name, which exercises that canonicalisation
+        // and is checked to name no real file, so no content is ever
+        // opened.
+        let probe = "f272-absent-content-probe";
+        assert!(
+            !canonical_real.join(probe).exists(),
+            "the corpus must not contain the probe name, the canonicalisation probe reads nothing"
+        );
+        let real_stop = match super::open_corpus(&canonical_real, probe) {
+            Err(stop) => stop,
+            Ok(_) => unreachable!("an absent probe name must not read"),
+        };
+        let link_stop = match super::open_corpus(&link, probe) {
+            Err(stop) => stop,
+            Ok(_) => unreachable!("an absent probe name must not read"),
+        };
+        assert_eq!(
+            (real_stop.disposition, real_stop.reason),
+            (link_stop.disposition, link_stop.reason),
+            "a corpus read through the mirror link must reach the same stop as through the real path"
         );
     }
 
