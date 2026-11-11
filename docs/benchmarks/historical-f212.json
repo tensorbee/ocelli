@@ -1,0 +1,42 @@
+{
+  "scope": "Historical F212 blinded same-story experiment, distinct from all new unmatched tasks",
+  "base": "5451cb7d4ca6c9e1304b96e1e95c493acbbbd060",
+  "reviews": {
+    "A": {
+      "primary": "/Users/atulsharma/Documents/projects/tensorbee/ocelli/.claude/reviews/F-212-pair-A.md",
+      "header_excerpt": "# F-212 review, pass 1, implementation A\n\n**Reviewed**: commit 0e896db2 against base 5451cb7d, worktree clean apart from the untracked `.venv` and `tools/oracle/out` links\n**Author / reviewer**: author withheld for a blind comparison. Reviewer is an independent Claude reviewer who did not write either side and did not read authorship data\n**Result**: 6 defects, 4 smells, 3 nitpicks\n",
+      "review_counts": {
+        "defects": 6,
+        "smells": 4,
+        "nits": 3
+      },
+      "commit": "0e896db2973257c8c672ca0239cfe6b5991a5f03"
+    },
+    "B": {
+      "primary": "/Users/atulsharma/Documents/projects/tensorbee/ocelli/.claude/reviews/F-212-pair-B.md",
+      "header_excerpt": "# F-212 review, pass 1, implementation B\n\n**Reviewed**: commit b236d6f2 against base 5451cb7d, worktree clean apart from the untracked `.venv` and `tools/oracle/out` links\n**Author / reviewer**: author withheld for a blind comparison. Reviewer is an independent Claude reviewer who did not write either side and did not read authorship data\n**Result**: 1 defect, 2 smells, 2 nitpicks\n",
+      "review_counts": {
+        "defects": 1,
+        "smells": 2,
+        "nits": 2
+      },
+      "commit": "b236d6f2c16543c748acd9b4edb9f8a887cfe912"
+    }
+  },
+  "primary_timing_note": {
+    "path": "/private/tmp/claude-501/-Users-atulsharma-Documents-projects-tensorbee-ocelli/7387c89c-42ee-4e98-93b8-dbe52072290d/scratchpad/pair-F-212-start.txt",
+    "text": "2026-11-07T09:19:08Z\nclaude finished 2026-11-07T09:59:38Z, self-review 4 cycles 13/4/4/1, commit b236d6f2\n"
+  },
+  "GLM_primary_log": {
+    "path": "/private/tmp/claude-501/-Users-atulsharma-Documents-projects-tensorbee-ocelli/7387c89c-42ee-4e98-93b8-dbe52072290d/scratchpad/glm-F-212-pair.log",
+    "model_marker": "GLM-5.3-Flash-EXL3",
+    "worktree_marker": "ocelli-wt-f-212-glm",
+    "markers_present": true
+  },
+  "common_prompt": {
+    "path": "/private/tmp/claude-501/-Users-atulsharma-Documents-projects-tensorbee-ocelli/7387c89c-42ee-4e98-93b8-dbe52072290d/scratchpad/story-F-212-pair.md",
+    "sha256": "bf0cebb3eefd32d2d28988b39814614020eb25af3b21e88bdd97c7f1b2843b11"
+  },
+  "mapping": "The dated note explicitly maps implementationB/b236 toClaude. The paired GLM log names the GLM model and GLM worktree, supporting A as its paired other implementation. Do not claim a recovered exact Claude launch payload or matched provider usage.",
+  "protocol_limits": "Both review commits have the same base and saved common task/design instructions. Historical session described the trial as same-prompt/blinded, but this takeover did not recover the exact Claude launch payload or complete comparable timing/token records. Report quality counts as one task/one review sample, never general model ranking or speed ratio."
+}

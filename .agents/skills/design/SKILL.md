@@ -7,7 +7,7 @@ description: "Write the design plan for one F-ID against the normative HLD, and 
 
 Canonical source: `.claude/commands/design.md`.
 
-Source SHA-256: `005a2d42814db8f9ac20f7fb9dde66193bb6a9af88390780d7dc4596d61bcb98`.
+Source SHA-256: `b4ba103e2c6034020b93e85bc4fdf39dab35553b17a24924079fc599c60d54e5`.
 
 Before acting, read the canonical source completely and follow it using this
 host's available tools. Treat invocation arguments as arguments to that

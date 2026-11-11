@@ -1,0 +1,86 @@
+# F-227 review, pass 20
+
+**Reviewed**: `git diff c88dba54..ad04f8d2` on branch `work/f-227-xai`, tip `ad04f8d2`, tracked tree clean (untracked `.venv` and `tools/oracle/out` only). The viewer half's pass 19 remediation, one commit, 12 files, 405 insertions, 95 deletions. During the pass the branch moved to `76f21ed4`, which adds only "Operator decision on the server memory budget, 2026-11-07" to `.claude/plans/F-227-design.md`. That ruling and the lead rulings after pass 19 are read as the contract and not reviewed.
+**Author / reviewer**: the remediation is by a Claude implementer, per the commit. This pass is by an independent Claude reviewer who wrote none of the reviewed material, none of the earlier remediation and none of the rulings.
+**Result**: 2 defects, 1 smell, 5 nitpicks
+
+## Acceptance challenged
+
+- **Pass 19 findings, replayed through auto.mjs, the HTTP route and the page** on the HEAD release binary. D1 is closed as to the samples, and the new wording about the unpacked copy is false, D2 of this pass. S1 is closed in code: rounds are limited and the term is named. Its figures do not follow the operator's decision, D1 of this pass. N2, N3, N5 and N6 are closed. N1 is closed in code and has left D2 and S1. N4 is closed apart from two lines, N3 of this pass. The orphaned viewer is closed.
+- **Challenge 1, `acquire_round`.** No deadlock is possible by construction, and none was seen. The round place is taken before any decode permit and released last, with `_round` dropped at the end of `series_window_route`. A round holds a decode permit only inside `permit.call`, one image at a time, and `WindowJob::run` waits on nothing while it runs. No other route takes a round place, so nothing that holds a decode permit can wait on a round. A waiting round still holds its pooled request body slot (`BodyCharge::slot`, `BODY_SLOTS` 4), so a fifth round on a scheduled viewer waits in `acquire_body` instead. Rounds need no body slot, so this delays posts and does not deadlock. A scratch probe build logged each enter, leave and gone-while-waiting to a file. Three driver runs, each of ten concurrent requests per iteration (P + 8): three 16-file series of 512 or 2048 square, a series with a forged gone id (410), an all-windowed series (400 `window`), a series with a truncated RLE file in its sample (200, `skipped 1`), and four clients that sent a round and closed after 0 to 800 ms. The results: at most 2 rounds live in every run. Enters and leaves balanced (23 and 23, 20 and 21 counted because two log lines interleaved, 26 and 26), and the last leave was 0. Every client that stayed got its reply. A disconnect while waiting released the place (`gone-while-waiting`), and two disconnects during a round ended it busy through `acquire_decode`'s `live`. `inflight` was 0 after, and the next two rounds answered 200 at once. A waiter enters in the same millisecond that a round leaves on the gone, nothing or busy paths, per the log timestamps. Mutants: a limit of 64 is red in 3 of 3 runs, `4 rounds ran at once, the limit is 2`. A limit of 3 is red in 3 of 3. Inverting `live` (refuse while waiting) is red with 503. Not decrementing on drop is red in two tests. A limit of 1 is green, see N4.
+- **Challenge 2, the two figures.** See D1. 536,582,800 appears in no tracked file. `serverRssBound` computes it at run time, measured here as `rss_bound_bytes` 536,582,800 in a scratch run at B 268,435,456, which is 528,194,192 plus 8,388,608. 528,194,192 appears in `ci/bench-baseline.json:718` (`rss_bound_bytes`), in `tolerance_provenance` at `:422`, `:471`, `:534`, `:585` and `:648` ("the 528,194,192 byte resident bound"), at `.claude/plans/F-216-design.md:451` (the operator's answer), at `examples/folder-viewer/src/held.rs:475` ("the plan's bound of 528,194,192 bytes"), and in historical review receipts. At `ad04f8d2` each sentence that calls 528,194,192 the bound was false, because the runner's bound was 536,582,800 and `thresholds_met` was judged against it. Under the operator's decision those sentences become true again once the constant is 24 MiB, and the places that must change are the ones D1 lists.
+- **Challenge 3, 268,147,168.** By hand from F-216's formula (`F-216-design.md:279`) with the new term: `4 * 17,400,516` = 69,602,064. `2 * (2 * 17,400,516 + 5 * 8,700,000)` = 156,602,064. `2 * 4,194,304` = 8,388,608. 32 MiB = 33,554,432. The sum is 268,147,168, which is correct for the formula as written at `ad04f8d2`. A 3 MiB pool mutant is red in `viewer_work_test.mjs`. Under the operator's decision the value is 69,602,064 + 156,602,064 + 8,388,608 + 25,165,824 = 259,758,560, the pre-range value.
+- **Challenge 4, the runner.** The scratch probe build under the real `tools/bench/run.mjs viewer.resident_memory` logged 3 rounds per run, each `200` with `sampled 16 skipped 0 counted 125520`, in two runs. A third run timestamped the phases. RSS set new highs during the PET phase, from 421,888 to 426,000 KiB. The run's peak, 452,240 KiB, came after the DX open, when no round was running. Each PET pool touches 125,520 values, 502,080 bytes of its 4 MiB reservation. So the run does ask for series windows inside the measured process. Whether their bytes are in the peak sample depends on the allocator reusing them, which was not established. See N1.
+- **Challenge 5, teardown.** `survivors()` walks only `started`, which holds only `child.pid` values from `track`, so it cannot reach a process this run did not spawn. PID 98891 is alive (parent 1, started 5 Nov), so no child of this run can be given that PID. A PID of an exited child could be reused by an unrelated process only after a full PID cycle within one run, which is not plausible. Two HEAD runs left no viewer behind. A scratch mutant that removes the stop from `withViewer` exits 1 with `viewers left running by this run: 79135, 79180, 79202, 79228`, the four `withViewer` cases, and kills them. A scratch mutant that throws inside `observeEvicted` exits 1 with that error, with no survivor reported and none left alive. `withBrowser` closes the browser before `withViewer` stops the viewer, and a failed launch still reaches the viewer's `finally`. In `observeRestart` the second viewer is tracked and is the one the `finally` stops.
+
+## Evidence
+
+| Command / selected cases | Source and input identity | Executed now / prior receipt | Exit and observation |
+|--------------------------|---------------------------|------------------------------|----------------------|
+| `cargo test -p ocelli-folder-viewer` | worktree `ad04f8d2` | now | 0. lib 97, preview 116, value 24, measure 16, the rest green |
+| `cargo clippy -p ocelli-folder-viewer --all-targets -- -D warnings`, `cargo fmt --all --check` | worktree | now | 0 and 0 |
+| `node --test tools/bench/tests/viewer_work_test.mjs` | worktree | now | 15 pass |
+| `scripts/prose_check.py`, `scripts/guard_census.py` | worktree | now | clean over 990 files, bucket empty |
+| `node examples/folder-viewer/tests/browser/auto.mjs`, two runs | worktree, release | now | 0 and 0. restart `200, 410, 200`, 4 MiB `410, 200`, values as pass 19. No viewer left |
+| Mutants NOLIMIT (64), LIMIT3, REFUSE, NORELEASE, LIMIT1 | scratch, `--lib` | now | red x3, red x3, red x2, red (2 tests), green |
+| EVICT (`claim_sample_buffer` in `WindowJob::run`) on `a_first_round_on_a_full_budget_evicts_nothing` | scratch | now | red x2, `410 {"gone":[...]}` |
+| BUSY (fresh pool for `back.ok_or(Busy)`) on `a_pool_not_given_back_is_busy` | scratch | now | red |
+| NOSHRINK (`scratch.len() < count`) | scratch, whole package | now | green. Scratch test `p20_smaller_after_larger`: green on HEAD, red under NOSHRINK with `400 window` |
+| Probe build, P + 8 rounds, mixed errors and disconnects, three runs | scratch release plus a file log | now | at most 2 live, balanced, `inflight` 0, later rounds 200 |
+| Probe build, `run.mjs viewer.resident_memory`, three runs | scratch copy of the runner | now | 3 rounds of 200 each. Peak after the DX open. `rss_bound_bytes` 536,582,800, `series_pool_term_bytes` 8,388,608 |
+| One round on a fresh HEAD release viewer, `GET /held` before and 1 s after | worktree release | now | `workspace` 0 to 2,097,152, `free` 0 to 524,288 |
+| auto.mjs mutants NOSTOP and THROW | scratch | now | exit 1 with 4 survivors named, and exit 1 with the throw and no survivor |
+| 3 MiB `SERIES_POOL_BYTES` mutant | scratch | now | `viewer_work_test.mjs` 1 fail |
+| Implementer's "red in 3 of 3", fresh budget, busy and survivor mutants | commit message | prior receipt | consistent with the above |
+
+## Defects
+
+### D1, the bound and its constant do not follow the operator's decision
+
+**Where**: `tools/bench/src/viewer_work.mjs:113` (formula with `+ P * 4 MiB + 32 MiB`) and `:121` (`+ permits * SERIES_POOL_BYTES + 32 * MIB`). `tools/bench/tests/viewer_work_test.mjs:56-63` (`// 32 MiB = 33554432`, total 268,147,168). `docs/lld/cache.md:202-203` (`... + P * 4 MiB + 32 MiB`). `.claude/plans/F-216-design.md:279` (the formula without the pool term) and `:282` ("The constant covers ...", and `B + 66.4 + 2 * (33.2 + 41.5) + 32` MiB).
+**What**: the runner's bound is 536,582,800 bytes at the measured workload. `thresholds_met` therefore accepts a peak between 528,194,192 and 536,582,800, which is over the budget the operator kept. At `ad04f8d2` the baseline's five `tolerance_provenance` sentences and `held.rs:475` named 528,194,192 as the bound while the runner used another figure.
+**Why it is wrong**: "Operator decision on the server memory budget, 2026-11-07" in `.claude/plans/F-227-design.md`: the total is unchanged at 528,194,192, the constant drops to 24 MiB, and every place that states the bound or the constant follows. Microscope section 3.
+**Evidence**: scratch run record `rss_bound_bytes` 536,582,800. `serverRssBound(268435456, 17400538, 8700000)` printed 536,582,800.
+**Scope and regression**: the runner and four prose sites, on HEAD. Fix: `24 * MIB` at `:121` and the comment at `:113`. In the test, `// 24 MiB = 25165824` and `69602064 + 156602064 + 8388608 + 25165824 = 259758560`. In cache.md the formula with `+ 24 MiB`, stating that the total is F-216's. The F-216 plan's `:279` and `:282` follow too, or the lead records that they stay as F-216's history. Leave `ci/bench-baseline.json` and `held.rs:475` as they are, since both are true once the constant changes. The smallest regression is the existing hand-value test at 259,758,560.
+
+### D2, "frees the unpacked copy" and "exist only inside that job" are false since the fold uses the permit's scratch
+
+**Where**: `docs/lld/pixel-pipeline.md:256-258` ("The decoded samples and their unpacked copy exist only inside that job ... The job frees the unpacked copy, which is the permit's own scratch"). `examples/folder-viewer/src/series_window.rs:13-14` and `examples/folder-viewer/src/serve.rs:1573-1576` ("exist only inside that job ... The unpacked copy is the permit's own scratch").
+**What**: `fold` now unpacks into `workspace.scratch`, which the permit keeps after the job, as `fold`'s own doc says ("keeps its capacity for the next decode under that permit"). The copy is neither freed by the job nor confined to it. It stays in the permit's workspace, counted in `GET /held` `workspace` and in F-216's permit term.
+**Why it is wrong**: microscope section 3. The new sentence contradicts `fold`'s doc in the same file and the observed state.
+**Evidence**: one round over 16 files of 512 square on a fresh HEAD release viewer. `workspace` went from 0 to 2,097,152, two permits at 512 * 512 * 4 bytes, and was still 2,097,152 one second later. A 2048 square run left 33,554,432.
+**Scope and regression**: prose in three files, on HEAD. Fix: "The frame is unpacked into the permit's own scratch, which the permit keeps for its next job inside F-216's permit term, as `GET /held` `workspace` reports. The decoded samples exist only inside the job, which parks them on the free list, inside `OCELLI_CACHE_MIB`, when cached and free bytes fit the budget, and frees them otherwise." Say it once in each file.
+
+## Smells
+
+### S1, the scratch shrink that a fold now depends on is guarded by nothing
+
+**Where**: `examples/folder-viewer/src/series_window.rs:260-262`, `if scratch.len() != count { scratch.resize(...) }`.
+**Failure mechanism**: the scratch now carries a length from earlier jobs on that permit, from previews and from other rounds. `unpack` refuses a destination of any other length (`stored_pixel.rs:317`). So if this branch becomes grow-only, every image of a series smaller than an earlier frame on that permit is skipped, and the round answers `400 window`. The page then shows `Auto window, this image` for a series that should share one window. With the mutant `scratch.len() < count`, the whole package suite is green. A scratch test that asks for a 128 square series and then a 32 square series on one scheduled viewer is green on HEAD and red under the mutant: `small after big HTTP/1.1 400 ... no sampled image of the series stores no window`.
+**Fix**: add that test (`serve.rs` tests, using `scheduled_viewer`, `post_series` and `ask_series`), requiring 200 and `counted` 16,384 for the smaller series.
+
+## Nitpicks
+
+- **N1** `docs/lld/cache.md:203-204` ("so that a series window is inside its measured peak"), `docs/lld/benchmarks.md:684-685` ("so its peak includes a series window round") and `viewer_work.mjs:1182-1183`. The peak sample came after the DX open, when no round was running, and each PET pool touches 502,080 bytes of its 4 MiB. "The measured run asks for three series windows before the DX open" is what was observed. This is an unconfirmed overstatement, not a measured falsehood.
+- **N2** `README.md:193`. The new sentence sits between "decodes on two threads, which is `P` in that bound" and "Every preview decodes there", so "there" now follows the series window sentence. The mirrored paragraph in `examples/folder-viewer/src/use.html:272` did not get the sentence, so the Use page does not say that series windows are limited to two at once or that each holds up to 4 MiB outside `OCELLI_CACHE_MIB`. Nothing it says is false.
+- **N3** `docs/lld/pixel-pipeline.md:275` leaves "oracle" alone on a line. `examples/folder-viewer/tests/browser/auto.mjs:45` is 113 columns.
+- **N4** `serve.rs:5894`. `at_most_p_series_window_rounds_run_at_once` accepts a peak of 1, so a limit of 1 is green. Nothing shows that `P` rounds can run at once. `peak != SERIES_ROUNDS` would make it a guard on both sides, though it may need a series large enough that two rounds overlap reliably.
+- **N5** `viewer_work.mjs:1231`. `series_pool_term_bytes: 2 * SERIES_POOL_BYTES` hard-codes `P`, where `serverRssBound` takes `permits`.
+- **Carried**: pass 15 N1 and the earlier library nitpicks, unchanged.
+
+## Verified clean
+
+- **Pass 19 D1 closed as to the samples.** "freed inside that job" and "live only inside F-216's permit term" are gone from all three files. The samples are parked when they fit (`free` 0 to 524,288 after one round) and freed otherwise.
+- **Pass 19 S1 closed in code.** `SERIES_ROUNDS = PERMITS = 2`. `acquire_round` is the only pool site in the viewer, and the pool is built after it. At most 2 rounds were live under P + 8 concurrent requests, so at most 8,388,608 bytes of pool at K = 16. The term is named in cache.md, pixel-pipeline.md, README and `serverRssBound`. `pet_no_window` is in the runner, and its rounds answer 200.
+- **Pass 19 N2, N3, N5 and N6 closed.** EVICT is red in the new fresh budget test. One busy check remains, and it is red under BUSY. The per-image figure is now a bound plus a measured range. The header names the `410, 200` check, and the catalogue row names the survivor check.
+- **Pass 19 N1 closed in code.** The fold unpacks into the permit's scratch, which `publish` counts after each job (`workspace_bytes`). A preview always unpacks into the scratch before reading it (`preview.rs:1266-1271`), so a fold cannot leave a preview stale values.
+- **The orphaned viewer closed**, as in Challenge 5.
+- No `as` cast, `unsafe` or `#[allow]` added. No pixel arithmetic changed, and `ocelli-pixel` is untouched. The window values in auto.mjs are byte-identical to pass 19's.
+- `acquire_round` checks `live` only while it must wait, and it re-checks after each 50 ms wake. A poisoned lock is recovered as everywhere else in `held.rs`. `RoundPermit::drop` saturates and notifies.
+
+## Limitations and handoff
+
+- The probe build added file logging to `acquire_round`, `RoundPermit::drop` and the route's result, and nothing else. The runner's phase timestamps came from a scratch copy of `viewer_work.mjs`. Whether the PET rounds' bytes are inside the DX-phase peak sample was not established.
+- `scripts/guard_probe.py` was not run this pass. auto.mjs was not run under NOSHRINK. No GPU, wasm or oracle job, by instruction. Timings are informational only.
+- Scratch work lived under `scratchpad/f227-p20` and is deleted with Python `shutil` after this file is written. Every viewer this pass started was stopped by its driver or by `survivors()`. Viewers of other worktrees and PID 98891 were not touched.
+- Next owner: the implementer fixes D1 to follow the operator's decision, fixes D2 and adds S1's test. A fresh independent pass then reviews the result.

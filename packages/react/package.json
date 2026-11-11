@@ -16,11 +16,12 @@
     "dist",
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist"
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@ocelli/core": "0.1.0"

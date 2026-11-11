@@ -15,10 +15,13 @@ use std::sync::Arc;
 
 use openjph_core::{codestream::Codestream, file::MemInfile};
 
-use crate::jpeg2000::{logical_codestream, parse_siz, read_u16, refuse_tile_coding_overrides};
+use crate::jpeg2000::{
+    ComponentParams, logical_codestream, parse_siz, read_u16, refuse_tile_coding_overrides,
+    validate_colour_components, validate_colour_shape, validate_pixel_descriptor,
+};
 use crate::{
-    Capability, CodecError, Decoder, FrameDesc, PixelDataVr, PixelRepresentation, Registry,
-    RegistryError, sample_convert::convert_samples,
+    Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
+    FrameDesc, PixelRepresentation, Registry, RegistryError, sample_convert::convert_samples,
 };
 
 const HTJ2K_LOSSLESS_UID: &str = "1.2.840.10008.1.2.4.201";
@@ -116,6 +119,17 @@ impl Decoder for Htj2kDecoder {
         }
     }
 
+    fn decode_photometric_interpretation(
+        &self,
+        desc: &FrameDesc,
+    ) -> DecodePhotometricInterpretation {
+        crate::jpeg2000::decoded_photometric(desc)
+    }
+
+    fn decode_sample_layout(&self, _desc: &FrameDesc) -> DecodeSampleLayout {
+        DecodeSampleLayout::Interleaved
+    }
+
     fn decode(&self, src: &[u8], desc: &FrameDesc, out: &mut [u8]) -> Result<(), CodecError> {
         if out.len() != desc.output_len() {
             return Err(CodecError::OutputLength {
@@ -123,7 +137,7 @@ impl Decoder for Htj2kDecoder {
                 actual: out.len(),
             });
         }
-        validate_descriptor(desc)?;
+        validate_pixel_descriptor(desc)?;
         let codestream = logical_codestream(src)?;
         let (header, tile_at) = inspect_main_header(codestream)?;
         if self.mode != Mode::General {
@@ -136,27 +150,11 @@ impl Decoder for Htj2kDecoder {
     }
 }
 
-fn validate_descriptor(desc: &FrameDesc) -> Result<(), CodecError> {
-    if desc.pixel_data_vr() != PixelDataVr::Ob
-        || desc.samples_per_pixel() != 1
-        || !matches!(desc.bits_allocated(), 8 | 16)
-        || !matches!(
-            desc.photometric_interpretation(),
-            "MONOCHROME1" | "MONOCHROME2"
-        )
-    {
-        return Err(CodecError::UnsupportedPixelFormat);
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MainHeader {
     width: u32,
     height: u32,
-    components: u16,
-    precision: u8,
-    signed: bool,
+    components: Vec<ComponentParams>,
     /// Whether CAP `(0xff50)` is present, which is what makes a codestream
     /// HTJ2K rather than JPEG 2000 Part 1.
     high_throughput: bool,
@@ -233,8 +231,7 @@ fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
         }
         offset = end;
     }
-    let (width, height, components, precision, signed) =
-        siz.ok_or(CodecError::InvalidCodestream)?;
+    let (width, height, components) = siz.ok_or(CodecError::InvalidCodestream)?;
     let (progression, multiple_component_transform, reversible) =
         cod.ok_or(CodecError::InvalidCodestream)?;
     Ok((
@@ -242,8 +239,6 @@ fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
             width,
             height,
             components,
-            precision,
-            signed,
             high_throughput,
             progression,
             reversible,
@@ -284,14 +279,24 @@ fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(
     if !header.high_throughput {
         return Err(CodecError::FrameMismatch);
     }
-    if header.components != 1 || header.multiple_component_transform != 0 {
-        return Err(CodecError::UnsupportedPixelFormat);
+    validate_colour_shape(
+        &header.components,
+        header.multiple_component_transform,
+        desc,
+    )?;
+    if header.components.len() == 3 {
+        validate_colour_components(&header.components)?;
     }
+    let first = header
+        .components
+        .first()
+        .copied()
+        .ok_or(CodecError::InvalidCodestream)?;
     let signed = desc.pixel_representation() == PixelRepresentation::Signed;
     if header.width != u32::from(desc.columns())
         || header.height != u32::from(desc.rows())
-        || u16::from(header.precision) != desc.bits_stored()
-        || header.signed != signed
+        || u16::from(first.precision) != desc.bits_stored()
+        || first.signed != signed
     {
         return Err(CodecError::FrameMismatch);
     }
@@ -341,10 +346,18 @@ fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(
 /// cost is bounded by the descriptor, which was already checked against the
 /// codestream's own SIZ, and the caller's output is not touched until every
 /// sample has been validated by `convert_samples`.
+///
+/// A colour frame's samples are interleaved, so the three components are
+/// pulled row by row into one sample stream. The codestream's own inverse
+/// component transform has already run inside the vendored decode.
 fn decode_rows(codestream: &[u8], desc: &FrameDesc) -> Result<Vec<f32>, CodecError> {
     let rows = usize::from(desc.rows());
     let columns = usize::from(desc.columns());
-    let samples = rows.checked_mul(columns).ok_or(CodecError::FrameMismatch)?;
+    let components = usize::from(desc.samples_per_pixel());
+    let samples = rows
+        .checked_mul(columns)
+        .and_then(|pixels| pixels.checked_mul(components))
+        .ok_or(CodecError::FrameMismatch)?;
 
     let mut input = MemInfile::new(codestream);
     let mut decoder = Codestream::new();
@@ -357,21 +370,37 @@ fn decode_rows(codestream: &[u8], desc: &FrameDesc) -> Result<Vec<f32>, CodecErr
 
     let mut decoded = Vec::with_capacity(samples);
     for _ in 0..rows {
-        let line = decoder.pull(0).ok_or(CodecError::FrameMismatch)?;
-        if line.len() != columns {
-            return Err(CodecError::FrameMismatch);
+        let mut lines: Vec<Vec<i32>> = Vec::with_capacity(components);
+        for component in 0..components {
+            let component =
+                u32::try_from(component).map_err(|_| CodecError::UnsupportedPixelFormat)?;
+            let line = decoder.pull(component).ok_or(CodecError::FrameMismatch)?;
+            if line.len() != columns {
+                return Err(CodecError::FrameMismatch);
+            }
+            lines.push(line);
         }
-        for value in line {
-            // `Stored`'s representation is `f32`, and `sample_convert` refuses
-            // anything that is not exactly an integer inside the descriptor's
-            // stored range. Every `i32` through 24 significant bits converts
-            // exactly, and a wider one is caught there rather than here.
-            decoded.push(exact_f32(value).ok_or(CodecError::UnsupportedPixelFormat)?);
+        // Sample-interleaved output: the three components' samples for one
+        // pixel are adjacent, so the rows are zipped and not concatenated.
+        for column in 0..columns {
+            for line in &lines {
+                // Every line was checked to be `columns` long, so the index
+                // below is in range, and `get` says so to the borrow checker.
+                let value = line.get(column).copied().ok_or(CodecError::FrameMismatch)?;
+                // `Stored`'s representation is `f32`, and `sample_convert` refuses
+                // anything that is not exactly an integer inside the descriptor's
+                // stored range. Every `i32` through 24 significant bits converts
+                // exactly, and a wider one is caught there rather than here.
+                decoded.push(exact_f32(value).ok_or(CodecError::UnsupportedPixelFormat)?);
+            }
         }
     }
     // A frame that still has rows is not the frame the descriptor described.
-    if decoder.pull(0).is_some() {
-        return Err(CodecError::FrameMismatch);
+    for component in 0..components {
+        let component = u32::try_from(component).map_err(|_| CodecError::UnsupportedPixelFormat)?;
+        if decoder.pull(component).is_some() {
+            return Err(CodecError::FrameMismatch);
+        }
     }
     if decoded.len() != samples {
         return Err(CodecError::FrameMismatch);

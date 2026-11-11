@@ -1,0 +1,32 @@
+# One allowlist. cargo-deny 0.19.0 reads this file for Rust.
+# scripts/licence_check.py reads the same allow list for npm and Python.
+# Do not add a copyleft identifier. An exception belongs in ci/licences.toml.
+
+[graph]
+all-features = true
+
+[licenses]
+unused-allowed-license = "allow"
+confidence-threshold = 0.8
+include-dev = true
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "BlueOak-1.0.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Python-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+
+[licenses.private]
+ignore = false

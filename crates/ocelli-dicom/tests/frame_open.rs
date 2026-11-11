@@ -5,12 +5,19 @@
 //! output 0 to 255:
 //! `((50 - 100) / 200 + 0.5) * 255 = 63.75`.
 
+use ocelli_codec::{
+    DecodePhotometricInterpretation, Decoder, FrameDesc, FrameDescInput, JpegDecoder, PixelDataVr,
+    PixelRepresentation,
+};
 use ocelli_core::Stored;
 use ocelli_dicom::{
-    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, OpenedFrame, WindowInput,
-    fill_padding, open_frame, parse_part10,
+    BurnedInFlag, ColourSelection, FrameOpenError, LossyFlag, MetadataSet, OpenedFrame,
+    WindowInput, fill_padding, open_frame, parse_part10, read_padding,
 };
-use ocelli_pixel::{LutChain, VoiFunction};
+use ocelli_pixel::{
+    ColorTransform, DecodedLayout, DecodedPhotometric, LutChain, PhotometricInterpretation,
+    PixelDataEncoding, PlanarConfiguration, Rgb, SampleLayout, VoiFunction,
+};
 
 fn require<T: std::fmt::Debug>(result: Result<T, impl std::fmt::Debug>) -> T {
     assert!(result.is_ok(), "{result:?}");
@@ -176,6 +183,55 @@ fn a_reversed_monochrome2_padding_range_is_refused() {
         unreachable!("asserted immediately above")
     };
     assert_eq!(error, FrameOpenError::PaddingOrder);
+}
+
+#[test]
+fn padding_is_read_alone_where_frame_open_refuses_a_flag() {
+    // PS3.3 C.7.5.1.1.2. Pixel Padding Value 0 and Range Limit 10, US, in
+    // MONOCHROME2 order (value at or below limit). Burned In Annotation
+    // MAYBE is outside the enumerated values YES and NO of the General
+    // Image Module, PS3.3 C.7.6.1, so `open_frame` refuses the object, and
+    // the padding range alone is still the inclusive 0 to 10.
+    let mut padded = require(image_module());
+    padded.extend(require(rescale_one()));
+    padded.extend(require(short_le(
+        (0x0028, 0x0120),
+        *b"US",
+        &0_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0121),
+        *b"US",
+        &10_u16.to_le_bytes(),
+    )));
+    padded.extend(require(short_le(
+        (0x0028, 0x0301),
+        *b"CS",
+        &text_pad("MAYBE"),
+    )));
+    let parsed = require(parse_part10(&require(part10(padded))));
+    assert_eq!(
+        open_frame(&parsed, 0).err(),
+        Some(FrameOpenError::BurnedInCode)
+    );
+    let metadata = require(MetadataSet::from_object(parsed.object()));
+    let range = require(read_padding(
+        &metadata,
+        PhotometricInterpretation::Monochrome2,
+        false,
+    ));
+    let Some(range) = range else {
+        unreachable!("the padding value is present")
+    };
+    assert_eq!((range.value(), range.limit()), (0, Some(10)));
+    assert!(range.contains(10));
+    assert!(!range.contains(11));
+    // The same pair is out of order for MONOCHROME1, where the value is at
+    // or above the limit.
+    assert_eq!(
+        read_padding(&metadata, PhotometricInterpretation::Monochrome1, false).err(),
+        Some(FrameOpenError::PaddingOrder)
+    );
 }
 
 #[test]
@@ -491,6 +547,91 @@ fn codec_rgb_is_once_and_only_on_colour() {
 }
 
 #[test]
+fn xyb_opens_as_the_named_photometric() {
+    // PS3.3 C.7.6.3.1.2. `XYB` is a real photometric interpretation.
+    // Samples per Pixel is 3, which is what that term requires.
+    let parsed = require(parse_part10(&require(part10(require(colour_pixels(
+        "XYB", 3, 8, 8, 8,
+    ))))));
+    let opened = require(open_frame(&parsed, 0));
+    assert_eq!(opened.photometric(), PhotometricInterpretation::Xyb);
+    assert_eq!(
+        opened.colour(),
+        ColourSelection::Colour {
+            codec_already_rgb: false,
+        }
+    );
+}
+
+#[test]
+fn ybr_full_422_reported_as_rgb_is_converted_once() {
+    // PS3.3 C.7.6.3.1.2. A decoder that already produced RGB is not converted
+    // again. `.111` is not decoded here. `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`
+    // makes that syntax unavailable, so the bytes are the `.50` baseline path.
+    let desc = require(FrameDesc::new(FrameDescInput {
+        rows: 64,
+        columns: 96,
+        samples_per_pixel: 3,
+        bits_allocated: 8,
+        bits_stored: 8,
+        high_bit: 7,
+        pixel_representation: PixelRepresentation::Unsigned,
+        photometric_interpretation: "YBR_FULL_422".to_owned(),
+        pixel_data_vr: PixelDataVr::Ob,
+    }));
+    let jpeg = include_bytes!("../../ocelli-codec/tests/fixtures/jpeg_baseline_rgb.jpg");
+    let mut from_jpeg = vec![0_u8; desc.output_len()];
+    require(JpegDecoder::baseline().decode(jpeg, &desc, &mut from_jpeg));
+
+    let parsed = require(parse_part10(&require(part10(require(colour_pixels(
+        "YBR_FULL_422",
+        3,
+        64,
+        96,
+        8,
+    ))))));
+    let opened = require(open_frame(&parsed, 0));
+    assert_eq!(opened.photometric(), PhotometricInterpretation::YbrFull422);
+    let reported = JpegDecoder::baseline().decode_photometric_interpretation(&desc);
+    assert_eq!(reported, DecodePhotometricInterpretation::Rgb);
+    let opened = require(opened.with_codec_rgb(true));
+    assert_eq!(
+        opened.colour(),
+        ColourSelection::Colour {
+            codec_already_rgb: true,
+        }
+    );
+    let transform = require(ColorTransform::resolve(
+        require(SampleLayout::new(
+            3,
+            PhotometricInterpretation::YbrFull422,
+            Some(PlanarConfiguration::Interleaved),
+        )),
+        PixelDataEncoding::Encapsulated,
+        DecodedPhotometric::Rgb,
+        DecodedLayout::Interleaved,
+        None,
+    ));
+    let stored: Vec<Stored> = from_jpeg
+        .iter()
+        .copied()
+        .map(|byte| Stored(f32::from(byte)))
+        .collect();
+    let pixels = usize::from(desc.rows()) * usize::from(desc.columns());
+    let mut rgb = vec![Rgb::BLACK; pixels];
+    require(transform.map_into(&stored, &mut rgb, usize::from(desc.columns())));
+    assert_eq!(from_jpeg.len(), rgb.len() * 3);
+    for (pixel, sample) in rgb.iter().zip(from_jpeg.chunks_exact(3)) {
+        let &[red, green, blue] = sample else {
+            continue;
+        };
+        assert_eq!(pixel.r.to_bits(), f32::from(red).to_bits());
+        assert_eq!(pixel.g.to_bits(), f32::from(green).to_bits());
+        assert_eq!(pixel.b.to_bits(), f32::from(blue).to_bits());
+    }
+}
+
+#[test]
 fn an_unreadable_creator_and_a_reserved_group_do_not_refuse_the_frame() {
     let mut data = require(image_module());
     data.extend(require(long_le(
@@ -724,6 +865,32 @@ fn image_pixels(photometric: &str) -> Result<Vec<u8>, String> {
     image_pixels_signed(photometric, false)
 }
 
+fn colour_pixels(
+    photometric: &str,
+    samples: u16,
+    rows: u16,
+    columns: u16,
+    bits: u16,
+) -> Result<Vec<u8>, String> {
+    let high = bits.checked_sub(1).ok_or("bits")?;
+    let mut data = Vec::new();
+    data.extend(short_le(
+        (0x0008, 0x0016),
+        *b"UI",
+        &ui(b"1.2.840.10008.5.1.4.1.1.2"),
+    )?);
+    data.extend(short_le((0x0028, 0x0002), *b"US", &samples.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0004), *b"CS", &text_pad(photometric))?);
+    data.extend(short_le((0x0028, 0x0006), *b"US", &0_u16.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0010), *b"US", &rows.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0011), *b"US", &columns.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0100), *b"US", &bits.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0101), *b"US", &bits.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0102), *b"US", &high.to_le_bytes())?);
+    data.extend(short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?);
+    Ok(data)
+}
+
 fn image_pixels_signed(photometric: &str, signed: bool) -> Result<Vec<u8>, String> {
     let mut data = Vec::new();
     data.extend(short_le(
@@ -856,4 +1023,437 @@ fn concat_bytes(parts: &[&[u8]]) -> Vec<u8> {
         bytes.extend_from_slice(part);
     }
     bytes
+}
+
+// ---------------------------------------------------------------------------
+// F-239, the one Palette Color Lookup Table reader and the ICC presence test
+// ---------------------------------------------------------------------------
+
+use ocelli_dicom::{has_icc_profile, icc_profile, palette_color_lut};
+use ocelli_pixel::PaletteColorLut;
+
+/// One PALETTE COLOR image module with the three descriptors and tables.
+///
+/// `descriptor` is PS3.3 C.7.6.3.1.5's three values, written as US. Each
+/// table is the raw OW value, so a test controls the wire packing exactly.
+fn palette_file(
+    descriptor: [u16; 3],
+    tables: [&[u8]; 3],
+    extra: &[Vec<u8>],
+) -> Result<Vec<u8>, String> {
+    palette_file_signed(descriptor, tables, extra, false)
+}
+
+/// [`palette_file`] with Pixel Representation chosen.
+fn palette_file_signed(
+    descriptor: [u16; 3],
+    tables: [&[u8]; 3],
+    extra: &[Vec<u8>],
+    signed: bool,
+) -> Result<Vec<u8>, String> {
+    let mut data = image_pixels_signed("PALETTE COLOR", signed)?;
+    let words: Vec<u8> = descriptor
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    for element in [0x1101_u16, 0x1102, 0x1103] {
+        data.extend(short_le((0x0028, element), *b"US", &words)?);
+    }
+    for (element, table) in [0x1201_u16, 0x1202, 0x1203].into_iter().zip(tables) {
+        data.extend(long_le((0x0028, element), *b"OW", table)?);
+    }
+    for blob in extra {
+        data.extend(blob);
+    }
+    part10(data)
+}
+
+fn metadata_of(bytes: &[u8]) -> MetadataSet {
+    let parsed = require(parse_part10(bytes));
+    require(MetadataSet::from_object(parsed.object()))
+}
+
+/// Map stored values through the palette the reader built.
+fn mapped(palette: PaletteColorLut, stored: &[f32]) -> Vec<[f32; 3]> {
+    let layout = require(SampleLayout::new(
+        1,
+        PhotometricInterpretation::PaletteColor,
+        None,
+    ));
+    let transform = require(ColorTransform::resolve(
+        layout,
+        PixelDataEncoding::Native,
+        DecodedPhotometric::Preserved,
+        DecodedLayout::Preserved,
+        Some(palette),
+    ));
+    let source: Vec<Stored> = stored.iter().copied().map(Stored).collect();
+    let mut destination = vec![Rgb::BLACK; source.len()];
+    require(transform.map_into(&source, &mut destination, source.len()));
+    destination
+        .iter()
+        .map(|rgb| [rgb.r, rgb.g, rgb.b])
+        .collect()
+}
+
+fn le_words(values: &[u16]) -> Vec<u8> {
+    values.iter().flat_map(|word| word.to_le_bytes()).collect()
+}
+
+/// PS3.3 C.7.6.3.1.5 and C.7.9, the AC7 table. Descriptor `4\10\8`, so four
+/// entries, the first mapped stored value is 10, and entries are 8-bit,
+/// "stored in a format equivalent to 8 bits allocated", one byte per entry.
+///
+/// ```text
+/// red 0 85 170 255   green 255 170 85 0   blue 10 20 30 40
+/// stored 9  -> below the first mapped value, clamps to entry 0 -> 0 255 10
+/// stored 10 -> entry 0                                        -> 0 255 10
+/// stored 12 -> entry 2                                        -> 170 85 30
+/// stored 13 -> entry 3, the last                              -> 255 0 40
+/// stored 99 -> above the last mapped value, clamps to entry 3 -> 255 0 40
+/// ```
+///
+/// Ignoring the first mapped value gives `255 0 40` for stored 9.
+#[test]
+fn a_palette_is_read_from_its_descriptors_and_eight_bit_tables() {
+    let bytes = require(palette_file(
+        [4, 10, 8],
+        [&[0, 85, 170, 255], &[255, 170, 85, 0], &[10, 20, 30, 40]],
+        &[],
+    ));
+    let palette = require(palette_color_lut(&metadata_of(&bytes)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert_eq!(palette.first_mapped_input(), 10);
+    assert_eq!(
+        mapped(palette, &[9.0, 10.0, 12.0, 13.0, 99.0]),
+        vec![
+            [0.0, 255.0, 10.0],
+            [0.0, 255.0, 10.0],
+            [170.0, 85.0, 30.0],
+            [255.0, 0.0, 40.0],
+            [255.0, 0.0, 40.0],
+        ]
+    );
+}
+
+/// PS3.3 C.7.6.3.1.5's note: some writers store 8-bit entries in 16 bits
+/// allocated, which the value length reveals, twice the entry count. The
+/// same table read that way gives the same colours. An odd entry count in
+/// one byte per entry carries OW's one pad byte.
+#[test]
+fn eight_bit_entries_are_read_in_either_container() {
+    let red = le_words(&[0, 85, 170, 255]);
+    let green = le_words(&[255, 170, 85, 0]);
+    let blue = le_words(&[10, 20, 30, 40]);
+    let bytes = require(palette_file([4, 10, 8], [&red, &green, &blue], &[]));
+    let palette = require(palette_color_lut(&metadata_of(&bytes)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert_eq!(mapped(palette, &[12.0]), vec![[170.0, 85.0, 30.0]]);
+
+    let odd = require(palette_file(
+        [3, 0, 8],
+        [&[1, 2, 3, 0], &[4, 5, 6, 0], &[7, 8, 9, 0]],
+        &[],
+    ));
+    let palette = require(palette_color_lut(&metadata_of(&odd)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert_eq!(palette.entry_count(), 3);
+    assert_eq!(mapped(palette, &[2.0]), vec![[3.0, 6.0, 9.0]]);
+}
+
+/// F-239 item 11 through the reader. Every channel holds an entry above 255,
+/// so the palette is not read as 8-bit and each channel is shifted by its
+/// declared depth minus 8:
+///
+/// ```text
+/// 16-bit 0 32768 65535 >> 8 -> 0 128 255
+/// 12-bit 0 2048 4095   >> 4 -> 0 128 255
+/// ```
+#[test]
+fn wide_palette_entries_are_scaled_by_their_descriptor() {
+    for (bits, table) in [(16_u16, [0_u16, 32_768, 65_535]), (12, [0, 2_048, 4_095])] {
+        let words = le_words(&table);
+        let bytes = require(palette_file([3, 0, bits], [&words, &words, &words], &[]));
+        let palette = require(palette_color_lut(&metadata_of(&bytes)));
+        let Some(palette) = palette else {
+            unreachable!("a PALETTE COLOR frame has a palette")
+        };
+        assert_eq!(
+            mapped(palette, &[0.0, 1.0, 2.0]),
+            vec![[0.0; 3], [128.0; 3], [255.0; 3]],
+            "{bits}"
+        );
+    }
+}
+
+/// Every refusal by name. Depth outside `8 ..= 16`, a Segmented Palette
+/// Color Lookup Table Data element, a missing table, and a table whose value
+/// length matches neither container.
+#[test]
+fn palette_tables_this_reader_cannot_use_are_refused_by_name() {
+    let table = le_words(&[0, 1, 2]);
+    for bits in [7_u16, 17] {
+        let bytes = require(palette_file([3, 0, bits], [&table, &table, &table], &[]));
+        assert_eq!(
+            palette_color_lut(&metadata_of(&bytes)),
+            Err(FrameOpenError::PaletteDepth),
+            "{bits}"
+        );
+    }
+
+    let segmented = require(long_le((0x0028, 0x1221), *b"OW", &[0, 0]));
+    let bytes = require(palette_file(
+        [3, 0, 16],
+        [&table, &table, &table],
+        &[segmented],
+    ));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&bytes)),
+        Err(FrameOpenError::SegmentedPalette)
+    );
+
+    let mut data = require(image_pixels("PALETTE COLOR"));
+    let words = le_words(&[3, 0, 16]);
+    for element in [0x1101_u16, 0x1102, 0x1103] {
+        data.extend(require(short_le((0x0028, element), *b"US", &words)));
+    }
+    for element in [0x1201_u16, 0x1203] {
+        data.extend(require(long_le((0x0028, element), *b"OW", &table)));
+    }
+    let missing = require(part10(data));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&missing)),
+        Err(FrameOpenError::MissingPalette)
+    );
+
+    let short = le_words(&[0, 1]);
+    let bytes = require(palette_file([3, 0, 16], [&table, &short, &table], &[]));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&bytes)),
+        Err(FrameOpenError::Attribute {
+            group: 0x0028,
+            element: 0x1202
+        })
+    );
+}
+
+/// A frame that is not PALETTE COLOR has no palette and is not refused.
+#[test]
+fn a_frame_that_is_not_palette_colour_has_no_palette() {
+    let bytes = require(part10(require(image_module())));
+    assert_eq!(palette_color_lut(&metadata_of(&bytes)), Ok(None));
+}
+
+/// Deviation D-30. ICC Profile `(0028,2000)` at the top level is present
+/// whatever its length, and an ICC profile only inside a sequence, the
+/// Optical Path Sequence `(0048,0105)` of a whole-slide image, is not this
+/// test's.
+#[test]
+fn an_icc_profile_is_present_by_its_element_alone() {
+    let plain = require(part10(require(image_module())));
+    assert!(!has_icc_profile(&metadata_of(&plain)));
+
+    for value in [&[0x61_u8, 0x63, 0x73, 0x70][..], &[]] {
+        let mut data = require(image_module());
+        data.extend(require(long_le((0x0028, 0x2000), *b"OB", value)));
+        assert!(has_icc_profile(&metadata_of(&require(part10(data)))));
+    }
+
+    let nested = require(long_le((0x0028, 0x2000), *b"OB", &[1, 2]));
+    let sequence_item = require(item(&nested));
+    let mut data = require(image_module());
+    data.extend(require(long_le((0x0048, 0x0105), *b"SQ", &sequence_item)));
+    assert!(!has_icc_profile(&metadata_of(&require(part10(data)))));
+}
+
+/// F-240. `icc_profile` returns the element's own bytes at the top level,
+/// and `None` for an absent, empty or word-projected element, because the
+/// attribute's VR is OB and a re-encoded payload would not be the profile.
+#[test]
+fn icc_profile_returns_the_elements_own_bytes() {
+    let plain = require(part10(require(image_module())));
+    assert_eq!(icc_profile(&metadata_of(&plain)), None);
+
+    let payload: &[u8] = &[0x04, 0x44, 0x00, 0x00, 0x61, 0x63, 0x73, 0x70];
+    let mut data = require(image_module());
+    data.extend(require(long_le((0x0028, 0x2000), *b"OB", payload)));
+    let opened = require(part10(data));
+    assert_eq!(icc_profile(&metadata_of(&opened)), Some(payload));
+
+    let mut data = require(image_module());
+    data.extend(require(long_le((0x0028, 0x2000), *b"OB", &[])));
+    assert_eq!(icc_profile(&metadata_of(&require(part10(data)))), None);
+
+    // An element projected as words is not a byte payload. The palette
+    // reader writes words back little-endian for a table the standard's note
+    // describes, and ICC Profile has no such note, so nothing is invented.
+    let mut data = require(image_module());
+    data.extend(require(long_le(
+        (0x0028, 0x2000),
+        *b"OW",
+        &[0x01_u8, 0x00, 0x02, 0x00],
+    )));
+    assert_eq!(icc_profile(&metadata_of(&require(part10(data)))), None);
+}
+
+/// Review pass 1, D1. An entry beyond its declared depth names the TABLE it
+/// is in, not the red descriptor. Descriptor `3\0\12`, so `2^12 - 1 = 4095`
+/// is the largest 12-bit entry, and green holds 4096.
+#[test]
+fn an_entry_beyond_its_depth_names_its_own_table() {
+    let fits = le_words(&[0, 4_000, 2]);
+    let beyond = le_words(&[0, 4_096, 2]);
+    let bytes = require(palette_file([3, 0, 12], [&fits, &beyond, &fits], &[]));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&bytes)),
+        Err(FrameOpenError::Attribute {
+            group: 0x0028,
+            element: 0x1202
+        })
+    );
+    let bytes = require(palette_file([3, 0, 12], [&fits, &fits, &beyond], &[]));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&bytes)),
+        Err(FrameOpenError::Attribute {
+            group: 0x0028,
+            element: 0x1203
+        })
+    );
+}
+
+/// Review pass 1, S2. PS3.3 C.7.6.3.1.5: the descriptor's second value is
+/// signed when Pixel Representation is 1. Written as US `0xFFF6`, it is `-10`
+/// signed and `65526` unsigned. Stored `-10` then reads entry 0 and stored
+/// `-9` reads entry 1, where an unsigned reading clamps both to entry 0.
+#[test]
+fn the_first_mapped_value_is_signed_under_pixel_representation_one() {
+    let bytes = require(palette_file_signed(
+        [2, 0xFFF6, 8],
+        [&[10, 20], &[30, 40], &[50, 60]],
+        &[],
+        true,
+    ));
+    let palette = require(palette_color_lut(&metadata_of(&bytes)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert_eq!(palette.first_mapped_input(), -10);
+    assert_eq!(
+        mapped(palette, &[-10.0, -9.0]),
+        vec![[10.0, 30.0, 50.0], [20.0, 40.0, 60.0]]
+    );
+}
+
+/// Review pass 1, S2. PS3.3 C.7.6.3.1.5: "When the number of table entries is
+/// equal to 2^16 then this value shall be 0." A declared 0 with 65,536 words
+/// is read as 65,536 entries. Entry `i` is `i`, so through the 16-bit display
+/// scale stored 40000 is `40000 >> 8 = 156` and stored 65535 is 255.
+#[test]
+fn a_declared_entry_count_of_zero_reads_sixty_five_thousand_five_hundred_and_thirty_six() {
+    let words: Vec<u16> = (0..=u16::MAX).collect();
+    let table = le_words(&words);
+    let bytes = require(palette_file([0, 0, 16], [&table, &table, &table], &[]));
+    let palette = require(palette_color_lut(&metadata_of(&bytes)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert_eq!(palette.entry_count(), 65_536);
+    assert_eq!(
+        mapped(palette, &[40_000.0, 65_535.0]),
+        vec![[156.0; 3], [255.0; 3]]
+    );
+}
+
+/// Review pass 1, S2. PS3.3 C.7.6.3.1.5's note: an 8-bit table in 16 bits
+/// allocated is detected by its value length. A word above 255 there is not an
+/// 8-bit entry and is refused, naming that table, rather than read wide.
+#[test]
+fn an_eight_bit_table_in_words_refuses_a_wide_word() {
+    let fits = le_words(&[0, 255, 2]);
+    let wide = le_words(&[0, 300, 2]);
+    let bytes = require(palette_file([3, 0, 8], [&fits, &wide, &fits], &[]));
+    assert_eq!(
+        palette_color_lut(&metadata_of(&bytes)),
+        Err(FrameOpenError::Attribute {
+            group: 0x0028,
+            element: 0x1202
+        })
+    );
+}
+
+/// Ruling R1. All three channels are declared 16-bit and every entry of every
+/// one fits in 8 bits, so the palette is read as 8-bit and carries the flag
+/// the page states. This is the
+/// shape of both corpus palette rows, `synthetic/sc_palette_color.dcm` and
+/// `synthetic/sc_palette_color_16.dcm`.
+#[test]
+fn a_sixteen_bit_table_of_8_bit_entries_is_read_as_8_bit_and_flagged() {
+    let table = le_words(&[0, 128, 255]);
+    let bytes = require(palette_file([3, 0, 16], [&table, &table, &table], &[]));
+    let palette = require(palette_color_lut(&metadata_of(&bytes)));
+    let Some(palette) = palette else {
+        unreachable!("a PALETTE COLOR frame has a palette")
+    };
+    assert!(palette.entries_read_as_8_bit());
+    assert_eq!(
+        mapped(palette, &[0.0, 1.0, 2.0]),
+        vec![[0.0; 3], [128.0; 3], [255.0; 3]]
+    );
+}
+
+/// One PALETTE COLOR file with a descriptor per channel, red then green then
+/// blue, each written as US.
+fn palette_file_by_channel(
+    descriptors: [[u16; 3]; 3],
+    tables: [&[u8]; 3],
+) -> Result<Vec<u8>, String> {
+    let mut data = image_pixels("PALETTE COLOR")?;
+    for (element, descriptor) in [0x1101_u16, 0x1102, 0x1103].into_iter().zip(descriptors) {
+        data.extend(short_le((0x0028, element), *b"US", &le_words(&descriptor))?);
+    }
+    for (element, table) in [0x1201_u16, 0x1202, 0x1203].into_iter().zip(tables) {
+        data.extend(long_le((0x0028, element), *b"OW", table)?);
+    }
+    part10(data)
+}
+
+/// Review pass 2, S2. PS3.3 C.7.6.3.1.5 gives each channel its own
+/// descriptor, and three that disagree on entry count or first mapped value
+/// are refused naming the first descriptor that differs from red's.
+///
+/// ```text
+/// red 3\0\8, green 2\0\8, blue 3\0\8  -> green's count differs -> (0028,1102)
+/// red 3\0\8, green 3\0\8, blue 3\5\8  -> blue's first differs  -> (0028,1103)
+/// red 3\0\8, green 2\0\8, blue 3\5\8  -> green is first        -> (0028,1102)
+/// red 3\0\8, green 3\5\8, blue 2\0\8  -> green's first differs -> (0028,1102)
+/// ```
+#[test]
+fn disagreeing_descriptors_name_the_first_that_differs_from_red() {
+    let three: &[u8] = &[1, 2, 3, 0];
+    let two: &[u8] = &[1, 2];
+    for (green, blue, green_table, blue_table, element) in [
+        ([2_u16, 0, 8], [3_u16, 0, 8], two, three, 0x1102_u16),
+        ([3, 0, 8], [3, 5, 8], three, three, 0x1103),
+        ([2, 0, 8], [3, 5, 8], two, three, 0x1102),
+        ([3, 5, 8], [2, 0, 8], three, two, 0x1102),
+    ] {
+        let bytes = require(palette_file_by_channel(
+            [[3, 0, 8], green, blue],
+            [three, green_table, blue_table],
+        ));
+        assert_eq!(
+            palette_color_lut(&metadata_of(&bytes)),
+            Err(FrameOpenError::Attribute {
+                group: 0x0028,
+                element
+            }),
+            "green {green:?} blue {blue:?}"
+        );
+    }
 }

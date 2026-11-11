@@ -54,7 +54,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from .sandbox import Sandbox
+from .sandbox import Sandbox, SandboxError
 
 Runner = Callable[[Sandbox], "subprocess.CompletedProcess[str]"]
 
@@ -274,6 +274,59 @@ def _unsafe_in_a_third_file(box: Sandbox) -> None:
     box.stage_all()
 
 
+def _tokenizer_snippet(label: str, source: str, line: int) -> Invoke:
+    """A level-1 run of the tokenizer over one planted Rust source.
+
+    The input is the trigger and nothing else, taken from F-229's review
+    findings rather than from the guard's code, so the probe asserts the rule
+    and not the implementation. It prints the guard's own refusal shape and
+    exits 1 when the planted line is reported. Exits 0 when the tokenizer
+    misses it, which is the inverted success. The same body is the control's
+    invoke with the plant removed, so a false positive on the healthy shape
+    fails the control instead of the probe.
+    """
+    body = (
+        "import sys\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import unsafe_allowlist_check as guard\n"
+        "source = " + repr(source) + "\n"
+        "try:\n"
+        "    lines, weakening = guard.scan(source)\n"
+        "except guard.LexError as error:\n"
+        "    print('probe/src/lib.rs:%d: %s' % (error.line, error.message))\n"
+        "    sys.exit(1)\n"
+        "if " + str(line) + " in lines:\n"
+        "    print('probe/src/lib.rs:" + str(line) +
+        ": `unsafe` outside the allow-list')\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n")
+    return python_snippet(label, body)
+
+
+def _weakening_snippet(label: str, source: str) -> Invoke:
+    """A level-1 run of the tokenizer over one weakening attribute.
+
+    Same shape as `_tokenizer_snippet`, asserting the attribute half of the
+    rule instead of the keyword half.
+    """
+    body = (
+        "import sys\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import unsafe_allowlist_check as guard\n"
+        "source = " + repr(source) + "\n"
+        "try:\n"
+        "    lines, weakening = guard.scan(source)\n"
+        "except guard.LexError as error:\n"
+        "    print('probe/src/lib.rs:%d: %s' % (error.line, error.message))\n"
+        "    sys.exit(1)\n"
+        "if 1 in weakening:\n"
+        "    print('probe/src/lib.rs:1: `unsafe_code` lowered by an allow, "
+        "expect or warn attribute')\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n")
+    return python_snippet(label, body)
+
+
 def _blocked_mention(box: Sandbox) -> None:
     name = _blocked_project(box)
     box.write(".claude/plans/F-000-probe.md",
@@ -326,6 +379,27 @@ def _drop_wgpu_entry(box: Sandbox) -> None:
         "")
 
 
+def _plant_objc2_build_dependency(box: Sandbox) -> None:
+    """The F-238 review's S1, as a rejected state.
+
+    objc2 under `[build-dependencies]` of `ocelli-native` is compiled when
+    the archive is built, so the shipped graph walk must refuse it the way
+    the licence closure already does. The plant adds an edge the lock file
+    does not carry, and the check runs `--locked`, so the probe resolves the
+    sandbox lock offline first. Without that the refusal would be the resolve
+    failure and would say nothing about which edges the walk reads.
+    """
+    box.append(
+        "crates/ocelli-native/Cargo.toml",
+        '\n[build-dependencies]\nobjc2 = "=0.6.4"\n')
+    updated = box.run(["cargo", "update", "--offline", "-p", "objc2"])
+    if updated.returncode != 0:
+        raise SandboxError(
+            "the probe's offline lock update failed, so the walk would "
+            f"refuse an unresolvable graph and prove nothing: "
+            f"{(updated.stderr or updated.stdout).strip()}")
+
+
 def _remove_openjph_published_source(box: Sandbox) -> None:
     box.delete("vendor/openjph-core-0.1.0/src/lib.rs")
 
@@ -350,11 +424,226 @@ def _change_openjph_vcs_revision(box: Sandbox) -> None:
     )
 
 
-def _plant_openjph_notice(box: Sandbox) -> None:
-    box.write(
-        "vendor/openjph-core-0.1.0/LICENSE",
-        "Copyright (c) placeholder\nBSD-2-Clause notice text\n",
-    )
+def _delete_openjph_notice(box: Sandbox) -> None:
+    box.delete("vendor/openjph-core-0.1.0/LICENSE")
+
+
+def _alter_openjph_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _plant_npm_licence(box: Sandbox, name: str, body: str) -> None:
+    needle = '"packages": {'
+    plant = '"packages": {\n    "node_modules/' + name + '": ' + body + ","
+    for rel in ("package-lock.json", "tools/oracle/package-lock.json",
+                "tools/bench/package-lock.json"):
+        box.substitute(rel, needle, plant)
+
+
+def _plant_npm_copyleft(box: Sandbox) -> None:
+    _plant_npm_licence(
+        box, "probe-copyleft",
+        '{"version": "0.0.1", "license": "GPL-3.0-only"}')
+
+
+def _plant_npm_undeclared(box: Sandbox) -> None:
+    _plant_npm_licence(box, "probe-undeclared", '{"version": "0.0.2"}')
+
+
+def _plant_stale_exception(box: Sandbox) -> None:
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "not-a-real-package"\n'
+        'version = "9.9.9"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _dev_only_caniuse(box: Sandbox) -> None:
+    # The oracle lock still carries the package. dev-only does not hold there.
+    box.substitute("ci/licences.toml", 'scope = "dev-only, tool"',
+                   'scope = "dev-only"')
+
+
+def _tool_scope_holds_nowhere(box: Sandbox) -> None:
+    # Drop the tooling copy. dev-only still holds for the root dev entry,
+    # and tool then holds for no lockfile the exception covers.
+    lock = json.loads(box.read("tools/oracle/package-lock.json"))
+    packages = lock.get("packages", {})
+    key = "node_modules/caniuse-lite"
+    if key not in packages:
+        # substitute raises in the sandbox when the plant matches nothing.
+        box.substitute("tools/oracle/package-lock.json",
+                       '"node_modules/caniuse-lite"', "missing")
+        return
+    del packages[key]
+    box.write("tools/oracle/package-lock.json", json.dumps(lock) + "\n")
+
+
+def _waiver_missing_decided_by(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'decided = "2026-11-05"\n'
+        'decided_by = "lead"\n'
+        'note = "The file is an empty placeholder for HEIF,',
+        'decided = "2026-11-05"\n'
+        'note = "The file is an empty placeholder for HEIF,')
+
+
+def _waiver_scope_prod(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "tool"',
+        'imagecodecs reports JETRAW unavailable and the file grants nothing."\n'
+        'scope = "prod"')
+
+
+def _stale_lzf_waiver(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'package = "imagecodecs"\n'
+        'version = "2026.10.10"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"',
+        'package = "imagecodecs"\n'
+        'version = "1999.0.0"\n'
+        'path = "imagecodecs/licenses/LICENSE-lzf"')
+
+
+def _claim_licence_on_empty_file(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "no-licence-text"',
+        'path = "imagecodecs/licenses/LICENSE-libjxs"\n'
+        'empty = true\n'
+        'licence = "BSD-3-Clause"')
+
+
+def _lead_waiver_names_copyleft(box: Sandbox) -> None:
+    # et-xmlfile is a lead waiver of an allowlisted text. A copyleft
+    # identifier is a decision only the operator may record.
+    box.substitute(
+        "ci/licences.toml",
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "Python-2.0"',
+        'path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"\n'
+        'markers = ["GNU General Public License"]\n'
+        'spdx = "Python-2.0"\n'
+        'licence = "GPL-3.0-only"')
+
+
+def _operator_waiver_unparseable(box: Sandbox) -> None:
+    box.substitute(
+        "ci/licences.toml",
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "BSD-2-Clause"',
+        'path = "imagecodecs/licenses/LICENSE-lzf"\n'
+        'spdx = "BSD-2-Clause"\n'
+        'markers = ["GPLv2"]\n'
+        'licence = "SEE LICENSE IN FILE"')
+
+
+def _plant_shipped_exception(box: Sandbox) -> None:
+    lock = json.loads(box.read("package-lock.json"))
+    version = ""
+    for key, entry in lock.get("packages", {}).items():
+        if key == "node_modules/dcmjs" or key.endswith("/node_modules/dcmjs"):
+            version = str(entry.get("version", ""))
+            break
+    if not version:
+        raise SandboxError("dcmjs is not in the root lock")
+    box.append(
+        "ci/licences.toml",
+        "\n[[exception]]\n"
+        'ecosystem = "npm"\n'
+        'package = "dcmjs"\n'
+        f'version = "{version}"\n'
+        'licence = "MIT"\n'
+        'reason = "probe"\n'
+        'scope = "dev-only"\n'
+        'decided = "2026-11-05"\n'
+        'decided_by = "probe"\n')
+
+
+def _rename_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'package = "pyyaml"',
+                   'package = "pyyaml-renamed"')
+
+
+def _copyleft_python_row(box: Sandbox) -> None:
+    box.substitute("ci/licences.toml", 'spdx = "BSD-3-Clause"',
+                   'spdx = "GPL-3.0-only"')
+
+
+def _copyleft_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"', 'license = "GPL-3.0-only"')
+
+
+def _disjoin_openjph(box: Sandbox) -> None:
+    box.substitute("vendor/openjph-core-0.1.0/Cargo.toml",
+                   'license = "BSD-2-Clause"',
+                   'license = "MIT OR GPL-3.0-only"')
+
+
+def _drift_notice(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/LICENSE", "\n")
+
+
+def _drift_holder(box: Sandbox) -> None:
+    box.substitute("LICENSE-MIT", "Tensorbee Limited", "Tensorbee")
+
+
+def _narrow_manifest_spdx(box: Sandbox) -> None:
+    box.substitute("package.json", '"license": "MIT OR Apache-2.0"',
+                   '"license": "MIT"')
+
+
+def _plant_python_dependency(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "pyproject.toml",
+        "dependencies = [",
+        'dependencies = [\n  "' + blocked + 'j2k>=1",')
+
+
+def _plant_lock_entry(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.append("uv.lock", f'\nname = "lib{blocked}"\n')
+
+
+def _plant_prefixed_lock_name(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    box.substitute(
+        "package-lock.json",
+        '"packages": {',
+        '"packages": {\n    "node_modules/lib' + blocked + 'j2k": '
+        '{"version": "0.0.1", "license": "MIT"},')
+
+
+def _plant_agent_trailer(box: Sandbox) -> None:
+    blocked = _blocked_project(box)
+    target = None
+    for path in sorted((box.path / ".claude" / "reviews").glob("*.md")):
+        target = path.relative_to(box.path).as_posix()
+        break
+    if target is None:
+        raise SandboxError("no tracked review to append")
+    box.append(
+        target,
+        f"\nOcelli-Generated-By: {blocked}\n"
+        "This names the agent. It is not a read-blocked project.\n")
 
 
 def _remove_ritk_published_source(box: Sandbox) -> None:
@@ -386,10 +675,82 @@ def _append_ritk_patch_provenance(box: Sandbox) -> None:
                "\nThe Rust source was changed locally.\n")
 
 
+def _drift_ritk_patched_source(box: Sandbox) -> None:
+    # A patched file whose bytes move must fail on its own record, not on the
+    # archive inventory the patch exempts it from.
+    box.append("vendor/ritk-codecs-0.6.0/src/jpeg_2000/image.rs",
+               "\n// beyond the reviewed D-31 record\n")
+
+
+def _drift_ritk_jpegls_patch(box: Sandbox) -> None:
+    # F-243. A patched source file is exempt from the archive inventory, so a
+    # byte beyond its record must fail on that record instead.
+    box.append("vendor/ritk-codecs-0.6.0/src/jpeg_ls/scan.rs",
+               "\n// beyond the recorded F-243 patch\n")
+
+
+def _drift_openjph_patched_source(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/src/codestream/tile.rs",
+               "\n// beyond the reviewed D-31 record\n")
+
+
+def _shift_openjph_ict_coefficient(box: Sandbox) -> None:
+    # One 1e-2 step on the blue-to-green inverse ICT coefficient, G-6's
+    # 0.34413 literal, in the sandbox's copy of the vendored decoder. S1 of
+    # review pass 4 measured this exact mutation: every workspace test stays
+    # green and only the vendored suite goes red, so the vendored Annex G
+    # test is the thing the new gate has to be watched driving red.
+    box.substitute("vendor/openjph-core-0.1.0/src/transform/colour.rs",
+                   "pub const GAMMA_CB2G: f32 = 0.34413;",
+                   "pub const GAMMA_CB2G: f32 = 0.35413;")
+
+
+def _run_vendor_tests_gate(box: Sandbox) -> "subprocess.CompletedProcess[str]":
+    # The reset before every probe wipes the sandbox's target directory, so
+    # this invoke pays a cold compile of both vendored test targets on every
+    # run, and a timeout there would surface as a broken harness rather
+    # than as a probe result. `Sandbox.run`'s default of 300 seconds is the
+    # only bound such a run would otherwise have, so this invoke carries a
+    # wider one.
+    return box.run(["bin/ocelli.sh", "gate", "vendor-tests"], timeout=1200)
+
+
+def _rewrite_openjph_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/openjph-core-0.1.0/PATCH-PROVENANCE.md",
+               "\nThe Rust source was changed locally.\n")
+
+
 def _restore_ritk_rayon_default(box: Sandbox) -> None:
     box.substitute("vendor/ritk-codecs-0.6.0/Cargo.toml",
                    'version = "0.3"\ndefault-features = false',
                    'version = "0.3"\ndefault-features = true')
+
+
+def _plant_dicom_object_source_byte(box: Sandbox) -> None:
+    box.append("vendor/dicom-object-0.10.0/src/mem.rs", "\n")
+
+
+def _second_dicom_object_patch(box: Sandbox) -> None:
+    box.substitute("vendor/dicom-object-0.10.0/src/collector.rs",
+                   "LazyDataToken::ItemStart { len: _ } => { /* no-op */ }",
+                   "LazyDataToken::ItemStart { len: _ } => { first = true; }")
+
+
+def _rewrite_dicom_object_source_and_inventory(box: Sandbox) -> None:
+    source_name = "vendor/dicom-object-0.10.0/src/mem.rs"
+    inventory_name = "vendor/dicom-object-0.10.0/PACKAGE-INVENTORY.sha256"
+    box.append(source_name, "// coordinated source and inventory change\n")
+    digest = hashlib.sha256((box.path / source_name).read_bytes()).hexdigest()
+    rows = box.read(inventory_name).splitlines()
+    box.write(inventory_name, "\n".join(
+        f"{digest}  ./src/mem.rs" if row.endswith("  ./src/mem.rs") else row
+        for row in rows
+    ) + "\n")
+
+
+def _append_dicom_object_patch_provenance(box: Sandbox) -> None:
+    box.append("vendor/dicom-object-0.10.0/PATCH-PROVENANCE.md",
+               "\nA second source file was changed locally.\n")
 
 
 def _remove_done_benchmark_runner(box: Sandbox) -> None:
@@ -516,6 +877,94 @@ def _decode_frame_accepts_absent_binary(box: Sandbox) -> None:
     )
 
 
+def _aspect_check_accepts_any_ratio(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/aspect.mjs",
+        "    if (!(Math.abs(ratio - expected) <= tolerance)) {",
+        "    if (false) {",
+    )
+
+
+def _aspect_check_accepts_no_canvas(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/aspect.mjs",
+        "  if (!Array.isArray(readings) || readings.length === 0) {",
+        "  if (false) {",
+    )
+
+
+def _readout_check_accepts_a_survivor(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/readout.mjs",
+        "    if (!seen.after.readHidden || !seen.after.crossHidden || !seen.after.magHidden) {",
+        "    if (false) {",
+    )
+
+
+def _link_check_accepts_a_stale_line(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/link.mjs",
+        "  } else if (seen.after.lines !== 0) {",
+        "  } else if (false) {",
+    )
+
+
+def _forget_check_accepts_the_left_folder(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/forget.mjs",
+        "    if (counted !== left.bFiles) {",
+        "    if (false) {",
+    )
+
+
+def _forget_check_accepts_a_late_post(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/forget.mjs",
+        "    if (late.reposts !== 0) {",
+        "    if (false) {",
+    )
+
+
+def _window_check_accepts_a_stale_grey(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/window.mjs",
+        "    if (want.soft !== undefined && (got.soft !== want.soft || got.lung !== want.lung)) {",
+        "    if (false) {",
+    )
+
+
+def _changed_check_accepts_the_old_image(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (changed.fault !== CHANGED_SENTENCE) {",
+        "    if (false) {",
+    )
+
+
+def _changed_check_accepts_claimed_detection(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (restored.fault !== \"\") {",
+        "    if (false) {",
+    )
+
+
+def _changed_check_accepts_a_whole_file_read(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/changed.mjs",
+        "    if (probe.bytes !== probe.files) {",
+        "    if (false) {",
+    )
+
+
+def _auto_check_accepts_a_per_slice_window(box: Sandbox) -> None:
+    box.substitute(
+        "examples/folder-viewer/tests/browser/auto.mjs",
+        "    else if (got.line !== line) problems.push(",
+        "    else if (false) problems.push(",
+    )
+
+
 def _missing_packaged_apache_licence(box: Sandbox) -> None:
     box.write("crates/ocelli-wasm/pkg/ocelli_wasm_bg.wasm", b"\x00" * 1000)
     _write_packaged_licences(box, omit="LICENSE-APACHE")
@@ -624,6 +1073,19 @@ def _delete_ci_step(box: Sandbox, leave_comment: bool) -> None:
     replacement = (f"      # the `bin/ocelli.sh gate {gate}` step was here"
                    if leave_comment else "")
     box.substitute(".github/workflows/ci.yml", line, replacement)
+
+
+def _drop_the_frontend_wasm_pack_step(box: Sandbox) -> None:
+    """Delete the frontend job's wasm-pack step, the state N3 measured.
+
+    The same step sits in the `wasm` job, so the edit is anchored on the
+    `npm ci` line that follows it in the frontend job and nowhere else.
+    """
+    box.substitute(
+        ".github/workflows/ci.yml",
+        "      - uses: jetli/wasm-pack-action@v0.4.0\n"
+        "      - run: npm ci",
+        "      - run: npm ci")
 
 
 def _put_gate_step_behind(box: Sandbox, gate: str, condition: str) -> None:
@@ -945,8 +1407,8 @@ def _sprint_plan_milestone_summary_deleted(box: Sandbox) -> None:
 
     The comparison was positional, so an absent line shifted every line after
     it and the refusal named the wrong milestone, which is a message a
-    maintainer cannot act on. The lines are matched on the sprint span they
-    name now, and an absent span is refused by name.
+    maintainer cannot act on. The lines are matched on the milestone heading
+    each sits under now, and an absent line is refused by milestone.
     """
     text = box.read("docs/sprints/SPRINT_PLAN.md")
     line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
@@ -957,7 +1419,7 @@ def _sprint_plan_milestone_summary_deleted(box: Sandbox) -> None:
 
 
 def _sprint_plan_extra_milestone_summary(box: Sandbox) -> None:
-    """Add a summary line for a span the allocation has no milestone for."""
+    """Add a second summary line under a milestone that already has one."""
     text = box.read("docs/sprints/SPRINT_PLAN.md")
     line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
                      text, re.M)
@@ -966,6 +1428,23 @@ def _sprint_plan_extra_milestone_summary(box: Sandbox) -> None:
     box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
                    line.group(0) + "\n\n_S98 to S99, 1 stories, "
                                    "1 engineer-weeks._")
+
+
+def _sprint_plan_unplanned_milestone_summary(box: Sandbox) -> None:
+    """Add a milestone heading and summary the allocation plans nothing for.
+
+    The comparison is keyed by the milestone heading each line sits under, so
+    a heading with no planned story is hand-written prose wearing a generated
+    line's shape and is refused by name.
+    """
+    text = box.read("docs/sprints/SPRINT_PLAN.md")
+    line = re.search(r"^_S\d+ to S\d+, \d+ stories, \d+ engineer-weeks\._$",
+                     text, re.M)
+    if line is None:
+        raise AssertionError("SPRINT_PLAN.md carries no milestone summary line")
+    box.substitute("docs/sprints/SPRINT_PLAN.md", line.group(0),
+                   line.group(0) + "\n\n### M99, Unplanned\n\n"
+                                   + line.group(0))
 
 
 def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
@@ -982,6 +1461,141 @@ def _sprint_plan_two_goal_lines(box: Sandbox) -> None:
     box.substitute("docs/sprints/SPRINT_PLAN.md", goal.group(0),
                    "**Goal**: something a previous edit left behind.\n\n"
                    + goal.group(0))
+
+
+def _sprint_plan_row_absent(box: Sandbox) -> None:
+    """Delete the first story row of the first sprint table.
+
+    The allocation still plans that story, so `--check` reports that it
+    appears in no sprint table. The goal line stays and still carries the
+    title, so the missing-title refusal does not fire. A check that walked
+    only the plan's own rows would stay green.
+    """
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    del lines[rows[0]]
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_row_unplanned(box: Sandbox) -> None:
+    """Insert a row for F-999 after the first sprint table's last row.
+
+    The allocation does not plan F-999, so the unplanned-row refusal is
+    the one that fires. The goal line is untouched. F-999 is fixed. If a
+    later allocation plans that id into a sprint, the same row would hit
+    the wrong-sprint refusal, so the fixture stops instead.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    if any(story["fid"] == "F-999" and story["sprint"]
+           for story in allocation["stories"]):
+        raise SandboxError(
+            "the allocation plans F-999 into a sprint, so this fixture "
+            "would reach the wrong-sprint refusal")
+    head = re.compile(r"^####\s+Sprint\s+S\d+\s*$")
+    story = re.compile(r"^\|\s*F-X?\d{3}[a-z]?\s*\|")
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    heads = [i for i, line in enumerate(lines) if head.match(line.rstrip("\n"))]
+    if not heads:
+        raise AssertionError("SPRINT_PLAN.md carries no sprint table")
+    end = heads[1] if len(heads) > 1 else len(lines)
+    rows = [i for i in range(heads[0], end) if story.match(lines[i])]
+    if not rows:
+        raise AssertionError("the first sprint table carries no story row")
+    last = rows[-1]
+    ending = "\n" if lines[last].endswith("\n") else ""
+    lines.insert(last + 1,
+                 "| F-999 | E0.0 | A row the allocation plans nowhere "
+                 "| Test | 1w |" + ending)
+    box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+
+
+def _sprint_plan_goal_line_absent(box: Sandbox) -> None:
+    """Delete the first `**Goal**:` line and the blank line under it.
+
+    The sprint heading remains, so the parser still knows which sprint
+    lost its goal. The table rows stay, so the row refusals stay quiet.
+    The fragment is the absent line. A comparison over only the sprints
+    whose goal line the parser found would stay green.
+    """
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    goal = re.compile(r"^\*\*Goal\*\*: .+$")
+    for index, line in enumerate(lines):
+        if not goal.match(line.rstrip("\n")):
+            continue
+        remove = 1
+        if index + 1 < len(lines) and lines[index + 1].strip() == "":
+            remove = 2
+        del lines[index:index + remove]
+        box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+        return
+    raise AssertionError("SPRINT_PLAN.md carries no **Goal** line")
+
+
+def _sprint_plan_goal_order_drift(box: Sandbox) -> None:
+    """Swap two adjacent distinct titles on one sprint's goal line.
+
+    Titles come from the sandbox allocation in the generator's order,
+    with the same semicolon-to-comma substitution the goal line uses.
+    The first sprint whose single goal line contains an adjacent pair
+    as `a, b` has those two titles exchanged on that line only. Both
+    titles remain, so the missing-title refusal stays quiet and the
+    order refusal is the one that fires. A sprint with two goal lines
+    is skipped, because that state is the duplicate-line refusal. A
+    plan with no such pair cannot express the drift, and the fixture
+    stops rather than passing.
+    """
+    allocation = json.loads(box.read("docs/sprints/allocation.json"))
+    planned = [story for story in allocation["stories"] if story["sprint"]]
+    planned.sort(key=lambda story: (int(story["sprint"][1:]), story["fid"]))
+    titles_by_sprint: dict[str, list[str]] = {}
+    sprint_order: list[str] = []
+    for story in planned:
+        sprint = story["sprint"]
+        if sprint not in titles_by_sprint:
+            sprint_order.append(sprint)
+            titles_by_sprint[sprint] = []
+        titles_by_sprint[sprint].append(story["story"].replace(";", ","))
+
+    lines = box.read("docs/sprints/SPRINT_PLAN.md").splitlines(keepends=True)
+    head = re.compile(r"^####\s+Sprint\s+(S\d+)\s*$")
+    goal = re.compile(r"^\*\*Goal\*\*: (.+)$")
+    current = ""
+    goals: dict[str, list[int]] = {}
+    for index, line in enumerate(lines):
+        found = head.match(line.rstrip("\n"))
+        if found:
+            current = found.group(1)
+            continue
+        if current and goal.match(line.rstrip("\n")):
+            goals.setdefault(current, []).append(index)
+
+    for sprint in sprint_order:
+        indexes = goals.get(sprint, [])
+        if len(indexes) != 1:
+            continue
+        titles = titles_by_sprint[sprint]
+        for left, right in zip(titles, titles[1:]):
+            if left == right:
+                continue
+            pair = f"{left}, {right}"
+            raw = lines[indexes[0]]
+            body = raw.rstrip("\r\n")
+            if pair not in body:
+                continue
+            lines[indexes[0]] = (
+                body.replace(pair, f"{right}, {left}", 1) + raw[len(body):])
+            box.write("docs/sprints/SPRINT_PLAN.md", "".join(lines))
+            return
+    raise SandboxError(
+        "no sprint goal line contains two adjacent distinct story titles")
 
 
 def _stale_codex_adapter(box: Sandbox) -> None:
@@ -2724,6 +3338,19 @@ def _write_close_state(
                   if s.get("sprint") == name)
     if not fids:
         raise AssertionError(f"allocation.json puts no story in {name}")
+    # This fixture describes a completed integration. Inherited handoffs are
+    # copied source state, not handoffs planted after this preparation.
+    handoffs = sorted(box.path.glob(".claude/handoffs/*-ready.md"))
+    if handoffs:
+        relative = [path.relative_to(box.path).as_posix() for path in handoffs]
+        tracked = box.git("ls-files", "--", *relative).stdout.splitlines()
+        for handoff_name in relative:
+            box.delete(handoff_name)
+        if tracked:
+            # Do not force an existing ignored run state into the index.
+            box.git("add", "-u", "--", *tracked)
+            box.git("commit", "-q", "-m", "probe inherited handoffs cleared",
+                    "--", *tracked)
     _mark_allocated_backlog_done(box, fids)
     tree = box.git("write-tree").stdout.strip()
     data: dict[str, object] = {
@@ -3227,6 +3854,56 @@ def _lint_policy_uninherited(box: Sandbox) -> None:
                    "[lints]\nworkspace = true", "")
 
 
+def _doctest_forbid_behind_a_separator(box: Sandbox) -> None:
+    """The attribute text inside a `//` comment, behind U+2028. F-232.
+
+    rustc ends a `//` comment at LF only, so `// F-232.`, U+2028 and the
+    attribute text are one comment and the root forbids nothing, while
+    `str.splitlines` read two lines and accepted it, review pass 5's D1.
+    """
+    attribute = "#![doc(test(attr(forbid(unsafe_code))))]\n"
+    box.substitute(_a_crate_root(box), attribute,
+                   "// F-232.\u2028" + attribute)
+
+
+def _doctest_forbid_removed(box: Sandbox) -> None:
+    """One member library root without the doctest forbid. F-232.
+
+    The crate is read rather than named, the first under `crates/` with a
+    `src/lib.rs`, and only the attribute line is removed, so the table, the
+    script and every other root are as they were.
+    """
+    box.substitute(_a_crate_root(box),
+                   "#![doc(test(attr(forbid(unsafe_code))))]\n", "")
+
+
+def _unsafe_code_at_deny(box: Sandbox) -> None:
+    """The row the guard requires at forbid, written one level weaker.
+
+    `deny` is what HLD 27.1's table literally says. F-232 went one level
+    stronger because an inner `allow` silences a deny and cannot silence a
+    forbid, so this is exactly the weakening the forbid exists to prevent.
+    """
+    box.substitute("Cargo.toml", 'unsafe_code = "forbid"',
+                   'unsafe_code = "deny"')
+
+
+def _the_unsafe_arm_running_something_else(box: Sandbox) -> None:
+    """The `unsafe` arm running another gate's command, with no comment.
+
+    The table stays at forbid and the CI step is untouched, so the only
+    thing lost is the script in the arm. That is the half the lint cannot
+    replace: it does not reach the vendored packages or the trybuild files.
+    """
+    runner = box.read("bin/ocelli.sh")
+    raw = re.search(r"(?ms)^([ \t]*)unsafe\).*?;;", runner)
+    assert raw is not None, "the unsafe arm must exist for this probe"
+    replacement = next(
+        c for c in _ci_arm_commands(box, "prose") if c.startswith("python3 "))
+    box.substitute("bin/ocelli.sh", raw.group(0),
+                   f"{raw.group(1)}unsafe) {replacement} ;;")
+
+
 def _a_crate_root(box: Sandbox) -> str:
     """The first crate root under `crates/`, read rather than named.
 
@@ -3399,22 +4076,36 @@ def _workspace_manifest_with_exclusion(manifest: str, member: str) -> str:
     must retain those exclusions and remain valid TOML, or the probe measures
     the parser's refusal instead of the lint policy it declares.
     """
+    document = tomllib.loads(manifest)
+    excluded = document["workspace"].get("exclude", [])
+    if member in excluded:
+        return manifest
     block = re.search(r"^\[workspace\]$(.*?)(?=^\[|\Z)", manifest,
                       re.M | re.S)
-    row = re.search(r"^[ \t]*exclude[ \t]*=[ \t]*(\[.*\])[ \t]*$",
-                    block.group(1), re.M)
-    if row is None:
-        insertion = block.start(1)
-        return (manifest[:insertion] +
-                f"\nexclude = {json.dumps([member])}" +
-                manifest[insertion:])
-
-    excluded = tomllib.loads(f"exclude = {row.group(1)}\n")["exclude"]
-
-    start = block.start(1) + row.start()
-    end = block.start(1) + row.end()
+    if block is None:
+        raise AssertionError("the fixture has no [workspace] table")
+    row = re.search(r"^[ \t]*exclude[ \t]*=", block.group(1), re.M)
     replacement = f"exclude = {json.dumps([*excluded, member])}"
-    return manifest[:start] + replacement + manifest[end:]
+    if row is None:
+        if "exclude" in document["workspace"]:
+            raise AssertionError("the fixture exclude key has an unsupported spelling")
+        insertion = block.start(1)
+        return manifest[:insertion] + "\n" + replacement + manifest[insertion:]
+
+    # Let TOML find the complete value, including multiline arrays, quoted
+    # brackets and comments. A line-shaped regex cannot delimit this value.
+    start = block.start(1) + row.start()
+    fragment = ""
+    for line in manifest[start:block.end(1)].splitlines(keepends=True):
+        fragment += line
+        try:
+            parsed = tomllib.loads(fragment)
+        except tomllib.TOMLDecodeError:
+            continue
+        if parsed == {"exclude": excluded}:
+            suffix = "\n" if fragment.endswith("\n") else ""
+            return manifest[:start] + replacement + suffix + manifest[start + len(fragment):]
+    raise AssertionError("the fixture exclude value could not be delimited")
 
 
 def _member_directories(box: Sandbox) -> list[Path]:
@@ -3904,6 +4595,37 @@ def _a_module_outside_the_member(box: Sandbox) -> None:
                f'\n#[path = "{relative}"]\npub mod probe_shared;\n')
 
 
+def _lint_followed_path_count(stdout: str) -> int:
+    found = re.search(r"\b(\d+) `#\[path\]` module\(s\) followed", stdout)
+    if found is None:
+        raise AssertionError("the lint guard did not report followed path modules")
+    return int(found.group(1))
+
+
+def _record_lint_path_baseline(box: Sandbox) -> None:
+    result = box.run(["python3", "scripts/lint_policy_check.py"])
+    if result.returncode != 0:
+        raise AssertionError("the lint module fixture's baseline guard failed")
+    box.write("probe-shared/baseline-path-count.json",
+              json.dumps(_lint_followed_path_count(result.stdout)))
+
+
+def _one_added_lint_path(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    result = box.run(["python3", "scripts/lint_policy_check.py"])
+    if result.returncode != 0:
+        return result
+    baseline = json.loads(box.read("probe-shared/baseline-path-count.json"))
+    followed = _lint_followed_path_count(result.stdout)
+    if followed != baseline + 1:
+        return subprocess.CompletedProcess(
+            result.args, 1, result.stdout +
+            f"\nFAIL: expected baseline {baseline} plus one path module, got {followed}\n",
+            result.stderr)
+    return subprocess.CompletedProcess(
+        result.args, 0, result.stdout +
+        "\nOK: one additional `#[path]` module followed\n", result.stderr)
+
+
 def _a_clean_module_outside_the_member(box: Sandbox) -> None:
     """The same layout with nothing switched off, which must be accepted.
 
@@ -3911,6 +4633,7 @@ def _a_clean_module_outside_the_member(box: Sandbox) -> None:
     nothing about lint levels on its own, so following `#[path]` must not turn
     the layout itself into a refusal.
     """
+    _record_lint_path_baseline(box)
     outside, relative = _a_module_source_outside_the_member(box)
     box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.append(_a_crate_root(box),
@@ -3950,9 +4673,10 @@ def _a_clean_cfg_attr_module_outside_the_member(box: Sandbox) -> None:
     Rust and says nothing about lint levels, and the guard now resolves the
     file it names and REFUSES a `#[path]` it cannot resolve, so an over-tight
     read of the wrapper would refuse a crate that moves a module behind a
-    feature. The `.rs` file count in the OK line is what proves the file was
-    read rather than skipped: it moves from 46 to 47, measured.
+    feature. The probe compares the actual followed-path count before and
+    after planting this module, independent of the repository's other modules.
     """
+    _record_lint_path_baseline(box)
     outside, relative = _a_module_source_outside_the_member(box)
     box.write(outside, "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.append(_a_crate_root(box),
@@ -4056,9 +4780,15 @@ def _clean_crate_root_outside_the_member(box: Sandbox) -> None:
     where it is, unread by cargo and still read by the rglob, which is the
     state that would make a guard refusing the SHAPE rather than the attribute
     look correct.
+
+    The moved root carries `#![doc(test(attr(forbid(unsafe_code))))]`, since
+    F-232 a part of a clean library root, so the state stays legitimate and
+    the probe still isolates the layout.
     """
     member, manifest, relative = _a_crate_root_the_manifest_moves(box)
-    box.write("probe-root/lib.rs", "pub fn probe(x: i64) -> i64 { x + 1 }\n")
+    box.write("probe-root/lib.rs",
+              "#![doc(test(attr(forbid(unsafe_code))))]\n"
+              "pub fn probe(x: i64) -> i64 { x + 1 }\n")
     box.substitute(manifest, "[lints]",
                    f'[lib]\npath = "{relative}"\n\n[lints]')
 
@@ -4638,12 +5368,20 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
     for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', runner, re.M):
         if gate in excluded or gate not in unseen or not visible.get(gate):
             continue
+        # The bypass is built by substituting a visible command out of the
+        # runner text, so one has to appear verbatim. A visible command
+        # wrapped over continuation lines is extracted joined and would
+        # substitute nothing: F-239's vendor-tests arm joined this class
+        # with every command wrapped, and picking it turned this builder
+        # into a StopIteration the probe reported as its own error.
+        if not any(command in runner for command in visible[gate]):
+            continue
         if f"bin/ocelli.sh gate {gate}" in workflow:
             return gate
     raise AssertionError(
-        "no floor gate CI names by gate has both an extractable arm command "
-        "and one the extractor cannot see, so the state this probe is about "
-        "cannot be built.")
+        "no floor gate CI names by gate has a verbatim extractable arm "
+        "command and one the extractor cannot see, so the state this probe "
+        "is about cannot be built.")
 
 
 def _expand_a_gate_step_into_its_visible_commands(box: Sandbox) -> None:
@@ -6643,12 +7381,1183 @@ def _example_dev_reaches_a_url(
     box.substitute(
         "bin/example-dev.sh",
         '"$root/target/debug/ocelli-example-server" >"$url_file" &',
-        "printf '%s\\n' 'http://127.0.0.1:9' >\"$url_file\"")
+        "printf '%s\\n' 'http://127.0.0.1:9' >\"$url_file\" &")
     box.substitute(
         "bin/example-dev.sh",
         "npm run dev -w @ocelli/example-viewer",
         "true")
     return box.run(["bin/example-dev.sh"])
+
+
+# F-218. The snippets call the pure functions on synthetic reports. The GHSA
+# ids are fixtures, not the live advisory list, so a moving database cannot
+# move a probe. `left-pad` stands in for a closure package that has no row.
+_ADVISORY_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {}}
+bad, warned = a.audit_problems(report, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNEXCEPTED_HIGH = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "high", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNEXCEPTED_CRITICAL = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "critical", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_NEW = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "adm-zip": {"nodes": ["node_modules/adm-zip"], "via": [
+        {"source": 1,
+         "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+         "severity": "high", "range": "<0.6.1"},
+        {"source": 2,
+         "url": "https://github.com/advisories/GHSA-9999-8888-7777",
+         "severity": "high", "range": "<0.6.1"}]}}}
+versions = {"node_modules/adm-zip": "0.5.17"}
+rows = [{"package": "adm-zip", "version": "0.5.17",
+         "advisories": ["GHSA-1111-2222-3333"]}]
+bad, warned = a.audit_problems(report, {"adm-zip"}, versions, rows)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_STALE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "adm-zip": {"nodes": ["node_modules/adm-zip"], "via": []}}}
+versions = {"node_modules/adm-zip": "0.5.17"}
+rows = [{"package": "adm-zip", "version": "0.5.17",
+         "advisories": ["GHSA-1111-2222-3333"]}]
+bad, warned = a.audit_problems(report, {"adm-zip"}, versions, rows)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_OUTSIDE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "vite": {"nodes": ["node_modules/vite"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "high", "range": "<1.0.0"}]}}}
+versions = {"node_modules/vite": "7.0.0"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+if bad or warned:
+    print("\\n".join(bad + warned))
+    sys.exit(1)
+print("OK")
+sys.exit(0)
+"""
+
+_ADVISORY_MODERATE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "moderate", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+if bad:
+    print("\\n".join(bad))
+    sys.exit(1)
+for warning in warned:
+    print("WARN: " + warning)
+sys.exit(0)
+"""
+
+_ADVISORY_NO_REPORT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+bad, warned = a.audit_problems({}, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_VERSION = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 1, "vulnerabilities": {}}
+bad, warned = a.audit_problems(report, {"left-pad"}, {}, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_ADVISORY_UNKNOWN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import advisory_check as a
+report = {"auditReportVersion": 2, "vulnerabilities": {
+    "left-pad": {"nodes": ["node_modules/left-pad"], "via": [{
+        "source": 1,
+        "url": "https://github.com/advisories/GHSA-1111-2222-3333",
+        "severity": "severe", "range": "<1.0.0"}]}}}
+versions = {"node_modules/left-pad": "0.0.1"}
+bad, warned = a.audit_problems(report, {"left-pad"}, versions, [])
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
+def _advisory_blank_decided_by(box: Sandbox) -> None:
+    """An exception with an empty decider is not a decision."""
+    box.substitute(
+        "ci/advisories.toml",
+        'decided_by = "lead, under the operator\'s delegation of 2026-11-05"',
+        'decided_by = ""')
+
+
+def _advisory_scope_dev_only(box: Sandbox) -> None:
+    """dev-only is a licence scope. An advisory row may not use it."""
+    box.substitute(
+        "ci/advisories.toml",
+        'scope = "unreachable"',
+        'scope = "dev-only"')
+
+
+def _advisory_scope_padded(box: Sandbox) -> None:
+    """A trailing space is a different spelling and is not the scope."""
+    box.substitute(
+        "ci/advisories.toml",
+        'scope = "unreachable"',
+        'scope = "unreachable "')
+
+
+def _unreachable_trace_snippet(record_entry: bool) -> str:
+    """`check_consumer` over a synthetic directory, installer and tsc stubbed.
+
+    The refused run writes a trace that records neither dcmjs build. The
+    control writes one that records both. Both are otherwise a healthy
+    consumer, so the only refusal is a missing URL. Deleting the
+    `unreachable_problems` call inside `check_consumer` leaves the refused
+    run with nothing to print.
+    """
+    line = (
+        "file:///tmp/consumer/node_modules/dcmjs/build/dcmjs.es.js\n"
+        "file:///tmp/consumer/node_modules/dcmjs/build/dcmjs.js\n"
+        if record_entry else
+        "file:///tmp/other.js\n")
+    return (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "from subprocess import CompletedProcess\n"
+        "sys.path.insert(0, 'scripts')\n"
+        "import package_check as p\n"
+        "tsc = p.ROOT / 'node_modules' / 'typescript' / 'bin' / 'tsc'\n"
+        "tsc.parent.mkdir(parents=True, exist_ok=True)\n"
+        "tsc.write_text('process.exit(0)\\n')\n"
+        "def fake_run(cmd, cwd):\n"
+        "    cwd = Path(cwd)\n"
+        "    if cmd[:2] == ['npm', 'install']:\n"
+        "        lock = {'packages': {'node_modules/adm-zip':\n"
+        "                {'version': '0.5.17'}}}\n"
+        "        (cwd / 'package-lock.json').write_text(json.dumps(lock))\n"
+        "        script = cwd / 'node_modules' / 'dcmjs' / 'build' / 'dcmjs.es.js'\n"
+        "        script.parent.mkdir(parents=True, exist_ok=True)\n"
+        "        script.write_text('export {}\\n')\n"
+        "        return CompletedProcess(cmd, 0, '', '')\n"
+        "    if cmd[:3] == ['node', '--import', './trace.mjs']:\n"
+        f"        (cwd / 'trace-urls.txt').write_text({line!r})\n"
+        "        return CompletedProcess(cmd, 0, 'ok\\n', '')\n"
+        "    if cmd and cmd[0] == 'node':\n"
+        "        return CompletedProcess(cmd, 0, '', '')\n"
+        "    return CompletedProcess(cmd, 1, '', 'unexpected command')\n"
+        "p.run = fake_run\n"
+        "work = p.ROOT / 'probe-unreachable-work'\n"
+        "work.mkdir(parents=True, exist_ok=True)\n"
+        "bad = p.check_consumer(work, [Path('dummy.tgz')])\n"
+        "print('\\n'.join(bad))\n"
+        "sys.exit(1 if bad else 0)\n"
+    )
+
+
+_SMOKE_REQUIRES_DCMJS = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(
+    'import { VERSION } from "@ocelli/core";\\n', p.TRACE_REGISTER)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_SMOKE_REGISTER_HOOKS = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(
+    p.SMOKE_SCRIPT,
+    'import { register } from "node:module";\\nregister("x", "y");\\n')
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_SMOKE_WIRING_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.smoke_wiring_problems(p.SMOKE_SCRIPT, p.TRACE_REGISTER)
+print("\\n".join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+# AC4. Four packed names, two packages. A suffix rule on `.test.js` only, or
+# a rule that runs for core only, leaves a path unnamed and this exits 0.
+_TEST_FILE_TARBALL = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/index.test.js', 'dist/index.test.d.ts',
+         'dist/x.spec.js', 'dist/__tests__/a.js']
+wanted = ['dist/index.test.js', 'dist/index.test.d.ts',
+          'dist/x.spec.js', 'dist/__tests__/a.js']
+bad = []
+for package in ('core', 'react'):
+    bad.extend(p.check_tarball(package, m, names))
+print('\\n'.join(bad))
+named = all(
+    any(path in line and ('@ocelli/' + package) in line for line in bad)
+    for package in ('core', 'react')
+    for path in wanted)
+sys.exit(1 if named else 0)
+"""
+
+_TEST_FILE_TARBALL_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+m = {'name': '@ocelli/core', 'version': '0.1.0',
+     'exports': {'.': {'import': './dist/index.js'}}}
+names = ['package.json', 'README.md', 'LICENSE-MIT',
+         'LICENSE-APACHE', 'NOTICE', 'dist/index.js',
+         'dist/latest.js', 'dist/contest.d.ts']
+bad = p.check_tarball('core', m, names)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+# The viewer build check's two states, as emitted names and worker text. The
+# inputs come from the refusal sentences, a clean-clone build that keeps the
+# runtime import and its probe and a pkg build that emits its own wasm files,
+# and not from the regular expressions the check uses to read them.
+_VIEWER_URL = "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js"
+_VIEWER_ABSENT_BUNDLED = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
+         'ocelli_wasm_bg-d4.wasm']
+worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
+bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_ABSENT_HEALTHY = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js']
+worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
+bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_EXTERNAL = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js']
+worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
+bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_HEALTHY = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+import viewer_build_check as v
+names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
+         'ocelli_wasm_bg-d4.wasm']
+worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
+bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
+# F-237. The identity is what docs/RELEASE.md item 6 compares to the release
+# HEAD, so each way it can lie is its own probe: absent, unparseable,
+# valid JSON that is not an object, another version, a build over an
+# uncommitted tree, another git SHA, a digest the bytes do not hash to, and a
+# module the digest names that is not in the tarball. The unparseable and
+# not-an-object inputs share one refusal sentence and get one probe each,
+# because deleting either branch leaves the other input crashing instead of
+# refusing. The stale-sha input is the cited wrong state, "not a stale
+# artefact from a previous build", with correct digests so the SHA is the
+# only refusal. Every input that parses records a clean tree, so the dirty
+# refusal fires only for the probe that drives it. The control for all of
+# them is the matching identity and returns none.
+_WASM_IDENTITY_FILES = """\
+files = {'dist/ocelli_wasm_bg.wasm': b'\\x00' * 8,
+         'dist/decode/ocelli_wasm_bg.wasm': b'\\x00' * 8}
+"""
+
+_WASM_IDENTITY_HEALTHY = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_ABSENT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(None, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_PARSE = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(b'not json', files, '1' * 40,
+                               '2' * 40, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_NON_OBJECT = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(b'[1]', files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_VERSION = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.2.0', 'git_sha': '1' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_STALE = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_DIGEST = """\
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': 'a' * 64,
+                                   'dist/decode/ocelli_wasm_bg.wasm': 'a' * 64}}
+                      ).encode()
+""" + _WASM_IDENTITY_FILES + """bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_MODULE_ABSENT = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+files = {'dist/ocelli_wasm_bg.wasm': b'\\x00' * 8}
+bad = p.wasm_identity_problems(build_id, files, '1' * 40, '2' * 40,
+                               '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_WASM_IDENTITY_DIRTY = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+modules = {'dist/ocelli_wasm_bg.wasm': digest,
+           'dist/decode/ocelli_wasm_bg.wasm': digest}
+explicit = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                       'tree': '2' * 40, 'dirty': True,
+                       'modules': modules}).encode()
+absent = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                     'tree': '2' * 40, 'modules': modules}).encode()
+""" + _WASM_IDENTITY_FILES + """explicit_bad = p.wasm_identity_problems(explicit, files, '1' * 40,
+                                        '2' * 40, '0.1.0')
+absent_bad = p.wasm_identity_problems(absent, files, '1' * 40, '2' * 40,
+                                      '0.1.0')
+print('\\n'.join(explicit_bad + absent_bad))
+if not explicit_bad:
+    print('a build id with dirty true was accepted')
+    sys.exit(0)
+if not absent_bad:
+    print('a build id with no dirty field was accepted, which fails open')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+_WASM_IDENTITY_TREE = """\
+import hashlib
+import json
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+digest = hashlib.sha256(b'\\x00' * 8).hexdigest()
+modules = {'dist/ocelli_wasm_bg.wasm': digest,
+           'dist/decode/ocelli_wasm_bg.wasm': digest}
+foreign = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                      'tree': '3' * 40, 'dirty': False,
+                      'modules': modules}).encode()
+absent = json.dumps({'version': '0.1.0', 'git_sha': '1' * 40,
+                     'dirty': False, 'modules': modules}).encode()
+""" + _WASM_IDENTITY_FILES + """foreign_bad = p.wasm_identity_problems(foreign, files, '1' * 40,
+                                      '2' * 40, '0.1.0')
+absent_bad = p.wasm_identity_problems(absent, files, '1' * 40, '2' * 40,
+                                      '0.1.0')
+print('\\n'.join(foreign_bad + absent_bad))
+if not foreign_bad:
+    print('a build id recording another tree was accepted')
+    sys.exit(0)
+if not absent_bad:
+    print('a build id with no tree field was accepted, which fails open')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+# S2. The whole build id refusal is wired through one call in main(). This
+# drives `wasm_identity_from_tarball` over a real tarball against the
+# sandbox's own git HEAD and index, so the stale refusal is seen at the end
+# of the path a pack takes and not only on the pure inputs above.
+_PACKED_IDENTITY_STALE = """\
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+module = b'\\x00' * 8
+digest = hashlib.sha256(module).hexdigest()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                       'tree': '2' * 40, 'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+buffer = io.BytesIO()
+with tarfile.open(fileobj=buffer, mode='w') as archive:
+    for name, data in (('dist/build-id.json', build_id),
+                       ('dist/ocelli_wasm_bg.wasm', module),
+                       ('dist/decode/ocelli_wasm_bg.wasm', module)):
+        info = tarfile.TarInfo('package/' + name)
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+tarball = pathlib.Path('probe-identity.tgz')
+tarball.write_bytes(buffer.getvalue())
+bad = p.wasm_identity_from_tarball(tarball, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_PACKED_IDENTITY_CURRENT = """\
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+module = b'\\x00' * 8
+digest = hashlib.sha256(module).hexdigest()
+head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True,
+                      text=True).stdout.strip()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+build_id = json.dumps({'version': '0.1.0', 'git_sha': head, 'tree': tree,
+                       'dirty': False,
+                       'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                   'dist/decode/ocelli_wasm_bg.wasm': digest}}
+                      ).encode()
+buffer = io.BytesIO()
+with tarfile.open(fileobj=buffer, mode='w') as archive:
+    for name, data in (('dist/build-id.json', build_id),
+                       ('dist/ocelli_wasm_bg.wasm', module),
+                       ('dist/decode/ocelli_wasm_bg.wasm', module)):
+        info = tarfile.TarInfo('package/' + name)
+        info.size = len(data)
+        archive.addfile(info, io.BytesIO(data))
+tarball = pathlib.Path('probe-identity.tgz')
+tarball.write_bytes(buffer.getvalue())
+bad = p.wasm_identity_from_tarball(tarball, '0.1.0')
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+# S2's behavioural half. The npm steps are stubbed so `main()` runs its
+# packaging loop on synthetic tarballs, the `wasm` one carrying a stale build
+# id, and the read refuses unless `main()` itself refuses that tarball. A
+# structural read passed under three unwirings the deletion probe never
+# planted: the two lines commented out, the call kept with its result
+# discarded, and the branch keyed on something other than MODULE_PACKAGE.
+# Each of those leaves this read at exit 0, because none of them puts the
+# stale refusal in `main()`'s output.
+_MAIN_REFUSES_STALE_ID = """\
+import contextlib
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+MODULE = b'\\x00' * 8
+digest = hashlib.sha256(MODULE).hexdigest()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+
+def names_for(name):
+    manifest = json.loads(
+        pathlib.Path('packages', name, 'package.json').read_text())
+    wanted = ['package.json', 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE',
+              'NOTICE']
+    for field in ('main', 'types', 'module'):
+        if field in manifest:
+            wanted.append(manifest[field].removeprefix('./'))
+    def walk(node):
+        if isinstance(node, str):
+            wanted.append(node.removeprefix('./'))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+    walk(manifest.get('exports', {}))
+    if name == 'wasm':
+        wanted += ['dist/ocelli_wasm.js', 'dist/ocelli_wasm_bg.wasm',
+                   'dist/decode/ocelli_wasm.js',
+                   'dist/decode/ocelli_wasm_bg.wasm',
+                   'dist/build-id.json', 'THIRD_PARTY_LICENSES',
+                   'THIRD_PARTY_NOTICES']
+    return wanted
+
+def fake_tarball_paths(directory):
+    if directory.name != 'wasm':
+        return pathlib.Path(directory.name + '.tgz'), names_for(directory.name)
+    build_id = json.dumps({'version': '0.1.0', 'git_sha': '0' * 40,
+                           'tree': tree, 'dirty': False,
+                           'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                       'dist/decode/ocelli_wasm_bg.wasm':
+                                           digest}}
+                          ).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        for name, data in (('dist/build-id.json', build_id),
+                           ('dist/ocelli_wasm_bg.wasm', MODULE),
+                           ('dist/decode/ocelli_wasm_bg.wasm', MODULE)):
+            info = tarfile.TarInfo('package/' + name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    tarball = pathlib.Path('probe-main-stale.tgz')
+    tarball.write_bytes(buffer.getvalue())
+    return tarball, names_for('wasm')
+
+real_run = p.run
+def fake_run(cmd, cwd):
+    if cmd and cmd[0] == 'npm':
+        return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+    return real_run(cmd, cwd)
+
+p.run = fake_run
+p.tarball_paths = fake_tarball_paths
+p.check_consumer = lambda work, tarballs: []
+pathlib.Path('node_modules').mkdir(exist_ok=True)
+
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    code = p.main()
+out = buffer.getvalue()
+print(out)
+if 'stale artefact' not in out:
+    print('main() did not refuse the stale build id, so the whole build id '
+          'refusal is unwired and the gate is green without it')
+    sys.exit(0)
+sys.exit(1)
+"""
+
+# The control: the same stubs over an HONEST build id, so a pass of the probe
+# above names the stale id and not the stubbing.
+_MAIN_ACCEPTS_HONEST_ID = """\
+import contextlib
+import hashlib
+import io
+import json
+import pathlib
+import subprocess
+import sys
+import tarfile
+sys.path.insert(0, 'scripts')
+import package_check as p
+
+MODULE = b'\\x00' * 8
+digest = hashlib.sha256(MODULE).hexdigest()
+head = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True,
+                      text=True).stdout.strip()
+tree = subprocess.run(['git', 'write-tree'], capture_output=True,
+                      text=True).stdout.strip()
+
+def names_for(name):
+    manifest = json.loads(
+        pathlib.Path('packages', name, 'package.json').read_text())
+    wanted = ['package.json', 'README.md', 'LICENSE-MIT', 'LICENSE-APACHE',
+              'NOTICE']
+    for field in ('main', 'types', 'module'):
+        if field in manifest:
+            wanted.append(manifest[field].removeprefix('./'))
+    def walk(node):
+        if isinstance(node, str):
+            wanted.append(node.removeprefix('./'))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+    walk(manifest.get('exports', {}))
+    if name == 'wasm':
+        wanted += ['dist/ocelli_wasm.js', 'dist/ocelli_wasm_bg.wasm',
+                   'dist/decode/ocelli_wasm.js',
+                   'dist/decode/ocelli_wasm_bg.wasm',
+                   'dist/build-id.json', 'THIRD_PARTY_LICENSES',
+                   'THIRD_PARTY_NOTICES']
+    return wanted
+
+def fake_tarball_paths(directory):
+    if directory.name != 'wasm':
+        return pathlib.Path(directory.name + '.tgz'), names_for(directory.name)
+    build_id = json.dumps({'version': '0.1.0', 'git_sha': head,
+                           'tree': tree, 'dirty': False,
+                           'modules': {'dist/ocelli_wasm_bg.wasm': digest,
+                                       'dist/decode/ocelli_wasm_bg.wasm':
+                                           digest}}
+                          ).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode='w') as archive:
+        for name, data in (('dist/build-id.json', build_id),
+                           ('dist/ocelli_wasm_bg.wasm', MODULE),
+                           ('dist/decode/ocelli_wasm_bg.wasm', MODULE)):
+            info = tarfile.TarInfo('package/' + name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    tarball = pathlib.Path('probe-main-honest.tgz')
+    tarball.write_bytes(buffer.getvalue())
+    return tarball, names_for('wasm')
+
+real_run = p.run
+def fake_run(cmd, cwd):
+    if cmd and cmd[0] == 'npm':
+        return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+    return real_run(cmd, cwd)
+
+p.run = fake_run
+p.tarball_paths = fake_tarball_paths
+p.check_consumer = lambda work, tarballs: []
+pathlib.Path('node_modules').mkdir(exist_ok=True)
+
+buffer = io.StringIO()
+with contextlib.redirect_stdout(buffer):
+    code = p.main()
+out = buffer.getvalue()
+print(out)
+if code != 0 or 'stale artefact' in out:
+    print('main() refused an honest build id, so this probe proves nothing '
+          'about the stale one')
+    sys.exit(1)
+sys.exit(0)
+"""
+
+# S3. The two modules share init, ocelli_version and the panic surface, so
+# the proof tells them apart only by the render-only export. Deleting that
+# assertion from the real smoke text is the state where it cannot.
+_SMOKE_WITHOUT_RENDER_PIN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+marker = ('if (typeof wasm.apply_commands !== "function") '
+          '{ throw new Error("render module: apply_commands"); }\\n')
+smoke = p.SMOKE_SCRIPT.replace(marker, '')
+if smoke == p.SMOKE_SCRIPT:
+    print('the render-only assertion is not in SMOKE_SCRIPT')
+    sys.exit(1)
+bad = p.module_surface_problems(smoke, p.CHECK_TS)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_CHECK_TS_WITHOUT_RENDER_PIN = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+marker = 'export const renderSurface: unknown = wasmSurface.apply_commands;\\n'
+check = p.CHECK_TS.replace(marker, '')
+if check == p.CHECK_TS:
+    print('the render-only pin is not in CHECK_TS')
+    sys.exit(1)
+bad = p.module_surface_problems(p.SMOKE_SCRIPT, check)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+_MODULE_SURFACE_HEALTHY = """\
+import sys
+sys.path.insert(0, 'scripts')
+import package_check as p
+bad = p.module_surface_problems(p.SMOKE_SCRIPT, p.CHECK_TS)
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+
+
+def _advisory_unknown_proof(box: Sandbox) -> None:
+    """A proof name the packages gate does not run."""
+    box.substitute(
+        "ci/advisories.toml",
+        'proof = "packages-consumer-trace"',
+        'proof = "not-a-proof"')
+
+
+def _advisory_stale_version(box: Sandbox) -> None:
+    """A row for a version the published closure no longer installs."""
+    box.substitute(
+        "ci/advisories.toml",
+        'version = "0.5.17"',
+        'version = "0.5.16"')
+
+
+def _advisory_install_script(box: Sandbox) -> None:
+    """An install script runs before any import trace can see it."""
+    box.substitute(
+        "package-lock.json",
+        '"node_modules/adm-zip": {\n      "version": "0.5.17",',
+        '"node_modules/adm-zip": {\n      "version": "0.5.17",\n'
+        '      "hasInstallScript": true,')
+
+
+def _advisory_shipped_override(box: Sandbox) -> None:
+    """A root override of a closure package never reaches a consumer."""
+    box.substitute(
+        "package.json",
+        '"overrides": {\n    "react": "19.2.8",',
+        '"overrides": {\n    "adm-zip": "0.6.1",\n    "react": "19.2.8",')
+
+
+def _advisory_nested_override(box: Sandbox) -> None:
+    """The same refusal one object deeper, under the parent package name."""
+    box.substitute(
+        "package.json",
+        '"overrides": {\n    "react": "19.2.8",',
+        '"overrides": {\n    "dcmjs": {"adm-zip": "0.6.1"},\n'
+        '    "react": "19.2.8",')
+
+
+# ---------------------------------------------------------------------------
+# Step 6 of the native arm
+# ---------------------------------------------------------------------------
+# A sandbox carries no release build of `ocelli-native`, which is what step 6
+# of `bin/ocelli.sh native` links and runs, so the step's refusals are driven
+# through the step's own lines, extracted from the sandbox copy of the
+# runner, against a stub `cargo` and a stub desktop binary. The stub build
+# honours an exported `CARGO_BUILD_TARGET` the way cargo does and prints the
+# `compiler-artifact` JSON the step reads. The extraction refuses to match
+# nothing, so a reshaped step reaches the harness as an error rather than as
+# a green.
+
+# The report an Apple shipped build prints, in `tier_report`'s format
+# (`crates/ocelli-native/src/lib.rs`) with the guard's flag set.
+_HONEST_APPLE_REPORT = (
+    "Tier Cpu, decided by NoAdapter. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  backends  none compiled for this target\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# The same shape without the cause line, which is what the step must refuse.
+_APPLE_REPORT_WITHOUT_CAUSE = (
+    "Tier Cpu, decided by NoAdapter. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# What the same binary prints with `OCELLI_TIER=cpu` exported: the override
+# returns from `detect` before the no-backend guard, so no cause line.
+_OVERRIDDEN_APPLE_REPORT = (
+    "Tier Cpu, decided by Override. OCELLI_TIER override: Applied(Cpu).\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier None\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+# A development-style report, what the stub prints when the step must refuse
+# an Apple host's report that is not the shipped one. Only the tier line is
+# load bearing for the refusal.
+_DEV_APPLE_REPORT = (
+    "Tier A, decided by Benchmark. OCELLI_TIER override: NotRequested.\n"
+    "  adapters  1 seen, device created true, measured tier Some(A)\n")
+
+# A tier line that is not the shipped one over the shipped build's cause
+# line. This is the state that triggers the Apple match refusal and no other
+# one, so that refusal's own exit is the only non-zero the step can produce
+# here.
+_WRONG_TIER_APPLE_REPORT = (
+    "Tier Cpu, decided by NoDevice. OCELLI_TIER override: NotRequested.\n"
+    "  caps      compute false, max_tex_3d 0, max_buffer 0\n"
+    "  adapters  0 seen, device created false, measured tier Some(Cpu)\n"
+    "  backends  none compiled for this target\n"
+    "  signals   benchmark Unknown, adapter type Unknown, renderer string Unknown\n")
+
+_STEP6_SCRIPT = "probe-f238-step6.sh"
+
+# The target triple the ruling's probe exports as `CARGO_BUILD_TARGET`. The
+# stub build honours it the way cargo does, writing the artifact under the
+# triple directory, and inside the sandbox the string is only ever a
+# directory name component, so the host's own triple is not load bearing.
+_STEP6_TRIPLE = "aarch64-apple-darwin"
+
+# What the stub desktop binary touches when it runs, under the stub target
+# directory. On a silent exit 0 it is the only thing that tells a step that
+# ran the binary its build named from one that finished without running
+# anything, so the target-triple probe's runner reads it.
+_STEP6_MARKER = "named-binary-ran"
+
+
+def _step6_fragment(box: Sandbox) -> str:
+    """Step 6's own lines, from the sandbox copy of `bin/ocelli.sh`.
+
+    From the line after the step's banner through the `esac` that closes its
+    host case, so a green run prints nothing and the banner is not counted
+    as the step's own output.
+    """
+    text = box.read("bin/ocelli.sh")
+    banner = ('    echo "  6/15 the shipped native build links and its '
+              'desktop binary reports"\n')
+    try:
+        begin = text.index(banner) + len(banner)
+        case_line = text.index('    case "$(uname -s)" in', begin)
+        end = text.index("\n    esac\n", case_line) + len("\n    esac\n")
+    except ValueError as error:
+        raise SandboxError(
+            "bin/ocelli.sh's native step 6 no longer matches the anchors the "
+            "runner probes extract it with. Re-read the step and re-anchor "
+            "the probes instead of leaving them running against a fragment "
+            "that is not the step.") from error
+    return text[begin:end]
+
+
+def _write_step6_probe(box: Sandbox, *, report: str, exit_code: int,
+                       override_report: str | None = None,
+                       without_env_u: bool = False,
+                       host: str = "Darwin",
+                       stale_report: str | None = None,
+                       named_desktops: int = 1) -> None:
+    """Write the step 6 fragment under its stubs, as one runnable script.
+
+    The stub `cargo` answers `cargo metadata` with a fixed target directory,
+    which a step that still derives its path from `target_directory` reads,
+    and answers `cargo build` by writing the stub desktop binary, whose
+    report and exit code are the probe's input, and, when the build is asked
+    for a message format, by printing the `compiler-artifact` JSON lines the
+    step reads, naming the path it wrote to. The build honours an exported
+    `CARGO_BUILD_TARGET` the way cargo does, writing the artifact under the
+    triple directory. The stub desktop binary touches a marker file when it
+    runs, which `runner.step6-target-triple-over-a-stale-binary`'s runner
+    reads. `override_report` makes the binary answer an exported
+    `OCELLI_TIER` the way the real one does, and `without_env_u` drops the
+    step's shield so that export reaches it. `stale_report` pre-seeds an
+    earlier build's desktop binary at the target directory's
+    `release/ocelli-desktop`, printing that report, which is only meaningful
+    alongside an exported `CARGO_BUILD_TARGET`, without which a build that
+    writes the desktop binary would overwrite it. `named_desktops` is how
+    many ocelli-desktop artifacts the build writes and its
+    `--message-format` JSON names under the one destination directory:
+    0 names no ocelli-desktop executable at all, and 2 names a second
+    `ocelli-desktop.wasm` that is not host-runnable, the shape the real
+    second target's artifact takes, which is the state
+    `runner.step6-two-named-executables` refuses.
+    """
+    fragment = _step6_fragment(box)
+    if without_env_u:
+        dropped = fragment.replace("env -u OCELLI_TIER ", "", 1)
+        if dropped == fragment:
+            raise SandboxError(
+                "the step 6 fragment carries no `env -u OCELLI_TIER` to "
+                "drop, so the override probe's rejected state cannot be "
+                "built.")
+        fragment = dropped
+    reactive = override_report is not None
+    stub = (
+        "#!/bin/sh\n"
+        "touch \"$F238_STUB_TARGET/" + _STEP6_MARKER + "\"\n"
+        + ("if [ -n \"${OCELLI_TIER:-}\" ]; then\n"
+           "  printf '%s' \"$F238_STUB_OVERRIDE_REPORT\"\n"
+           "else\n"
+           "  printf '%s' \"$F238_STUB_REPORT\"\n"
+           "fi\n"
+           "exit \"$F238_STUB_EXIT\"\n"
+           if reactive else
+           "printf '%s' \"$F238_STUB_REPORT\"\n"
+           "exit \"$F238_STUB_EXIT\"\n")
+    )
+    artifacts = (
+        "{\"reason\":\"compiler-artifact\","
+        "\"target\":{\"name\":\"ocelli-server\"},"
+        "\"executable\":\"$dest/ocelli-server\"}\n"
+        + ("{\"reason\":\"compiler-artifact\","
+           "\"target\":{\"name\":\"ocelli-desktop\"},"
+           "\"executable\":\"$dest/ocelli-desktop\"}\n"
+           if named_desktops >= 1 else "")
+        + ("{\"reason\":\"compiler-artifact\","
+           "\"target\":{\"name\":\"ocelli-desktop\"},"
+           "\"executable\":\"$dest/ocelli-desktop.wasm\"}\n"
+           if named_desktops >= 2 else ""))
+    script = (
+        "# Generated by the guard catalogue's runner probes. The stubs end\n"
+        "# at the marker line, and the step's own lines follow, verbatim.\n"
+        "set -euo pipefail\n"
+        "ROOT=$PWD\n"
+        f"uname() {{ echo {host}; }}\n"
+        # exported because the stub desktop binary runs as a child process
+        # and touches its marker under this directory
+        "export F238_STUB_TARGET=\"$PWD/target/f238-step6-stub\"\n"
+        f"export F238_STUB_EXIT={exit_code}\n"
+        f"export F238_STUB_REPORT='{report}'\n"
+        + (f"export F238_STUB_OVERRIDE_REPORT='{override_report}'\n"
+           if reactive else "")
+        + (f"export F238_STALE_REPORT='{stale_report}'\n"
+           "mkdir -p \"$F238_STUB_TARGET/release\"\n"
+           "cat > \"$F238_STUB_TARGET/release/ocelli-desktop\" "
+           "<<'F238_STALE'\n"
+           "#!/bin/sh\n"
+           "printf '%s' \"$F238_STALE_REPORT\"\n"
+           "exit 0\n"
+           "F238_STALE\n"
+           "chmod +x \"$F238_STUB_TARGET/release/ocelli-desktop\"\n"
+           if stale_report is not None else "")
+        + "cargo() {\n"
+        "  case \"${1:-}\" in\n"
+        "    metadata)\n"
+        "      printf '{\"target_directory\":\"%s\"}' \"$F238_STUB_TARGET\" ;;\n"
+        "    build)\n"
+        "      dest=\"$F238_STUB_TARGET/release\"\n"
+        "      if [ -n \"${CARGO_BUILD_TARGET:-}\" ]; then\n"
+        "        dest=\"$F238_STUB_TARGET/$CARGO_BUILD_TARGET/release\"\n"
+        "      fi\n"
+        "      mkdir -p \"$dest\"\n"
+        + ("      cat > \"$dest/ocelli-desktop\" <<'F238_STUB'\n"
+           f"{stub}"
+           "F238_STUB\n"
+           "      chmod +x \"$dest/ocelli-desktop\"\n"
+           if named_desktops >= 1 else "")
+        + ("      printf 'wasm artifact stub, not host-runnable' "
+           "> \"$dest/ocelli-desktop.wasm\"\n"
+           if named_desktops >= 2 else "")
+        + "      case \"$*\" in\n"
+        "        *--message-format*)\n"
+        "          cat <<F238_JSON\n"
+        f"{artifacts}"
+        "F238_JSON\n"
+        "          ;;\n"
+        "      esac ;;\n"
+        "    *)\n"
+        "      echo \"stub cargo: unexpected subcommand ${1:-}\" >&2\n"
+        "      return 1 ;;\n"
+        "  esac\n"
+        "}\n"
+        + fragment)
+    box.write(_STEP6_SCRIPT, script)
+
+
+def _run_step6_probe(box: Sandbox,
+                     env: dict[str, str] | None = None,
+                     ) -> subprocess.CompletedProcess[str]:
+    """Run the generated fragment, with the sandbox as the working directory."""
+    return box.run(["bash", _STEP6_SCRIPT], env=env)
+
+
+def _run_step6_probe_naming_its_binary(
+        box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """Run the target-triple probe, and observe which binary answered.
+
+    The stub desktop binary touches the marker file when it runs, and the
+    step's own lines print nothing on a green run, so on a silent exit 0 the
+    marker is the only thing that tells a step that ran the binary its
+    build named from one that finished without running anything. A green
+    run is annotated with what was observed, which is what the probe's
+    `expect` matches, and an exit 0 without the marker is reported as the
+    refusal it is.
+    """
+    done = _run_step6_probe(box, env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})
+    stub_target = box.path / "target" / "f238-step6-stub"
+    ran = stub_target / _STEP6_MARKER
+    stale = stub_target / "release" / "ocelli-desktop"
+    fresh = stub_target / _STEP6_TRIPLE / "release" / "ocelli-desktop"
+    if done.returncode == 0:
+        # The fixture's own faithfulness, checked on the acceptance path. A
+        # stub build that stopped honouring the exported target would
+        # overwrite the plant at `release/` and leave this probe green while
+        # exercising nothing, which is the quietest way to lose it.
+        if not fresh.is_file() or "F238_STALE_REPORT" not in (
+                stale.read_text() if stale.is_file() else ""):
+            return subprocess.CompletedProcess(
+                done.args, 1, done.stdout,
+                "FAIL: the stub build did not honour CARGO_BUILD_TARGET, so "
+                "the probe's rejected state was never built\n")
+    if done.returncode == 0 and not ran.exists():
+        return subprocess.CompletedProcess(
+            done.args, 1, done.stdout,
+            "FAIL: the step exited 0 and the binary its build named never "
+            "ran\n")
+    if done.returncode == 0:
+        return subprocess.CompletedProcess(
+            done.args, 0, "the step ran the binary its build named\n",
+            done.stderr)
+    return done
+
+
+def _step6_reports_and_exits(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The shared control: the step against a binary that reports and exits 0."""
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0)
+    return _run_step6_probe(box)
+
+
+def _step6_override_stays_out(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The override control: the intact step under the same exported override.
+
+    `env -u` is intact here, so the stub sees no override, prints the
+    shipped report and the step exits 0. This is the override probe's
+    rejected state with the shield back in place, which is what proves the
+    two differ only in the shield.
+    """
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       override_report=_OVERRIDDEN_APPLE_REPORT)
+    return _run_step6_probe(box, env={"OCELLI_TIER": "cpu"})
+
+
+def _step6_off_apple_report(box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The off-Apple control: the same step against a binary that reports."""
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       host="Linux")
+    return _run_step6_probe(box)
+
+
+def _step6_triple_build_names_the_binary(
+        box: Sandbox) -> subprocess.CompletedProcess[str]:
+    """The no-named-executable probe's control.
+
+    The same exported `CARGO_BUILD_TARGET` and the same earlier build's
+    binary at the target directory's `release/ocelli-desktop`, with the
+    build writing the desktop binary into the triple directory and its JSON
+    naming it. The step must run that one and pass, which is the state the
+    probe refuses to let the stale path substitute for.
+    """
+    _write_step6_probe(box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                       stale_report=_HONEST_APPLE_REPORT)
+    return _run_step6_probe(box, env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})
 
 
 # ---------------------------------------------------------------------------
@@ -6729,8 +8638,17 @@ GUARDS: tuple[Guard, ...] = (
         gate="unsafe",
         spec="HLD 27.2 R5, `docs/hld/24-agent-code-standards.md`",
         refuses="An `unsafe` keyword in any file other than the two the rule "
-                "names, so that auditing every unsafe line means reading two "
-                "files. Under a vendored package, which is a dependency that "
+                "names, found by a left-to-right Rust tokenizer that reports "
+                "it only as a keyword token, so the five shapes F-229's "
+                "reviews planted, a char literal holding a quote, the same "
+                "escaped, a raw string ending in a backslash, a raw string "
+                "holding a quote and a comment holding an unpaired quote, "
+                "are refused and never blanked, and a nested block comment "
+                "is one comment and not code. It refuses an unterminated "
+                "string, raw string or block comment naming the file and the "
+                "line the construct starts on, and an allow, expect or warn "
+                "of `unsafe_code`, inner or outer, in any tracked Rust file. "
+                "Under a vendored package, which is a dependency that "
                 "happens to be tracked, it instead refuses a count that has "
                 "moved from its record, a vendored package with no record at "
                 "all, and a record naming a package that is not in the tree.",
@@ -6771,14 +8689,125 @@ GUARDS: tuple[Guard, ...] = (
                   "`unsafe` outside the allow-list (HLD section 27.2 R5)",
                   note="The probe appends to a crate that is neither of the "
                        "two R5 names. It deliberately does NOT test "
-                       "`is_unsafe` or `unsafe` in a doc comment, which are "
-                       "facts about the current regex rather than about R5. "
+                       "`is_unsafe` or `unsafe` in a doc comment. The "
+                       "tokenizer's cases are covered by the unit tests and "
+                       "the `unsafe.after-*` probes. A doctest holding "
+                       "`unsafe` is refused by rustc through each member "
+                       "library root's "
+                       "`#![doc(test(attr(forbid(unsafe_code))))]`, which "
+                       "the lint policy check refuses the absence of and "
+                       "`lint-policy.doctest-forbid-removed` probes, and "
+                       "the scanner reads doc text as comment text. "
                        "The fragment is the refusal HEADER and not the bare "
                        "words `outside the allow-list`, which the guard's OK "
                        "line also contains: with an accept probe that would "
                        "have been a false green, and here it was kept from "
                        "mattering only by the exit-status check running "
                        "first."),
+            Probe("unsafe.after-quote-char", None,
+                  _tokenizer_snippet(
+                      "tokenizer, quote char literal",
+                      "pub const QUOTE: char = '\"';\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, quote char literal, clean",
+                      "pub const QUOTE: char = '\"';\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 1 of F-229's pass 8. A char literal holding "
+                       "a double quote, and the STRING regex opened a false "
+                       "match there and closed it at the next literal, "
+                       "blanking the block. The rejected fix was another "
+                       "pattern while keeping the three regexes.",
+                  ),
+            Probe("unsafe.after-escaped-quote-char", None,
+                  _tokenizer_snippet(
+                      "tokenizer, escaped quote char literal",
+                      "pub const ESCAPED: char = '\\\"';\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, escaped quote char literal, clean",
+                      "pub const ESCAPED: char = '\\\"';\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 2, the escaped spelling of trigger 1. The "
+                       "backslash sits before the quote the regex matched, so "
+                       "it changed nothing about what was blanked."),
+            Probe("unsafe.after-raw-backslash", None,
+                  _tokenizer_snippet(
+                      "tokenizer, raw string ending in a backslash",
+                      "pub const RAW: &str = r\"a\\\";\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, raw string ending in a backslash, clean",
+                      "pub const RAW: &str = r\"a\\\";\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 3. `r\"a\\\"` is a COMPLETE raw string "
+                       "holding a backslash. Treating the backslash as an "
+                       "escape inside a raw string runs past the closing "
+                       "quote, which is the wrong implementation the plan "
+                       "names for this row."),
+            Probe("unsafe.after-raw-quote", None,
+                  _tokenizer_snippet(
+                      "tokenizer, raw string holding a quote",
+                      "pub const RAW: &str = r#\"a \" b\"#;\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, raw string holding a quote, clean",
+                      "pub const RAW: &str = r#\"a \" b\"#;\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 4. The hash count is part of the delimiter, "
+                       "and `br##\"x \"# y\"##` is the byte form with two. A "
+                       "rule with a fixed hash count mis-closes both, which "
+                       "is the wrong implementation the plan names."),
+            Probe("unsafe.after-comment-quote", None,
+                  _tokenizer_snippet(
+                      "tokenizer, line comment holding a quote",
+                      "// say \"\n"
+                      "pub unsafe fn planted() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  "`unsafe` outside the allow-list",
+                  level=1,
+                  control=_tokenizer_snippet(
+                      "tokenizer, line comment holding a quote, clean",
+                      "// say \"\n"
+                      "pub fn clean() {}\n"
+                      "pub const AFTER: &str = \"next\";\n", 2),
+                  note="Trigger 5. The regexes stripped strings BEFORE line "
+                       "comments, so an unpaired quote in `//` or `///` text "
+                       "opened a false string into the code below it. The "
+                       "wrong implementation is any order that strips strings "
+                       "first, which a tokenizer has no order to get wrong."),
+            Probe("unsafe.weakening-attribute", None,
+                  _weakening_snippet(
+                      "tokenizer, allow of unsafe_code",
+                      "#![allow(unsafe_code)]\npub fn clean() {}\n"),
+                  "lowered by an allow, expect or warn attribute",
+                  level=1,
+                  control=_weakening_snippet(
+                      "tokenizer, allow of dead_code",
+                      "#![allow(dead_code)]\npub fn clean() {}\n"),
+                  note="F-232's second refusal. The workspace table is "
+                       "forbid, so rustc refuses an allow, an expect or a "
+                       "warn of `unsafe_code` as well. This half keeps the "
+                       "trybuild files honest, which no lint table reaches. "
+                       "The vendored packages are audited by their recorded "
+                       "counts, and an allow inside one lowers nothing "
+                       "because no lint table reaches them."),
         ),
     ),
 
@@ -6844,6 +8873,608 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
 
+    # -- licences ------------------------------------------------------------
+    Guard(
+        id="licences",
+        file="scripts/licence_check.py",
+        gate="licences licences-wheels",
+        spec="F-217, F-220 and SPDX 2.3 Annex D",
+        refuses="A dependency whose licence is not on the one allowlist, "
+                "an exception or a file waiver that is stale, incomplete, "
+                "out of scope or in a published runtime closure, a lead "
+                "file waiver whose licence is not an allowlisted expression, "
+                "an operator file waiver whose licence is not a parseable "
+                "expression, a Python package with no recorded row, a bundled "
+                "wheel file that carries a copyleft marker or an unrecorded "
+                "library, a third-party notice that drifts, and a holder or "
+                "manifest SPDX line that drifts. A shipped binary notice that "
+                "is absent or drifts from the lockfile, a pinned notice byte "
+                "that does not match its digest, a toolchain channel that "
+                "does not match the pinned standard library notice, and an "
+                "expression-only crate with no pinned text are refused as well. "
+                "A pinned template that names another project's holder, an "
+                "unfilled placeholder in the generated notice, a crate with "
+                "no packaged file and no recorded upstream notice, an "
+                "expression with no allowlisted licence, a licence path that "
+                "leaves the crate root, an absent licence file, a crate with "
+                "no file and no expression, a --write of any section "
+                "other than binaries, and a crate pin whose URL commit "
+                "differs from the package's published commit are refused "
+                "as well.",
+        claims=("*",),
+        probes=(
+            Probe("licences.npm-copyleft", _plant_npm_copyleft,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "GPL-3.0-only",
+                  note="The same entry is planted in each of the three "
+                       "lockfiles."),
+            Probe("licences.npm-undeclared", _plant_npm_undeclared,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "has no licence and no exception"),
+            Probe("licences.exception-stale", _plant_stale_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "stale exception"),
+            Probe("licences.exception-shipped", _plant_shipped_exception,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "published runtime closure",
+                  note="dcmjs is in the published runtime closure. Scope "
+                       "dev-only does not waive that."),
+            Probe("licences.scope-dev-only", _dev_only_caniuse,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "is false for tools/oracle/package-lock.json",
+                  note="caniuse-lite stays in the oracle lock. dev-only "
+                       "does not hold for that copy."),
+            Probe("licences.scope-nowhere", _tool_scope_holds_nowhere,
+                  script("python3", "scripts/licence_check.py", "npm"),
+                  "holds for no lockfile",
+                  note="The oracle copy is removed, so tool holds nowhere. "
+                       "dev-only still holds for the root dev entry, and "
+                       "that is why this plant does not also say the scope "
+                       "is false."),
+            Probe("licences.waiver-decided-by", _waiver_missing_decided_by,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is missing decided_by"),
+            Probe("licences.waiver-scope", _waiver_scope_prod,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "scope 'prod'"),
+            Probe("licences.waiver-stale", _stale_lzf_waiver,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "stale licence file"),
+            Probe("licences.waiver-placeholder", _claim_licence_on_empty_file,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is valid only on an empty file"),
+            Probe("licences.waiver-lead-copyleft", _lead_waiver_names_copyleft,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "allowlisted expression a lead may waive",
+                  note="et-xmlfile is a lead waiver of an allowlisted text. "
+                       "GPL-3.0-only is on no allowlist, so the lead may not "
+                       "record it. An operator row may."),
+            Probe("licences.waiver-operator-expression",
+                  _operator_waiver_unparseable,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not a parseable SPDX expression",
+                  note="The operator may name a copyleft licence. The value "
+                       "still has to parse as an SPDX expression, or be the "
+                       "placeholder."),
+            Probe("licences.python-unrecorded", _rename_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "has no licence row"),
+            Probe("licences.python-copyleft", _copyleft_python_row,
+                  script("python3", "scripts/licence_check.py", "python"),
+                  "is not allowed"),
+            Probe("licences.notice-drift", _drift_notice,
+                  script("python3", "scripts/licence_check.py", "notices"),
+                  "sha256"),
+            Probe("licences.holder-drift", _drift_holder,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "does not name Tensorbee Limited"),
+            Probe("licences.manifest-spdx", _narrow_manifest_spdx,
+                  script("python3", "scripts/licence_check.py", "holder"),
+                  "expected MIT OR Apache-2.0"),
+            Probe("licences.rust-copyleft", _copyleft_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "openjph-core",
+                  needs="cargo", profile="deep",
+                  note="The vendor manifest is part of the graph. A "
+                       "registry-only reader would stay green."),
+            Probe("licences.rust-disjunction", _disjoin_openjph,
+                  script("python3", "scripts/licence_check.py", "rust"),
+                  "OK: licence check",
+                  needs="cargo", profile="deep", polarity="accept",
+                  note="MIT OR a copyleft identifier is satisfied by MIT. "
+                       "A token scan would refuse it."),
+            Probe(
+                "licences.wheel-marker", None,
+                python_snippet(
+                    "installed_problems, marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('marker')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "copyleft marker",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-library", None,
+                python_snippet(
+                    "installed_problems, library",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('library')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "is not on the recorded list",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean library",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.wheel-platform", None,
+                python_snippet(
+                    "installed_problems, platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('platform')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "no recorded bundled-library list",
+                level=1,
+                control=python_snippet(
+                    "installed_problems, clean platform",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.synthetic_installed_problems('clean')\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "licences.binaries-no-text", None,
+                python_snippet(
+                    "licence_check.render_notices, no pinned text",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='BSD-3-Clause', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'MIT-STANDARD\\nCopyright (c) <copyright-holder>\\n'}\n"
+                    "allow = {'mit', 'bsd-3-clause'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', allow)\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no pinned text for BSD-3-Clause",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, MIT pin",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'MIT-STANDARD\\nCopyright (c) <copyright-holder>\\n'}\n"
+                    "allow = {'mit', 'bsd-3-clause'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', allow)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. BSD-3-Clause is allowlisted and has no pinned "
+                     "text, and the crate ships no licence file. The MIT pin "
+                     "carries the copyright marker so the holder check is not "
+                     "what refuses. The control renders MIT against that pin "
+                     "and exits 0. Neither call runs cargo."),
+            Probe(
+                "licences.binaries-pin",
+                lambda box: box.append("ci/notices/spdx/MIT.txt", "\n"),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "sha256 is",
+                needs="cargo", profile="deep",
+                note="One extra newline in ci/notices/spdx/MIT.txt. binaries "
+                     "refuses on the digest. The check is the binaries entry "
+                     "point. Dropping pinned_digest_problems from "
+                     "binaries_problems leaves this probe exiting 1. The "
+                     "harness reports \"got the exit status it wanted, but "
+                     "not at the declared refusal: nothing in the output "
+                     "contains 'sha256 is'. A run that went the right way "
+                     "for another reason proves nothing about this guard.\" "
+                     "The guard output is \"FAIL: licence check\" and "
+                     "\"THIRD_PARTY_LICENSES does not match the lockfile\"."),
+            Probe(
+                "licences.binaries-elect", None,
+                python_snippet(
+                    "licence_check.elect_terms, no allowlisted disjunct",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "try:\n"
+                    "    l.elect_terms('GPL-3.0-only', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no allowlisted licence",
+                level=1,
+                control=python_snippet(
+                    "licence_check.elect_terms, MIT",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "l.elect_terms('MIT', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. GPL-3.0-only is not on the probe allowlist. "
+                     "The control elects MIT and exits 0."),
+            Probe(
+                "licences.binaries-escape", None,
+                python_snippet(
+                    "licence_check.collect_licence_files, escape",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "try:\n"
+                    "    l.collect_licence_files(Path('.'), '../secret')\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "escapes the crate root",
+                level=1,
+                control=python_snippet(
+                    "licence_check.collect_licence_files, no named file",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "l.collect_licence_files(Path('.'), None)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The named path contains '..'. The control "
+                     "scans the sandbox root and names no extra file."),
+            Probe(
+                "licences.binaries-absent", None,
+                python_snippet(
+                    "licence_check.collect_licence_files, absent",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "try:\n"
+                    "    l.collect_licence_files(Path('.'), 'MISSING-LICENCE.txt')\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "is absent",
+                level=1,
+                control=python_snippet(
+                    "licence_check.collect_licence_files, absent control",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "from pathlib import Path\n"
+                    "l.collect_licence_files(Path('.'), None)\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The named file is not in the crate root. The "
+                     "control names no extra file."),
+            Probe(
+                "licences.binaries-no-expression", None,
+                python_snippet(
+                    "licence_check.render_notices, no expression",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='', authors=(), files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "has no licence file and no licence expression",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, expression control",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. Empty files and an empty expression. The "
+                     "control renders MIT against a marked pin."),
+            Probe(
+                "licences.binaries-write-section", None,
+                python_snippet(
+                    "licence_check.main, write holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "sys.exit(l.main(['--write', 'holder']))\n"),
+                "--write regenerates the binaries section only",
+                level=1,
+                control=python_snippet(
+                    "licence_check.main, holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "sys.exit(l.main(['holder']))\n"),
+                note="Level 1. --write is the binaries regenerator. holder "
+                     "is a check section. The control runs that check."),
+            Probe(
+                "licences.binaries-foreign-holder", None,
+                python_snippet(
+                    "licence_check.render_notices, foreign holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='Zlib', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {\n"
+                    "    'zlib': b'Copyright (C) 1995 Jean-loup Gailly\\n',\n"
+                    "    'mit': b'Copyright (c) <copyright-holder>\\n',\n"
+                    "}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'zlib'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "names another project's holder",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, marker holder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='Zlib', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'zlib': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'zlib'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The Zlib pin names a holder that is not the "
+                     "marker. The control carries only the marker."),
+            Probe(
+                "licences.binaries-placeholder", None,
+                python_snippet(
+                    "licence_check.render_notices, unfilled placeholder",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\nSee [year] [fullname].\\n'}\n"
+                    "try:\n"
+                    "    l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "unfilled placeholder",
+                level=1,
+                control=python_snippet(
+                    "licence_check.render_notices, filled marker",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "l.render_notices([crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The marker is filled and [year] stays in the "
+                     "output. The control pin has only the marker."),
+            Probe(
+                "licences.binaries-no-pin", None,
+                python_snippet(
+                    "licence_check.crate_from_package, no pin",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "import tempfile\n"
+                    "from pathlib import Path\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "(root / 'Cargo.toml').write_text('x\\n', encoding='utf-8')\n"
+                    "try:\n"
+                    "    l.crate_from_package({\n"
+                    "        'name': 'probe-gap', 'version': '0.0.0',\n"
+                    "        'license': 'MIT', 'authors': [],\n"
+                    "        'repository': 'https://example.com/probe-gap',\n"
+                    "        'manifest_path': str(root / 'Cargo.toml'),\n"
+                    "        'source': 'registry+https://github.com/rust-lang/crates.io-index',\n"
+                    "    })\n"
+                    "    sys.exit(0)\n"
+                    "except l.BinariesError as exc:\n"
+                    "    print(exc)\n"
+                    "    sys.exit(1)\n"),
+                "no pinned upstream notice",
+                level=1,
+                control=python_snippet(
+                    "licence_check.crate_from_package, packaged file",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "import tempfile\n"
+                    "from pathlib import Path\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "(root / 'Cargo.toml').write_text('x\\n', encoding='utf-8')\n"
+                    "(root / 'LICENSE').write_text('granted\\n', encoding='utf-8')\n"
+                    "l.crate_from_package({\n"
+                    "    'name': 'probe-ok', 'version': '0.0.0',\n"
+                    "    'license': 'MIT', 'authors': ['Ann <ann@example.com>'],\n"
+                    "    'repository': 'https://example.com/probe-ok',\n"
+                    "    'manifest_path': str(root / 'Cargo.toml'),\n"
+                    "    'source': 'registry+https://github.com/rust-lang/crates.io-index',\n"
+                    "})\n"
+                    "sys.exit(0)\n"),
+                note="Level 1. The package has no licence file and sources.toml "
+                     "has no pin for it. The control package ships LICENSE."),
+            Probe(
+                "licences.binaries-published-commit", None,
+                python_snippet(
+                    "licence_check.published_commit_problems, other commit",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "rows = [{\n"
+                    "    'name': 'block2', 'version': '0.6.2',\n"
+                    "    'url': 'https://raw.githubusercontent.com/madsmtm/objc2/'\n"
+                    "           'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/LICENSE.md',\n"
+                    "}]\n"
+                    "bad = l.published_commit_problems(rows)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "differs from the published commit",
+                level=1,
+                control=python_snippet(
+                    "licence_check.published_commit_problems, real pins",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "bad = l.published_commit_problems()\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The pin URL names a commit that is not block2 "
+                     "0.6.2's published sha1. The check reads "
+                     ".cargo_vcs_info.json from the registry cache and does "
+                     "not use the network. The control checks the crate pins "
+                     "in sources.toml. Replacing published_commit_problems "
+                     "with a function that returns nothing makes this probe "
+                     "exit 0. The harness then reports that the guard it aims "
+                     "at did not fire."),
+            Probe(
+                "licences.binaries-attribution", None,
+                python_snippet(
+                    "licence_check.attribution_problems, paragraph removed",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "blob = l.render_notices(\n"
+                    "    [crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "stripped = blob.replace(l._CC_BY_ATTRIBUTION.encode(), b'')\n"
+                    "bad = l.attribution_problems(stripped)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "attribution paragraph is absent",
+                level=1,
+                control=python_snippet(
+                    "licence_check.attribution_problems, paragraph kept",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "crate = l.CrateNotice(\n"
+                    "    name='probe-crate', version='0.0.0', source='crates.io',\n"
+                    "    expression='MIT', authors=('Ann <ann@example.com>',),\n"
+                    "    files=())\n"
+                    "pins = {'mit': b'Copyright (c) <copyright-holder>\\n'}\n"
+                    "blob = l.render_notices(\n"
+                    "    [crate], pins, b'<std>', '1.97.1', {'mit'})\n"
+                    "bad = l.attribution_problems(blob)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The rendered notice has the CC BY paragraph "
+                     "removed. The control keeps the paragraph and exits 0. "
+                     "Neither call runs cargo."),
+            Probe(
+                "licences.binaries-earlier-commit", None,
+                python_snippet(
+                    "licence_check.earlier_commit_problems, file absent",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "commit = 'e' * 40\n"
+                    "rows = [{\n"
+                    "    'name': 'block2', 'version': '0.6.2',\n"
+                    "    'path': 'ci/notices/crates/objc2-earlier/LICENSE.txt',\n"
+                    "    'url': 'https://raw.githubusercontent.com/madsmtm/objc2/'\n"
+                    "           + commit + '/LICENSE.txt',\n"
+                    "    'sha256': 'ab' * 32,\n"
+                    "    'commit': commit,\n"
+                    "}]\n"
+                    "bad = l.earlier_commit_problems(\n"
+                    "    rows, blob_at=lambda _url: None)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "is absent at commit",
+                level=1,
+                control=python_snippet(
+                    "licence_check.earlier_commit_problems, pinned bytes",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import licence_check as l\n"
+                    "rows = l._table_rows(\n"
+                    "    l._load_sources(), 'earlier', required=False)\n"
+                    "def blob_at(url):\n"
+                    "    for row in rows:\n"
+                    "        if str(row.get('url') or '') == url:\n"
+                    "            return (l.ROOT / str(row['path'])).read_bytes()\n"
+                    "    return None\n"
+                    "bad = l.earlier_commit_problems(rows, blob_at=blob_at)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The earlier pin URL names a commit and blob_at "
+                     "reports that LICENSE.txt is absent there. The control "
+                     "returns the pinned bytes for the rows in sources.toml "
+                     "and exits 0. Neither call uses the network."),
+            Probe(
+                "licences.binaries-toolchain",
+                lambda box: box.substitute(
+                    "rust-toolchain.toml", 'channel = "1.97.1"',
+                    'channel = "1.98.0"'),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "rustup component add rust-docs",
+                needs="cargo", profile="deep",
+                note="The channel becomes 1.98.0. binaries names the "
+                     "rust-docs regenerate instruction. The check reads the "
+                     "channel before it asks cargo for the closure."),
+            Probe(
+                "licences.binaries-drift",
+                lambda box: box.append("THIRD_PARTY_LICENSES", "\n"),
+                script("python3", "scripts/licence_check.py", "binaries"),
+                "THIRD_PARTY_LICENSES does not match the lockfile",
+                needs="cargo", profile="deep",
+                note="One extra newline in THIRD_PARTY_LICENSES. binaries "
+                     "refuses because the bytes no longer match the lockfile."),
+        ),
+    ),
+
     # -- source policy ------------------------------------------------------
     Guard(
         id="provenance",
@@ -6863,6 +9494,21 @@ GUARDS: tuple[Guard, ...] = (
             Probe("provenance.unqualified-mention", _blocked_mention,
                   script("python3", "scripts/source_provenance_check.py"),
                   "with no statement that it is out of bounds"),
+            Probe("provenance.python-dependency", _plant_python_dependency,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.lock-entry", _plant_lock_entry,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.prefixed-name", _plant_prefixed_lock_name,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "depends on"),
+            Probe("provenance.agent-trailer", _plant_agent_trailer,
+                  script("python3", "scripts/source_provenance_check.py"),
+                  "OK: source-provenance policy clean",
+                  polarity="accept",
+                  note="The trailer names the agent. Prose matching is "
+                       "unchanged, and the planted sentence negates a read."),
         ),
         limit="The URL clause has no probe, deliberately. "
               "`docs/SOURCE-POLICY.md` names the projects and does not name "
@@ -6893,20 +9539,28 @@ GUARDS: tuple[Guard, ...] = (
                 "byte-identical dual-licence grant, a changed or incomplete "
                 "ritk-codecs archive inventory or its immutable digest, an "
                 "undeclared change outside either exact manifest patch or "
-                "the exact patch provenance record, "
+                "the exact patch provenance record, a patched source file "
+                "whose bytes differ from its reviewed record, "
                 "incorrect provenance, or Rayon in either target graph, "
                 "a decode module over its recorded ceiling, a decode size "
                 "record whose tolerance is not the shared 5 percent, and a "
                 "decode binding file that drops a panic export or names the "
                 "canvas. "
-                "For openjph-core under D-22, where there is NO patch: a "
-                "changed, absent or unrecorded published file, a changed "
-                "inventory or its immutable digest, a wrong packaged VCS "
-                "revision, workspace wiring that is not the exact path and "
-                "version, and, at `--require-redistribution` only, a vendored "
-                "package carrying no licence notice. That last refusal fires "
-                "on the unmodified tree today and no development profile runs "
-                "the flag.",
+                "For openjph-core under D-22 and D-31: a changed, absent or "
+                "unrecorded published file outside the two recorded patch "
+                "files, a changed inventory or its immutable digest, a wrong "
+                "packaged VCS revision, a patch record that is absent or not "
+                "the reviewed bytes, workspace wiring that is not the exact "
+                "path and version, and, at `--require-redistribution` only, a "
+                "vendored package carrying no licence notice or a notice "
+                "whose bytes differ from the recorded hash."
+                "For dicom-object under F-244 and D-18, where there is ONE "
+                "source patch: a changed, absent or unrecorded published "
+                "file, a second change in the patched collector.rs or the "
+                "patch removed, a changed inventory or its immutable digest, "
+                "a provenance record with undeclared changes, a wrong "
+                "packaged VCS revision, and workspace wiring that is not the "
+                "exact path and version.",
         claims=("*",),
         probes=(
             Probe("pins.range", _relax_wgpu_pin,
@@ -6975,8 +9629,9 @@ GUARDS: tuple[Guard, ...] = (
                   script("python3", "scripts/pin_and_size_check.py"),
                   "openjph-core published file is absent: src/lib.rs",
                   note="D-22. The published package inventory is the source "
-                       "boundary. This vendor carries NO patch, so every "
-                       "recorded file must match the archive byte for byte."),
+                       "boundary. Unpatched files must still match the "
+                       "archive byte for byte. The recorded D-31 patch covers "
+                       "the files its refusal names."),
             Probe("pins.openjph-inventory-root",
                   _rewrite_openjph_source_and_inventory,
                   script("python3", "scripts/pin_and_size_check.py"),
@@ -6991,26 +9646,46 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-22. The packaged VCS revision is half of this "
                        "package's provenance and the archive digest is the "
                        "other half. It has one release and one owner."),
-            Probe("pins.openjph-notice", _plant_openjph_notice,
+            Probe("pins.openjph-notice", _delete_openjph_notice,
                   script("python3", "scripts/pin_and_size_check.py",
                          "--require-redistribution"),
-                  "pinned exactly",
-                  polarity="accept",
-                  control=script("python3", "scripts/pin_and_size_check.py",
-                                 "--require-redistribution"),
-                  control_status=1,
-                  control_expect="carries no BSD notice or copyright material",
-                  note="D-22, and this probe runs in BOTH directions because "
-                       "the refusal fires on the unmodified tree. The control "
-                       "is the unmutated repository, where the check must "
-                       "REFUSE and name the missing notice. The mutation "
-                       "plants a licence file, where it must ACCEPT. Without "
-                       "the second half this would be a hard-coded failure "
-                       "rather than a gate on a condition, and without the "
-                       "first half nothing would record that the condition is "
-                       "open today. No development profile runs this flag: "
-                       "`--floor`, `--sprint` and `--all` gate development and "
-                       "this gates publication. `/release` step 5 runs it."),
+                  "carries no BSD notice",
+                  note="D-22. The unmodified tree carries the upstream notice "
+                       "and the control accepts. Deleting the vendor LICENSE "
+                       "must refuse. No development profile runs this flag. "
+                       "`/release` step 5 runs it."),
+            Probe("pins.openjph-notice-hash", _alter_openjph_notice,
+                  script("python3", "scripts/pin_and_size_check.py",
+                         "--require-redistribution"),
+                  "LICENSE sha256",
+                  note="D-22. One extra byte in the vendor LICENSE must "
+                       "refuse on the recorded hash."),
+            Probe("pins.dicom-object-planted-byte",
+                  _plant_dicom_object_source_byte,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object published file changed: src/mem.rs",
+                  note="F-244 and D-18. One planted byte in an unpatched "
+                       "published file must fail with the file named."),
+            Probe("pins.dicom-object-second-patch",
+                  _second_dicom_object_patch,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "src/collector.rs has undeclared changes",
+                  note="F-244. The patched file is pinned by its whole "
+                       "digest, so a second change beside the recorded "
+                       "`first = false;` line must fail."),
+            Probe("pins.dicom-object-inventory-root",
+                  _rewrite_dicom_object_source_and_inventory,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object published-package inventory digest",
+                  note="F-244. The inventory digest is rooted outside the "
+                       "vendor tree, so changing a source file and its "
+                       "inventory row together must still fail."),
+            Probe("pins.dicom-object-provenance-extra",
+                  _append_dicom_object_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "dicom-object PATCH-PROVENANCE.md has undeclared changes",
+                  note="F-244. A false claim appended to an otherwise true "
+                       "patch record must fail."),
             Probe("pins.ritk-inventory", _remove_ritk_published_source,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "published file is absent: src/lib.rs",
@@ -7043,6 +9718,34 @@ GUARDS: tuple[Guard, ...] = (
                   note="D-20. The complete patch record is rooted outside "
                        "the vendor tree, so a false source-change claim "
                        "appended to otherwise true provenance must fail."),
+            Probe("pins.ritk-patched-source-drift",
+                  _drift_ritk_patched_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "undeclared changes beyond its recorded patch",
+                  note="F-239, D-31. A patched source file is exempt from "
+                       "the archive inventory and therefore held to its own "
+                       "recorded bytes. Drift that the exemption would "
+                       "otherwise hide has to fail here."),
+            Probe("pins.ritk-jpegls-patch-drift", _drift_ritk_jpegls_patch,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "src/jpeg_ls/scan.rs has undeclared changes beyond its "
+                  "recorded patch",
+                  note="F-243, D-20. A patched source file is held to its own "
+                       "recorded bytes, because the archive inventory no "
+                       "longer covers it."),
+            Probe("pins.openjph-patched-source-drift",
+                  _drift_openjph_patched_source,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "undeclared changes beyond the exact D-31",
+                  note="F-239, D-31. Same ratchet as the ritk side, for the "
+                       "decode-path files the openjph patch records."),
+            Probe("pins.openjph-patch-provenance",
+                  _rewrite_openjph_patch_provenance,
+                  script("python3", "scripts/pin_and_size_check.py"),
+                  "does not match the exact reviewed patch record",
+                  note="F-239, D-31. The openjph patch record is new with "
+                       "this story and is rooted outside the vendor tree "
+                       "like the ritk one."),
             Probe("pins.ritk-rayon", _restore_ritk_rayon_default,
                   script("python3", "scripts/pin_and_size_check.py"),
                   "Rayon is present",
@@ -7092,16 +9795,51 @@ GUARDS: tuple[Guard, ...] = (
                        "measured module."),
         ),
     ),
+
+    # -- the vendored coefficient contract, F-239 D-31 ----------------------
+    Guard(
+        id="vendor-tests",
+        file="bin/ocelli.sh",
+        gate="vendor-tests",
+        spec="F-239 D-31, the lead ruling after the codec part's review "
+             "pass 4 in `.claude/plans/F-239-design.md`",
+        refuses="A vendored decoder whose library tests no longer hold the "
+                "recorded G-6 inverse ICT coefficients, now that a floor "
+                "gate runs them instead of a command somebody remembers to "
+                "run by hand.",
+        claims=(),
+        silent="The refusal is cargo's own failing test output from a "
+               "vendored crate, which is no shape scripts/guards/discover.py "
+               "scans and carries no words of this repository's own. The one "
+               "shell refusal in bin/ocelli.sh belongs to the runner entry.",
+        probes=(
+            Probe("vendor-tests.openjph-ict-coefficient",
+                  _shift_openjph_ict_coefficient,
+                  Invoke("bin/ocelli.sh gate vendor-tests",
+                         _run_vendor_tests_gate),
+                  "ict_backward_is_the_annex_g_transform",
+                  needs="cargo", profile="deep",
+                  note="S1 of review pass 4. The fragment is the vendored "
+                       "test's own name rather than a refusal sentence of "
+                       "this repository's, because the guard is cargo's red "
+                       "and the contract is the vendored suite's. The "
+                       "control is the same gate over the unmutated "
+                       "sandbox, which must build both crates and exit 0."),
+        ),
+    ),
     Guard(
         id="decode-graph",
         file="scripts/decode_graph_check.py",
         gate="wasm",
-        spec="HLD 15.2, deviation D-27, story F-110",
+        spec="HLD 15.2, deviation D-27, deviation D-33, story F-110",
         refuses="A decode build that links wgpu, Naga or the renderer, a "
                 "wasm32 wgpu feature set other than the D-27 set, a native "
-                "table that drops a default backend, wasm-opt turned off, "
-                "and a workspace resolve that enables a native backend on "
-                "wasm32 or drops one on the host.",
+                "table that drops a default backend, a shipped native table "
+                "on ocelli-render or ocelli-compute that drops a backend the "
+                "shipped set keeps, a manifest whose `metal` forwarding to "
+                "wgpu is missing from the crates D-33 ships, wasm-opt turned "
+                "off, and a workspace resolve that enables a native backend "
+                "on wasm32 or drops one on the host.",
         claims=("*",),
         probes=(
             Probe(
@@ -7237,6 +9975,88 @@ GUARDS: tuple[Guard, ...] = (
                     "sys.exit(1 if bad else 0)\n"),
                 note="F-110. The workspace resolve is not the ocelli-wasm "
                      "package graph. A native backend on wasm32 fails here."),
+            Probe(
+                "decode-graph.shipped-table-drops", None,
+                python_snippet(
+                    "decode_graph_check.check_trimmed, shipped gles",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "shipped = sorted(d.SHIPPED_NATIVE_FEATURES - {'gles'})\n"
+                    "shipped.append('webgl')\n"
+                    "manifest = {'target': {\n"
+                    "    'cfg(target_arch = \"wasm32\")': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': list(d.WASM_FEATURES)}}},\n"
+                    "    'cfg(not(target_arch = \"wasm32\"))': "
+                    "{'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': shipped}}},\n"
+                    "}}\n"
+                    "manifest['features'] = {'metal': ['wgpu/metal']}\n"
+                    "bad = d.check_trimmed('probe', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "drops a default backend",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_trimmed, shipped healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "bad = d.check_trimmed(\n"
+                    "    'ocelli-render', d.load(d.RENDER_CRATE), True,\n"
+                    "    shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="D-33. The shipped native table of the render crate is "
+                     "missing `gles`, which the shipped set keeps. The "
+                     "control is the manifest in the tree, judged against the "
+                     "same shipped rule."),
+            Probe(
+                "decode-graph.shipped-forwarding-absent", None,
+                python_snippet(
+                    "decode_graph_check.check_trimmed, forwarding missing",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "native = sorted(d.SHIPPED_NATIVE_FEATURES)\n"
+                    "native.append('webgl')\n"
+                    "manifest = {'target': {\n"
+                    "    'cfg(target_arch = \"wasm32\")': {'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': list(d.WASM_FEATURES)}}},\n"
+                    "    'cfg(not(target_arch = \"wasm32\"))': "
+                    "{'dependencies': {\n"
+                    "        'wgpu': {'default-features': False,\n"
+                    "                 'features': native}}},\n"
+                    "}}\n"
+                    "bad = d.check_trimmed('probe', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "does not forward metal to wgpu",
+                level=1,
+                control=python_snippet(
+                    "decode_graph_check.check_trimmed, forwarding healthy",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import decode_graph_check as d\n"
+                    "manifest = d.load(d.RENDER_CRATE)\n"
+                    "bad = d.check_trimmed('ocelli-render', manifest, True,\n"
+                    "                      shipped=True)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="D-33. A shipped table without the `metal` forwarding "
+                     "feature on the render crate would leave development "
+                     "unable to restore the D-27 native set, and `gate gpu` "
+                     "would quietly resolve tier C on the macOS host. The "
+                     "control is the render manifest in the tree, which "
+                     "forwards `metal` and must return nothing. "
+                     "`ocelli-compute` is judged against the same shipped "
+                     "table but is exempt from this half, because it is not "
+                     "in the shipped graph and names no forwarding feature."),
         ),
         limit="The cargo-tree process itself is the wasm gate. A probe that "
               "makes cargo fail to resolve needs a broken toolchain, so the "
@@ -7338,6 +10158,21 @@ GUARDS: tuple[Guard, ...] = (
                   lambda box: _delete_ci_step(box, leave_comment=False),
                   script("python3", "scripts/ci_floor_check.py"),
                   "and nothing in"),
+            Probe("ci-floor.packages-job-without-wasm-pack",
+                  _drop_the_frontend_wasm_pack_step,
+                  script("python3", "scripts/ci_floor_check.py"),
+                  "provisions wasm-pack",
+                  note="F-237 review pass 2, N3. The frontend job gained "
+                       "wasm-pack and the wasm32 target with D1 of the same "
+                       "review, because `gate packages` packs @ocelli/wasm "
+                       "through a prepack script that builds both modules. "
+                       "Deleting the step left this check at exit 0: the "
+                       "floor's claim is about a step running the gate, and "
+                       "a job that fails closed at the first pack still "
+                       "runs it. The provisioning rule beside the floor "
+                       "loop refuses now. Its target half is refused by the "
+                       "same rule and is watched by the recorded count "
+                       "rather than by a second probe here."),
             Probe("ci-floor.multi-command-split-steps",
                   _split_a_multi_command_gate_across_steps,
                   script("python3", "scripts/ci_floor_check.py"),
@@ -9115,11 +11950,13 @@ GUARDS: tuple[Guard, ...] = (
              "bootstrap",
         refuses="A sprint plan that disagrees with the backlog about which "
                 "sprint a story is in or how large it is, a story planned "
-                "into two sprint tables at once, a generated milestone "
-                "summary or goal line that has drifted from the allocation it "
-                "is written from or that is absent, duplicated or spurious, "
-                "an absent plan, and a bare write that would replace an "
-                "existing hand-curated plan.",
+                "into two sprint tables at once, a planned story absent from "
+                "every sprint table, a table row for a story the allocation "
+                "does not plan, a generated milestone summary or goal line "
+                "that has drifted from the allocation it is written from or "
+                "that is absent, duplicated or spurious, an absent plan, and "
+                "a bare write that would replace an existing hand-curated "
+                "plan.",
         claims=("*",),
         probes=(
             Probe("sprint-plan.existing-refuses-write",
@@ -9147,20 +11984,28 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.milestone-summary-absent",
                   _sprint_plan_milestone_summary_deleted,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "carries no summary line for it",
+                  "carries no summary line under its heading",
                   note="The lines were compared by POSITION, so one absent "
                        "line shifted every line after it and the refusal "
-                       "named the wrong milestone. They are matched on the "
-                       "sprint span they name now, which is the identity a "
-                       "reader has anyway."),
+                       "named the wrong milestone. They were then matched "
+                       "on the sprint span they name, which collapses two "
+                       "milestones that share a span. They are matched on "
+                       "the milestone heading each sits under now."),
             Probe("sprint-plan.milestone-summary-spurious",
                   _sprint_plan_extra_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "has no milestone spanning those sprints",
-                  note="The other direction of the same span comparison. A "
-                       "summary line is generated, so one the allocation "
-                       "cannot account for is hand-written prose wearing a "
-                       "generated line's shape."),
+                  "summary lines and the generator writes one",
+                  note="render writes one summary line per milestone "
+                       "heading, so a second one under a heading it already "
+                       "wrote is a hand edit."),
+            Probe("sprint-plan.milestone-summary-unplanned",
+                  _sprint_plan_unplanned_milestone_summary,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "the allocation plans no story for it",
+                  note="A summary line under a heading for a milestone the "
+                       "allocation plans no story in. Before the S46 review "
+                       "the span key let such a line pass whenever its span "
+                       "matched a real milestone's."),
             Probe("sprint-plan.two-goal-lines", _sprint_plan_two_goal_lines,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
                   "**Goal** lines",
@@ -9180,10 +12025,42 @@ GUARDS: tuple[Guard, ...] = (
             Probe("sprint-plan.wrong-milestone-summary",
                   _sprint_plan_wrong_milestone_summary,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "milestone summary line"),
+                  "the summary line for"),
             Probe("sprint-plan.stale-goal-line", _sprint_plan_stale_goal_line,
                   script("python3", "scripts/gen_sprint_plan.py", "--check"),
-                  "**Goal** line"),
+                  "does not carry the story title it is built from",
+                  note="The fragment used to be `**Goal** line`, which the "
+                       "absent goal line, the order drift and the duplicate "
+                       "goal lines also print. This fragment is the "
+                       "missing-title refusal alone. The fixture is "
+                       "unchanged."),
+            Probe("sprint-plan.row-absent", _sprint_plan_row_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "appears in no SPRINT_PLAN.md sprint table",
+                  note="Deletes the first sprint table's first story row. "
+                       "The allocation still plans that story and the goal "
+                       "line still names it, so the absent row is the only "
+                       "refusal."),
+            Probe("sprint-plan.row-unplanned", _sprint_plan_row_unplanned,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no sprint in BACKLOG.md",
+                  note="Inserts a row for F-999, which the allocation does "
+                       "not plan. The goal line is left alone, so the "
+                       "unplanned row is the only refusal."),
+            Probe("sprint-plan.goal-line-absent",
+                  _sprint_plan_goal_line_absent,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "carries no **Goal** line",
+                  note="Deletes the first goal line. The sprint heading and "
+                       "its table stay, so the refusal is the absent line "
+                       "and not a missing title."),
+            Probe("sprint-plan.goal-order-drift",
+                  _sprint_plan_goal_order_drift,
+                  script("python3", "scripts/gen_sprint_plan.py", "--check"),
+                  "its order or its punctuation has drifted",
+                  note="Swaps the first adjacent pair of distinct story "
+                       "titles on one goal line. Both titles remain, so a "
+                       "comparison that ignores order would stay green."),
         ),
     ),
     Guard(
@@ -9561,6 +12438,15 @@ GUARDS: tuple[Guard, ...] = (
         ),
         covered_by=("scripts/tests/test_corpus_check.py "
                     "(run by the `corpus-tests` gate)",),
+        limit="The count moved from 43 to 46 with F-229's three decode-digest "
+              "refusals for a known syntax that has no decoder: a `.111` row "
+              "routed to a decoder, a `.111` row carrying a decode digest, and "
+              "an available row routed to the unavailable refusal. Each is "
+              "covered by `UnavailableDecodeDigests` in "
+              "`scripts/tests/test_corpus_check.py` rather than by a sandbox "
+              "probe, because the function imports "
+              "the DICOM tooling and the corpus, neither of which a probe "
+              "sandbox carries.",
     ),
     Guard(
         id="corpus-tests",
@@ -9630,7 +12516,27 @@ GUARDS: tuple[Guard, ...] = (
               "of this script inside a sandbox dies at import before reaching "
               "any refusal of its own. That is the same reason every other "
               "refusal in this file is `covered_by` its unit test rather than "
-              "probed, and the count moving from 5 to 6 is this selector.",
+              "probed, and the count moving from 5 to 6 is this selector. "
+              "The seventh to ninth are F-229's JPEG XL encoder refusals, an "
+              "encode or a recompression that returns no bytes and a "
+              "recompression that does not restore the `.50` fragment. Each "
+              "is covered by `JpegXlEncoderRefusals` with a stubbed "
+              "imagecodecs entry point, for the same import reason. "
+              "The tenth to seventeenth are F-244's empty Basic Offset Table "
+              "generator refusals: a non-Item tag, an odd Item value, a frame "
+              "with no marker-free split, an unsupported Fragment count, a "
+              "source row with more than one Fragment, a producer writing the "
+              "wrong frame count, a populated table beside an Extended Offset "
+              "Table, and an unknown shape. Each is covered by "
+              "`EmptyBotGeneratorRefusals`, for the same import reason. "
+              "F-240 adds the closed synthetic ICC kind refusal, covered by "
+              "`IccProfileFixtures.test_unknown_icc_kind_is_refused_by_fixed_name` "
+              "without requiring any corpus file. Controlled colour "
+              "comparison inputs add closed-case, dimension, nonempty-output "
+              "and incompatible-CLI-mode refusals, covered by "
+              "`ControlledColourComparisonFixtures`. The ICC slot assertion "
+              "is an internal invariant of the own gamma1 profile and is "
+              "checked by the independent tag/curve fixture test.",
     ),
 
     # -- the cross-target proof and the packages ---------------------------
@@ -9657,14 +12563,197 @@ GUARDS: tuple[Guard, ...] = (
               "to fetch a new dependency graph, so that branch has no probe.",
     ),
     Guard(
+        id="simd-variant",
+        file="scripts/simd_variant_check.py",
+        gate="native",
+        spec="F-233's lead rulings after review pass 1, `bin/ocelli.sh "
+             "native` steps 10 and 14, and D-22's evidence clause",
+        refuses="A SIMD verification module holding no SIMD instruction the "
+                "plain module lacks, a plain module holding any SIMD "
+                "instruction, and a module that is missing or that the "
+                "decoder cannot walk to its last byte. As a structural pin on "
+                "`bin/ocelli.sh`, a SIMD variant step that does not pass "
+                "`+simd128` through the target rustflags variable and a step "
+                "passing a target feature after `cargo rustc --`.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "simd-variant.no-simd-instruction", None,
+                python_snippet(
+                    "simd_variant_check.check, no SIMD instruction",
+                    "import sys, tempfile\n"
+                    "from pathlib import Path\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "def mod(body):\n"
+                    "    entry = b'\\x00' + body\n"
+                    "    code = bytes([1, len(entry)]) + entry\n"
+                    "    return (b'\\x00asm\\x01\\x00\\x00\\x00'\n"
+                    "            b'\\x01\\x04\\x01\\x60\\x00\\x00'\n"
+                    "            b'\\x03\\x02\\x01\\x00\\x0a'\n"
+                    "            + bytes([len(code)]) + code)\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "plain = root / 'plain.wasm'\n"
+                    "simd = root / 'simd.wasm'\n"
+                    "plain.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "simd.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "bad = s.check(plain, simd)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "no SIMD instruction",
+                level=1,
+                control=python_snippet(
+                    "simd_variant_check.check, v128.const",
+                    "import sys, tempfile\n"
+                    "from pathlib import Path\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "def mod(body):\n"
+                    "    entry = b'\\x00' + body\n"
+                    "    code = bytes([1, len(entry)]) + entry\n"
+                    "    return (b'\\x00asm\\x01\\x00\\x00\\x00'\n"
+                    "            b'\\x01\\x04\\x01\\x60\\x00\\x00'\n"
+                    "            b'\\x03\\x02\\x01\\x00\\x0a'\n"
+                    "            + bytes([len(code)]) + code)\n"
+                    "root = Path(tempfile.mkdtemp())\n"
+                    "plain = root / 'plain.wasm'\n"
+                    "simd = root / 'simd.wasm'\n"
+                    "plain.write_bytes(mod(b'\\x41\\x00\\x1a\\x0b'))\n"
+                    "simd.write_bytes(mod(b'\\xfd\\x0c' + bytes(16)\n"
+                    "                     + b'\\x1a\\x0b'))\n"
+                    "bad = s.check(plain, simd)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. Both modules are hand-assembled, one type, "
+                     "one function and a code section, and stand in for the "
+                     "two `examples/<name>.wasm` files the native arm links. "
+                     "The probe's SIMD module holds `i32.const 0, drop`, the "
+                     "state a build that lost `+simd128` at the example's "
+                     "link produces, and the control's holds `v128.const`, "
+                     "so the refusal is shown to discriminate. The plain-"
+                     "module, missing and undecodable refusals are driven by "
+                     "`scripts/tests/test_simd_variant_check.py`, which `gate "
+                     "native` runs after the arm."),
+            Probe(
+                "simd-variant.cargo-rustc-shape", None,
+                python_snippet(
+                    "simd_variant_check.build_shape_problems, cargo rustc --",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "text = ('  native)\\n'\n"
+                    "        '    cargo rustc -p ocelli-codec --example verify_htj2k '\n"
+                    "        '--target-dir target/codec-wasm-simd -- '\n"
+                    "        '-C target-feature=+simd128\\n'\n"
+                    "        '    ;;\\n')\n"
+                    "bad = s.build_shape_problems(text)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "after `cargo rustc --`",
+                level=1,
+                control=python_snippet(
+                    "simd_variant_check.build_shape_problems, target rustflags",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import simd_variant_check as s\n"
+                    "text = ('  native)\\n'\n"
+                    "        '    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='\n"
+                    "        '\"-C target-feature=+simd128\" cargo build '\n"
+                    "        '-p ocelli-codec --example verify_htj2k '\n"
+                    "        '--target-dir target/codec-wasm-simd\\n'\n"
+                    "        '    ;;\\n')\n"
+                    "bad = s.build_shape_problems(text)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1, and a structural pin rather than a measurement "
+                     "of a build. It reads runner text and refuses a SIMD "
+                     "variant step that does not pass `+simd128` through "
+                     "`CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS`, and "
+                     "any step that passes a target feature after `cargo "
+                     "rustc --`. The module check cannot separate that "
+                     "pre-F-233 shape from the F-233 one, because under fat "
+                     "LTO both link a module with the same SIMD "
+                     "instructions. The probe plants the pre-F-233 step and "
+                     "the control the F-233 one. "
+                     "`scripts/tests/test_simd_variant_check.py` applies the "
+                     "same function to the tracked `bin/ocelli.sh`."),
+        ),
+    ),
+
+    # -- the shipped native graph -------------------------------------------
+    Guard(
+        id="shipped-native",
+        file="scripts/shipped_native_check.py",
+        gate="native",
+        spec="F-238, acceptance rows AC1 and AC2",
+        refuses="An objc2 package in the resolved graph of `ocelli-native` "
+                "built with `--no-default-features`, on either Apple target, "
+                "over normal and build edges, and a shipped graph that does "
+                "not resolve at all.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "shipped-native.metal-planted",
+                lambda box: box.substitute(
+                    "crates/ocelli-render/Cargo.toml",
+                    'wgpu = { workspace = true, features = ["std", '
+                    '"parking_lot", "dx12", "gles", "vulkan", "wgsl", '
+                    '"webgpu", "webgl"] }',
+                    'wgpu = { workspace = true, features = ["std", '
+                    '"parking_lot", "dx12", "metal", "gles", "vulkan", '
+                    '"wgsl", "webgpu", "webgl"] }'),
+                script("python3", "scripts/shipped_native_check.py"),
+                "reaches the shipped native graph",
+                needs="cargo", profile="deep",
+                control=script("python3", "scripts/shipped_native_check.py"),
+                note="AC2. Metal is planted back into ocelli-render's native "
+                     "table, which is the shipped feature set's only route to "
+                     "wgpu's Metal backend, and the check must refuse because "
+                     "the RESOLVED graph names objc2 again. A check that read "
+                     "a feature list instead of the graph would stay green. "
+                     "The control is the same command over the unmutated "
+                     "sandbox, which must resolve and pass."),
+            Probe(
+                "shipped-native.build-dep-planted",
+                _plant_objc2_build_dependency,
+                script("python3", "scripts/shipped_native_check.py"),
+                "reaches the shipped native graph",
+                needs="cargo", profile="deep",
+                control=script("python3", "scripts/shipped_native_check.py"),
+                note="The F-238 review's S1. objc2 planted under "
+                     "`[build-dependencies]` of `ocelli-native` is compiled "
+                     "when the archive is built, and the licence closure "
+                     "refuses it already, so the shipped-graph walk must "
+                     "refuse it too, and over normal edges alone it stayed "
+                     "green. The plant adds a lock edge, so the probe "
+                     "resolves the sandbox lock offline before running the "
+                     "check. The control is the same command over the "
+                     "unmutated sandbox."),
+        ),
+    ),
+    Guard(
         id="packages",
         file="scripts/package_check.py",
         gate="packages",
-        spec="story E1.3 and `docs/RELEASE.md`",
+        spec="story E1.3, F-220 and `docs/RELEASE.md`",
         refuses="A published package whose version skews from the workspace, "
                 "an advertised exports path absent from the tarball, a "
-                "tarball carrying sources or build state, and a consumer that "
-                "cannot import or type-check what was published.",
+                "tarball carrying sources, build state or a test file, a "
+                "consumer that cannot import or type-check what was "
+                "published, and an unreachable package the consumer resolves "
+                "at another version, loads during the smoke import, or names "
+                "from another package's file. A resolve trace that does not "
+                "record the dcmjs ES entry is refused as well. A tarball that "
+                "carries a wasm file without THIRD_PARTY_LICENSES or "
+                "THIRD_PARTY_NOTICES is refused. The @ocelli/wasm tarball is "
+                "refused without both modules and their glue, and refused "
+                "when its build id is absent, names another git SHA than "
+                "this HEAD, does not name this index, records unstaged "
+                "tracked changes, or records a digest its own module bytes "
+                "do not hash to. The consumer "
+                "proof must pin a render-only export on the root entry and "
+                "its absence on ./decode, so a staging edit that swaps the "
+                "two modules is refused.",
         claims=("*",),
         probes=(
             Probe(
@@ -9677,7 +12766,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -9691,7 +12780,7 @@ GUARDS: tuple[Guard, ...] = (
                     "     'exports': {'.': {'import': './dist/index.js'}},\n"
                     "     'files': ['dist']};\n"
                     "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
-                    "         'LICENSE-APACHE', 'dist/index.js'];\n"
+                    "         'LICENSE-APACHE', 'NOTICE', 'dist/index.js'];\n"
                     "bad = p.check_tarball('core', m, names);\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n"),
@@ -9701,6 +12790,22 @@ GUARDS: tuple[Guard, ...] = (
                      "input is an exports map naming a path the name list "
                      "does not carry, which is story E1.3's sentence and not "
                      "the function's code."),
+            Probe(
+                "packages.test-file-in-tarball", None,
+                python_snippet(
+                    "package_check.check_tarball, test file",
+                    _TEST_FILE_TARBALL),
+                "which is a test file",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_tarball, no test file",
+                    _TEST_FILE_TARBALL_HEALTHY),
+                note="Level 1. The name list carries dist/index.test.js, "
+                     "dist/index.test.d.ts, dist/x.spec.js and "
+                     "dist/__tests__/a.js, for both packages. The control "
+                     "carries dist/latest.js and dist/contest.d.ts and must "
+                     "return none. A suffix rule on .test.js only, or a rule "
+                     "that matches the substring test, fails one of the two."),
             Probe(
                 "packages.version-skew", None,
                 python_snippet(
@@ -9717,16 +12822,652 @@ GUARDS: tuple[Guard, ...] = (
                     "package_check.check_manifest, healthy",
                     "import sys; sys.path.insert(0, 'scripts');\n"
                     "import package_check as p;\n"
-                    "m = {'name': '@ocelli/core', 'version': '0.1.0'};\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.1.0'}};\n"
                     "bad = p.check_manifest('core', m, '0.1.0');\n"
                     "print('\\n'.join(bad));\n"
                     "sys.exit(1 if bad else 0)\n")),
+            Probe(
+                "packages.peer-dep-skew", None,
+                python_snippet(
+                    "package_check.check_manifest, peer skew",
+                    "import sys; sys.path.insert(0, 'scripts');\n"
+                    "import package_check as p;\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.0.9'}};\n"
+                    "bad = p.check_manifest('core', m, '0.1.0');\n"
+                    "print('\\n'.join(bad));\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "peer-depends on @ocelli/wasm",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_manifest, peer healthy",
+                    "import sys; sys.path.insert(0, 'scripts');\n"
+                    "import package_check as p;\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0',\n"
+                    "     'peerDependencies': {'@ocelli/wasm': '0.1.0'}};\n"
+                    "bad = p.check_manifest('core', m, '0.1.0');\n"
+                    "print('\\n'.join(bad));\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="F-237. The shell peer-depends on the module at the "
+                     "version the module publishes. A range resolves to "
+                     "whatever the registry has, the same defect the react "
+                     "dependency check refuses."),
+            Probe(
+                "packages.unreachable-version", None,
+                python_snippet(
+                    "package_check.consumer_version_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "rows = [{'package': 'adm-zip', 'version': '0.5.17',\n"
+                    "         'scope': 'unreachable'}]\n"
+                    "lock = {'packages': {'node_modules/adm-zip':\n"
+                    "         {'version': '0.5.16'}}}\n"
+                    "bad = p.consumer_version_problems(rows, lock)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "the consumer resolves",
+                level=1,
+                control=python_snippet(
+                    "package_check.consumer_version_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "rows = [{'package': 'adm-zip', 'version': '0.5.17',\n"
+                    "         'scope': 'unreachable'}]\n"
+                    "lock = {'packages': {'node_modules/adm-zip':\n"
+                    "         {'version': '0.5.17'}}}\n"
+                    "bad = p.consumer_version_problems(rows, lock)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="The consumer lock is the proof. A row that describes "
+                     "this repository's lock and not the consumer's is "
+                     "refused."),
+            Probe(
+                "packages.unreachable-loaded", None,
+                python_snippet(
+                    "package_check.resolved_package_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "urls = ['file:///tmp/consumer/node_modules/adm-zip/"
+                    "index.js']\n"
+                    "bad = p.resolved_package_problems(urls, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "loads an unreachable package",
+                level=1,
+                control=python_snippet(
+                    "package_check.resolved_package_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "urls = ['file:///tmp/consumer/node_modules/dcmjs/build/"
+                    "dcmjs.es.js']\n"
+                    "bad = p.resolved_package_problems(urls, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="One resolved URL under the excepted package. The "
+                     "control resolves only dcmjs."),
+            Probe(
+                "packages.unreachable-named", None,
+                python_snippet(
+                    "package_check.specifier_problems",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "files = {'node_modules/dcmjs/build/dcmjs.es.js':\n"
+                    "         'import \"adm-zip\";\\n'}\n"
+                    "bad = p.specifier_problems(files, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                "names an unreachable package",
+                level=1,
+                control=python_snippet(
+                    "package_check.specifier_problems, healthy",
+                    "import sys; sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "files = {'node_modules/dcmjs/build/dcmjs.es.js':\n"
+                    "         'export const ok = 1;\\n'}\n"
+                    "bad = p.specifier_problems(files, {'adm-zip'})\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="A quoted package name in another package's file. The "
+                     "package's own files are not the scan."),
+            Probe(
+                "packages.unreachable-trace", None,
+                python_snippet(
+                    "package_check.check_consumer, trace misses dcmjs",
+                    _unreachable_trace_snippet(False)),
+                "does not record dcmjs/build/dcmjs.es.js",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_consumer, trace records dcmjs",
+                    _unreachable_trace_snippet(True)),
+                note="A synthetic consumer whose trace does not record the "
+                     "dcmjs ES entry or the CommonJS build the smoke run "
+                     "must load. The installer and the typecheck are stubbed. "
+                     "The call is check_consumer, so deleting "
+                     "unreachable_problems from it turns this probe red."),
+            Probe(
+                "packages.smoke-requires-dcmjs", None,
+                python_snippet(
+                    "package_check.smoke_wiring_problems, no require",
+                    _SMOKE_REQUIRES_DCMJS),
+                "does not require dcmjs",
+                level=1,
+                control=python_snippet(
+                    "package_check.smoke_wiring_problems, healthy",
+                    _SMOKE_WIRING_HEALTHY),
+                note="The control reads the real smoke text. Removing "
+                     "createRequire(import.meta.url)(\"dcmjs\") from it "
+                     "leaves this control failing."),
+            Probe(
+                "packages.hook-register-hooks", None,
+                python_snippet(
+                    "package_check.smoke_wiring_problems, module.register",
+                    _SMOKE_REGISTER_HOOKS),
+                "does not use registerHooks",
+                level=1,
+                control=python_snippet(
+                    "package_check.smoke_wiring_problems, hook healthy",
+                    _SMOKE_WIRING_HEALTHY),
+                note="module.register does not record a require from "
+                     "createRequire. The control reads the real hook text."),
+            Probe(
+                "packages.wasm-without-notices", None,
+                python_snippet(
+                    "package_check.check_tarball, wasm without notices",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0'}\n"
+                    "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
+                    "         'LICENSE-APACHE', 'NOTICE',\n"
+                    "         'dist/ocelli_wasm_bg.wasm']\n"
+                    "bad = p.check_tarball('core', m, names)\n"
+                    "print('\\n'.join(bad))\n"
+                    "wanted = ('THIRD_PARTY_LICENSES', 'THIRD_PARTY_NOTICES')\n"
+                    "ok = all(any(item in problem for problem in bad)\n"
+                    "         for item in wanted)\n"
+                    "sys.exit(1 if ok else 0)\n"),
+                "has no THIRD_PARTY_LICENSES",
+                level=1,
+                control=python_snippet(
+                    "package_check.check_tarball, wasm with notices",
+                    "import sys\n"
+                    "sys.path.insert(0, 'scripts')\n"
+                    "import package_check as p\n"
+                    "m = {'name': '@ocelli/core', 'version': '0.1.0'}\n"
+                    "names = ['package.json', 'README.md', 'LICENSE-MIT',\n"
+                    "         'LICENSE-APACHE', 'NOTICE',\n"
+                    "         'dist/ocelli_wasm_bg.wasm',\n"
+                    "         'THIRD_PARTY_LICENSES', 'THIRD_PARTY_NOTICES']\n"
+                    "bad = p.check_tarball('core', m, names)\n"
+                    "print('\\n'.join(bad))\n"
+                    "sys.exit(1 if bad else 0)\n"),
+                note="Level 1. The name list carries dist/ocelli_wasm_bg.wasm "
+                     "and the files every tarball needs, and it lacks both "
+                     "notice files. The control is that list plus both files "
+                     "and returns none. A tarball with no wasm file is not "
+                     "asked for them."),
+            Probe(
+                "packages.build-id-absent", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, no build id",
+                    _WASM_IDENTITY_ABSENT),
+                "carries no dist/build-id.json",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The identity file is how a release proves the "
+                     "module is the one its HEAD builds, so its absence is "
+                     "its own refusal rather than a missing-field warning."),
+            Probe(
+                "packages.build-id-parse", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, not json",
+                    _WASM_IDENTITY_PARSE),
+                "does not parse to a build id object",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. A build id that is not valid JSON refuses "
+                     "rather than crashing the gate. The next probe drives "
+                     "the valid-JSON-but-not-an-object half of the same "
+                     "refusal."),
+            Probe(
+                "packages.build-id-non-object", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, not an object",
+                    _WASM_IDENTITY_NON_OBJECT),
+                "does not parse to a build id object",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. Valid JSON that parses to a list is refused by "
+                     "the same sentence as the unparseable form. Deleting "
+                     "the object check crashes this probe instead of "
+                     "refusing, which the harness reads red."),
+            Probe(
+                "packages.build-id-version", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, other version",
+                    _WASM_IDENTITY_VERSION),
+                "not the workspace version",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The build id records the package version beside "
+                     "the SHA, and the pairing is one version."),
+            Probe(
+                "packages.build-id-stale", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, stale sha",
+                    _WASM_IDENTITY_STALE),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The recorded SHA is another tree's and this "
+                     "HEAD is current. The digests in the input are correct, "
+                     "so the SHA mismatch is the only refusal. A presence "
+                     "check passes this input, which is the wrong "
+                     "implementation AC3 rejects."),
+            Probe(
+                "packages.build-id-digest", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, digest mismatch",
+                    _WASM_IDENTITY_DIGEST),
+                "hash to",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The SHA is current and the digests are not the "
+                     "bytes' hash, which is an edited identity beside "
+                     "unrebuilt modules."),
+            Probe(
+                "packages.build-id-module-absent", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, module absent",
+                    _WASM_IDENTITY_MODULE_ABSENT),
+                "tarball has no dist/decode/ocelli_wasm_bg.wasm",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237. The build id names a digest for a module the "
+                     "tarball does not carry, so the decode half of Q3 is "
+                     "refused when it is missing."),
+            Probe(
+                "packages.build-id-dirty", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, dirty tree",
+                    _WASM_IDENTITY_DIRTY),
+                "does not record a tree without unstaged tracked changes",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237 review S1. The build id records whether the "
+                     "working tree had unstaged tracked changes, and a build "
+                     "over such changes names a SHA its bytes do not come "
+                     "from. The read requires the refusal for a build id "
+                     "with dirty true and for one with the field absent, "
+                     "which is what pins the fail-closed direction: "
+                     "loosening the check to `is True` accepts the absent "
+                     "field and turns this probe red."),
+            Probe(
+                "packages.build-id-tree", None,
+                python_snippet(
+                    "package_check.wasm_identity_problems, foreign tree",
+                    _WASM_IDENTITY_TREE),
+                "must name the index the pack staged from",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_problems, healthy",
+                    _WASM_IDENTITY_HEALTHY),
+                note="F-237 review pass 2, D1. The build id records the git "
+                     "write-tree of the staged index beside the SHA. The "
+                     "read requires the refusal for a tree that is not this "
+                     "index's and for the field absent, which pins the "
+                     "fail-closed direction the same way the dirty probe "
+                     "does. The staged-index case itself is the accept "
+                     "direction: a tree recorded from a staged index passes "
+                     "while the index is still that one, which "
+                     "test_release_wasm.py's stage suite drives."),
+            Probe(
+                "packages.build-id-tarball-stale", None,
+                python_snippet(
+                    "package_check.wasm_identity_from_tarball, stale",
+                    _PACKED_IDENTITY_STALE),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check.wasm_identity_from_tarball, current",
+                    _PACKED_IDENTITY_CURRENT),
+                note="S2. The pure inputs above enter at "
+                     "wasm_identity_problems. This one enters at "
+                     "wasm_identity_from_tarball with a real tarball and the "
+                     "sandbox's own git HEAD, so the refusal is seen at the "
+                     "end of the path a pack takes. Deleting the whole "
+                     "function turns both this and the pure probes red, and "
+                     "deleting the call in main is what the next probe "
+                     "watches."),
+            Probe(
+                "packages.build-id-call-in-main", None,
+                python_snippet("package_check main, stale build id",
+                               _MAIN_REFUSES_STALE_ID),
+                "stale artefact",
+                level=1,
+                control=python_snippet(
+                    "package_check main, honest build id",
+                    _MAIN_ACCEPTS_HONEST_ID),
+                note="S2. All seven earlier build id probes called the "
+                     "detection function directly, so deleting the call in "
+                     "main left every one of them green. This one runs "
+                     "main() with run, tarball_paths and check_consumer "
+                     "stubbed over a wasm tarball whose build id is stale, "
+                     "and requires the stale refusal in main's own output, "
+                     "so any unwiring of the call is red: the two lines "
+                     "commented out, the call kept with its result "
+                     "discarded, the branch keyed on anything but "
+                     "MODULE_PACKAGE, and the deletion. The control runs the "
+                     "same stubs over an honest build id and must be green, "
+                     "which is what says the refusal names the stale id and "
+                     "not the stubbing."),
+            Probe(
+                "packages.module-surface-smoke", None,
+                python_snippet(
+                    "package_check.module_surface_problems, no render pin",
+                    _SMOKE_WITHOUT_RENDER_PIN),
+                "cannot tell the render module from the decode module",
+                level=1,
+                control=python_snippet(
+                    "package_check.module_surface_problems, healthy",
+                    _MODULE_SURFACE_HEALTHY),
+                note="S3. Both modules export init, ocelli_version and the "
+                     "panic surface, so a smoke built on those alone accepts "
+                     "a root entry that is the decode module. The input is "
+                     "the real SMOKE_SCRIPT with the render-only assertion "
+                     "removed, and the control is the real pair."),
+            Probe(
+                "packages.module-surface-check", None,
+                python_snippet(
+                    "package_check.module_surface_problems, no type pin",
+                    _CHECK_TS_WITHOUT_RENDER_PIN),
+                "does not read apply_commands from the root entry",
+                level=1,
+                control=python_snippet(
+                    "package_check.module_surface_problems, healthy",
+                    _MODULE_SURFACE_HEALTHY),
+                note="S3, the type half. The real CHECK_TS with the "
+                     "render-only pin removed. A swapped staging would then "
+                     "type-check under bundler and node16 with the gate "
+                     "green."),
         ),
         limit="The consumer install, node import, two tsc resolutions and "
               "publish dry run need an npm install. `node_modules` is ignored "
-              "and therefore absent from the `git ls-files` sandbox, so these "
-              "level-3 refusals have no catalogue probe. The `packages` gate "
-              "runs them against the real install on every push.",
+              "and therefore absent from the `git ls-files` sandbox, so those "
+              "steps have no level-3 probe. The `packages` gate runs them "
+              "against the real install on every push. The unreachability "
+              "checks are pure functions and have level-1 probes. "
+              "`packages.unreachable-trace` calls `check_consumer` on a "
+              "synthetic directory with the installer and the typecheck "
+              "stubbed, so removing that call turns the probe red. "
+              "`packages.smoke-requires-dcmjs` and "
+              "`packages.hook-register-hooks` read the real smoke text and "
+              "the real hook, so removing the dcmjs require or registerHooks "
+              "turns those probes red. `packages.test-file-in-tarball` calls "
+              "check_tarball for core and for react on the four test paths, "
+              "and its control is the healthy list. "
+              "`packages.wasm-without-notices` calls check_tarball with a "
+              "wasm path and no third-party notice file, and its control is "
+              "that list with both notice files. "
+              "`packages.build-id-tarball-stale` and "
+              "`packages.build-id-call-in-main` watch the wiring of the "
+              "build id refusal, the first through a real tarball and the "
+              "sandbox's own git HEAD, the second by running main() with "
+              "the npm steps stubbed over a stale build id and requiring "
+              "the refusal in its output, which any unwiring of the call "
+              "turns off. The two "
+              "module-surface probes delete the render-only assertion from "
+              "the real smoke text and the real type check text in memory, "
+              "and a real staging swap is driven red by the consumer install "
+              "in the `packages` gate itself, which no sandbox can run. The "
+              "surface refusal reads the same two constants the consumer "
+              "files are written from, so its wiring is one layer beside the "
+              "runtime one: dropping the module_surface_problems call leaves "
+              "the smoke's throw and tsc's TS2339 and TS2578 alive in the "
+              "real install, and gutting a constant turns this refusal red. "
+              "The module-and-glue presence refusal for @ocelli/wasm has no "
+              "dedicated probe, the same standing as the generic REQUIRED "
+              "check beside it, and its addition is recorded in the "
+              "entry_sites count.",
+    ),
+    Guard(
+        id="release-wasm",
+        file="scripts/release_wasm.py",
+        gate="-",
+        spec="docs/RELEASE.md item 6 and the F-237 review's D3 ruling",
+        refuses="A release tarball whose build id does not name the release "
+                "revision or its tree, does not record a clean tree, whose "
+                "recorded digests differ from a cold build of the tagged "
+                "source, or whose packed module bytes differ from that cold "
+                "build. A revision that does not resolve to a commit, a cold "
+                "build or a pack that fails, and a tarball without the build "
+                "id or without both modules are refused as well.",
+        claims=("*",),
+        covered_by=("scripts/tests/test_release_wasm.py "
+                    "(run by the `guards` gate)",),
+        limit="The cold build needs wasm-pack and the pinned toolchain for "
+              "minutes, which no probe sandbox carries and no floor probe "
+              "may wait on. The tests drive the comparison and the tarball "
+              "round trip on synthetic inputs, and the real cold build runs "
+              "when `/release` runs the script at preflight item 8, before "
+              "any tag, push or publish. The script reads the dirty flag, "
+              "the SHA and the tree out of the build id stage.mjs wrote, so "
+              "a stage that lied about any of them is caught here only when "
+              "the bytes differ from the tag's build: a dirty change that "
+              "leaves both modules byte-identical to what the tag builds "
+              "would pass with a false clean flag. The packages gate refuses "
+              "a recorded dirty flag and a tree that is not the index it "
+              "runs at, for the same reason it refuses a recorded stale SHA.",
+    ),
+    Guard(
+        id="viewer-build",
+        file="scripts/viewer_build_check.py",
+        gate="packages",
+        spec="F-217 AC18 in `.claude/plans/F-217-design.md`, the viewer's "
+             "`vite build` passing in CI, and the lead decision that a build "
+             "without `crates/ocelli-wasm/pkg` passes and leaves the import "
+             "to runtime, where it fails and the core reads as not built",
+        refuses="A viewer build that fails with the wasm pkg absent, or that "
+                "then emits a wasm file or drops the runtime import of the "
+                "pkg URL or the fetch probe in front of it. A viewer build "
+                "that fails with a pkg present, or that then emits no wasm "
+                "glue chunk or no `.wasm` asset, or still imports the pkg URL "
+                "at runtime.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "viewer-build.absent-bundled", None,
+                python_snippet("viewer_build_check.absent_problems",
+                               _VIEWER_ABSENT_BUNDLED),
+                "does not keep a runtime import()",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.absent_problems, healthy",
+                    _VIEWER_ABSENT_HEALTHY),
+                note="Level 1. A pkg-absent build whose worker imports a "
+                     "bundled chunk and which emitted wasm files, which is "
+                     "what a build that found a pkg it should not have "
+                     "looks like. The control keeps the runtime import and "
+                     "the probe and emits no wasm file."),
+            Probe(
+                "viewer-build.present-external", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_EXTERNAL),
+                "no ocelli_wasm chunk",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1. A pkg-present build that left the URL "
+                     "external, which is what a config that always marks it "
+                     "external produces. The control emits the glue chunk and "
+                     "the `.wasm` and imports the chunk."),
+        ),
+        limit="The two builds need an npm install, and `node_modules` is "
+              "ignored and therefore absent from the `git ls-files` sandbox, "
+              "so the build steps and the missing-library refusal have no "
+              "level-3 probe. The `packages` gate runs both builds against "
+              "the real install on every push. The present state uses a "
+              "stand-in pkg, because the frontend job has no Rust toolchain, "
+              "so it proves what Vite emits for a pkg that exists and not "
+              "that the real pkg instantiates. The worker-count refusals have "
+              "no probe.",
+    ),
+    Guard(
+        id="advisories",
+        file="scripts/advisory_check.py",
+        gate="advisories",
+        spec="`.claude/plans/F-218-design.md`",
+        refuses="A high or critical advisory in the published npm runtime "
+                "with no covering exception, a stale or misshapen exception, "
+                "an override of a closure package, and an audit report that "
+                "is missing, unreadable or the wrong version.",
+        claims=("*",),
+        probes=(
+            Probe(
+                "advisories.unexcepted-high", None,
+                python_snippet("advisory_check unexcepted high",
+                               _ADVISORY_UNEXCEPTED_HIGH),
+                "has no exception",
+                level=1,
+                control=python_snippet("advisory healthy, unexcepted high",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.unexcepted-critical", None,
+                python_snippet("advisory_check unexcepted critical",
+                               _ADVISORY_UNEXCEPTED_CRITICAL),
+                "has no exception",
+                level=1,
+                control=python_snippet(
+                    "advisory healthy, unexcepted critical",
+                    _ADVISORY_HEALTHY),
+                note="critical sorts before high. Membership is the test."),
+            Probe(
+                "advisories.new-advisory", None,
+                python_snippet("advisory_check new advisory", _ADVISORY_NEW),
+                "has no exception",
+                level=1,
+                control=python_snippet("advisory healthy, new advisory",
+                                       _ADVISORY_HEALTHY),
+                note="The row lists one high id and the report carries a "
+                     "second. A package-level waiver would accept both."),
+            Probe(
+                "advisories.stale-advisory", None,
+                python_snippet("advisory_check stale advisory",
+                               _ADVISORY_STALE),
+                "no longer reports",
+                level=1,
+                control=python_snippet("advisory healthy, stale advisory",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.outside-closure", None,
+                python_snippet("advisory_check outside closure",
+                               _ADVISORY_OUTSIDE),
+                "OK",
+                level=1, polarity="accept",
+                note="vite is outside the published closure. A high advisory "
+                     "on it needs no row."),
+            Probe(
+                "advisories.moderate-warns", None,
+                python_snippet("advisory_check moderate",
+                               _ADVISORY_MODERATE),
+                "WARN",
+                level=1, polarity="accept",
+                note="An unexcepted moderate exits 0 and names itself."),
+            Probe(
+                "advisories.no-report", None,
+                python_snippet("advisory_check no report",
+                               _ADVISORY_NO_REPORT),
+                "did not produce a report",
+                level=1,
+                control=python_snippet("advisory healthy, no report",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.report-version", None,
+                python_snippet("advisory_check report version",
+                               _ADVISORY_VERSION),
+                "report version",
+                level=1,
+                control=python_snippet("advisory healthy, report version",
+                                       _ADVISORY_HEALTHY)),
+            Probe(
+                "advisories.unknown-severity", None,
+                python_snippet("advisory_check unknown severity",
+                               _ADVISORY_UNKNOWN),
+                "unknown severity",
+                level=1,
+                control=python_snippet("advisory healthy, unknown severity",
+                                       _ADVISORY_HEALTHY),
+                note="severe is not one of the five severities npm uses."),
+            Probe(
+                "advisories.exception-incomplete",
+                _advisory_blank_decided_by,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is missing"),
+            Probe(
+                "advisories.exception-scope",
+                _advisory_scope_dev_only,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is not unreachable"),
+            Probe(
+                "advisories.exception-scope-padded",
+                _advisory_scope_padded,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "is not unreachable",
+                note="scope = \"unreachable \" is a different spelling. "
+                     "Stripping it would accept the row and drop it from "
+                     "the consumer proof."),
+            Probe(
+                "advisories.exception-proof",
+                _advisory_unknown_proof,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "names no proof the packages gate runs"),
+            Probe(
+                "advisories.exception-stale",
+                _advisory_stale_version,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "stale advisory exception"),
+            Probe(
+                "advisories.install-script",
+                _advisory_install_script,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "has an install script"),
+            Probe(
+                "advisories.shipped-override",
+                _advisory_shipped_override,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "overrides do not reach a consumer"),
+            Probe(
+                "advisories.nested-override",
+                _advisory_nested_override,
+                script("python3", "scripts/advisory_check.py", "exceptions"),
+                "overrides do not reach a consumer",
+                note="The override sits under dcmjs. A top-level key scan "
+                     "would miss it."),
+        ),
+        limit="The live audit needs the registry, so the npm section has no "
+              "level-3 probe in the sandbox. Level-1 probes call "
+              "`audit_problems` on synthetic reports. The exceptions section "
+              "is level 3 over the sandbox copy of the tracked lock and "
+              "manifests. This gate's verdict follows the advisory database "
+              "and can change without a tree change.",
     ),
 
     # -- the example viewer launcher --------------------------------------
@@ -9749,6 +13490,7 @@ GUARDS: tuple[Guard, ...] = (
                 control=Invoke(
                     "example-dev reaches a printed URL",
                     _example_dev_reaches_a_url),
+                control_expect="example helper http://127.0.0.1:9",
                 note="The plan requires the helper's base URL before Vite. "
                      "The probe stubs the build and the binary so the sandbox "
                      "can reach the wait, and shortens that wait. The control "
@@ -9758,13 +13500,25 @@ GUARDS: tuple[Guard, ...] = (
     ),
 
     # -- the runner and the source resolver --------------------------------
+    # Step 6 of the native arm is probed through its own extracted lines and
+    # a stub `cargo` and stub desktop binary, because a probe that ran the
+    # step for real would run the whole native arm inside the sandbox. The
+    # builders are in the `Step 6 of the native arm` section above `GUARDS`.
+
     Guard(
         id="runner",
         file="bin/ocelli.sh",
         gate="-",
-        spec="`.claude/WORKFLOW.md`, a skipped gate is not a pass",
+        spec="`.claude/WORKFLOW.md`, a skipped gate is not a pass. F-238, "
+             "the shipped native build links and its desktop binary reports",
         refuses="A command whose prerequisite is absent, rather than running "
-                "it and reporting whatever comes out.",
+                "it and reporting whatever comes out. And a shipped native "
+                "build whose own output names no ocelli-desktop executable "
+                "or names more than one, or a shipped native desktop binary "
+                "that exits non-zero, does not report the NoAdapter tier on "
+                "an Apple host, reports NoAdapter without its no-backend "
+                "cause line, or prints no tier on any other host, rather "
+                "than failing the native arm.",
         claims=("*",),
         probes=(
             Probe("runner.absent-prerequisite", None,
@@ -9776,7 +13530,212 @@ GUARDS: tuple[Guard, ...] = (
                        "the sandbox's natural state. The control is "
                        "`gate --list`, which proves the runner itself works "
                        "in the sandbox and does not print this message."),
+            Probe("runner.step6-exits-without-a-report",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=3),
+                  Invoke("probe-f238-step6.sh, an honest report and exit 3",
+                         _run_step6_probe),
+                  "exited 3 instead of reporting its tier",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The non-zero-exit refusal. The step's own lines are "
+                       "extracted from the sandbox copy of the runner and "
+                       "run against a stub `cargo` whose build writes a "
+                       "binary that prints the honest Apple report and then "
+                       "exits 3, the way a panic while tearing down would: "
+                       "the report alone passes both Apple greps, so the "
+                       "non-zero status is the only thing this refusal "
+                       "hangs on. The control is the same fragment against "
+                       "a binary that reports and exits 0."),
+            Probe("runner.step6-wrong-tier-on-apple",
+                  lambda box: _write_step6_probe(
+                      box, report=_DEV_APPLE_REPORT, exit_code=0),
+                  Invoke("probe-f238-step6.sh, a development-style report",
+                         _run_step6_probe),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The Apple match refusal. The stub prints a "
+                       "development-style report and only its tier line is "
+                       "load bearing: it is a tier, so the step reached a "
+                       "report, and it is not the shipped one, so the "
+                       "branch must refuse. The control prints the shipped "
+                       "report and exits 0."),
+            Probe("runner.step6-wrong-tier-over-the-cause-line",
+                  lambda box: _write_step6_probe(
+                      box, report=_WRONG_TIER_APPLE_REPORT, exit_code=0),
+                  Invoke("probe-f238-step6.sh, a wrong tier line over the "
+                         "cause line",
+                         _run_step6_probe),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The wrong-tier refusal's exit. The rejected state "
+                       "pairs a tier line that is not the shipped one with "
+                       "the cause line, so the Apple match refusal is the "
+                       "only one that fires and its exit is the only "
+                       "non-zero the step can produce. "
+                       "step6-wrong-tier-on-apple's rejected state also "
+                       "lacks the cause line, so there a later refusal's "
+                       "own exit produces the non-zero and this refusal's "
+                       "exit could go missing unwatched. The control is the "
+                       "honest report, which the step must accept."),
+            Probe("runner.step6-override-cannot-reach-the-binary",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      override_report=_OVERRIDDEN_APPLE_REPORT,
+                      without_env_u=True),
+                  Invoke("probe-f238-step6.sh, env -u dropped and "
+                         "OCELLI_TIER=cpu exported",
+                         lambda box: _run_step6_probe(
+                             box, env={"OCELLI_TIER": "cpu"})),
+                  "did not report Tier Cpu, decided by NoAdapter on an "
+                  "Apple host",
+                  control=Invoke(
+                      "probe-f238-step6.sh, env -u intact and "
+                      "OCELLI_TIER=cpu exported",
+                      _step6_override_stays_out),
+                  note="The F-238 review's S2. The rejected state drops "
+                       "`env -u` from the extracted fragment, so the "
+                       "caller's `OCELLI_TIER=cpu` reaches the stub binary, "
+                       "which answers it the way `probe.rs` does: the "
+                       "override returns from `detect` before the "
+                       "no-backend guard, so the report names `Override` "
+                       "and carries no cause line, and the step must "
+                       "refuse. The control is the same fragment with "
+                       "`env -u` intact, which must stay green, so its "
+                       "green and the red above differ only in the shield."),
+            Probe("runner.step6-cause-line-missing",
+                  lambda box: _write_step6_probe(
+                      box, report=_APPLE_REPORT_WITHOUT_CAUSE,
+                      exit_code=0),
+                  Invoke("probe-f238-step6.sh, NoAdapter without its cause "
+                         "line",
+                         _run_step6_probe),
+                  "without its no-backend cause line",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The F-238 review's S3. The stub prints the NoAdapter "
+                       "tier line without the `backends` cause line, which "
+                       "is what reaches the step when a `probe.rs` stops "
+                       "setting `no_backend_compiled`, and the step must "
+                       "refuse rather than let the cause go silent. The "
+                       "control prints the full report."),
+            Probe("runner.step6-no-tier-off-apple",
+                  lambda box: _write_step6_probe(
+                      box, report="", exit_code=0, host="Linux"),
+                  Invoke("probe-f238-step6.sh, an off-Apple host and no "
+                         "report",
+                         _run_step6_probe),
+                  "printed no tier report",
+                  control=Invoke("probe-f238-step6.sh, an off-Apple host "
+                                 "and a report", _step6_off_apple_report),
+                  note="The off-Apple refusal. The fragment runs with "
+                       "`uname` pinned to Linux, so the branch runs on "
+                       "every host, this Apple one included, and the stub "
+                       "prints nothing, so no line starts with `Tier`. The "
+                       "control prints a report whose first line is a tier "
+                       "and exits 0."),
+            Probe("runner.step6-target-triple-over-a-stale-binary",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_DEV_APPLE_REPORT),
+                  Invoke("probe-f238-step6.sh, CARGO_BUILD_TARGET set over "
+                         "a stale release binary",
+                         _run_step6_probe_naming_its_binary),
+                  "the step ran the binary its build named",
+                  polarity="accept",
+                  control=Invoke("probe-f238-step6.sh, an honest report and "
+                                 "exit 0", _step6_reports_and_exits),
+                  note="The F-238 review's S1. The stub build honours the "
+                       "exported `CARGO_BUILD_TARGET` the way cargo does: "
+                       "it writes the desktop binary into the triple "
+                       "directory and its `--message-format` JSON names "
+                       "that path, while an earlier build's desktop binary "
+                       "sits at the target directory's "
+                       "`release/ocelli-desktop` printing a "
+                       "development-style report, which is not the shipped "
+                       "one, so a run of the stale path refuses. The stub "
+                       "binary touches a marker file when it runs, and the "
+                       "runner reads it, because the step's own lines are "
+                       "silent on a green run: an exit 0 without the "
+                       "marker is reported as the refusal it is. The "
+                       "control is the same fragment with no target "
+                       "exported and the stub writing "
+                       "`release/ocelli-desktop`."),
+            Probe("runner.step6-no-named-executable",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_HONEST_APPLE_REPORT,
+                      named_desktops=0),
+                  Invoke("probe-f238-step6.sh, a build that names no "
+                         "desktop executable",
+                         lambda box: _run_step6_probe(
+                             box,
+                             env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})),
+                  "named no ocelli-desktop executable",
+                  control=Invoke(
+                      "probe-f238-step6.sh, a triple build that names the "
+                      "desktop binary",
+                      _step6_triple_build_names_the_binary),
+                  note="The ruling's refuse half. The build's output names "
+                       "no ocelli-desktop executable and the earlier "
+                       "build's binary sits at the path the target "
+                       "directory would suggest, printing the honest "
+                       "shipped report, so a step that falls back to that "
+                       "path runs it and passes. The step must refuse with "
+                       "its own refusal instead. The control is the same "
+                       "exported target and the same stale binary, with "
+                       "the build writing and naming the desktop binary in "
+                       "the triple directory, which the step must run and "
+                       "pass."),
+            Probe("runner.step6-two-named-executables",
+                  lambda box: _write_step6_probe(
+                      box, report=_HONEST_APPLE_REPORT, exit_code=0,
+                      stale_report=_HONEST_APPLE_REPORT,
+                      named_desktops=2),
+                  Invoke("probe-f238-step6.sh, a build that names two "
+                         "desktop executables",
+                         lambda box: _run_step6_probe(
+                             box,
+                             env={"CARGO_BUILD_TARGET": _STEP6_TRIPLE})),
+                  "named 2 ocelli-desktop executables, expected exactly one",
+                  control=Invoke(
+                      "probe-f238-step6.sh, a triple build that names the "
+                      "desktop binary",
+                      _step6_triple_build_names_the_binary),
+                  note="The pass 6 review's S1. The build names two "
+                       "ocelli-desktop executables. A multi-target build's "
+                       "stream carries two, one under each target's "
+                       "directory: cargo emits one such message per "
+                       "requested target, so which single binary a "
+                       "first-match parse checks is decided by the order "
+                       "cargo finishes the units and not by anything the "
+                       "step controls. The step must refuse naming the "
+                       "count and run nothing. A parse that takes the "
+                       "first match runs the first named binary, which "
+                       "here prints the honest report and passes, so "
+                       "under the break it exists to catch, as over a "
+                       "parse that fell back to the stale path, this probe "
+                       "reports HARNESS rather than red. The control is "
+                       "the same exported "
+                       "target and the same stale binary with the build "
+                       "naming exactly one desktop executable, which the "
+                       "step must run and pass."),
         ),
+        limit="The step 6 probes run the step's extracted lines against a "
+              "stub `cargo` and a stub desktop binary, because driving them "
+              "for real means running the whole native arm inside the "
+              "sandbox. The stubs' reports follow `tier_report` in "
+              "`crates/ocelli-native/src/lib.rs`. The stub build honours an "
+              "exported `CARGO_BUILD_TARGET` and, asked for a message "
+              "format, prints the `compiler-artifact` lines the step reads, "
+              "naming the paths it wrote, of which two desktop ones is the "
+              "state `runner.step6-two-named-executables` refuses. "
+              "`bin/ocelli.sh gate native` stays the end-to-end watcher: it "
+              "runs the step against the real binary on every run.",
     ),
     Guard(
         id="source-dir",
@@ -9844,19 +13803,70 @@ GUARDS: tuple[Guard, ...] = (
         spec="HLD 27.1, the denied lint table",
         refuses="A lint in HLD 27.1's table weakened below the level the "
                 "specification sets, a crate that stops inheriting the "
-                "workspace lint table, and any `.rs` file in a crate putting "
+                "workspace lint table, any `.rs` file in a crate putting "
                 "one of those lints back to sleep with an inner allow, by "
-                "name or through a group that contains it.",
+                "name or through a group that contains it, and, since "
+                "F-232, an `unsafe_code` row below 'forbid' in "
+                "[workspace.lints.rust], an `unsafe` gate that no longer "
+                "runs scripts/unsafe_allowlist_check.py beside it, and a "
+                "member library root without "
+                "`#![doc(test(attr(forbid(unsafe_code))))]`, which is what "
+                "refuses `unsafe` in a doctest.",
         claims=("*",),
         probes=(
             Probe("lint-policy.weakened", _lint_policy_weakened,
                   script("python3", "scripts/lint_policy_check.py"),
                   "is 'allow' and HLD 27.1 requires",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.unsafe-code-not-forbidden",
+                  _unsafe_code_at_deny,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "must be 'forbid'",
+                  needs="cargo", profile="deep",
+                  note="F-232 requires both mechanisms. `deny` is HLD 27.1's "
+                       "literal level and it is refused: an inner `allow` "
+                       "silences a deny and cannot silence a forbid, which "
+                       "is why the table went one level stronger."),
+            Probe("lint-policy.unsafe-script-dropped-beside-the-lint",
+                  _the_unsafe_arm_running_something_else,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "must stay in the `unsafe` gate",
+                  needs="cargo", profile="deep",
+                  note="F-232's other half. The table is present at forbid "
+                       "and the CI step is untouched, so the only loss is "
+                       "the script in the arm. The lint does not reach the "
+                       "vendored packages or the trybuild files, which the "
+                       "script audits, so the arm going quiet leaves half of "
+                       "R5 enforced by nothing."),
             Probe("lint-policy.uninherited", _lint_policy_uninherited,
                   script("python3", "scripts/lint_policy_check.py"),
                   "does not inherit the workspace lint table",
                   needs="cargo", profile="deep"),
+            Probe("lint-policy.doctest-forbid-removed",
+                  _doctest_forbid_removed,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and does not carry",
+                  needs="cargo", profile="deep",
+                  note="F-232. The [workspace.lints.rust] table does not "
+                       "reach a doctest, so each member library root "
+                       "carries `#![doc(test(attr(forbid(unsafe_code))))]`, "
+                       "which rustdoc injects into every doctest of the "
+                       "crate. One root loses the line and nothing else "
+                       "moves. The workspace has no doctests today, so the "
+                       "floor checks the attribute is present, and it acts "
+                       "on the first doctest anyone writes."),
+            Probe("lint-policy.doctest-forbid-behind-a-separator",
+                  _doctest_forbid_behind_a_separator,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "holds a character other than printable ASCII and tab",
+                  needs="cargo", profile="deep",
+                  note="F-232, review pass 5. The root is split at LF "
+                       "only, as rustc ends a `//` comment, and a head "
+                       "line holding anything but printable ASCII and tab "
+                       "is refused naming the line, so CR, NEL, U+2028 and "
+                       "the other separators Python splits at cannot hide "
+                       "the attribute text inside a comment. The unit tests "
+                       "carry one case per separator."),
             Probe("lint-policy.group-allow", _group_allow_at_a_crate_root,
                   script("python3", "scripts/lint_policy_check.py"),
                   "allows the lint group",
@@ -10221,20 +14231,24 @@ GUARDS: tuple[Guard, ...] = (
                   needs="cargo", profile="deep"),
             Probe("lint-policy.clean-module-outside-the-member",
                   _a_clean_module_outside_the_member,
-                  script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  Invoke("lint-policy.one-added-path", _one_added_lint_path),
+                  "one additional `#[path]` module followed",
                   polarity="accept",
+                  control=script("python3", "scripts/lint_policy_check.py"),
                   note="The other direction. A module source outside the "
                        "member directory is legal Rust and says nothing about "
                        "lint levels, so following `#[path]` must not turn the "
-                       "layout itself into a refusal. The expect fragment "
-                       "carries the COUNT since the S03 review's tenth pass. "
+                       "layout itself into a refusal. Since the S03 review's "
+                       "tenth pass, traversal evidence uses an actual count. "
                        "The OK line named the four keys in a fixed string, so "
                        "this probe passed on a sentence that would have "
                        "printed identically had the file been skipped, and "
                        "the count is derived from the sources actually read. "
-                       "`produce` already follows one path module, so the "
-                       "planted module is the second.",
+                       "The fixture records the real guard's baseline and "
+                       "requires exactly one additional followed path after "
+                       "planting the module. Other repository modules do not "
+                       "set this expectation. The group-allow companion "
+                       "challenges reading the planted file's content.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cfg-attr-module-path",
                   _a_cfg_attr_module_outside_the_member,
@@ -10267,17 +14281,20 @@ GUARDS: tuple[Guard, ...] = (
                   needs="cargo", profile="deep"),
             Probe("lint-policy.clean-cfg-attr-module-path",
                   _a_clean_cfg_attr_module_outside_the_member,
-                  script("python3", "scripts/lint_policy_check.py"),
-                  "2 `#[path]` module(s) followed",
+                  Invoke("lint-policy.one-added-path", _one_added_lint_path),
+                  "one additional `#[path]` module followed",
                   polarity="accept",
+                  control=script("python3", "scripts/lint_policy_check.py"),
                   note="The direction widening `MODULE_PATH` could get wrong. "
                        "`cfg_attr` is legal Rust and says nothing about lint "
                        "levels, and the guard REFUSES a `#[path]` it cannot "
                        "resolve, so an over-tight read of the wrapper would "
                        "refuse a crate that moves a module behind a feature. "
-                       "The count in the expect is what proves the file was "
-                       "read. `produce` already follows one path module, so "
-                       "the planted module is the second.",
+                       "The expect witness is emitted only after comparing "
+                       "actual counts. The fixture records the baseline "
+                       "and requires exactly one additional followed path "
+                       "after planting this module. The group-allow companion "
+                       "challenges reading the planted file's content.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.required-row-with-a-tail",
                   _a_required_row_with_a_tail,
@@ -10353,6 +14370,16 @@ GUARDS: tuple[Guard, ...] = (
                        "`#[path]`: it names a file clippy compiles and this "
                        "pass did not read, which is exactly the state the "
                        "group-allow measurement above was taken in.",
+                  needs="cargo", profile="deep"),
+            Probe("lint-policy.unreadable-library-root",
+                  _crate_root_the_guard_cannot_open,
+                  script("python3", "scripts/lint_policy_check.py"),
+                  "is a member library root and could not be read",
+                  note="F-232. The same missing `[lib] path` as "
+                       "`lint-policy.unreadable-crate-root`, read by the "
+                       "doctest attribute check. A library root it cannot "
+                       "open is an unknown, and an unknown is not a forbid, "
+                       "so it is refused rather than skipped.",
                   needs="cargo", profile="deep"),
             Probe("lint-policy.cap-lints-allow",
                   _cap_lints_allow,
@@ -10641,7 +14668,7 @@ GUARDS: tuple[Guard, ...] = (
             Probe("lint-policy.unsafe-gate-named-only-in-a-comment",
                   _the_unsafe_gate_named_only_in_a_comment,
                   script("python3", "scripts/lint_policy_check.py"),
-                  "neither mechanism is present",
+                  "must stay in the `unsafe` gate",
                   note="**One line of regex producing a positive assertion of "
                        "a false thing.** The declared substitution for HLD "
                        "27.1's `unsafe_code` deny is that the `unsafe` gate "
@@ -10665,7 +14692,10 @@ GUARDS: tuple[Guard, ...] = (
                        "comment-stripped and span-aware by construction, and "
                        "this guard is its third caller now. That is the "
                        "propagation failure again, the answer present in the "
-                       "repository and not reaching the caller.",
+                       "repository and not reaching the caller. F-232 made "
+                       "both mechanisms required, so the same plant now "
+                       "refuses with the script-dropped message rather than "
+                       "with neither-mechanism-is-present.",
                   needs="cargo", profile="deep"),
         ),
         limit="`REFUSED_GROUPS` is a list of nine names that exists only in "
@@ -11082,10 +15112,18 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/guards/catalogue.py",
         gate="guards",
         spec="`.claude/plans/F-X009-design.md` section 2",
-        refuses="A probe builder that mutated nothing, and a fixture drawn "
-                "from a citation that has gone away.",
+        refuses="A probe builder that mutated nothing, a fixture drawn "
+                "from a citation that has gone away, an unsupported fixture "
+                "exclusion layout, or missing successful traversal evidence.",
         claims=("*",),
         covered_by=("scripts/tests/test_guard_catalogue.py",),
+        limit="Fixture exclusion and traversal setup errors are exercised "
+              "directly by WorkspaceExcludeProbeBuilder and "
+              "LintModuleProbeWitness in the named unit suite. They are "
+              "harness preconditions, not additional repository policy. "
+              "The positive traversal probes also require the real guard's "
+              "baseline plus exactly one followed path, and their negative "
+              "companions require the planted file's group allow to refuse.",
     ),
     Guard(
         id="event-catalogue",
@@ -11191,7 +15229,9 @@ GUARDS: tuple[Guard, ...] = (
         gate="oracle",
         spec="HLD section 18, the LUT chain's VOI stage",
         refuses="A VOI declaration the reference cannot apply, and a window "
-                "the row does not carry.",
+                "the row does not carry. The explicit colour observation requires "
+                "a finite LINEAR pair and a boolean inversion, with malformed "
+                "pairs exercised in params_test.mjs.",
         claims=("*",),
         covered_by=("tools/oracle/tests/params_test.mjs",),
     ),
@@ -11201,7 +15241,9 @@ GUARDS: tuple[Guard, ...] = (
         gate="oracle",
         spec="`tools/oracle/render-params.json` is the declared parameter set",
         refuses="A render parameter the page does not implement, and a "
-                "parameter set that does not resolve for a row.",
+                "parameter set that does not resolve for a row. AC20 unknown, "
+                "duplicate and malformed observation rows are exercised by "
+                "params_test.mjs without changing the default declaration.",
         claims=("*",),
         covered_by=("tools/oracle/tests/params_test.mjs",),
     ),
@@ -11374,6 +15416,9 @@ GUARDS: tuple[Guard, ...] = (
                 "subject whose story is not in progress or done.",
         claims=("*",),
         covered_by=("tools/bench/tests/run_test.mjs (run by the `bench` gate)",),
+        limit="Five new comparison argument refusals are exercised by the "
+              "comparison conflict and controlled-colour selector tests, "
+              "including publication and missing or unknown case values.",
     ),
     Guard(
         id="codec.wasm-runner",
@@ -11545,6 +15590,484 @@ GUARDS: tuple[Guard, ...] = (
         ),
     ),
     Guard(
+        id="bench.viewer-work",
+        file="tools/bench/src/viewer_work.mjs",
+        gate="bench",
+        spec="F-216 design, the folder viewer subjects",
+        refuses="A viewer measurement that has no samples, a Part 10 element "
+                "whose length does not match its VR, a page that does not "
+                "expose the timed hooks, a scroll that delivered too few keys "
+                "or moved the counter backwards or blanked or faulted the "
+                "stage, a window step that never drew, a canvas that does not "
+                "match the server grey, a restart that leaves the gone "
+                "sentence or does not re-post, a held preview that still "
+                "carries a body, a held report that does not name its build, "
+                "and a retained heap with no memory counter, no forced "
+                "collection, or two readings that do not agree.",
+        claims=(
+            "median needs at least one value",
+            "a short element has a bad length",
+            "a long element has a bad length",
+            "the page did not expose requestGrey and drawGrey",
+            "the viewer did not report its build",
+            "the page did not expose performance.memory",
+            "the page did not expose gc or performance.memory",
+            "retained heap readings did not agree",
+            r"scroll delivered \$ keys, which is fewer than 120",
+            "the counter went backwards during a forward scroll",
+            "the stage showed a fault during the scroll",
+            "the stage was blank during the scroll",
+            "a window step did not reach drawGrey",
+            "the canvas check failed:",
+            r"canvas check sampled \$ points",
+            r"canvas pixel \$ ,\$ was not the server grey",
+            "a restart left the gone sentence on the page",
+            "the restart did not re-post the file",
+            r"/preview carried a body \$ times while the file was held",
+        ),
+        covered_by=("tools/bench/tests/viewer_work_test.mjs",),
+    ),
+    Guard(
+        id="viewer-browser.aspect",
+        file="examples/folder-viewer/tests/browser/aspect.mjs",
+        gate="viewer-browser",
+        spec="F-208 design AC14, PS3.3 10.7.1.3 Pixel Spacing is row spacing "
+             "then column spacing",
+        refuses="A folder viewer canvas whose displayed width over height on "
+                "the synthetic study, 128 columns by 96 rows at Pixel Spacing "
+                "0.7 by 0.5, is not 64 to 67.2 within 0.001, and a run that "
+                "measured no canvas.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `aspectProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives it.",
+        probes=(
+            Probe(
+                "viewer-browser.aspect-swapped",
+                _aspect_check_accepts_any_ratio,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { aspectProblems } from "
+                    "'./examples/folder-viewer/tests/browser/aspect.mjs';\n"
+                    "const problems = aspectProblems([{ name: 'swapped', "
+                    "width: 89.6, height: 48 }]);\n"
+                    "if (problems.some((line) => line.includes('not 0.952381'))) "
+                    "process.exit(0);\n"
+                    "console.error('aspect check accepted a swapped aspect'); "
+                    "process.exit(1);",
+                ),
+                "aspect check accepted a swapped aspect",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.aspect-no-canvas",
+                _aspect_check_accepts_no_canvas,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { aspectProblems } from "
+                    "'./examples/folder-viewer/tests/browser/aspect.mjs';\n"
+                    "const problems = aspectProblems([]);\n"
+                    "if (problems.includes('no canvas was measured')) "
+                    "process.exit(0);\n"
+                    "console.error('aspect check accepted a run with no "
+                    "canvas'); process.exit(1);",
+                ),
+                "aspect check accepted a run with no canvas",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the ratio check with the swapped spacing "
+              "reading and the empty-run check with no reading. The measurement itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so the browser half is watched by the `viewer-browser` gate "
+              "and its CI job rather than by this harness.",
+    ),
+    Guard(
+        id="viewer-browser.readout",
+        file="examples/folder-viewer/tests/browser/readout.mjs",
+        gate="viewer-browser",
+        spec="F-208 design, the cross, its readout and the magnifier are "
+             "positioned from the cell under the pointer, and the lead's "
+             "pass 4 ruling that they are cleared whenever that view "
+             "geometry can change",
+        refuses="A layout change, a window resize, a zoom with `=` or a tile "
+                "toggle, made with the pointer still, that leaves the readout, "
+                "the cross or the magnifier showing, a pointer move after it "
+                "that does not show them again, a pan or zoom drag that hides "
+                "them on most moves, a still-pointer ArrowRight or Play that "
+                "leaves the magnifier on the previous image, a tile emptied "
+                "under the pointer that leaves the magnifier on its old "
+                "image, a throw inside a drag's layout after which a zoom "
+                "no longer clears, a pointer over a faulted cell or between "
+                "tiles that shows the cross, the readout or the magnifier, "
+                "and a run that observed no change.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `readoutProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its survival branch.",
+        probes=(
+            Probe(
+                "viewer-browser.readout-survives",
+                _readout_check_accepts_a_survivor,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { readoutProblems } from "
+                    "'./examples/folder-viewer/tests/browser/readout.mjs';\n"
+                    "const shown = { read: 'C 1  R 1  40 HU', readHidden: "
+                    "false, crossHidden: false, magHidden: false };\n"
+                    "const problems = readoutProblems([{ name: 'kept', "
+                    "before: shown, after: shown, moved: shown, shown: "
+                    "['readout', 'magnifier'], again: ['readout', "
+                    "'magnifier'] }]);\n"
+                    "if (problems.some((line) => line.includes('survived the "
+                    "change'))) process.exit(0);\n"
+                    "console.error('readout check accepted a readout that "
+                    "survived'); process.exit(1);",
+                ),
+                "readout check accepted a readout that survived",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the survival branch with a readout that "
+              "stayed. The observation itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so it is watched by the `viewer-browser` gate and its CI job. "
+              "The no-change, no-repaint, drag, image-step, empty-tile, "
+              "thrown-layout, faulted-cell and tile-gap branches have no "
+              "probe.",
+    ),
+    Guard(
+        id="viewer-browser.link",
+        file="examples/folder-viewer/tests/browser/link.mjs",
+        gate="viewer-browser",
+        spec="F-209 design, a reference line is drawn from the outlined "
+             "viewport's image, and review pass 1 D1",
+        refuses="A reference line that stays displayed after the outlined "
+                "viewport becomes a cell with no image, and a run in which "
+                "no line showed before that change.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `linkProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its stale-line branch.",
+        probes=(
+            Probe(
+                "viewer-browser.link-stale-line",
+                _link_check_accepts_a_stale_line,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { linkProblems } from "
+                    "'./examples/folder-viewer/tests/browser/link.mjs';\n"
+                    "const problems = linkProblems({ name: 'kept', before: "
+                    "{ active: 1, lines: 2 }, after: { active: 5, lines: 2 } "
+                    "});\n"
+                    "if (problems.some((line) => line.includes('stayed with no "
+                    "source image'))) process.exit(0);\n"
+                    "console.error('link check accepted a stale reference "
+                    "line'); process.exit(1);",
+                ),
+                "link check accepted a stale reference line",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the stale-line branch with two lines that "
+              "stayed. The observation itself needs Chromium and a release "
+              "build of the viewer, which a disposable sandbox does not have, "
+              "so it is watched by the `viewer-browser` gate and its CI job. "
+              "The nothing-shown branch has no probe.",
+    ),
+    Guard(
+        id="viewer-browser.forget",
+        file="examples/folder-viewer/tests/browser/forget.mjs",
+        gate="viewer-browser",
+        spec="F-226 design AC13 to AC15, the folder viewer forgets the "
+             "folder the page left",
+        refuses="A second open after which `GET /held` still counts files or "
+                "frames of the folder left, an id of that folder that does not "
+                "answer 410, a late preview of it that is not 410 or that is "
+                "followed by a post of its file, a `pagehide` that sends "
+                "other than one forget request or one of 1 KiB or more, a "
+                "`GET /held` after it that does not count exactly the second "
+                "page's files and frames, files or frames still held after "
+                "the page navigates away, and a run in which a case was not "
+                "observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `forgetProblems`, which the script prints and "
+               "exits 1 on, and the probes below drive two of its branches.",
+        probes=(
+            Probe(
+                "viewer-browser.forget-left-folder",
+                _forget_check_accepts_the_left_folder,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { forgetProblems } from "
+                    "'./examples/folder-viewer/tests/browser/forget.mjs';\n"
+                    "const problems = forgetProblems({ left: { bFiles: 3, "
+                    "held: { files: 1, frames: 6 }, aStatuses: [410] } });\n"
+                    "if (problems.some((line) => line.includes(\"not B's "
+                    "3\"))) process.exit(0);\n"
+                    "console.error('forget check accepted a folder the page "
+                    "left'); process.exit(1);",
+                ),
+                "forget check accepted a folder the page left",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.forget-late-post",
+                _forget_check_accepts_a_late_post,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { forgetProblems } from "
+                    "'./examples/folder-viewer/tests/browser/forget.mjs';\n"
+                    "const problems = forgetProblems({ late: { caught: true, "
+                    "lateStatus: 410, reposts: 1 } });\n"
+                    "if (problems.some((line) => line.includes('posted again "
+                    "1 times'))) process.exit(0);\n"
+                    "console.error('forget check accepted a late post of a "
+                    "file the page left'); process.exit(1);",
+                ),
+                "forget check accepted a late post of a file the page left",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the left-folder count with the census F-216's "
+              "page gave and the late-post branch with one post. The "
+              "observation itself needs Chromium and a release build of the "
+              "viewer, which a disposable sandbox does not have, so it is "
+              "watched by the `viewer-browser` gate and its CI job. The 410, "
+              "beacon count, beacon size, held-after and not-observed "
+              "branches have no probe.",
+    ),
+    Guard(
+        id="viewer-browser.window",
+        file="examples/folder-viewer/tests/browser/window.mjs",
+        gate="viewer-browser",
+        spec="F-213 design AC13 and lead amendment 2, the window rows on "
+             "the number keys draw what they name and the file window "
+             "index is part of every viewport's cache key",
+        refuses="A number key whose corner word or grey is not its row's, "
+                "key 5 on the CT drawing key 4's grey, a shorter next list "
+                "that shows a fault or another window than its first, an MR "
+                "that lists a preset row or a key that reaches past its one "
+                "window, a region window that does not read WW 840 WL -380 "
+                "region, a missing library build that does not say so, a "
+                "per-frame multiframe frame that shows a fault before its "
+                "own window list arrives or is not drawn at its own first "
+                "window, a frame change on a fully held multiframe that "
+                "posts the file again, a Four images tile that is not drawn "
+                "at the chosen file window once its frame's list is known or "
+                "whose label does not name that window, a later frame of a "
+                "file whose frame 0 takes the top-level window that is named "
+                "with frame 0's label or shows a fault, a tile whose frame "
+                "list is held back and whose label does not give the WW and "
+                "WL it is drawn at, a multiframe step "
+                "whose process never holds every frame without the posted "
+                "bytes, and a run in which a step was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `windowProblems`, which the script prints and "
+               "exits 1 on, and the probe below drives its grey branch.",
+        probes=(
+            Probe(
+                "viewer-browser.window-stale-grey",
+                _window_check_accepts_a_stale_grey,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { EXPECTED, windowProblems } from "
+                    "'./examples/folder-viewer/tests/browser/window.mjs';\n"
+                    "const steps = EXPECTED.map((want) => ({ name: want.name, "
+                    "corner: 'WW 1  WL 1  ' + want.word, soft: want.soft, "
+                    "lung: want.lung, fault: '' }));\n"
+                    "steps[4].soft = 128; steps[4].lung = 0;\n"
+                    "const problems = windowProblems({ steps, mrRows: 1, "
+                    "region: { served: true, corner: 'WW 840  WL -380  "
+                    "region' } });\n"
+                    "if (problems.length === 1 && problems[0].includes('grey "
+                    "128 and 0, wanted 236 and 94')) process.exit(0);\n"
+                    "console.error('window check accepted a stale grey'); "
+                    "process.exit(1);",
+                ),
+                "window check accepted a stale grey",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the grey branch with key 5 showing key 4's "
+              "grey, which is what a cache key without the file window "
+              "index serves. The observation itself needs Chromium and a "
+              "release build of the viewer, which a disposable sandbox does "
+              "not have, so it is watched by the `viewer-browser` gate and "
+              "its CI job. Which region leg runs depends on whether "
+              "`packages/core/dist` is built, and CI does not build it, so "
+              "CI observes the library sentence. The corner, fault, MR row, "
+              "region, `multiframeProblems` and `tileProblems` branches have "
+              "no probe.",
+    ),
+    Guard(
+        id="viewer-browser.changed",
+        file="examples/folder-viewer/tests/browser/changed.mjs",
+        gate="viewer-browser",
+        spec="F-224 design AC13 to AC17, the folder viewer refuses to show "
+             "a file that changed on disk",
+        refuses="A file rewritten with a later modification time whose image "
+                "the viewport still shows after a focus, a status line that "
+                "does not count it, a process that still holds it or "
+                "answers other than 410 for its id, another image of the "
+                "series that does not draw, a folder chosen again whose "
+                "canvas is not the process grey of the new bytes, a rewrite "
+                "with its modification time restored that the page marks or "
+                "whose held image it drops before a new open, a held reply of "
+                "the old bytes that is painted or kept after the change, a "
+                "thumbnail still drawn from a changed file, a four-image view "
+                "where a changed tile lacks the sentence or an unchanged tile "
+                "does not draw, a status that counts another series after a "
+                "viewport becomes active or an activation that does not find "
+                "a change, a series selection that does not read one byte of "
+                "each file at most four at a time in under 1 s, and a run in "
+                "which a case was not observed.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `changedProblems`, which the script prints and "
+               "exits 1 on, and the probes below drive three of its branches.",
+        probes=(
+            Probe(
+                "viewer-browser.changed-old-image",
+                _changed_check_accepts_the_old_image,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ changed: { fault: '' "
+                    "} });\n"
+                    "if (problems.some((line) => line.includes('not the "
+                    "changed-file sentence'))) process.exit(0);\n"
+                    "console.error('changed check accepted the old image of a "
+                    "changed file'); process.exit(1);",
+                ),
+                "changed check accepted the old image of a changed file",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.changed-claimed-detection",
+                _changed_check_accepts_claimed_detection,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ restored: { fault: "
+                    "'marked' } });\n"
+                    "if (problems.some((line) => line.includes('detection the "
+                    "page does not claim'))) process.exit(0);\n"
+                    "console.error('changed check accepted detection of a "
+                    "restored modification time'); process.exit(1);",
+                ),
+                "changed check accepted detection of a restored modification "
+                "time",
+                level=1,
+            ),
+            Probe(
+                "viewer-browser.changed-whole-file",
+                _changed_check_accepts_a_whole_file_read,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { changedProblems } from "
+                    "'./examples/folder-viewer/tests/browser/changed.mjs';\n"
+                    "const problems = changedProblems({ probe: { files: 3, "
+                    "reads: 3, bytes: 1200, peak: 4, ms: 5 } });\n"
+                    "if (problems.some((line) => line.includes('not one "
+                    "each'))) process.exit(0);\n"
+                    "console.error('changed check accepted a probe that reads "
+                    "whole files'); process.exit(1);",
+                ),
+                "changed check accepted a probe that reads whole files",
+                level=1,
+            ),
+        ),
+        limit="The probes drive the old-image, restored-detection and "
+              "whole-file branches. The observation itself needs Chromium "
+              "and a release build of the viewer, which a disposable sandbox "
+              "does not have, so it is watched by the `viewer-browser` gate "
+              "and its CI job. The status, held count, 410, other-image, "
+              "chosen-again, restored-grey, held-reply, thumbnail, tile, "
+              "two-cell, read count, width, time and not-observed branches "
+              "have no probe.",
+    ),
+    Guard(
+        id="viewer-browser.auto",
+        file="examples/folder-viewer/tests/browser/auto.mjs",
+        gate="viewer-browser",
+        spec="F-227 design AC15, a series that stores no window is drawn at "
+             "one automatic window that the corner names as the reply does",
+        refuses="A series window reply that is not the nearest-rank window "
+                "of the sampled slices, a PT slice whose corner is not the "
+                "series window with Auto window, a disc-centre grey that is "
+                "not that window's on the first or last slice, more than one "
+                "series window request for a series or any for a scroll, a "
+                "drag, Reset or the row, a drag that keeps the words, a Reset "
+                "or Auto window row that does not restore them, a windowed CT "
+                "labelled Auto window, a refused series window not labelled "
+                "Auto window, this image, a linked Reset that leaves the "
+                "other cell anywhere but its own series window, and a series "
+                "that loses its window after a process restart, under a 4 MiB "
+                "cache that evicts the files posted at open or there answers "
+                "anything but one 410 then 200, or with a file "
+                "changed on disk outside or inside its sample, and a page that "
+                "sends more than 17 series window requests under a 1 MiB "
+                "cache or then shows anything but Auto window, this image, "
+                "and a run that leaves a viewer it started still running.",
+        claims=(),
+        silent="The file is under examples/, which scripts/guards/discover.py "
+               "does not scan, so the census finds no refusal site to claim. "
+               "The refusal is `seriesProblems`, `refusedProblems` and "
+               "`linkedProblems`, `restartProblems`, `evictedProblems`, "
+               "`changedProblems` and `starvedProblems`, which the script "
+               "prints and exits 1 on, and "
+               "the probe below drives the per-slice branch.",
+        probes=(
+            Probe(
+                "viewer-browser.auto-per-slice",
+                _auto_check_accepts_a_per_slice_window,
+                script(
+                    "node", "--input-type=module", "-e",
+                    "import { PT_SLICES, ptSlope, expectedWindow, "
+                    "seriesProblems } from "
+                    "'./examples/folder-viewer/tests/browser/auto.mjs';\n"
+                    "const pt = expectedWindow(PT_SLICES, ptSlope, 1);\n"
+                    "const reply = { center: String(pt.center), width: "
+                    "String(pt.width), sampled: 16, skipped: 0 };\n"
+                    "const line = 'WW ' + reply.width + '  WL ' + "
+                    "reply.center + '  Auto window';\n"
+                    "const slices = Array.from({ length: PT_SLICES }, () => "
+                    "({ line, fault: '', grey: 0 }));\n"
+                    "slices[1].line = 'WW 9  WL 9  Auto window, this image';\n"
+                    "const blank = { line: '', fault: '', grey: 0 };\n"
+                    "const problems = seriesProblems({ slices, replies: "
+                    "[reply], afterScroll: 1, beforeOthers: 1, total: 2, "
+                    "dragged: blank, reset: blank, row: blank, rowLabel: '', "
+                    "mr: blank, ct: blank, back: blank });\n"
+                    "if (problems.some((text) => text.startsWith('PT slice 2 "
+                    "reads'))) process.exit(0);\n"
+                    "console.error('auto check accepted a per-slice window'); "
+                    "process.exit(1);",
+                ),
+                "auto check accepted a per-slice window",
+                level=1,
+            ),
+        ),
+        limit="The probe drives the per-slice corner branch with slice 2 "
+              "showing its own window. The observation itself needs Chromium "
+              "and a release build of the viewer, which a disposable sandbox "
+              "does not have, so it is watched by the `viewer-browser` gate "
+              "and its CI job. The reply, grey, request count, drag, Reset, "
+              "row, MR, CT, shown-again, refused, linked, restart, eviction, "
+              "changed-file and stopping-rule branches have no probe.",
+    ),
+    Guard(
         id="bench.cold-start",
         file="tools/bench/src/runners/wasm_cold_start.mjs",
         gate="bench",
@@ -11575,6 +16098,177 @@ GUARDS: tuple[Guard, ...] = (
               "test.",
     ),
     Guard(
+        id="bench.comparison",
+        file="tools/bench/src/comparison.mjs",
+        gate="bench",
+        spec="`.claude/plans/F-223-design.md`, the comparison mode's pure "
+             "functions, and HLD section 26",
+        refuses="A comparison.json that disagrees with the code's vocabulary, "
+                "a statistic summarised over a partial sample, a process "
+                "inventory that changed between snapshots, a workload "
+                "selected by path or by first found, a footprint text with "
+                "no parsable process, and a published record carrying a key "
+                "the closed schema does not define or a value of the wrong "
+                "type.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_test.mjs",),
+        limit="The runtime composition adds seven refusal sites: closed "
+              "condition insertion, duplicate-condition rejection, paired "
+              "cold/warm labels and the typed memory upper-bound child. "
+              "Permanent literal fixtures cover missing, unknown, duplicate "
+              "and wrong-sample cases, with unchanged statistic thresholds.",
+    ),
+    Guard(
+        id="bench.colour-frame",
+        file="tools/bench/src/runners/viewer_colour_frame.mjs",
+        gate="bench",
+        spec="F-239 AC31, release-only measured replies, ICC held identity and RSS samples",
+        refuses="A non-release viewer, no valid RSS reading, a passed, corrupt "
+                "or absent checked byte, an unsuccessful preview, wrong source, "
+                "channels, body length or dimensions/window headers, incomplete "
+                "sample validation, ICC application metadata, the requested child budget, charged TRC "
+                "heap or frame stability, and a file post that fails, is not held, "
+                "names no id or returns a non-object report.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",),
+        limit="All twenty-four refusal sites have permanent controls. The release "
+              "guard and empty-RSS tests cover build and measurement identity. "
+              "SampleWindow's corrupt, missing and passed-sample tests cover "
+              "stream offsets. Wrong channels, length and status each have "
+              "HTTP controls. validatePreview's source/header/check-count test "
+              "covers every numeric header both missing and wrong. holdFile's "
+              "held/id and HTTP/non-object tests cover all four post refusals. "
+              "ICC metadata, budget and census controls cover all eight added "
+              "sites, with real fake-child byte, budget and heap-growth failures. "
+              "The tests use tiny local HTTP fixtures and serialized fake RSS "
+              "readings, with no browser, viewer binary or timing claim.",
+    ),
+    Guard(
+        id="bench.colour-frame-fixture",
+        file="tools/bench/src/viewer_colour_frame_fixture.mjs",
+        gate="bench",
+        spec="F-239 AC31 synthetic inputs and PS3.5 7.1.2 even Value Length",
+        refuses="An unknown workload name, an odd long-form Value Length, "
+                "and a FileHandle write that makes no progress.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",),
+        limit="The fixture-controls test covers all three refusal sites with "
+              "a supported-workload/even-length/partial-write control. The "
+              "public builder always supplies even lengths and real file "
+              "handles, so the two otherwise unreachable defensive leaf "
+              "guards are exported only from a test-owned module copy. "
+              "Production source and its public exports are unchanged.",
+    ),
+    Guard(
+        id="bench.icc-frame-fixture",
+        file="tools/bench/src/viewer_icc_frame_fixture.mjs",
+        gate="bench",
+        spec="F-240 AC15, bound synthetic ICC profiles and sample validation",
+        refuses="Missing or mismatched asset provenance, a non-curv or non-gamma "
+                "source, insufficient aligned table space or missing TRCs, an "
+                "incomplete hand-vector or marker set, unknown workload, row, "
+                "window or reply variant, an 8-bit indexing mutant requested "
+                "for the 8-bit fixture, odd Value Length and a stalled write.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/viewer_colour_frame_test.mjs",
+                    "tools/bench/tests/viewer_icc_frame_guard_test.mjs"),
+        limit="All fifteen refusal sites have permanent controls. The ICC guard "
+              "suite makes tiny disposable copies of the owned assets and "
+              "changes each intrinsic profile, provenance or vector condition "
+              "while preserving unrelated bytes. A test-owned module copy "
+              "redirects only its asset root and exports the otherwise "
+              "unreachable longHeader and writeAll leaves. Production source "
+              "and exports are unchanged. Named main tests also reject wrong "
+              "profile bytes and wrong 16-bit indexing through the real runner "
+              "with applied metadata and correct transport headers. No browser, "
+              "viewer binary, full-size fixture or timing observation is claimed.",
+    ),
+    Guard(
+        id="bench.comparison-runtime",
+        file="tools/bench/src/comparison_run.mjs",
+        gate="bench",
+        spec="F-223 equipped comparison lifecycle, clocks and privacy",
+        refuses="Missing inputs or pinned tools, invalid observed clocks, "
+                "unobserved pixels or process inventories, malformed comparator "
+                "verdicts or incoherent process exit/output channels, different browser "
+                "identities, failed trials, source changes, private output, "
+                "invalid publication and incomplete resource cleanup.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_run_test.mjs",
+                    "tools/bench/tests/comparison_page_test.mjs"),
+        limit="Permanent Node controls exercise clock origins, per-side trial "
+              "counts, privacy, failed CT preconditions, signal cleanup, "
+              "retained environment and invalid-publication refusals, and "
+              "setup-only CPU coherence retries through actual orchestration. "
+              "Three permanent pair-process controls reject malformed, unknown "
+              "or duplicate verdict fields, invalid scalar domains, contradictory "
+              "exit/passes/low-information status and foreign stdout, stderr or "
+              "signal channels. The actual precheck/controller retains a valid "
+              "exit-1 refusal report with zero timing trials and completed cleanup "
+              "using controlled synthetic process fixtures. Tiny RGBA observations "
+              "through the real release comparator are separately recorded "
+              "explicit checks outside the floor, not default fixture execution. "
+              "The opted-in browser control exercises the real metadata "
+              "provider and retained refusal after both browsers close. "
+              "Installed Chromium and macOS footprint "
+              "paths are exercised by equipped functional receipts and remain "
+              "outside the floor. The tests do not claim every native I/O "
+              "refusal fired, and no equipped timing acceptance follows.",
+    ),
+    Guard(
+        id="oracle.comparison-voi-adapter",
+        file="tools/oracle/src/bench-series.mjs",
+        gate="bench",
+        spec="PS3.3 C.11.2 VOI selectors and pinned-loader5.8.2 interoperability",
+        refuses="An unknown string being normalized as a recognized VOI "
+                "function, or an existing array or absent value being altered.",
+        claims=("*",),
+        covered_by=("tools/oracle/tests/bench_series_test.mjs",),
+        limit="The recognition list is a normalization boundary, not a new "
+              "pixel predicate. Literal typed fixtures cover all three valid "
+              "selectors, existing arrays, unknown strings and absent values. "
+              "The separate browser control observes the real next-frame "
+              "commit. No package source or default budget is changed.",
+    ),
+    Guard(
+        id="oracle.comparison-page",
+        file="tools/oracle/page/bench.mjs",
+        gate="bench",
+        spec="F-223 comparator page, actual rendered commits and fixed errors",
+        refuses="An unready or superseded open, an absent displayed image, "
+                "invalid window parameters, absent renderer identity and an "
+                "unwritten or wrongly sized native canvas.",
+        claims=("*",),
+        covered_by=("tools/oracle/tests/bench_series_test.mjs",
+                    "tools/bench/tests/comparison_page_test.mjs (explicit browser opt-in)",),
+        limit="The permanent pure suite covers grouping, ordering and the "
+              "typed VOI adapter. The opted-in browser suite checks actual "
+              "committed indices, changed pixels and visible blank stages. "
+              "The page refusals need the equipped browser and synthetic "
+              "functional checks, not a floor-only Node test. Positive actual "
+              "canvas capture does not demonstrate every defensive refusal.",
+    ),
+    Guard(
+        id="bench.colour-comparison",
+        file="tools/bench/src/comparison_colour.mjs",
+        gate="bench",
+        spec="F239 AC32 and F240 AC16, explicit controlled supplemental mode",
+        refuses="An unknown case, malformed or changed dataset identity, "
+                "nonstandard measurement dimensions, a path or inventory "
+                "mismatch, an absent informative CT pixel precheck, an actual "
+                "cache budget differing from the declared case, invalid "
+                "trial or process receipts, or differing browser builds.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/comparison_colour_test.mjs",),
+        limit="Fake-tool tests drive calibration, alternating counts, window "
+              "parameters, actual budget, measurement validity, memory "
+              "receipt presence and cleanup. Tiny identity files challenge "
+              "manifest schema, sizes, paths, inventory and digests. They "
+              "are not DICOM or performance evidence. The real browser and "
+              "all-process collector belong to the separately reviewed "
+              "F223 runtime and run only on the equipped host.",
+    ),
+    Guard(
         id="panic-probe",
         file="scripts/panic_probe.mjs",
         gate="panic",
@@ -11591,6 +16285,31 @@ GUARDS: tuple[Guard, ...] = (
     ),
 
     # -- declared out of scope, with the reason -----------------------------
+    Guard(
+        id="bench.auto-window-reference",
+        file="tools/bench/window_reference.py",
+        gate="-",
+        spec="F-227 AC16 and its approved finite-binary32 reference clarification",
+        refuses="A missing or non-finite excluded maximum, invalid percentile "
+                "endpoints, an overflowing initial window, or a bounded "
+                "candidate search with no verified window.",
+        claims=("unverifiable-window", "empty-or-nonfinite-pool",
+                "invalid-percentiles", "nonfinite-window"),
+        covered_by=("tools/bench/tests/test_auto_window_scalar.py",),
+        kind="not-a-guard",
+        owner="F-227",
+        reason="An offline independent acceptance calculator invoked by the "
+               "operator procedure tools/bench/auto_window_reference.md, "
+               "not a repository verification gate. Its permanent synthetic "
+               "scalar controls run through the explicit local command "
+               "`.venv/bin/python -m unittest discover -s tools/bench/tests "
+               "-p 'test_auto_window_*.py' -v`. No floor or CI execution of "
+               "that NumPy and pydicom dependent command is claimed. All four "
+               "closed refusals have exact permanent assertions, including "
+               "hand-derived finite search exhaustion. Actual study "
+               "comparison and manual browser observations remain separate "
+               "operator acceptance, never a census result.",
+    ),
     Guard(
         id="bootstrap-importer",
         file="scripts/import_backlog_xlsx.py",
@@ -11746,11 +16465,34 @@ CONSTANTS: tuple[Constant, ...] = (
              why="HLD Appendix C.2.1's Read column set to NO."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "BLOCKED_URLS", r"^BLOCKED_URLS = \[(.*?)^\]"),
+    Constant("provenance", "scripts/source_provenance_check.py", "MANIFESTS",
+             r"^MANIFESTS = \{(.*?)^\}",
+             why="The manifests whose dependency names are extracted. "
+                 "Narrowing this set reopens the lockfile hole."),
     Constant("provenance", "scripts/source_provenance_check.py",
              "POLICY_FILES", r"^POLICY_FILES = \{(.*?)^\}",
              why="Files permitted to name a read-blocked project. Widening "
                  "this list to make a build green is the exact shape this "
                  "repository distrusts."),
+    Constant("pins", "scripts/pin_and_size_check.py", "OPENJPH_LICENCE_SHA256",
+             r'^OPENJPH_LICENCE_SHA256 = "(.*?)"$',
+             why="The upstream OpenJPH notice. A changed hash is a changed "
+                 "grant."),
+    Constant("licences", "deny.toml", "allow",
+             r"^allow = \[(.*?)^\]",
+             why="The one allowlist. Widening it admits a licence in every "
+                 "ecosystem at once."),
+    Constant("licences", "scripts/licence_check.py", "COPYLEFT_MARKERS",
+             r"^COPYLEFT_MARKERS = \((.*?)^\)",
+             why="The markers that refuse a bundled licence text."),
+    Constant("licences", "scripts/licence_check.py", "EXCEPTION_FIELDS",
+             r"^EXCEPTION_FIELDS = (\(.*?\))$",
+             why="The fields an exception must carry. Dropping one lets an "
+                 "approval through with no reason."),
+    Constant("licences", "scripts/licence_check.py", "PLACEHOLDER_LICENCE",
+             r'^PLACEHOLDER_LICENCE = "(.*?)"$',
+             why="The only licence value an empty file may record. Any other "
+                 "value claims a grant the file does not state."),
     Constant("pins", "scripts/pin_and_size_check.py", "EXACT_PINNED",
              r"^EXACT_PINNED = \{(.*?)^\}"),
     Constant("pins", "scripts/pin_and_size_check.py", "PACKAGE_LICENCES",
@@ -11778,6 +16520,13 @@ CONSTANTS: tuple[Constant, ...] = (
              "NATIVE_FEATURES",
              r"^NATIVE_FEATURES = (\{.*?^})",
              why="The native backends the host resolve must keep."),
+    Constant("decode-graph", "scripts/decode_graph_check.py",
+             "SHIPPED_NATIVE_FEATURES",
+             r"^SHIPPED_NATIVE_FEATURES = (NATIVE_FEATURES - \{\"metal\"\})$",
+             why="D-33. The native backends the shipped table must keep. "
+                 "Widening it back toward the full set would ship Metal "
+                 "again, and the shipped-native guard beside it would not "
+                 "notice a narrowing that the objc2 check still survives."),
     Constant("ci-floor", "scripts/ci_floor_check.py", "NOT_IN_FLOOR",
              r"^NOT_IN_FLOOR = (\{.*?\})$",
              why="Deviation D-04. A gate leaving the floor is a decision."),
@@ -11944,6 +16693,28 @@ CONSTANTS: tuple[Constant, ...] = (
              why="Deviation D-09's explicit crate set. Direct comparison "
                  "catches a source attribute entering or leaving it, and this "
                  "digest makes a deliberate posture change visible."),
+    # F-218. Widening PROOFS would accept a proof name the packages gate
+    # does not run.
+    Constant("advisories", "scripts/advisory_check.py", "REFUSED",
+             r"^REFUSED = (\(.*?\))$",
+             why="High and critical fail. Membership, not alphabetical "
+                 "order, because critical sorts before high."),
+    Constant("advisories", "scripts/advisory_check.py", "KNOWN",
+             r"^KNOWN = (\(.*?\))$",
+             why="The five severities npm uses. A severity outside this "
+                 "tuple fails closed."),
+    Constant("advisories", "scripts/advisory_check.py", "FIELDS",
+             r"^FIELDS = (\(.*?\))\n",
+             why="The fields an advisory exception must carry. Dropping one "
+                 "lets an approval through with no reason."),
+    Constant("advisories", "scripts/advisory_check.py", "SCOPES",
+             r"^SCOPES = (\(.*?\))$",
+             why="The only scope an advisory exception may name. dev-only "
+                 "would accept a package the published runtime installs."),
+    Constant("advisories", "scripts/advisory_check.py", "PROOFS",
+             r"^PROOFS = (\(.*?\))$",
+             why="The proof names the packages gate runs. Widening this "
+                 "tuple would accept a proof that gate does not run."),
 )
 
 

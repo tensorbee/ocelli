@@ -31,16 +31,19 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import json
 import math
 import os
 import re
 import struct
 import subprocess
 import sys
+import shutil
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -58,6 +61,101 @@ except ImportError as exc:  # pragma: no cover - environment, not a defect
 # reason to report the suite as skipped.
 import corpus_check  # noqa: E402
 import corpus_synth  # noqa: E402
+
+
+# One read-back route per SYNTAX_CASES filename. The helper owns the choice.
+# No route relies on pydicom plugin order. Colour conversion for the baseline
+# colour case happens inside libjpeg-turbo and this helper does not convert
+# a second time.
+READ_BACK = {
+    "implicit_vr_le.dcm": "native",
+    "explicit_vr_le.dcm": "native",
+    "deflated_explicit_vr_le.dcm": "native",
+    "explicit_vr_be.dcm": "native",
+    "rle_lossless.dcm": "pylibjpeg",
+    "jpeg_baseline_rgb8.dcm": "jpeg8-rgb",
+    "jpeg_extended_12.dcm": "jpeg8",
+    "jpeg_lossless_p14.dcm": "ljpeg",
+    "jpeg_lossless_p14_sv1.dcm": "ljpeg",
+    "jpegls_lossless.dcm": "pyjpegls",
+    "jpegls_lossless_rgb8.dcm": "pyjpegls",
+    "jpegls_near_lossless.dcm": "pyjpegls",
+    "jpegls_banded_lossless.dcm": "pyjpegls",
+    "jpegls_banded_near_lossless.dcm": "pyjpegls",
+    "j2k_lossless.dcm": "pylibjpeg",
+    "j2k_lossy.dcm": "pylibjpeg",
+    # The F-239 colour rows. OpenJPEG applies the codestream's own inverse
+    # component transform, so the plugin hands back RGB for all four.
+    "j2k_lossless_ybr_rct.dcm": "pylibjpeg",
+    "j2k_lossy_ybr_ict.dcm": "pylibjpeg",
+    "htj2k_lossless_ybr_rct.dcm": "pylibjpeg",
+    "htj2k_lossy_ybr_ict.dcm": "pylibjpeg",
+    "htj2k_lossless.dcm": "pylibjpeg",
+    "htj2k_lossless_rpcl.dcm": "pylibjpeg",
+    "htj2k_lossy.dcm": "pylibjpeg",
+    "jpegxl_lossless.dcm": "jpegxl",
+    "jpegxl_lossless_rgb8.dcm": "jpegxl",
+    "jpegxl_recompression_rgb8.dcm": "unavailable",
+    "jpegxl_lossy.dcm": "jpegxl",
+    "jpegxl_xyb_rgb8.dcm": "jpegxl",
+}
+# F-244. An empty-table row is read by its source row's route. pydicom 3.0.2
+# reads a zero-length Basic Offset Table as PS3.5 A.4 says, independently of
+# Ocelli, and splits frames that span Fragments at their end markers.
+for _name, _source in corpus_synth.EMPTY_BOT_CASES.items():
+    READ_BACK[_name] = READ_BACK[_source]
+
+# imagecodecs.__version__ and the string jpeg8_version() reports.
+DECODED_WITH = {
+    "imagecodecs": "2026.10.10",
+    "jpeg8_version": "libjpeg_turbo 3.2.0/8.0",
+}
+
+
+class UnavailableSyntax(AssertionError):
+    """The registry knows this syntax and refuses to decode it."""
+
+
+def read_back(ds: "pydicom.Dataset", name: str):
+    """Decode one syntax case through its declared route."""
+    route = READ_BACK[name]
+    if route == "native":
+        return pydicom.pixels.pixel_array(ds)
+    if route == "pylibjpeg":
+        return pydicom.pixels.pixel_array(ds, decoding_plugin="pylibjpeg")
+    if route == "pyjpegls":
+        return pydicom.pixels.pixel_array(ds, decoding_plugin="pyjpegls")
+    import imagecodecs
+    from pydicom.encaps import generate_frames
+    if route == "unavailable":
+        raise UnavailableSyntax(
+            f"{corpus_check.UNAVAILABLE_REFUSAL} "
+            f"(jxl-jbr 0.2.1 src/reconstruct.rs:457)")
+    decoders = {
+        "ljpeg": imagecodecs.ljpeg_decode,
+        "jpeg8": imagecodecs.jpeg8_decode,
+        "jpeg8-rgb": lambda fragment: imagecodecs.jpeg8_decode(
+            fragment, outcolorspace="RGB"),
+        "jpegxl": imagecodecs.jpegxl_decode,
+    }
+    if route not in decoders:
+        raise AssertionError(f"unknown read-back route {route}")
+    count = int(ds.get("NumberOfFrames", 1) or 1)
+    frames = [decoders[route](fragment) for fragment in generate_frames(
+        ds.PixelData, number_of_frames=count)]
+    if len(frames) != count:
+        raise AssertionError(f"{name} yielded {len(frames)} frames, not {count}")
+    return frames[0] if count == 1 else np.stack(frames)
+
+
+def decode_array_sha256(array) -> str:
+    """SHA-256 of dtype, shape and bytes. The digest table uses this form."""
+    import hashlib
+    values = np.ascontiguousarray(array)
+    head = (
+        f"{values.dtype.str} {','.join(str(int(n)) for n in values.shape)}\n"
+    ).encode("ascii")
+    return hashlib.sha256(head + values.tobytes()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -294,10 +392,22 @@ class SigmoidFixture(unittest.TestCase):
 # three quarters of it. Hence the name, and hence the selector below keying on
 # PhotometricInterpretation. Shipped 0.0157, and 0.0196 on a transposed variant
 # of the same shape, so this bound is 1.5 times the worst measured.
+# Re-measured with imagecodecs jpeg8_decode and outcolorspace RGB: 4 of 255,
+# ratio 0.015686. The bound is unchanged.
+# libjxl 0.12.0 at distance 1.0 and effort 7 on reference_rgb8. TRANSFORM_MAX
+# times 255 is 1.275 levels. The same encoder's smallest positive distance
+# on this ramp is already 7 levels, so the generic fraction cannot hold.
+# This ceiling is that encode's measured maximum absolute error. It is not
+# a change to TRANSFORM_MAX.
+JPEGXL_XYB_MAX_ABS = 21
+
 YBR_EIGHT_BIT_MAX = 0.03
 # The three transform cases at their configured settings: JPEG extended at
 # quality 90 gives 0.00049, JPEG 2000 at ratio 20 gives 0.00003, HTJ2K at
 # qstep 0.001 gives 0.00063, so this is the worst of them rounded up an order.
+# Re-measured with imagecodecs jpeg8_decode: the extended 12-bit case is 2 of
+# 4095, ratio 0.000488. JPEG 2000 and HTJ2K stay on pylibjpeg and the figures
+# above are unchanged. The bound is unchanged.
 TRANSFORM_MAX = 0.005
 
 # The identity constants a regenerated case must carry. Written out here rather
@@ -535,7 +645,9 @@ class Conformance(unittest.TestCase):
         that the two are distinguishable rather than nominally different."""
         expected = {"htj2k_lossless.dcm": 0,        # LRCP
                     "htj2k_lossless_rpcl.dcm": 2,   # RPCL
-                    "htj2k_lossy.dcm": 2}           # RPCL
+                    "htj2k_lossy.dcm": 2,           # RPCL
+                    "htj2k_lossless_ybr_rct.dcm": 0,   # LRCP
+                    "htj2k_lossy_ybr_ict.dcm": 2}      # RPCL
         for name, order in expected.items():
             with self.subTest(case=name):
                 data = self.frame(self.case(name))
@@ -558,27 +670,103 @@ class Conformance(unittest.TestCase):
         self.assertEqual(expected, 2)
         self.assertEqual(struct.unpack("<L", data[:4])[0], expected)
 
+    def test_jpegxl_codestreams_are_jpeg_xl(self) -> None:
+        """ISO/IEC 18181-2. A bare codestream starts FF 0A.
+
+        An ISO BMFF container has the box type JXL at byte 4. imagecodecs
+        2026.10.10 writes that container for the 16-bit lossless encode and
+        for jpegxl_encode_jpeg even when usecontainer is false. The other
+        three rows are bare codestreams.
+        """
+        boxed = {"jpegxl_lossless.dcm", "jpegxl_recompression_rgb8.dcm"}
+        # F-244. An empty-table row carries its source's codestream.
+        boxed |= {name for name, source in corpus_synth.EMPTY_BOT_CASES.items()
+                  if source in boxed}
+        for name, uid in corpus_synth.SYNTAX_CASES.items():
+            if uid not in (corpus_synth.JPEGXL_LOSSLESS,
+                           corpus_synth.JPEGXL_RECOMPRESSION,
+                           corpus_synth.JPEGXL_GENERAL):
+                continue
+            with self.subTest(case=name):
+                data = self.frame(self.case(name))
+                if name in boxed:
+                    self.assertEqual(data[4:8], b"JXL ")
+                else:
+                    self.assertEqual(data[:2], b"\xff\x0a")
+
     def test_lossless_syntaxes_round_trip_exactly(self) -> None:
         for name, uid in corpus_synth.SYNTAX_CASES.items():
             if uid in corpus_synth.LOSSY_TRANSFER_SYNTAXES:
+                continue
+            # `.111` is the unavailable refusal. A pixel compare would
+            # claim a decode the registry does not perform.
+            if uid == corpus_synth.JPEGXL_RECOMPRESSION:
                 continue
             with self.subTest(case=name):
                 ds = self.case(name)
                 reference = pydicom.dcmread(
                     str(CORPUS / "syntax" / corpus_synth.SYNTAX_REFERENCE[name]))
+                want = reference.pixel_array
+                if name in corpus_synth.MULTIFRAME_EMPTY_BOT:
+                    want = corpus_synth.multiframe_reference(want)
                 self.assertTrue(
-                    np.array_equal(ds.pixel_array, reference.pixel_array),
+                    np.array_equal(read_back(ds, name), want),
                     f"{name} declares a lossless syntax and did not round-trip")
+
+    def test_jpegxl_recompression_is_unavailable(self) -> None:
+        """`.111` is known and the read-back route refuses it.
+
+        jxl-jbr 0.2.1 src/reconstruct.rs:457 panics on a malformed DHT, so
+        the corpus row expects the unavailable refusal rather than pixels.
+        """
+        name = "jpegxl_recompression_rgb8.dcm"
+        self.assertEqual(READ_BACK[name], "unavailable")
+        self.assertIn(
+            corpus_synth.JPEGXL_RECOMPRESSION,
+            corpus_check.UNAVAILABLE_REGISTRY_SYNTAXES)
+        self.assertEqual(
+            self.case(name).file_meta.TransferSyntaxUID,
+            corpus_synth.JPEGXL_RECOMPRESSION)
+        with self.assertRaises(UnavailableSyntax) as caught:
+            read_back(self.case(name), name)
+        message = str(caught.exception)
+        self.assertIn(corpus_check.UNAVAILABLE_REFUSAL, message)
+        self.assertIn("jxl-jbr 0.2.1", message)
+        self.assertIn("reconstruct.rs:457", message)
 
     def test_jpeg_ls_near_lossless_holds_its_declared_near_bound(self) -> None:
         """ISO/IEC 14495-1 guarantees max abs error <= NEAR. This is the one
-        lossy case with a bound the standard actually promises, so it is
-        asserted exactly rather than as a sanity range."""
-        ds = self.case("jpegls_near_lossless.dcm")
-        reference = pydicom.dcmread(str(CORPUS / "syntax" / "explicit_vr_le.dcm"))
-        error = np.abs(ds.pixel_array.astype(np.int64)
-                       - reference.pixel_array.astype(np.int64))
-        self.assertLessEqual(int(error.max()), corpus_synth.JPEG_LS_NEAR)
+        lossy syntax with a bound the standard actually promises, so every
+        `.81` case is asserted exactly rather than as a sanity range."""
+        names = [name for name, uid in corpus_synth.SYNTAX_CASES.items()
+                 if uid == "1.2.840.10008.1.2.4.81"]
+        self.assertEqual(sorted(names), ["jpegls_banded_near_lossless.dcm",
+                                         "jpegls_near_lossless.dcm",
+                                         "jpegls_near_lossless_empty_bot.dcm"])
+        for name in names:
+            with self.subTest(case=name):
+                ds = self.case(name)
+                reference = pydicom.dcmread(
+                    str(CORPUS / "syntax" / corpus_synth.SYNTAX_REFERENCE[name]))
+                error = np.abs(read_back(ds, name).astype(np.int64)
+                               - reference.pixel_array.astype(np.int64))
+                self.assertLessEqual(int(error.max()), corpus_synth.JPEG_LS_NEAR)
+
+    def test_the_banded_reference_is_the_two_band_formula(self) -> None:
+        """F-243. s(r, c) = 224 if c < 16 else 1064 over 32 by 32, typed in
+        here rather than read from the generator, so the reference the banded
+        JPEG-LS rows decode against is the formula and not whatever the
+        generator wrote."""
+        ds = self.case("reference_banded16.dcm")
+        self.assertEqual(str(ds.file_meta.TransferSyntaxUID),
+                         "1.2.840.10008.1.2.1")
+        self.assertEqual((ds.Rows, ds.Columns, ds.BitsAllocated,
+                          ds.BitsStored, ds.PixelRepresentation),
+                         (32, 32, 16, 16, 0))
+        expected = np.array([[224 if column < 16 else 1064
+                              for column in range(32)] for _ in range(32)],
+                            dtype=np.uint16)
+        self.assertTrue(np.array_equal(ds.pixel_array, expected))
 
     def test_lossy_syntaxes_decode_to_the_right_shape_and_stay_close(self) -> None:
         """No standard promises a bound for DCT or irreversible wavelet, so
@@ -600,10 +788,16 @@ class Conformance(unittest.TestCase):
                 ds = self.case(name)
                 reference = pydicom.dcmread(
                     str(CORPUS / "syntax" / corpus_synth.SYNTAX_REFERENCE[name]))
-                got, want = ds.pixel_array, reference.pixel_array
+                got, want = read_back(ds, name), reference.pixel_array
                 self.assertEqual(got.shape, want.shape)
                 full_scale = float(1 << ds.BitsStored) - 1.0
                 error = np.abs(got.astype(np.float64) - want.astype(np.float64))
+                if ds.PhotometricInterpretation == "XYB":
+                    self.assertGreater(float(error.max()), 0.0)
+                    self.assertLessEqual(float(error.max()), JPEGXL_XYB_MAX_ABS,
+                                         f"{name} exceeded the recorded "
+                                         f"JPEG XL ceiling")
+                    continue
                 bound = (YBR_EIGHT_BIT_MAX
                          if ds.PhotometricInterpretation.startswith("YBR")
                          else TRANSFORM_MAX)
@@ -640,14 +834,56 @@ class Conformance(unittest.TestCase):
         if frame[:4] == b"\xff\x4f\xff\x51":              # SOC then SIZ
             rsiz = struct.unpack(">H", frame[6:8])[0]
             return "ISO_15444_15" if rsiz & 0x4000 else "ISO_15444_1"
+        # ISO/IEC 18181-1. PS3.3 C.7.6.1.1.5.1 Defined Term ISO_18181_1,
+        # Supplement 232. A bare codestream starts FF 0A. An ISO BMFF
+        # container carries the box type JXL at byte 4.
+        if frame[:2] == b"\xff\x0a" or frame[4:8] == b"JXL ":
+            return "ISO_18181_1"
         self.fail(f"unrecognised codestream {frame[:4].hex()}")
 
     def test_the_classifier_refuses_a_codestream_it_cannot_name(self) -> None:
         """The fall-through is unreachable for the cases shipped today, so
         nothing else reaches it. A future lossy case whose codestream this
-        cannot parse must not be quietly declared to be one of the four."""
+        cannot parse must not be quietly given a name."""
         with self.assertRaises(self.failureException):
             self.codestream_method(b"\x00\x01\x02\x03")
+
+
+class ReaderRoutes(unittest.TestCase):
+    """Every syntax case names one decoder, and the decoder version is pinned."""
+
+    def test_every_syntax_has_one_declared_decoder(self) -> None:
+        self.assertEqual(set(READ_BACK), set(corpus_synth.SYNTAX_CASES))
+        allowed = {"native", "pylibjpeg", "pyjpegls", "ljpeg", "jpeg8",
+                   "jpeg8-rgb", "jpegxl", "unavailable"}
+        for name, route in READ_BACK.items():
+            with self.subTest(case=name):
+                self.assertIn(route, allowed)
+                self.assertNotIn("gdcm", route)
+                self.assertNotIn("pylibjpeg-libjpeg", route)
+        self.assertEqual(READ_BACK["jpeg_lossless_p14.dcm"], "ljpeg")
+        self.assertEqual(READ_BACK["jpeg_lossless_p14_sv1.dcm"], "ljpeg")
+        self.assertEqual(READ_BACK["jpegls_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_lossless_rgb8.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_near_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_banded_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpegls_banded_near_lossless.dcm"], "pyjpegls")
+        self.assertEqual(READ_BACK["jpeg_baseline_rgb8.dcm"], "jpeg8-rgb")
+        self.assertEqual(READ_BACK["jpeg_extended_12.dcm"], "jpeg8")
+        self.assertEqual(READ_BACK["j2k_lossy.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["htj2k_lossy.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["rle_lossless.dcm"], "pylibjpeg")
+        self.assertEqual(READ_BACK["jpegxl_lossless.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_lossless_rgb8.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_recompression_rgb8.dcm"], "unavailable")
+        self.assertEqual(READ_BACK["jpegxl_lossy.dcm"], "jpegxl")
+        self.assertEqual(READ_BACK["jpegxl_xyb_rgb8.dcm"], "jpegxl")
+
+    def test_reader_versions_match_decoded_with(self) -> None:
+        import imagecodecs
+        self.assertEqual(imagecodecs.__version__, DECODED_WITH["imagecodecs"])
+        self.assertEqual(imagecodecs.jpeg8_version(),
+                         DECODED_WITH["jpeg8_version"])
 
 
 class EncoderProvenance(unittest.TestCase):
@@ -673,8 +909,11 @@ class EncoderProvenance(unittest.TestCase):
                 if uid not in corpus_synth.NATIVE_TRANSFER_SYNTAXES}
 
     def internal_case(self) -> str:
+        # F-244's empty-table rows reuse or re-run the same encoder. The
+        # case whose bytes the plugins must reproduce is the source row.
         found = [name for name, uid in corpus_synth.SYNTAX_CASES.items()
-                 if uid == corpus_synth.INTERNAL_ENCODER_SYNTAX]
+                 if uid == corpus_synth.INTERNAL_ENCODER_SYNTAX
+                 and name not in corpus_synth.EMPTY_BOT_CASES]
         self.assertEqual(len(found), 1)
         return found[0]
 
@@ -766,8 +1005,12 @@ class ToolchainPins(unittest.TestCase):
 
     # BUILT_WITH entries uv does not install directly. OpenJPH and DCMTK have
     # a test below each. OpenJPEG has none, because it ships inside the pinned
-    # pylibjpeg-openjpeg wheel. Everything else must be a project pin.
-    NOT_UV = ("OpenJPEG (the library inside it)", "DCMTK", "OpenJPH")
+    # pylibjpeg-openjpeg wheel. The opj_compress entry is that project's CLI
+    # binary, which encodes the F-239 colour rows and is installed beside
+    # DCMTK, not by uv. libjxl ships inside imagecodecs and encodes the JPEG
+    # XL rows. Everything else must be a project pin.
+    NOT_UV = ("OpenJPEG (the library inside it)", "OpenJPEG (opj_compress CLI)",
+              "DCMTK", "OpenJPH", "libjxl (the library inside imagecodecs)")
 
     def test_uv_pins_agree_with_built_with(self) -> None:
         project = tomllib.loads(self.PROJECT.read_text(encoding="utf-8"))
@@ -800,6 +1043,217 @@ class ToolchainPins(unittest.TestCase):
         # A bare token. An apt pin is `dcmtk=3.6.7-9.1build4`, one token with
         # one equals sign, which `dcmtk==` would not have caught either.
         self.assertIn("dcmtk", install.group(0).split())
+
+
+def encapsulated_items(ds: "pydicom.Dataset") -> list[bytes]:
+    """PS3.5 A.4 Items, read here rather than through the generator.
+
+    Each Item is Tag (FFFE,E000), a 4-byte little-endian length and that many
+    bytes. The first is the Basic Offset Table. pydicom drops the Sequence
+    Delimitation Item (FFFE,E0DD) from the value it keeps.
+    """
+    value, items, at = bytes(ds.PixelData), [], 0
+    while at < len(value):
+        tag = value[at:at + 4]
+        if tag == b"\xfe\xff\xdd\xe0":
+            break
+        if tag != b"\xfe\xff\x00\xe0":
+            raise AssertionError(f"Item Tag expected, found {tag.hex()}")
+        (length,) = struct.unpack("<I", value[at + 4:at + 8])
+        items.append(value[at + 8:at + 8 + length])
+        at += 8 + length
+    return items
+
+
+# PS3.4 B.5, Enhanced CT Image Storage. Its IOD, PS3.3 A.38, carries the
+# Multi-frame Functional Groups Module whose Number of Frames is Type 1.
+ENHANCED_CT = "1.2.840.10008.5.1.4.1.1.2.1"
+
+
+class EmptyBasicOffsetTable(unittest.TestCase):
+    """F-244, PS3.5 A.4 and 8.2, and PS3.3 C.7.6.3.1.8.
+
+    Expected values come from the standard and from the source rows, which
+    carry populated tables, never from the generator's own helpers.
+    """
+
+    def case(self, name: str) -> pydicom.Dataset:
+        return pydicom.dcmread(str(CORPUS / "syntax" / name))
+
+    def names(self) -> list[str]:
+        return sorted(corpus_synth.EMPTY_BOT_CASES)
+
+    def test_nineteen_rows_one_per_decodable_syntax_and_five_shapes(self) -> None:
+        self.assertEqual(len(corpus_synth.EMPTY_BOT_SOURCES), 14)
+        self.assertEqual(len(corpus_synth.EMPTY_BOT_SHAPES), 5)
+        syntaxes = {corpus_synth.SYNTAX_CASES[name]
+                    for name in corpus_synth.EMPTY_BOT_SOURCES}
+        encapsulated = (set(corpus_check.REGISTRY_TRANSFER_SYNTAXES)
+                        - corpus_synth.NATIVE_TRANSFER_SYNTAXES
+                        - set(corpus_check.UNAVAILABLE_REGISTRY_SYNTAXES))
+        self.assertEqual(syntaxes, encapsulated)
+
+    def test_the_first_item_is_an_empty_table(self) -> None:
+        """Table A.4-1: the Basic Offset Table Item has length 00000000H."""
+        for name in self.names():
+            with self.subTest(case=name):
+                items = encapsulated_items(self.case(name))
+                self.assertEqual(items[0], b"")
+                self.assertGreaterEqual(len(items), 2)
+                for fragment in items[1:]:
+                    # A.4: "an even number of bytes greater or equal to two".
+                    self.assertGreaterEqual(len(fragment), 2)
+                    self.assertEqual(len(fragment) % 2, 0)
+
+    def test_single_frame_rows_keep_their_source_fragment(self) -> None:
+        for name, source in corpus_synth.EMPTY_BOT_SOURCES.items():
+            with self.subTest(case=name):
+                source_items = encapsulated_items(self.case(source))
+                # The source carries A.4's one-frame table, a single 0.
+                self.assertEqual(source_items[0], b"\x00" * 4)
+                self.assertEqual(encapsulated_items(self.case(name))[1:],
+                                 source_items[1:])
+
+    def test_every_row_has_its_own_instance(self) -> None:
+        for name, source in corpus_synth.EMPTY_BOT_CASES.items():
+            with self.subTest(case=name):
+                ds, original = self.case(name), self.case(source)
+                self.assertNotEqual(ds.SOPInstanceUID, original.SOPInstanceUID)
+                self.assertEqual(ds.file_meta.TransferSyntaxUID,
+                                 original.file_meta.TransferSyntaxUID)
+
+    def test_single_frame_decodes_equal_their_source(self) -> None:
+        for name, source in corpus_synth.EMPTY_BOT_CASES.items():
+            if name in corpus_synth.MULTIFRAME_EMPTY_BOT:
+                continue
+            with self.subTest(case=name):
+                self.assertEqual(
+                    decode_array_sha256(read_back(self.case(name), name)),
+                    decode_array_sha256(read_back(self.case(source), source)))
+
+    def test_fragmented_rows_start_a_fragment_at_2_mod_4(self) -> None:
+        """dicom-object 0.10.0 refused a first Fragment of length 2 mod 4."""
+        jls = encapsulated_items(
+            self.case("jpegls_lossless_fragmented_empty_bot.dcm"))[1:]
+        self.assertEqual(len(jls), 3)
+        self.assertEqual(len(jls[0]) % 4, 2)
+        [whole] = encapsulated_items(self.case("jpegls_lossless.dcm"))[1:]
+        self.assertEqual(b"".join(jls), whole)
+        for name in ("jpeg_lossless_p14_sv1_multiframe_fragmented_empty_bot.dcm",
+                     "j2k_lossless_multiframe_fragmented_empty_bot.dcm"):
+            with self.subTest(case=name):
+                fragments = encapsulated_items(self.case(name))[1:]
+                self.assertEqual(len(fragments), 6)
+                for first in fragments[0::2]:
+                    self.assertEqual(len(first) % 4, 2)
+                    # ISO/IEC 10918-1 SOI or ISO/IEC 15444-1 SOC opens a frame.
+                    self.assertIn(first[:2], (b"\xff\xd8", b"\xff\x4f"))
+                    # No end marker where pydicom or cornerstone3D would end
+                    # the frame early.
+                    self.assertNotIn(b"\xff\xd9", first[-10:])
+                for last in fragments[1::2]:
+                    self.assertIn(b"\xff\xd9", last[-3:])
+
+    def test_multiframe_rows_decode_to_three_distinct_frames_in_order(self) -> None:
+        reference = self.case(corpus_synth.REFERENCE_MONO16).pixel_array
+        expected = [reference, np.fliplr(reference), np.flipud(reference)]
+        self.assertFalse(np.array_equal(expected[0], expected[1]))
+        self.assertFalse(np.array_equal(expected[0], expected[2]))
+        self.assertFalse(np.array_equal(expected[1], expected[2]))
+        fragment_count = {
+            "rle_multiframe_empty_bot.dcm": 3,
+            "jpeg_lossless_p14_sv1_multiframe_fragmented_empty_bot.dcm": 6,
+            "j2k_lossless_multiframe_fragmented_empty_bot.dcm": 6,
+            "j2k_lossless_multiframe_eot.dcm": 3,
+        }
+        self.assertEqual(set(fragment_count), corpus_synth.MULTIFRAME_EMPTY_BOT)
+        for name, count in fragment_count.items():
+            with self.subTest(case=name):
+                ds = self.case(name)
+                self.assertEqual(ds.SOPClassUID, ENHANCED_CT)
+                self.assertEqual(int(ds.NumberOfFrames), 3)
+                self.assertEqual(len(encapsulated_items(ds)) - 1, count)
+                decoded = read_back(ds, name)
+                self.assertEqual(decoded.shape, (3, *reference.shape))
+                for frame, want in enumerate(expected):
+                    self.assertTrue(np.array_equal(decoded[frame], want),
+                                    f"frame {frame}")
+
+    def test_the_extended_offset_table_points_at_each_fragment(self) -> None:
+        """PS3.3 C.7.6.3.1.8: offsets to each frame's one Fragment Item Tag,
+        from the first Item Tag after the empty table, first entry 0, and
+        Lengths of each frame's encoded bytes."""
+        ds = self.case("j2k_lossless_multiframe_eot.dcm")
+        fragments = encapsulated_items(ds)[1:]
+        offsets = struct.unpack(f"<{len(fragments)}Q", ds.ExtendedOffsetTable)
+        lengths = struct.unpack(f"<{len(fragments)}Q",
+                                ds.ExtendedOffsetTableLengths)
+        expected, at = [], 0
+        for fragment in fragments:
+            expected.append(at)
+            at += 8 + len(fragment)
+        self.assertEqual(list(offsets), expected)
+        self.assertEqual(offsets[0], 0)
+        for fragment, length in zip(fragments, lengths, strict=True):
+            self.assertIn(len(fragment) - length, (0, 1))
+            self.assertEqual(len(fragment) - length, length % 2)
+
+
+class EmptyBotGeneratorRefusals(unittest.TestCase):
+    """F-244's eight generator refusals, each driven directly.
+
+    A sandbox probe cannot reach them, because this module imports pydicom
+    at module scope and `.venv` is not tracked, which is the import reason the
+    catalogue's `corpus-synth` entry gives for every refusal in this file.
+    """
+
+    def test_a_non_item_tag_is_refused(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "non-Item tag"):
+            corpus_synth.pixel_items(b"\x08\x00\x16\x00\x00\x00\x00\x00")
+
+    def test_an_odd_item_value_is_refused(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "even length"):
+            corpus_synth.item(b"\x01")
+
+    def test_a_frame_with_no_marker_free_split_is_refused(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "avoids an end marker"):
+            corpus_synth.split_offset(b"\xff\xd9" * 32)
+
+    def test_an_unsupported_fragment_count_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Fragment count 4"):
+            corpus_synth.fragment_split(b"\x00" * 64, 4)
+
+    def test_a_source_with_two_fragments_is_refused(self) -> None:
+        with mock.patch.object(corpus_synth, "pixel_items",
+                               return_value=[b"", b"ab", b"cd"]), \
+             self.assertRaisesRegex(RuntimeError, "does not hold one Fragment"):
+            corpus_synth.encode_empty_bot_cases(CORPUS / "syntax")
+
+    def test_a_producer_writing_the_wrong_frame_count_is_refused(self) -> None:
+        with mock.patch("pydicom.encaps.generate_frames",
+                        return_value=iter([b"ab"])), \
+             self.assertRaisesRegex(RuntimeError, "wrote 1 frames"):
+            corpus_synth.encode_multiframe(CORPUS / "syntax",
+                                           "rle_lossless.dcm", "probe")
+
+    def test_a_populated_table_beside_an_extended_table_is_refused(self) -> None:
+        shapes = {"probe.dcm": ("rle_lossless.dcm",
+                                "multiframe-extended-offset-table")}
+        populated = corpus_synth.item(b"\x00" * 4) + corpus_synth.item(b"ab")
+        with mock.patch.object(corpus_synth, "EMPTY_BOT_SOURCES", {}), \
+             mock.patch.object(corpus_synth, "EMPTY_BOT_SHAPES", shapes), \
+             mock.patch("pydicom.encaps.encapsulate_extended",
+                        return_value=(populated, b"", b"")), \
+             self.assertRaisesRegex(RuntimeError, "populated table"):
+            corpus_synth.encode_empty_bot_cases(CORPUS / "syntax")
+
+    def test_an_unknown_shape_is_refused(self) -> None:
+        shapes = {"probe.dcm": ("rle_lossless.dcm", "nonsense")}
+        with mock.patch.object(corpus_synth, "EMPTY_BOT_SOURCES", {}), \
+             mock.patch.object(corpus_synth, "EMPTY_BOT_SHAPES", shapes), \
+             self.assertRaisesRegex(RuntimeError, "unknown shape"):
+            corpus_synth.encode_empty_bot_cases(CORPUS / "syntax")
+        self.assertFalse((CORPUS / "syntax" / "probe.dcm").exists())
 
 
 class SyntaxSeriesShape(unittest.TestCase):
@@ -975,6 +1429,83 @@ class SyntheticTraps(unittest.TestCase):
         self.assertFalse(np.array_equal(channels[1], channels[2]))
 
 
+class IccProfileFixtures(unittest.TestCase):
+    """F-240, independent header, tag and device-value checks, ICC.1:2022."""
+
+    def profile(self, kind: str) -> tuple[pydicom.Dataset, dict[bytes, bytes]]:
+        path = CORPUS / "synthetic" / f"sc_rgb_icc_{kind}.dcm"
+        ds = pydicom.dcmread(path)
+        data = bytes(ds.ICCProfile)
+        self.assertEqual(data[8:12], bytes.fromhex("04400000"))
+        self.assertEqual(data[16:24], b"RGB XYZ ")
+        self.assertEqual(data[36:40], b"acsp")
+        self.assertEqual(data[44:48], bytes.fromhex("00000001"))
+        self.assertEqual(struct.unpack_from(">I", data)[0], len(data))
+        count = struct.unpack_from(">I", data, 128)[0]
+        tags: dict[bytes, bytes] = {}
+        next_offset = 132 + count * 12
+        for index in range(count):
+            code, offset, size = struct.unpack_from(">4sII", data, 132 + index * 12)
+            self.assertNotIn(code, tags)
+            self.assertEqual(offset, next_offset)
+            self.assertEqual(offset % 4, 0)
+            self.assertLessEqual(offset + size, len(data))
+            tags[code] = data[offset:offset + size]
+            next_offset = offset + size + (-size) % 4
+        self.assertEqual(next_offset, len(data))
+        self.assertTrue({b"desc", b"cprt", b"wtpt", b"rXYZ", b"gXYZ",
+                         b"bXYZ", b"rTRC", b"gTRC", b"bTRC"} <= tags.keys())
+        return ds, tags
+
+    def test_unknown_icc_kind_is_refused_by_fixed_name(self) -> None:
+        # The helper accepts only the five documented synthetic cases.
+        # Unknown input must not silently become a gamma1 profile.
+        for kind in ["", "gamma2", "GAMMA1", "unknown"]:
+            with self.subTest(kind=kind):
+                with self.assertRaisesRegex(ValueError,
+                                            "^unknown synthetic ICC case$"):
+                    corpus_synth.synthetic_icc_profile(kind)
+
+    def test_committed_profile_bytes_reproduce_from_the_generator(self) -> None:
+        base = ROOT / "examples" / "folder-viewer" / "tests" / "fixtures"
+        for kind in ["gamma1", "gamma22", "srgb_para", "swap", "lut"]:
+            self.assertEqual((base / f"icc_{kind}.icc").read_bytes(),
+                             corpus_synth.synthetic_icc_profile(kind))
+
+    def test_profiles_encode_the_standard_version_and_curve_words(self) -> None:
+        for kind, gamma in [("gamma1", 0x0100), ("gamma22", 0x0233)]:
+            with self.subTest(kind=kind):
+                ds, tags = self.profile(kind)
+                self.assertEqual(ds.pixel_array.tolist(),
+                                 [[[64, 64, 64], [128, 128, 128],
+                                   [192, 192, 192], [255, 255, 255]]])
+                self.assertEqual(tags[b"rTRC"][:12],
+                                 b"curv" + bytes(4) + bytes.fromhex("00000001"))
+                self.assertEqual(struct.unpack_from(">H", tags[b"rTRC"], 12)[0], gamma)
+                self.assertEqual(tags[b"gTRC"], tags[b"rTRC"])
+                self.assertEqual(tags[b"bTRC"], tags[b"rTRC"])
+
+    def test_parametric_fixture_uses_type_three_and_fixed_point_parameters(self) -> None:
+        _, tags = self.profile("srgb_para")
+        self.assertEqual(tags[b"rTRC"][:12], b"para" + bytes(4) + b"\x00\x03\x00\x00")
+        # ICC.1 10.18, round the five sRGB parameters once to signed15.16.
+        self.assertEqual(struct.unpack_from(">5i", tags[b"rTRC"], 12),
+                         (157286, 62119, 3417, 5072, 2651))
+
+    def test_swap_and_lookup_traps_preserve_their_raw_device_values(self) -> None:
+        ds, tags = self.profile("swap")
+        self.assertEqual(ds.pixel_array.tolist(), [[[255, 0, 0], [0, 255, 0]]])
+        self.assertEqual(struct.unpack_from(">3I", tags[b"rXYZ"], 8),
+                         (0x6296, 0xB78A, 0x18DA))
+        self.assertEqual(struct.unpack_from(">3I", tags[b"gXYZ"], 8),
+                         (0x6FA0, 0x38F2, 0x038F))
+        ds, tags = self.profile("lut")
+        self.assertEqual(ds.pixel_array.tolist(), [[[10, 20, 30], [200, 100, 50]]])
+        self.assertEqual(bytes(ds.ICCProfile)[12:16], b"scnr")
+        self.assertEqual(tags[b"A2B0"][:12], b"mft2" + bytes(4) + b"\x03\x03\x02\x00")
+        self.assertEqual(struct.unpack_from(">2H", tags[b"A2B0"], 48), (2, 2))
+
+
 class CaseSelector(unittest.TestCase):
     """`--case`, added by F-030, and the refusal that keeps it honest.
 
@@ -1010,11 +1541,66 @@ class CaseSelector(unittest.TestCase):
     def test_the_manifest_categories_name_every_synthetic_case(self) -> None:
         """A case that generates a file with no CATEGORIES row would make
         `--write-manifest` raise, but only after the file was written."""
+        # syntax, jpegls_rgb8, jpegls_banded, jpegxl and empty_bot write under syntax/
+        # and are named by SYNTAX_CASES rather than by CATEGORIES.
         synthetic = {name for name in corpus_synth.case_callables(Path("."))
-                     if name not in ("syntax", "jpegls_rgb8")}
+                     if name not in ("syntax", "colour_syntax", "jpegls_rgb8",
+                                     "jpegls_banded", "jpegxl", "empty_bot")}
         recorded = {Path(path).stem for path in corpus_synth.CATEGORIES}
         recorded |= set(corpus_synth.SERIES_CATEGORY)
         self.assertEqual(synthetic - recorded, set())
+
+
+class JpegXlEncoderRefusals(unittest.TestCase):
+    """F-229's three generator refusals, each driven by a stubbed encoder.
+
+    The locked imagecodecs never returns these shapes, so each test replaces
+    one imagecodecs entry point for the duration of one call. The bases are
+    copied out of the module's generated corpus so nothing there is written.
+    """
+
+    def bases(self, scratch: str) -> Path:
+        target = Path(scratch) / "syntax"
+        target.mkdir()
+        for name in (corpus_synth.REFERENCE_MONO16, corpus_synth.REFERENCE_MONO12,
+                     corpus_synth.REFERENCE_RGB8, "jpeg_baseline_rgb8.dcm"):
+            shutil.copyfile(CORPUS / "syntax" / name, target / name)
+        return target
+
+    def test_a_frame_encoder_returning_no_bytes_is_refused(self) -> None:
+        import imagecodecs
+        pixels = np.zeros((2, 2), dtype=np.uint8)
+        with mock.patch.object(imagecodecs, "jpegxl_encode", return_value=None):
+            with self.assertRaises(RuntimeError) as caught:
+                corpus_synth.jpegxl_encode_frame(
+                    pixels, lossless=True, bits=8, photometric="GRAY")
+        self.assertIn("jpegxl_encode did not return bytes", str(caught.exception))
+
+    def test_a_recompression_returning_no_bytes_is_refused(self) -> None:
+        import imagecodecs
+        with tempfile.TemporaryDirectory(prefix="ocelli-jxl-") as scratch:
+            directory = self.bases(scratch)
+            with mock.patch.object(imagecodecs, "jpegxl_encode_jpeg",
+                                   return_value=None):
+                with self.assertRaises(RuntimeError) as caught:
+                    corpus_synth.encode_jpegxl_cases(directory)
+            self.assertFalse(
+                (directory / "jpegxl_recompression_rgb8.dcm").exists())
+        self.assertIn("jpegxl_encode_jpeg did not return bytes",
+                      str(caught.exception))
+
+    def test_a_recompression_that_does_not_restore_the_jpeg_is_refused(self) -> None:
+        """PS3.5 10.19. A `.111` fragment must reconstruct the `.50` bytes."""
+        import imagecodecs
+        with tempfile.TemporaryDirectory(prefix="ocelli-jxl-") as scratch:
+            directory = self.bases(scratch)
+            with mock.patch.object(imagecodecs, "jpegxl_decode_jpeg",
+                                   return_value=b"\xff\xd8\xff\xd9"):
+                with self.assertRaises(RuntimeError) as caught:
+                    corpus_synth.encode_jpegxl_cases(directory)
+            self.assertFalse(
+                (directory / "jpegxl_recompression_rgb8.dcm").exists())
+        self.assertIn("did not restore the JPEG fragment", str(caught.exception))
 
 
 class MultiComponentJpegLs(unittest.TestCase):
@@ -1065,6 +1651,123 @@ class MultiComponentJpegLs(unittest.TestCase):
         self.assertEqual(components, 3)
         # Ns (Ci Tm)*Ns NEAR ILV, per C.2.3.
         self.assertEqual(codestream[sos + 4 + 2 * components + 2], 2)
+
+
+
+class ControlledColourComparisonFixtures(unittest.TestCase):
+    """F239AC32/F240AC16 inputs from their approved dimensions and PS3.5."""
+
+    def test_closed_measurement_sizes_match_the_approved_cases(self) -> None:
+        self.assertEqual(corpus_synth.COMPARISON_COLOUR_CASES, {
+            "rgb8": (512, 200, "RGB", 3, 8),
+            "ybr422": (512, 200, "YBR_FULL_422", 3, 8),
+            "palette16": (512, 200, "PALETTE COLOR", 1, 16),
+            "icc8-gamma22": (8192, 1, "RGB", 3, 8),
+            "icc16-table": (8192, 1, "RGB", 3, 16),
+        })
+
+    def test_small_inputs_are_deterministic_and_keep_calibration_separate(self) -> None:
+        for case in ["rgb8", "ybr422", "palette16", "icc8-gamma22", "icc16-table"]:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as first, \
+                    tempfile.TemporaryDirectory() as second:
+                roots = [Path(first), Path(second)]
+                manifests = [json.loads(corpus_synth.write_colour_comparison(
+                    root, case, edge=6, frames=2).read_text()) for root in roots]
+                self.assertEqual(manifests[0], manifests[1])
+                manifest = manifests[0]
+                self.assertFalse(manifest["measurementSize"])
+                self.assertEqual(len(manifest["targetFiles"]), 2)
+                self.assertEqual(len(manifest["calibrationFiles"]), 1)
+                calibration = pydicom.dcmread(roots[0] / manifest["calibrationFiles"][0]["path"])
+                self.assertEqual((calibration.Modality, calibration.Rows,
+                                  calibration.Columns, calibration.PhotometricInterpretation),
+                                 ("CT", 512, 512, "MONOCHROME2"))
+                self.assertEqual((float(calibration.WindowCenter), float(calibration.WindowWidth)),
+                                 (40, 400))
+                target_uids = set()
+                for number, item in enumerate(manifest["targetFiles"], 1):
+                    path = roots[0] / item["path"]
+                    self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), item["sha256"])
+                    self.assertEqual(path.stat().st_size, item["bytes"])
+                    ds = pydicom.dcmread(path)
+                    self.assertEqual((ds.Rows, ds.Columns, ds.InstanceNumber), (6, 6, number))
+                    self.assertEqual(ds.PhotometricInterpretation, manifest["photometric"])
+                    self.assertEqual(ds.SamplesPerPixel, manifest["samplesPerPixel"])
+                    self.assertEqual(ds.BitsStored, manifest["bitsStored"])
+                    self.assertEqual(ds.HighBit, ds.BitsStored - 1)
+                    self.assertEqual(ds.PixelRepresentation, 0)
+                    self.assertEqual(str(ds.file_meta.TransferSyntaxUID), "1.2.840.10008.1.2.1")
+                    self.assertNotIn("WindowCenter", ds)
+                    target_uids.add(str(ds.SeriesInstanceUID))
+                self.assertEqual(target_uids, {manifest["seriesUid"]})
+                self.assertNotEqual(str(calibration.SeriesInstanceUID), manifest["seriesUid"])
+                self.assertEqual(manifest["serverCacheMiB"], 512 if case == "icc16-table" else 256)
+
+    def test_native_stored_patterns_preserve_channels_pairs_and_low_device_bits(self) -> None:
+        rgb = np.frombuffer(corpus_synth.comparison_colour_row("rgb8", 6, 1, 0), dtype=np.uint8)
+        self.assertEqual(rgb.reshape(6, 3)[5].tolist(), [5, 1, 6])
+        later = np.frombuffer(corpus_synth.comparison_colour_row("rgb8", 6, 1, 1), dtype=np.uint8)
+        self.assertEqual(later.reshape(6, 3)[5].tolist(), [36, 48, 77])
+        ybr = corpus_synth.comparison_colour_row("ybr422", 6, 0, 0)
+        self.assertEqual(list(ybr), [64, 128, 128, 128, 100, 101, 150, 90, 4, 5, 64, 128])
+        palette = np.frombuffer(corpus_synth.comparison_colour_row("palette16", 6, 1, 1), dtype="<u2")
+        self.assertEqual(palette.tolist(), list(range(263, 269)))
+        high = np.frombuffer(corpus_synth.comparison_colour_row("icc16-table", 6, 0, 0), dtype="<u2").reshape(6, 3)
+        self.assertEqual(high[:5].tolist(), [[v, v, v] for v in [15, 16384, 32768, 49152, 65535]])
+        self.assertEqual(len(corpus_synth.comparison_colour_row("icc16-table", 8192, 1, 0)), 49152)
+
+    def test_palette_descriptor_and_tables_have_the_declared_sixteen_bit_words(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = json.loads(corpus_synth.write_colour_comparison(root, "palette16", edge=6, frames=1).read_text())
+            ds = pydicom.dcmread(root / manifest["targetFiles"][0]["path"])
+            for name, expected in [("Red", 100), ("Green", 65435), ("Blue", 25700)]:
+                self.assertEqual(list(getattr(ds, name + "PaletteColorLookupTableDescriptor")), [0, 0, 16])
+                data = getattr(ds, name + "PaletteColorLookupTableData")
+                self.assertEqual(len(data), 131072)
+                self.assertEqual(struct.unpack_from("<H", data, 200)[0], expected)
+
+    def test_icc_profiles_keep_own_gamma22_and_valid_two_entry_curve_ids(self) -> None:
+        gamma = corpus_synth.comparison_icc_profile("icc8-gamma22")
+        self.assertEqual(gamma, corpus_synth.synthetic_icc_profile("gamma22"))
+        table = corpus_synth.comparison_icc_profile("icc16-table")
+        self.assertIsNotNone(table)
+        count = struct.unpack_from(">I", table, 128)[0]
+        seen = 0
+        for index in range(count):
+            signature, offset, length = struct.unpack_from(">4sII", table, 132 + index * 12)
+            if signature in [b"rTRC", b"gTRC", b"bTRC"]:
+                self.assertEqual(length, 16)
+                self.assertEqual(table[offset:offset + 16], b"curv\0\0\0\0" + struct.pack(">I2H", 2, 0, 65535))
+                seen += 1
+        self.assertEqual(seen, 3)
+        for data in [gamma, table]:
+            hashed = bytearray(data)
+            hashed[44:48], hashed[64:68], hashed[84:100] = bytes(4), bytes(4), bytes(16)
+            self.assertEqual(data[84:100], hashlib.md5(hashed, usedforsecurity=False).digest())
+
+    def test_invalid_selector_dimensions_and_nonempty_output_refuse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "unknown controlled"):
+                corpus_synth.write_colour_comparison(root, "constructor")
+            for kwargs in [{"edge": 3}, {"edge": 0}, {"edge": True}, {"frames": 0}, {"frames": 201}]:
+                with self.assertRaisesRegex(ValueError, "invalid controlled"):
+                    corpus_synth.write_colour_comparison(root, "rgb8", **kwargs)
+            (root / "kept.txt").write_text("keep")
+            with self.assertRaisesRegex(ValueError, "must be empty"):
+                corpus_synth.write_colour_comparison(root, "rgb8", edge=6, frames=1)
+            self.assertEqual((root / "kept.txt").read_text(), "keep")
+
+    def test_explicit_cli_mode_cannot_fall_into_corpus_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for args in [["--comparison-colour", "rgb8"],
+                         ["--comparison-colour", "rgb8", "--out", tmp, "--case", "rgb8"]]:
+                proc = subprocess.run([sys.executable, str(ROOT / "scripts/corpus_synth.py"), *args],
+                                      capture_output=True, text=True, check=False)
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn("needs explicit --out and no corpus mode", proc.stderr)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
 
 
 if __name__ == "__main__":

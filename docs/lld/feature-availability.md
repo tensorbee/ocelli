@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067, F-240
+**Last updated:** 2026-11-09
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -29,7 +29,7 @@ of any of them.
 | `caps::opens_a_device` | F-037 in `ocelli-render` | Whether the session has a GPU device at all. Tier C has none, so every GPU-requiring feature is `Unavailable` there by construction rather than by each feature checking |
 | `DeviceState` and `GpuContext::recover` | F-037 in `ocelli-render` | A lost device is an OBSERVED state rather than a later call failing, so a feature can report unavailable for the right reason while a rebuild is pending |
 | `VoiParams::from_chain` | F-041 in `ocelli-render` | The first feature-level refusal of this shape: a chain driven by a Modality LUT Sequence or a VOI LUT Sequence has no HLD section 18.4 uniform to be expressed in, so the GPU path is `Unavailable` and tier C is `Available` through `LutChain::map_into`. The two error variants name WHICH stage, because a caller reporting the feature unavailable has to say |
-| `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. ICC reports unavailable. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
+| `CpuRaster` | F-X003 in `ocelli-render` | Tier C stack drawing. Monochrome uses `LutChain` and the preset tables. Palette and RGB use `ColorTransform` for a supported space. The native CPU colour path supports F-240's matrix/TRC ICC subset. `RenderGraph::new` still returns `TierCUnavailable`. Representative-host interactive and idle acceptance remains unmeasured |
 | `RenderGraph::show_fusion` | F-056 in `ocelli-render` | Two volumes that share a frame of reference. Tier A and tier B draw them when a preserving float sample format and the `Rgba16Float` window target can be bound. Otherwise the bind returns `FusionError::Unavailable` and writes no CPU image. Tier C returns `FusionError::TierCUnavailable` before a sample is read and writes no CPU image |
 | Volume ray `VOLUME_3D` | F-X005 in `ocelli-render` | Tier A and tier B run the existing fragment ray. Tier C returns `TierCUnavailable` from `volume_ray_admission` before a sample is read and writes no colour buffer. There is no CPU ray |
 | CPU MPR `present_cpu_plane` | F-X004 in `ocelli-render` | Tier C copies `Volume::reslice` and `Volume::reslice_oblique` samples into `CpuRaster`. An absent sample or a raster refusal writes nothing. Tier A and tier B stay on `present_plane`. A linear stack mode is refused before the plane is read and is not drawn as nearest. Selecting linear after a nearest orthographic upload is refused, the mode stays nearest, and the lane is not written. There is no second interpolant and no CPU ray. A missing SIMD measurement is not a passed timing row |
@@ -175,6 +175,18 @@ producer.
 `volume_ray_admission` returns `TierCUnavailable` before a sample is read and
 writes no colour buffer. There is no CPU ray. That is D-07 applied to this
 feature, not a new availability state.
+
+ICC colour management is F-240's declaration. Tier C is full for the matrix
+and tone-curve subset, through `ColorTransform::with_icc` and `map_into` in
+`ocelli-pixel`. Tiers A and B are unavailable: `ColourLut::icc` still returns
+`ColourLutError::Unavailable`, and a GPU route given a profiled frame reports
+unavailable rather than drawing device RGB. The palette bake in
+`ocelli-render` carries the frame's profile presence,
+`IccProfilePresence`, and refuses a profile the subset accepted before any
+texel is built, so no GPU route bakes device RGB beside a profile it cannot
+apply. A profile the subset refused keeps the CPU route's own bytes on every
+tier, which is deviation D-30, and is not a quiet second answer. The
+refusals are named in `docs/lld/pixel-pipeline.md`.
 
 ## What this contract does not build
 

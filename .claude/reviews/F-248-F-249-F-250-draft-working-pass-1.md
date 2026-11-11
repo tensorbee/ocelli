@@ -1,0 +1,25 @@
+# F-248, F-249 and F-250 draft refinement, working pass 1
+
+# Independent controller review of three future draft refinements
+
+Reviewer Codex child glm_codec_merge did not author F248/F249/F250 or their proposed appendices. Bounded source/planning review of complete patch SHA8468664b60982cc2d7a548c662e14de66efd9aa614a70ce80a4a26f878c583ce against a601d30620b727abda7225b3b215dea76e31d358. Result:0 supported introduced defects,0 smells,0 nits. Approval is for draft refinement, not implementation design readiness, mathematical policy, canonical adoption or completion. Fresh remote-model risk review remains separate and is not the basis of this participant approval.
+
+All three original source files equal their named base Git objects and are byte-identical prefixes of the corrected files. Original draft status, S48, estimates, dependencies, numbered ACs and normative transcription remain unchanged. New sections map observable actual consumers, synthetic independent expected outputs, identity/generation refusal/recovery, S46 compatibility and named hot-path evidence. Their open questions remain explicitly unresolved. They do not add a new API, tolerance, rounding, dependency or scheduled feature.
+
+For F248, actual finite-sample histogram contract preserves existing edge/maximum/constant rules and refuses empty samples without changing caller bins. Actual native region sampling excludes stored padding before applying modality. The appendix requires real provider counts, not reconstructed extrema. Histogram UI is future work, and colour/ICC domain/channel scope and UX remain lead questions. Retained last-valid graphs require truthful identity and cannot masquerade as fresh zero counts.
+
+For F249, actual `preview.rs` constants are 4096 element rows and 1024 retained value characters, with omission/truncation suffixes. `push_dataset` stops nested descent at depth 6 and uses 0-based item prefixes. The appendix names observed limits without claiming they already satisfy future disclosure controls. MetadataSet retains empty, ordered sequences, typed carriers and JSON null positions, with absent represented by missing elements and File Meta separate. Unsupported encapsulated-pixel projection can return an error for the entire set. That per-row recovery gap remains an implementation-design question. Metadata-only tier independence is accurate.
+
+For F250, clipboard proof explicitly requires actual copied content, not resolved Promise or status alone. The appendix does not pretend post-resolution generation checks revoke an issued write. Intent snapshot, dispatch/cancellation and changed-selection semantics remain lead questions under the original strict AC2/AC3. No equality policy is inferred from PartialEq. Real intended local display/user copy is allowed while synthetic evidence and no real-data logs remain required.
+
+An inherited HLD quotation in the original F248 prefix contains the known LINEAR_EXACT(-160)=1.594 transcription error. It is not introduced or adopted by this additive patch. Governing D-13 and the DICOM expert correction give0. No implementation fixture may copy that inherited number. This review does not waive the normal future detailed numerical transcription/design round.
+
+No source, candidate/index, test, build, browser, data or hardware was mutated or run by this reviewer. DICOM expert canonical guidance was read. Missing guessed source paths were corrected to actual preview.rs and measure.rs and were not treated as absence proof. Source-byte checks and provider reads are not verification-gate or runtime receipts.
+
+## Root adoption-preface clarification
+
+Root proposed replacing only the shared private-copy/pending-review preface with: "This draft refinement is retained for the normal pre-implementation design round after independent non-author review. Status stays draft. It maps observable controls to the existing numbered acceptance inventory above and lists remaining lead questions. No existing AC row is rewritten or weakened, and no new policy, rounding, tolerance, equality, refusal, API, dependency, estimate, sprint or status choice is made here."
+
+Approve this exact editorial substitution0D/0S/0N. The participant non-author review has actually completed. Additional model risk review remains separately pending and is not required to turn that factual participant review into a claimed future approval. This text preserves draft-only status and open lead questions, not implementation authorization. Root owns preparation and exact resulting source identities. The original reviewed patch and all original plan prefixes remain preserved in their immutable evidence.
+
+The root adopted the appendices as future drafts only. The independent reviewer also approved the exact shared preface correction identifying this as a retained, independently reviewed draft rather than a private proposal awaiting review. All original plan bytes remain unchanged prefixes. No sprint allocation, estimate, dependency, existing AC, feature status or implementation changed. The extra GLM risk review remains separate from the participant approval.

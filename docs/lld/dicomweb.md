@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021, F-101, F-198
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-021, F-101, F-198, F-230, F-224
+**Last updated:** 2026-11-06
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -38,8 +38,8 @@ non-decimal components, leading-zero forms, and longer values are
 `InvalidRequest`.
 
 Automatic retry, authentication refresh, whole-study retrieval, whole-series
-retrieval, rendered WADO-URI output, caching, and timeout policy are outside
-this contract.
+retrieval, rendered WADO-URI output, response caching of its own, and timeout
+policy are outside this contract.
 
 ## Transport validation and errors
 
@@ -49,8 +49,38 @@ transport error classes are `InvalidRequest`, `Network`, `Aborted`,
 `HttpStatus`, and `ContentType`. Only `HttpStatus` retains the numeric status.
 Errors never retain a URL, UID, header, query, credential, or response body.
 
+`DicomwebError` extends `OcelliError`, so `instanceof OcelliError` catches it.
+Its `name` is `DicomwebError`, its `code` is one of the five transport classes,
+its message is fixed per code, and it carries no `cause`.
+
+An unknown own key on `DicomwebClientOptions` or `QidoSearchOptions` is not a
+transport class. It is `OcelliError` code `UnknownOption`, raised before any
+fetch, and `error.option` names the refused key and nothing else. The
+constructor throws it. `searchStudies`, `searchSeries` and `searchInstances`
+reject their promise with it. `postWadoInstance` refuses an unknown key on
+`WadoInstanceRequest` the same way. A value that is not an options object is
+`InvalidOptions`. `docs/lld/public-api.md`, "Options and refusals", holds the
+rule.
+
 The injected fetch receives the caller's `AbortSignal` unchanged. Ocelli does
 not retry a rejected fetch.
+
+## The fetch cache mode
+
+Every request is sent with a fetch cache mode. `DicomwebClientOptions` takes
+an optional `cache`, and `postWadoInstance` takes the same field on
+`WadoInstanceRequest` and passes it through. The accepted values are
+`"no-cache"`, `"no-store"`, `"reload"` and `"default"`, and the default is
+`"no-cache"`. `"no-cache"` uses a stored response only after a conditional
+request to the server, which closes the RFC 9111 heuristic freshness path a
+server sending no `Cache-Control` would otherwise open, and a server with
+validators answers 304 so an unchanged object is not downloaded twice.
+`"default"` is an explicit opt-in to the browser's heuristics.
+`"force-cache"` and `"only-if-cached"` return a stored response whether or
+not it is stale, and are refused at construction with `DicomwebError` code
+`InvalidRequest` before any fetch, as is any other string. A proxy or a
+service worker between the browser and the server is outside what a cache
+mode controls.
 
 ## Bulk boundary
 
@@ -75,8 +105,8 @@ until the ticket is released. It does not call `commit_dicomweb_response`,
 and that wasm entry is still absent. The worker binds one offscreen canvas,
 commits one monochrome stored sample through the existing frame commit, and
 publishes with `publishCpuCanvas`. The page shows the tier string from
-`resolvedTier` and whether that publish returned. A failed load leaves
-`coreAvailable()` false.
+`resolvedTier` and whether that publish returned. A failed load rejects
+`loadCore` with `CoreLoadFailed` and leaves `coreAvailable()` false.
 
 ## Rust source contract
 

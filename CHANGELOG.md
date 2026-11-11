@@ -10,6 +10,13 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The embedding Content Security Policy is documented and browser-proven, and the local folder viewer serves strict page-specific script and style hashes.
+- Release tooling packages the wasm module and its notice files separately as `@ocelli/wasm`, alongside the matching `@ocelli/core` version.
+- Folder viewer colour frames draw through the library colour stage with per-channel window and invert and named refusals.
+- Matrix and tone-curve ICC profiles apply in the native CPU colour path. Unsupported kinds stay named and unapplied.
+- The local viewer shows scoped DICOM conformance findings without exposing file values in findings or stopping display.
+- Compressed DICOM files with an empty Basic Offset Table open, including frames spanning fragments when their JPEG or JPEG 2000 markers prove the boundaries.
+
 - Frame open reads one Part 10 object into the existing LUT chain inputs. The example page shows the synthetic display value and the padding count.
 - Series assembly orders parsed frames by projected position and reads cine timing from the first frame. The example page shows the groups and Loop or Bounce.
 - Overlay planes are read from the top-level overlay groups, and display shutters from the shutter attributes. The example page shows the synthetic hit, the shutter hide, and an absent neutral value.
@@ -530,3 +537,238 @@ Repository bootstrap. Nothing is published.
   stops before product implementation, verification receipts or publication.
   The unsafe gate audits the complete staged index and the verify ledger
   reports whether a receipt existed before invalidation.
+- An advisory gate audits the dependencies `@ocelli/core` ships. dcmjs
+  0.52.2 declares adm-zip 0.5.17, which has a published advisory, and the one
+  recorded exception holds only while the packages gate finds no shipped file
+  that loads adm-zip. The README gives the override a consumer can add to
+  install adm-zip 0.6.1.
+- The `@ocelli/core` and `@ocelli/react` tarballs no longer ship compiled
+  test files. Core packs 140 entries and react 17. The packages check
+  refuses any test file in a published tarball.
+- `THIRD_PARTY_LICENSES` lists the licence text of every third-party crate
+  compiled into the wasm module and the native binaries, with the Rust
+  standard library's notice. The licences gate checks that it matches the
+  lockfile, offline.
+- The local folder viewer posts each file once and holds it in a bounded
+  cache, keeps a decoded frame for window changes, and draws a frame larger
+  than its design size on its own. Previews that wait are admitted in the
+  order they first waited. Open, first image, scroll, window step and
+  resident memory have recorded budgets on the operator's machine.
+- The local folder viewer shows the modality value and its unit under the
+  pointer, HU on a CT that states HU or states no unit and is not
+  multi-energy, and Units on a PET. The local process computes it from the
+  held frame, and `ocelli-dicom` gains `read_padding`.
+- The local folder viewer measures angle, Cobb angle, bidirectional, arrow,
+  probe and regions with area, mean, SD, minimum and maximum in modality
+  units, with editable handles and a measurement list. An outline that
+  crosses or touches itself is not measured. A projection image whose Pixel
+  Spacing equals its Imager Pixel Spacing is measured at the detector plane
+  unless it states a magnification factor, per PS3.3 10.7.1.1. `ocelli-geom`
+  gains region sampling and `polygon_crosses_itself`, and `ocelli-core` gains
+  `spacing_pair_agrees`, the one definition of an equal spacing pair.
+- The local folder viewer lays out 1 by 1 up to 3 by 3 viewports from a
+  picker on `G`, each with its own series, image, zoom, pan and window. A
+  series row dragged onto a viewport opens there, and the four-image view is
+  a tile mode of one viewport on `Shift G`. Bare digits no longer choose a
+  layout. A `viewer-browser` gate measures the displayed aspect and the
+  pointer readout in headless Chromium.
+- The local folder viewer links its viewports. A Link menu turns on Scroll,
+  Window and Zoom over every visible viewport, with the outlined one as the
+  source, and Reference lines draw where the source image's plane cuts each
+  other viewport. Scroll moves to the nearest image by Image Position
+  (Patient) when both series share a Frame of Reference UID and their planes
+  are within cornerstone3D 5.8.2's coplanar threshold. The local process
+  chooses the image and computes the line through the new
+  `ocelli_viewport::link`, with `same_frame_of_reference`, `closest_coplanar`
+  and `reference_segment`, and `SyncScene` now uses the same UID rule. The
+  corner of an image that is not monochrome reads `Window not applicable`.
+- Release by series and by volume. `ImageCache::release_series` releases
+  every frame of one series and returns one `Released` event, which the ring
+  carries as the new kind 7, `cache.released`, with the series, the frame
+  count and the bytes. `BrickCache::release_volume` releases every brick of
+  every level of one volume and returns a `ReleaseSummary`. Both go through
+  the new `Lru::remove_range`, an explicit release that is not an eviction.
+  `@ocelli/core` decodes `cache.released` and lists it in `UNMAPPED_EVENTS`,
+  because cornerstone3D 5.8.2 reports a removed image per image. The cache
+  has no study, so a study is released by its owner's series and volumes.
+  The local folder viewer now forgets the folder it left. Opening another
+  folder or the synthetic study sends that folder's ids to the new
+  `POST /forget`, and leaving the page sends one short beacon naming a
+  per-load page token, so `GET /held` counts only what is open. A late reply
+  for the folder left does not post its file again, and a decode already
+  running for a forgotten file stores nothing.
+- JPEG XL decoding. `register_jpegxl_decoders` registers a sixth decoder
+  family in `ocelli-codec` for JPEG XL Lossless, `1.2.840.10008.1.2.4.110`,
+  and JPEG XL, `.112`, through `jxl-oxide` with default features off.
+  Lossless frames decode to their exact stored values and lossy frames are
+  quantised to Bits Stored. JPEG XL JPEG Recompression, `.111`, is known and
+  unavailable until an upstream panic, jxl-oxide issue 512, is fixed. A
+  signed, ICC, HDR, oriented or extra-channel frame is refused as
+  unavailable, and a frame of more than one keyframe is refused as a
+  mismatch, rather than drawn. `XYB` is a recognised
+  Photometric Interpretation whose colour conversion the codec owns. The
+  local folder viewer opens monochrome `.110` and `.112` frames.
+- The local folder viewer's four corners show the birth date, sex, age,
+  study time, institution, slice location and thickness, kVp, mAs, TR and TE
+  when the file has them. Names, dates, times and ages are formatted by the
+  local process from PS3.5's PN, DA, TM and AS rules, and with no Patient's
+  Age the age is the age at the study date. Edge letters come from Patient
+  Orientation on an image without Image Orientation (Patient), and an image
+  whose Anatomical Orientation Type is `QUADRUPED` shows none. A scale bar
+  in each viewport follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice
+  rule and reads the same calibration as the length tool.
+- Frame identity in the decoded tier. `ContentId::of` is a 64-bit FNV-1a
+  over the length-prefixed SOP Instance UID, transfer syntax UID and encoded
+  bytes, and `FrameSource` is what a lookup presents, that id with the
+  frame's stored pixel description and image plane. `ImageCache::get` answers
+  `FrameLookup::Hit` only when all three match the held frame, and otherwise
+  removes it and answers `Stale` with the bytes released, so a frame decoded
+  from one object is never returned to a caller holding another in the same
+  slot. A stale removal is an explicit release and emits no event.
+  `FrameKey` and the stack, handoff and event wire formats are unchanged.
+  `DicomwebClient` and `postWadoInstance` take an optional `cache`, the fetch
+  cache mode sent on every request, one of `"no-cache"`, `"no-store"`,
+  `"reload"` and `"default"`. `"force-cache"` and `"only-if-cached"` are
+  refused with `DicomwebError` code `InvalidRequest`, because both can serve
+  a stale response.
+- The local folder viewer reads a folder again when the same folder is
+  chosen again, and keys every grey it keeps by the file object that choice
+  gave it rather than by name, size and time. A file rewritten on disk with a
+  new modification time is found when the window regains focus, the page
+  becomes visible, a series is selected or another viewport becomes active.
+  The page then forgets it in the local process and shows a sentence in its
+  place. A rewrite that keeps the modification time is not detected, and only
+  Chromium was measured.
+- The wasm session's own frame cache. The session keeps committed stack
+  frames in an `ImageCache` whose budget the caller sets with
+  `setFrameBudget`, in bytes, and the default is 0, which is off, so a
+  caller that never sets one gets the earlier behaviour. A frame enters the
+  cache only through a commit that carries `FrameCommitMeta.content`, the
+  frame's `ContentId`, beside `stackIndex` and `stackEpoch`, and
+  `contentId(wasm, sopInstanceUid, transferSyntaxUid, encoded)` computes that
+  id in the core. A `content` without both stack keys is refused with
+  `OcelliError` code `InvalidValue`. `frameResident` asks whether a slice is
+  held for those bytes and that extent without counting as a use.
+  `showResident` draws a held frame at the selected slice, answers `false`
+  for a miss or a stale entry, and throws `CommitRefused` for any other
+  index. `releaseSeries` empties one series and `releaseStudy` empties the
+  caller's list of series, one call per series. The session now produces
+  `cache.evicted`, `cache.displaced`, `cache.refused`, `cache.pressure`,
+  `cache.budgetChanged` and `cache.released` in the ring, and a pressure
+  reading carries the evictions and refusals since the previous one.
+  `requestFramePressure` asks for a reading. The displayed frame is held
+  outside the budget. `ocelli-cache` gains `CommittedFrame` and
+  `CommittedSource`, `ImageCache` becomes generic over its value with
+  `DecodedFrame` as the default, `ImageCache::set_budget` moves the budget
+  and returns the evictions, and `Lru::peek` reads a value without marking
+  it used.
+- The local folder viewer lists its windows from the local process. On a CT
+  the list starts with the Soft tissue, Lung and Bone presets, and on every
+  image it lists each Window Center and Width pair of the file in file
+  order, named by its Window Center & Width Explanation or `Window n`, with
+  each VOI LUT Sequence item listed as a row that cannot be chosen. The keys
+  `1` to `9` choose rows 1 to 9 and `0` stays Fit. A file window is sent as
+  `X-Ocelli-Window-Index` and selected once by `VoiTransform::new`, and a
+  file opens at its first pair holding both a centre and a width. A preset
+  on an image whose Modality is not CT is refused with
+  `X-Ocelli-Error: modality`, whatever the page sends. A multiframe whose windows change per
+  frame lists the shown frame's own, and the process keeps those replies up
+  to 16 MiB across every file, reported as `kept` in `GET /held`. Region
+  window `Y` drags a rectangle, `POST /region` returns the least and
+  greatest modality value whose pixel centre is inside it with padding left
+  out, and `windowRegion` from `@ocelli/core` makes the window, which
+  centres on the middle of the span where cornerstone3D 5.8.2's
+  `WindowLevelRegionTool` centres on the mean. The process serves the built
+  `@ocelli/core` under `/lib/` from an allowlist, so the region window needs
+  `npm run build -w @ocelli/core` and reads unavailable without it. The
+  bottom right corner names the window shown.
+- The local folder viewer offers three mouse profiles in its MOUSE section.
+  Ocelli, the default, starts the left button on Scroll with the middle
+  button zooming and the right button panning. Scroll on left drags the
+  window with the middle button and zooms with the right. Window on left
+  starts on W/L, pans with the middle button and zooms with the right.
+  Control with the left button pans in all three. The profile, the play
+  rate and the two hidden side columns are kept in this browser for the
+  page's address. Between two frames of one multi-frame file, Play waits
+  that file's Frame Time `(0018,1063)`, and the FPS control otherwise, with
+  a line saying which and Use the slider to take the rate back.
+  `ocelli-dicom` gains `cine_timing`, which reads one object's cine timing
+  alone through the same rules as `assemble_display`.
+- The local folder viewer saves its marks. Save marks downloads one DICOM
+  SR TID 1500 file per study for the Freeform, Rectangle, Ellipse, Length
+  and Text marks, and one Key Object Selection per study for the key
+  images. Nothing is written into the opened folder. Opening the folder
+  again with those files in it, or Load marks, places each mark and key
+  image on its image by SOP Instance UID and frame. A save names the
+  reports it replaces in Predecessor Documents Sequence. Angle, Cobb,
+  Bidirectional, Arrow and Probe marks are not saved and are counted.
+  `@ocelli/core` gains `writeTid1500Groups`, `readTid1500Groups`,
+  `writeKeyObjects` and `readKeyObjects`, `GraphicType` gains `ELLIPSE`, and
+  an `IMAGE` item gains an optional `frame`. Save marks and Load marks need
+  `npm run build` first.
+- The local folder viewer draws a series whose images store no window at
+  one automatic window for the whole series, and the corner says `Auto
+  window`. The window runs from the 1st to the 99th nearest-rank percentile
+  of modality values over up to 16 images spread through the series, each
+  through its own rescale, with stored zero and the Pixel Padding Value left
+  out, and the function is LINEAR_EXACT. `POST /series-window` computes it
+  once per series and the page sends it back unchanged with each preview. A
+  thumbnail, and a series whose window the local process refuses, use each
+  image's own automatic window and say `Auto window, this image`. A window in
+  the file is always used as it is. `ocelli-pixel` gains `series_sample`,
+  `AutoWindowPool`, `auto_window` and `AutoWindow`. cornerstone3D 5.8.2 takes
+  each image's own minimum and maximum instead, so this is not a parity row.
+
+### Changed
+
+- Shipped native builds now compile no Metal backend and no objc2 crate, proven per Apple target by the resolved dependency graph, and the desktop reports an explicit no-backend result instead of panicking when no backend is compiled. Development builds keep Metal for the tier A gate.
+- Every public options and request object in `@ocelli/core` now refuses an
+  unknown key with `OcelliError` code `UnknownOption`, naming the key, before
+  any fetch or write. A misspelt option used to be ignored.
+- Errors the shell raises are `OcelliError` with a string `code`.
+  `DicomwebError` is a subclass and keeps its codes. An engine `RangeError`
+  or `TypeError` from a view over wasm memory still passes through.
+- `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed`, with
+  the initialiser's error as `cause`. It used to resolve `false`.
+- A contributor's build refuses `unsafe` code. `Cargo.toml` forbids
+  `unsafe_code` for every target of every workspace member, and every member
+  library root forbids it in its doctests, so a doctest holding `unsafe` fails
+  to compile. `scripts/unsafe_allowlist_check.py` reads Rust with a tokenizer
+  and no longer misses `unsafe` after a quote character literal, a raw string
+  or a comment holding a quote, and it refuses an attribute that weakens
+  `unsafe_code`. Nothing published changes.
+- A contributor's `bin/ocelli.sh gate native` builds the `+simd128`
+  codec verification modules with the flag on every crate, so each
+  dependency's `simd128` code paths are compiled, and two new steps refuse a
+  SIMD module holding no SIMD instruction and a plain module holding any. The
+  modules hold SIMD loads, stores and constants and no lane arithmetic.
+  Nothing published changes.
+- `ImageCache::insert` takes the frame's `ContentId` beside its key,
+  `ImageCache::get` takes a `FrameSource` and returns a `FrameLookup` rather
+  than an `Option`, and `StackSequence::samples_for_upload` takes a
+  `FrameSource` and can fail with the new `ScrollError::Stale`. A caller
+  passes the identity of the bytes it decoded.
+- `DicomwebClient` now sends every request with the fetch cache mode
+  `"no-cache"` unless its `cache` option says otherwise. It used to send no
+  mode, so a browser applied `"default"` and could serve a re-processed
+  object from its HTTP cache by heuristic freshness without asking the
+  server. A server with validators answers an unchanged object with 304.
+
+### Fixed
+
+- Files whose sequence nesting exceeds this build's supported depth are refused before recursive parsing, keeping the local viewer process available for the next request.
+- The example viewer builds again from a clean clone with no
+  `crates/ocelli-wasm/pkg`. Under Vite 7 `npm run build` failed with ENOENT on
+  `ocelli_wasm.js`. Without the pkg the worker now keeps a runtime import and
+  reports the core as not built, and with it the wasm is still bundled as its
+  own files. A checkout under a path with a space builds too.
+- `acceptTransferredFrame` honours `stackIndex`, `stackEpoch` and `content`.
+  The three keys were accepted and then dropped, so a transferred frame into
+  a session with an installed stack was always refused with `CommitRefused`,
+  and a content id never reached the session's frame cache. The validated
+  target is now forwarded beside the handoff, so a frame carrying both stack
+  keys commits through the selected-frame export at the current index and
+  epoch and is refused with `CommitRefused` for a stale one, and a frame
+  that also carries `content` is cached as a `writeFrame` commit is. A
+  caller that sets none of the keys sees the earlier behaviour.
+- JPEG-LS flat runs decode correctly. The decoder refuses unsupported LSE presets and scans that run out of data or carry padding beyond their final partial byte.

@@ -127,6 +127,14 @@
       "goal": "The local folder viewer opens a synthetic study or a folder, and the page shows the image tools, the marks, and how to call the library."
     },
     {
+      "key": "M21",
+      "title": "One showcase viewer and usable feature completion",
+      "epics": [
+        "E38"
+      ],
+      "goal": "One viewer exposes every developed user-facing library feature through real workflows, with explicit tier limits and measured or source-qualified cornerstone3D parity. S47 to S50 are the next four implementation waves, not a measured calendar forecast."
+    },
+    {
       "key": "M14",
       "title": "Out-of-core volume streaming",
       "epics": [
@@ -2646,17 +2654,23 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Worker decode of a posted WADO-RS envelope, the frame cache, and a render of that frame",
-      "layer": "TS",
-      "weeks": 4,
+      "story": "Worker decode and owned frame render in the single showcase viewer",
+      "layer": "All",
+      "weeks": 6,
       "depends_eids": [
-        "E38.8"
+        "E38.40",
+        "E38.8",
+        "E5.9",
+        "E16.7"
       ],
-      "notes": "Remainder of the narrowed F-198 title. No sprint.",
-      "milestone": "",
-      "sprint": "",
+      "notes": "Worker decode, frame cache and render remainder of F-198. Browser acceptance must run in the single showcase, not the sample-only React proof. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft.",
+      "milestone": "M21",
+      "sprint": "S47",
       "depends_fids": [
-        "F-198"
+        "F-245",
+        "F-198",
+        "F-231",
+        "F-236"
       ]
     },
     {
@@ -2665,17 +2679,27 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Example prior studies, linked scroll, synced window and zoom, frame-of-reference cursor, MPR, slab, volume rendering and fusion",
-      "layer": "TS",
-      "weeks": 4,
+      "story": "Orthographic and oblique MPR in the single showcase viewer",
+      "layer": "All",
+      "weeks": 6,
       "depends_eids": [
-        "E38.9"
+        "E38.12",
+        "E38.40",
+        "E38.7",
+        "E8.2",
+        "E8.3",
+        "X1.4"
       ],
-      "notes": "Remainder of the narrowed F-199 title. No sprint.",
-      "milestone": "",
-      "sprint": "",
+      "notes": "Retains MPR from original F-203. Prior, cursor, slab, volume and fusion slices move explicitly to F-252, F-253, F-254, F-255, F-256 and F-257. Existing F-209 links are reused. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft.",
+      "milestone": "M21",
+      "sprint": "S49",
       "depends_fids": [
-        "F-199"
+        "F-202",
+        "F-245",
+        "F-197",
+        "F-052",
+        "F-053",
+        "F-X004"
       ]
     },
     {
@@ -2684,17 +2708,19 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Example one to one, histogram, four corners, and a shutter beyond the overlay panel",
-      "layer": "TS",
-      "weeks": 4,
+      "story": "One stored pixel per device pixel in the single showcase viewer",
+      "layer": "All",
+      "weeks": 2,
       "depends_eids": [
-        "E38.10"
+        "E38.40",
+        "E38.17"
       ],
-      "notes": "Remainder of the narrowed F-200 title. No sprint.",
-      "milestone": "",
-      "sprint": "",
+      "notes": "Retains one-to-one from original F-204. Histogram and shutters move explicitly to F-248 and F-247. F-212 already supplies folder corners. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft.",
+      "milestone": "M21",
+      "sprint": "S47",
       "depends_fids": [
-        "F-200"
+        "F-245",
+        "F-207"
       ]
     },
     {
@@ -2703,18 +2729,755 @@
       "phase": "P1",
       "epic": "E38 Series open",
       "epic_key": "E38",
-      "story": "Example metadata browser with compare and copy, export beyond the document panel, and preferences",
+      "story": "Validated shared preferences in the single showcase viewer",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.40",
+        "E38.24"
+      ],
+      "notes": "Retains preferences from original F-205, incorporating F-214 rather than replacing it. Metadata and exports move explicitly to F-249, F-250 and F-258. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft.",
+      "milestone": "M21",
+      "sprint": "S47",
+      "depends_fids": [
+        "F-245",
+        "F-214"
+      ]
+    },
+    {
+      "fid": "F-220",
+      "eid": "E38.30",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Shipped binary notices: the full licence text of every crate compiled into the wasm module and the native binaries, generated from the lockfile and checked by a gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "F-217's plan question 6 recommended a follow-up. THIRD_PARTY_NOTICES covers the vendored sources only, while MIT and BSD grants in every compiled crate also require their notice on redistribution.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-221",
+      "eid": "E38.31",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Published package contents: the @ocelli/core tarball stops shipping compiled test files, with a packages gate refusal for any test file in a published tarball",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found while designing F-218 on 2026-11-05. npm pack lists 47 compiled *.test.js files under dist/ among 280 entries.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-222",
+      "eid": "E30.7",
+      "phase": "P1.5",
+      "epic": "E30 Out-of-core volume streaming",
+      "epic_key": "E30",
+      "story": "Pyramid means skip non-finite F32 samples: a coarser level averages only the finite samples of its box by their overlap weight, a box with no finite sample stays NaN, and negative zero is written as positive zero",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E30.1"
+      ],
+      "depends_fids": [
+        "F-119"
+      ],
+      "notes": "The operator answered F-119's open question on 2026-11-05. Due before F-120 makes the pyramid reachable.",
+      "milestone": "M14",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-223",
+      "eid": "E38.32",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Comparative benchmark against cornerstone3D 5.8.2: the folder viewer and a bare cornerstone3D page on the same studies, browser and machine, with every process's memory counted, a pixel check before any timing, and a generated summary",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-216"
+      ],
+      "notes": "Asked by the operator on 2026-11-05 to measure the viewer against cornerstone3D. Runs after F-216 integrates, alone on the GPU.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-224",
+      "eid": "E5.7",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Frame identity: the decoded tier answers a lookup only when the frame's content id, from SOP Instance UID, transfer syntax and encoded bytes, and its description and plane match, DicomwebClient takes a documented cache mode defaulting to no-cache, and the folder viewer keys page caches by the picked File, lets the same folder be chosen again, and refuses to show a file that changed on disk",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E16.6",
+        "E5.8"
+      ],
+      "depends_fids": [
+        "F-230",
+        "F-226"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-225",
+      "eid": "E3.8",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "DICOM conformance report: ocelli-dicom checks each value against the VR rules of PS3.5 section 6.2 and Type 1, 1C and 2 presence for seven PS3.3 modules on CR, CT, MR and PET, a finding never carries a value or stops display, @ocelli/core reads the report, and the folder viewer shows a Checks badge and list",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.26",
+        "E38.23"
+      ],
+      "depends_fids": [
+        "F-216",
+        "F-213"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-226",
+      "eid": "E5.8",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Release by series and study: ImageCache::release_series and BrickCache::release_volume over one Lru range removal, a cache.released ring event decoded by @ocelli/core, and the folder viewer forgetting the previous folder's held files and frames on the local process when another folder or the synthetic study is opened or the page is left",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26",
+        "E38.18"
+      ],
+      "depends_fids": [
+        "F-216",
+        "F-208"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-227",
+      "eid": "E38.33",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Automatic window per series when the file has none: one window from the 1st to 99th nearest-rank percentile of modality values pooled over up to 16 frames spread through the series, each frame through its own rescale, leaving out stored zero and the Pixel Padding Value range, computed once in ocelli-pixel, labelled Auto window in the folder viewer, and every window in the file still used as it is",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.20",
+        "E38.23"
+      ],
+      "depends_fids": [
+        "F-210",
+        "F-213"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-228",
+      "eid": "E38.34",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Content Security Policy: the minimal policy an embedding page needs for the Ocelli worker and wasm path, documented and proven by a browser probe of the built example viewer with minimality probes, and the folder viewer served under a strict hash policy with compressed frames decoded and drawn",
+      "layer": "All",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.23",
+        "E38.25"
+      ],
+      "depends_fids": [
+        "F-213",
+        "F-215"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-229",
+      "eid": "E4.10",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "JPEG XL decoding: the three JPEG XL transfer syntaxes through jxl-oxide, lossless decoded exactly, JPEG recompression rebuilt and decoded by the existing JPEG path, unsupported features refused as unavailable, with synthetic corpus rows and declared oracle rows",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.27",
+        "E38.30"
+      ],
+      "depends_fids": [
+        "F-217",
+        "F-220"
+      ],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-230",
+      "eid": "E16.6",
+      "phase": "P1",
+      "epic": "E16 Public API & TypeScript shell",
+      "epic_key": "E16",
+      "story": "Public options refuse unknown keys: every options and request object in @ocelli/core refuses an unknown key at run time with a coded OcelliError naming it, DicomwebError and the bulk, command and instance errors share that class, and loadCore rejects with the initialiser's cause instead of resolving false",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Filed on 2026-11-05 from a list of issues a team hit with legacy Cornerstone, scheduled into S46 by the operator.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-231",
+      "eid": "E5.9",
+      "phase": "P1",
+      "epic": "E5 Cache & memory",
+      "epic_key": "E5",
+      "story": "Session frame cache: the wasm session keeps committed stack frames in a caller-budgeted ImageCache checked by ContentId, reports eviction, pressure and release through the ring, and exports a residency query, a show-from-cache call, and releaseSeries and releaseStudy in @ocelli/core",
+      "layer": "Rust+TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E16.6",
+        "E5.8",
+        "E5.7"
+      ],
+      "depends_fids": [
+        "F-230",
+        "F-226",
+        "F-224"
+      ],
+      "notes": "The operator answered F-226's question on 2026-11-05 with a separate story giving the wasm session its own frame cache.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-232",
+      "eid": "E38.35",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Unsafe guard soundness: unsafe_code forbidden by rustc through the workspace lint table on every target of every workspace member, and scripts/unsafe_allowlist_check.py rebuilt on a left-to-right Rust tokenizer with a planted unsafe test for each of the five triggers the F-229 review found",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-229"
+      ],
+      "notes": "Found by F-229's eighth and ninth reviews. Answered by the operator on 2026-11-06: fixed in S46, the guard made sound against every trigger.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-233",
+      "eid": "E38.36",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "SIMD wasm builds compile SIMD code: the SIMD codec verification variants pass +simd128 to every crate through a target-scoped RUSTFLAGS, a native arm step refuses a SIMD variant whose dependency rlibs match the plain build, and D-22's F-X013 claim is rechecked on that build",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E4.10",
+        "E38.35"
+      ],
+      "depends_fids": [
+        "F-229",
+        "F-232"
+      ],
+      "notes": "Found by F-229's eighth review, defect D2. Answered by the operator on 2026-11-06: fixed in S46, every crate built with +simd128 for the SIMD variants and F-X013's claim rechecked.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-234",
+      "eid": "E3.9",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "Bounded sequence depth in parse_part10: the structural preflight refuses sequence nesting deeper than a named constant with a typed ParseError before dicom-rs recurses, with tests at the limit and one past on a 2 MiB thread and a fuzz-shaped regression",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E3.8",
+        "E4.10"
+      ],
+      "depends_fids": [
+        "F-225",
+        "F-229"
+      ],
+      "notes": "Found by F-225's first review while fuzzing. Answered by the operator on 2026-11-06: fixed in S46 with a typed error.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-235",
+      "eid": "E6.9",
+      "phase": "P1",
+      "epic": "E6 Render core (wgpu)",
+      "epic_key": "E6",
+      "story": "VOI shader stage 1 matches LutChain on every tier: the shader's rescale gives the bits of ocelli_pixel::modality on a backend that fuses multiply and add, proven by a tier A fixture from the F-227 reviews that fails today",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.33"
+      ],
+      "depends_fids": [
+        "F-227"
+      ],
+      "notes": "Found by F-227's fourth and fifth reviews on Apple M4 Max under Metal. Answered by the operator on 2026-11-06: a story in S47 with a tier A fixture that fails today.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-236",
+      "eid": "E16.7",
+      "phase": "P1",
+      "epic": "E16 Public API & TypeScript shell",
+      "epic_key": "E16",
+      "story": "acceptTransferredFrame honours stackIndex and stackEpoch: a transferred frame carrying both keys commits through the selected-frame export and is refused for a stale index or epoch, with tests at the unit and built wasm levels",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [
+        "E5.9"
+      ],
+      "depends_fids": [
+        "F-231"
+      ],
+      "notes": "Found by F-230's first review. Answered by the operator on 2026-11-06: a story in S47 honours both keys with tests.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-237",
+      "eid": "E19.6",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "The wasm module ships outside the @ocelli/core tarball: docs/RELEASE.md preflight item 6 and the published list name where the module and its licence files ship and how a release proves the module is the one its HEAD builds, with the packages gate checking that place",
+      "layer": "Build",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.30",
+        "E38.34"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-228"
+      ],
+      "notes": "Found while designing F-220. Answered by the operator on 2026-11-06: change the release rule, the module ships outside the @ocelli/core tarball and a story in S47 decides where.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-238",
+      "eid": "E19.7",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "story": "Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate",
+      "layer": "Build",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.30",
+        "E38.36"
+      ],
+      "depends_fids": [
+        "F-220",
+        "F-233"
+      ],
+      "notes": "Found by F-220's first review reading the objc2 LICENSE.md. Answered by the operator on 2026-11-06: a native build without wgpu's Metal backend, a story in S47.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-239",
+      "eid": "E38.37",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer colour frames: RGB, YBR_FULL, YBR_FULL_422, YBR_ICT, YBR_RCT and PALETTE COLOR with Planar Configuration drawn through ocelli-pixel's ColorTransform on the decoder's reported output space, multi-component JPEG 2000 and HTJ2K decoded with their component transforms, window and invert per channel as cornerstone3D 5.8.2 applies them, region statistics per channel, colour above 8 bits scaled by one library rule, an ICC profile named as not applied, and every colour shape this build cannot draw refused by name",
+      "layer": "All",
+      "weeks": 12,
+      "depends_eids": [
+        "E4.8",
+        "E38.19",
+        "E38.26",
+        "E4.13"
+      ],
+      "depends_fids": [
+        "F-030",
+        "F-209",
+        "F-216",
+        "F-243"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: a colour series shows the fault 'this preview shows monochrome frames only' from PreviewError::NotMonochrome today, and the folder viewer previews colour frames through the library's colour stage instead. Scheduled first in the folder viewer chain, ahead of F-212. Questions 1 to 8 answered by the operator on 2026-11-07, widening the story to JPEG 2000 and HTJ2K colour decoding and cornerstone3D's colour window, and F-240 filed to apply matrix ICC profiles after it. F-243 lands first, by the operator's order of 2026-11-07, and this story's ritk-codecs patch merges onto it.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-240",
+      "eid": "E38.38",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Matrix and tone-curve ICC profiles applied in ocelli-pixel stage 4 for colour frames, lookup-table profiles refused by name until F-145",
+      "layer": "All",
+      "weeks": 5,
+      "depends_eids": [
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-239"
+      ],
+      "notes": "Filed by the operator on 2026-11-07 with the answers to F-239's questions. F-239 draws a frame carrying ICC Profile (0028,2000) with a sentence that the profile was not applied, and this story applies the matrix and tone-curve subset. Scheduled right after F-239. A subset of F-145, which keeps its own row and its recorded E4.9 defect.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-241",
+      "eid": "E4.11",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "DICOM video in the folder viewer and @ocelli/core: the MPEG-2, MPEG-4 AVC/H.264 and HEVC/H.265 transfer syntaxes known to the codec registry, the stream demuxed in Rust, YBR_PARTIAL_420 converted once in ocelli-pixel, each frame shown and stepped exactly by the stream's own sample table with window, invert, readout and statistics on the decoded frame, better than cornerstone3D 5.8.2 on measured axes, and every stream this build cannot decode refused by name",
+      "layer": "All",
+      "weeks": 12,
+      "depends_eids": [
+        "E38.24",
+        "E38.32",
+        "E5.9",
+        "E38.37"
+      ],
+      "depends_fids": [
+        "F-214",
+        "F-223",
+        "F-231",
+        "F-239"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: file a video story now. Ocelli refuses YBR_PARTIAL_420 by name after F-239, and no decoder handles the video transfer syntaxes. cornerstone3D 5.8.2 is the floor and Ocelli must be better on a stated measured axis. Questions 1 to 9 answered by the operator on 2026-11-07: WebCodecs in a worker for both targets, no shipped software H.264 or HEVC decoder, MPEG-2 decoded in Rust by F-242, the stream's colour description first, the VideoFrame held in the worker accepted as D-32, one F-ID in two parts. E4.11 rather than E4.9, which F-145's recorded defect declares.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-242",
+      "eid": "E4.12",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "MPEG-2 video decoded in Rust: the four MPEG2 MP@ML and MP@HL transfer syntaxes decoded by a decoder written here from ITU-T H.262 with no dependency, in the program stream and bare PES as well as F-241's containers, so a local MPEG-2 file plays in the folder viewer and @ocelli/core where cornerstone3D 5.8.2 needs a transcoding server, with hand-computed fixtures for inverse quantisation and prediction, IDCT accuracy measured, size and speed recorded, and every MPEG-2 stream this decoder cannot decode refused by name",
+      "layer": "All",
+      "weeks": 8,
+      "depends_eids": [
+        "E4.11"
+      ],
+      "depends_fids": [
+        "F-241"
+      ],
+      "notes": "Decided by the operator on 2026-11-07, F-241 question 4: a Rust MPEG-2 decoder now, so local MPEG-2 files play, beating cornerstone, its own story by question 9. No dependency unless docs/SOURCE-POLICY.md is satisfied. The patent position is what the policy's patent section relies on and is marked for verification. Open questions are the operator's. Questions 1 to 6 answered by the operator on 2026-11-07: proceed on patents with the Malaysian risk recorded, f64 IDCT, MONOCHROME2 as the Y plane, libmpeg2 and ffmpeg's decoder source read-blocked and enforced by the provenance checker, real-time thresholds, synthetic clips with a recorded assessment of the conformance streams.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-243",
+      "eid": "E4.13",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "story": "JPEG-LS decoded per ITU-T T.87: the vendored ritk-codecs scan decoder raises the run index only for a full run segment, a scan that runs out of data or leaves unread bytes before EOI is refused, an LSE preset this decoder does not apply is refused by name, default thresholds clamp as C.2.4.1.1.1 gives them, with CharLS-encoded trigger fixtures and banded corpus rows under .80 and .81",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E4.6"
+      ],
+      "depends_fids": [
+        "F-028"
+      ],
+      "notes": "Decided by the operator on 2026-11-07: a monochrome JPEG-LS frame with a long flat run ending a line decodes to wrong pixels with no error. The vendored run-mode loop raises RUNindex on a partial end-of-line segment, and the scan decoder never refuses a desynchronised or truncated scan. This story patches the vendored decoder, lands before F-239's codec part, and F-239's ritk-codecs patch merges onto it. E4.13 rather than E4.9, which F-145's recorded defect declares.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-244",
+      "eid": "E3.10",
+      "phase": "P1",
+      "epic": "E3 DICOM ingest & metadata",
+      "epic_key": "E3",
+      "story": "Encapsulated Pixel Data with an empty Basic Offset Table opens per PS3.5 A.4: dicom-object 0.10.0 vendored with its collector patched so the zero-length first Item is the table and every later Item a Fragment, at the top level and inside an Icon Image Sequence, for every encapsulated syntax the registry decodes, single-frame and multi-frame, with frames that span Fragments delimited by their codestream start and end markers where A.4 lets a frame span Fragments, a present Extended Offset Table applied through EncapsulatedFrameIndex::from_extended, and an empty-table corpus row per decodable syntax",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E3.4"
+      ],
+      "depends_fids": [
+        "F-019"
+      ],
+      "notes": "Approved by the operator on 2026-11-08 to be fixed in S46. dicom-object 0.10.0 collector.rs build_encapsulated_data clears its first-item flag only when an Item value is read, so a zero-length Basic Offset Table leaves the flag set and the first Fragment is read as the table. 0.10.1 and upstream master carry the same code. Every encapsulated syntax fails this way, not RLE only, and ocelli-codec's decoders are not at fault. Found while F-213 was reviewed, AS_BUILT F-213 notes. The lead confirmed route (b) on 2026-11-08: the published 0.10.0 package vendored with the one-line patch in the ItemEnd arm, a PATCH-PROVENANCE file and a pins-gate section, as ritk-codecs is, and D-18 amended in the implementing change with the publication caveat. An upgrade replaces the vendored copy once a published release carries the fix.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-208",
+      "eid": "E38.18",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer viewports: layouts from 1 by 1 to 3 by 3, per-viewport series and view state, an active viewport, a series dragged from its thumbnail onto a cell, and the four-image view kept as a tile mode",
+      "layer": "TS",
+      "weeks": 6,
+      "depends_eids": [
+        "E38.17",
+        "E38.9"
+      ],
+      "notes": "Professional viewers load a series by dragging its thumbnail onto a viewport cell, and every cell holds its own series.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207",
+        "F-199"
+      ]
+    },
+    {
+      "fid": "F-209",
+      "eid": "E38.19",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer linked viewports: scroll by position in a shared frame of reference, synced window and zoom, and reference lines from the library",
       "layer": "TS",
       "weeks": 4,
       "depends_eids": [
-        "E38.11"
+        "E38.18",
+        "E38.9"
       ],
-      "notes": "Remainder of the narrowed F-201 title. No sprint.",
-      "milestone": "",
-      "sprint": "",
+      "notes": "Uses the library reference line of F-199. The page computes no geometry of its own.",
+      "milestone": "M20",
+      "sprint": "S46",
       "depends_fids": [
-        "F-201"
+        "F-208",
+        "F-199"
       ]
+    },
+    {
+      "fid": "F-210",
+      "eid": "E38.20",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer value at the pointer: the modality value and its unit from the modality stage of the LUT chain, HU on CT, returned by the local process",
+      "layer": "Rust",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.17",
+        "E38.1"
+      ],
+      "notes": "The pointer cross shows column and row today. The value comes from ocelli-pixel, never from page arithmetic, with a hand-computed fixture citing PS3.3 C.11.1.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207",
+        "F-191"
+      ]
+    },
+    {
+      "fid": "F-211",
+      "eid": "E38.21",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer measurements: angle, Cobb angle, bidirectional, arrow and probe, region area with mean, SD, minimum and maximum in modality units, editable handles and a measurement list",
+      "layer": "All",
+      "weeks": 6,
+      "depends_eids": [
+        "E38.20",
+        "E38.5"
+      ],
+      "notes": "Calibration provenance comes from F-195. Statistics are computed once in Rust and reported with their units.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-210",
+        "F-195"
+      ]
+    },
+    {
+      "fid": "F-212",
+      "eid": "E38.22",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer four corners at parity: birth date, sex, age, study time, institution, slice location and thickness, kVp and mAs, TR and TE, a scale bar, and edge letters from Patient Orientation on projection images",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.16",
+        "E38.37"
+      ],
+      "notes": "Projection images carry Patient Orientation (0020,0020) and no Image Orientation (Patient), so they show no edge letters today. F-239 lands first, by the operator's order of 2026-11-07.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-206",
+        "F-239"
+      ]
+    },
+    {
+      "fid": "F-213",
+      "eid": "E38.23",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer window presets by modality on number keys, every VOI window in the file listed by its explanation, and a region window from the library",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.10",
+        "E38.17"
+      ],
+      "notes": "The three CT presets are offered on CT only. Number keys currently choose the layout, so the binding needs one decision.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-200",
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-214",
+      "eid": "E38.24",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer mouse profiles and preferences: the current binding, a scroll-on-left profile and a window-on-left profile, saved in the browser, and cine at Frame Time (0018,1063)",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.17"
+      ],
+      "notes": "Button bindings differ between viewers that radiologists use, so the binding is a preference rather than one fixed choice.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-215",
+      "eid": "E38.25",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer marks written as a TID 1500 document and key images as a Key Object Selection through @ocelli/core, saved to a download and loaded back from a folder",
+      "layer": "TS",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.11",
+        "E38.6",
+        "E38.17"
+      ],
+      "notes": "This deliberately retires the sentences that say marks are not saved. Nothing is written back into the opened folder.",
+      "milestone": "M20",
+      "sprint": "S46",
+      "depends_fids": [
+        "F-201",
+        "F-196",
+        "F-207"
+      ]
+    },
+    {
+      "fid": "F-216",
+      "eid": "E38.26",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Folder viewer performance: each file posted once and held in a bounded cache, decode reused across window changes, measured budgets for open, first image, scroll rate and resident memory, and a release build",
+      "layer": "All",
+      "weeks": 4,
+      "depends_eids": [
+        "E38.17"
+      ],
+      "depends_fids": [
+        "F-207"
+      ],
+      "milestone": "M20",
+      "sprint": "S46",
+      "notes": "Every window drag step, and every slice not in the page cache, posts the whole file again today, so a 17 MB radiograph is uploaded on each window step. Budgets are measured on a named host and recorded, never claimed from a feeling."
+    },
+    {
+      "fid": "F-217",
+      "eid": "E38.27",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Licence hygiene: no copyleft dependency in any tracked manifest, a permissive JPEG reference decoder for the corpus, licence allowlist gates for Rust, npm and Python, and a third-party notices file",
+      "layer": "All",
+      "weeks": 2,
+      "depends_eids": [],
+      "depends_fids": [],
+      "milestone": "M20",
+      "sprint": "S46",
+      "notes": "A sweep on 2026-11-05 found pylibjpeg-libjpeg 2.4.0 under GPL-3 pinned in pyproject.toml for corpus JPEG decoding, lightningcss 1.33.0 under MPL-2.0 through vite 8 in dev tooling, and vendor/openjph-core with no BSD-2 notice. No transitive licence check exists in any ecosystem."
+    },
+    {
+      "fid": "F-218",
+      "eid": "E38.28",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Dependency advisories in shipped packages: adm-zip below 0.6.1 reaches the published @ocelli/core runtime through dcmjs, resolved by a patched override or a proof that no shipped path reaches it, with an audit gate over shipped dependencies",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [
+        "F-217"
+      ],
+      "notes": "npm audit on 2026-11-05 reports GHSA-xcpc-8h2w-3j85 and GHSA-7q85-xj36-vmfc (high, memory exhaustion from a crafted ZIP) and GHSA-vwc7-r8mq-g2x9 (moderate) for adm-zip 0.5.17 under dcmjs 0.52.2. The audit's suggested fix downgrades dcmjs a major version.",
+      "milestone": "M20",
+      "sprint": "S46"
+    },
+    {
+      "fid": "F-219",
+      "eid": "E38.29",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Sprint plan checker refusals that no guard probe triggers: the four refusals in gen_sprint_plan.py the S46 guard review found unwatched, each given a fixture that turns it red",
+      "layer": "Test",
+      "weeks": 1,
+      "depends_eids": [],
+      "depends_fids": [],
+      "notes": "Found by the S46 guard probe review, pass 1 nitpick N1. The census counts per entry, so these four read as watched without any probe triggering them.",
+      "milestone": "M20",
+      "sprint": "S46"
     },
     {
       "fid": "F-206",
@@ -2783,13 +3546,15 @@
       "layer": "Rust",
       "weeks": 8,
       "depends_eids": [
-        "E30.1"
+        "E30.1",
+        "E30.8"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
-      "sprint": "S47",
+      "sprint": "S51",
       "depends_fids": [
-        "F-119"
+        "F-119",
+        "F-276"
       ]
     },
     {
@@ -2804,9 +3569,9 @@
       "depends_eids": [
         "E30.2"
       ],
-      "notes": "The subtle part most implementations get wrong",
+      "notes": "The subtle part most implementations get wrong Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
-      "sprint": "S48",
+      "sprint": "S52",
       "depends_fids": [
         "F-120"
       ]
@@ -2823,9 +3588,9 @@
       "depends_eids": [
         "E30.2"
       ],
-      "notes": "GPU memory becomes a configured number, not a function of series size",
+      "notes": "GPU memory becomes a configured number, not a function of series size Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
-      "sprint": "S48",
+      "sprint": "S52",
       "depends_fids": [
         "F-120"
       ]
@@ -2842,9 +3607,9 @@
       "depends_eids": [
         "E30.4"
       ],
-      "notes": "Show the cost before the user commits to a resolution",
+      "notes": "Show the cost before the user commits to a resolution Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
-      "sprint": "S49",
+      "sprint": "S53",
       "depends_fids": [
         "F-122"
       ]
@@ -2861,9 +3626,9 @@
       "depends_eids": [
         "E30.4"
       ],
-      "notes": "Stops being a special case of the memory problem",
+      "notes": "Stops being a special case of the memory problem Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
-      "sprint": "S49",
+      "sprint": "S53",
       "depends_fids": [
         "F-122"
       ]
@@ -2880,9 +3645,9 @@
       "depends_eids": [
         "E1.8"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S50",
+      "sprint": "S54",
       "depends_fids": [
         "F-008"
       ]
@@ -2899,9 +3664,9 @@
       "depends_eids": [
         "E31.1"
       ],
-      "notes": "NiiVue proves the value fighting WebGL2; ordinary code in WGSL",
+      "notes": "NiiVue proves the value fighting WebGL2; ordinary code in WGSL Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S51",
+      "sprint": "S55",
       "depends_fids": [
         "F-125"
       ]
@@ -2918,9 +3683,9 @@
       "depends_eids": [
         "E31.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S52",
+      "sprint": "S56",
       "depends_fids": [
         "F-125"
       ]
@@ -2937,9 +3702,9 @@
       "depends_eids": [
         "E31.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S53",
+      "sprint": "S57",
       "depends_fids": [
         "F-125"
       ]
@@ -2956,9 +3721,9 @@
       "depends_eids": [
         "E31.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S54",
+      "sprint": "S58",
       "depends_fids": [
         "F-125"
       ]
@@ -2975,9 +3740,9 @@
       "depends_eids": [
         "E31.3"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S55",
+      "sprint": "S59",
       "depends_fids": [
         "F-127"
       ]
@@ -2994,9 +3759,9 @@
       "depends_eids": [
         "E31.2"
       ],
-      "notes": "WebGL2 has no compute; degrade, never fail",
+      "notes": "WebGL2 has no compute; degrade, never fail Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M15",
-      "sprint": "S53",
+      "sprint": "S57",
       "depends_fids": [
         "F-126"
       ]
@@ -3013,9 +3778,9 @@
       "depends_eids": [
         "E31.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S56",
+      "sprint": "S60",
       "depends_fids": [
         "F-125"
       ]
@@ -3032,9 +3797,9 @@
       "depends_eids": [
         "E32.1"
       ],
-      "notes": "The reason to do this in-engine rather than beside it",
+      "notes": "The reason to do this in-engine rather than beside it Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S57",
+      "sprint": "S61",
       "depends_fids": [
         "F-132"
       ]
@@ -3051,9 +3816,9 @@
       "depends_eids": [
         "E32.2"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S58",
+      "sprint": "S62",
       "depends_fids": [
         "F-133"
       ]
@@ -3070,9 +3835,9 @@
       "depends_eids": [
         "E34.4"
       ],
-      "notes": "No PHI leaves the browser - a compliance story, not just a feature",
+      "notes": "No PHI leaves the browser - a compliance story, not just a feature Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S60",
+      "sprint": "S64",
       "depends_fids": [
         "F-142"
       ]
@@ -3089,9 +3854,9 @@
       "depends_eids": [
         "E16.3"
       ],
-      "notes": "One commercial viewer needs a browser extension with matched resolutions",
+      "notes": "One commercial viewer needs a browser extension with matched resolutions Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S61",
+      "sprint": "S65",
       "depends_fids": [
         "F-102"
       ]
@@ -3108,9 +3873,9 @@
       "depends_eids": [
         "E33.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S62",
+      "sprint": "S66",
       "depends_fids": [
         "F-136"
       ]
@@ -3127,9 +3892,9 @@
       "depends_eids": [
         "E33.1"
       ],
-      "notes": "A browser cannot fully calibrate; report honestly what it can measure",
+      "notes": "A browser cannot fully calibrate; report honestly what it can measure Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S62",
+      "sprint": "S66",
       "depends_fids": [
         "F-136"
       ]
@@ -3146,9 +3911,9 @@
       "depends_eids": [
         "E15.1"
       ],
-      "notes": "BlueLight has it; cornerstone3D does not",
+      "notes": "BlueLight has it; cornerstone3D does not Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S56",
+      "sprint": "S60",
       "depends_fids": [
         "F-094"
       ]
@@ -3165,9 +3930,9 @@
       "depends_eids": [
         "E15.2"
       ],
-      "notes": "Makes every measurement training-data-grade by construction",
+      "notes": "Makes every measurement training-data-grade by construction Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S57",
+      "sprint": "S61",
       "depends_fids": [
         "F-095"
       ]
@@ -3184,9 +3949,9 @@
       "depends_eids": [
         "E34.2"
       ],
-      "notes": "SLIM's second tier; needed the moment AI generates annotations",
+      "notes": "SLIM's second tier; needed the moment AI generates annotations Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S58",
+      "sprint": "S62",
       "depends_fids": [
         "F-140"
       ]
@@ -3203,9 +3968,9 @@
       "depends_eids": [
         "E15.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M16",
-      "sprint": "S59",
+      "sprint": "S63",
       "depends_fids": [
         "F-094"
       ]
@@ -3222,9 +3987,9 @@
       "depends_eids": [
         "E30.1"
       ],
-      "notes": "Pyramids are discovered, not assumed - variable factors, missing frames",
+      "notes": "Pyramids are discovered, not assumed - variable factors, missing frames Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S70",
+      "sprint": "S74",
       "depends_fids": [
         "F-119"
       ]
@@ -3241,9 +4006,9 @@
       "depends_eids": [
         "E35.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S71",
+      "sprint": "S75",
       "depends_fids": [
         "F-143"
       ]
@@ -3260,9 +4025,9 @@
       "depends_eids": [
         "E4.9"
       ],
-      "notes": "Radiology ignores this; pathology cannot",
+      "notes": "Radiology ignores this; pathology cannot Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S72",
+      "sprint": "S76",
       "depends_fids": [
         "E4.9 (UNRESOLVED)"
       ]
@@ -3279,9 +4044,9 @@
       "depends_eids": [
         "E35.3"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S73",
+      "sprint": "S77",
       "depends_fids": [
         "F-145"
       ]
@@ -3298,9 +4063,9 @@
       "depends_eids": [
         "E35.2"
       ],
-      "notes": "The open niche - IDC runs two separate viewer forks",
+      "notes": "The open niche - IDC runs two separate viewer forks Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S74",
+      "sprint": "S78",
       "depends_fids": [
         "F-144"
       ]
@@ -3317,9 +4082,9 @@
       "depends_eids": [
         "E35.5"
       ],
-      "notes": "A lesion on CT to its biopsy; a real workflow with no good tool",
+      "notes": "A lesion on CT to its biopsy; a real workflow with no good tool Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S75",
+      "sprint": "S79",
       "depends_fids": [
         "F-147"
       ]
@@ -3336,9 +4101,9 @@
       "depends_eids": [
         "E35.2"
       ],
-      "notes": "Images, annotations and AI results on three DICOMweb servers",
+      "notes": "Images, annotations and AI results on three DICOMweb servers Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M18",
-      "sprint": "S76",
+      "sprint": "S80",
       "depends_fids": [
         "F-144"
       ]
@@ -3355,9 +4120,9 @@
       "depends_eids": [
         "E6.1"
       ],
-      "notes": "Measure divergence rather than assume it away",
+      "notes": "Measure divergence rather than assume it away Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S63",
+      "sprint": "S67",
       "depends_fids": [
         "F-037"
       ]
@@ -3374,9 +4139,9 @@
       "depends_eids": [
         "E2.7"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S61",
+      "sprint": "S65",
       "depends_fids": [
         "F-015"
       ]
@@ -3393,9 +4158,9 @@
       "depends_eids": [
         "E23.1"
       ],
-      "notes": "Only possible because one core serves all three targets",
+      "notes": "Only possible because one core serves all three targets Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S64",
+      "sprint": "S68",
       "depends_fids": [
         "F-169"
       ]
@@ -3412,9 +4177,9 @@
       "depends_eids": [
         "E36.3"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S65",
+      "sprint": "S69",
       "depends_fids": [
         "F-152"
       ]
@@ -3431,9 +4196,9 @@
       "depends_eids": [
         "E7.6"
       ],
-      "notes": "The state is already a serialisable struct",
+      "notes": "The state is already a serialisable struct Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S66",
+      "sprint": "S70",
       "depends_fids": [
         "F-050"
       ]
@@ -3450,9 +4215,9 @@
       "depends_eids": [
         "E37.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S67",
+      "sprint": "S71",
       "depends_fids": [
         "F-154"
       ]
@@ -3469,9 +4234,9 @@
       "depends_eids": [
         "E37.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S68",
+      "sprint": "S72",
       "depends_fids": [
         "F-154"
       ]
@@ -3488,9 +4253,9 @@
       "depends_eids": [
         "E37.1"
       ],
-      "notes": "",
+      "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M17",
-      "sprint": "S69",
+      "sprint": "S73",
       "depends_fids": [
         "F-154"
       ]
@@ -4594,6 +5359,864 @@
       "depends_fids": [
         "F-X018"
       ]
+    },
+    {
+      "fid": "F-245",
+      "eid": "E38.40",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.17",
+        "E38.34",
+        "E5.9",
+        "E3.6"
+      ],
+      "story": "One showcase viewer for local, DICOMweb and future user-facing workflows",
+      "sprint": "S47",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-207",
+        "F-228",
+        "F-231",
+        "F-021"
+      ],
+      "notes": "A single application and control vocabulary replace split viewer demonstrations. Existing entry points may launch it, but no user-facing feature is accepted only in a separate demo. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft. The canonical source connection must execute real QIDO study/series discovery and WADO instance loading over the existing client. No new PACS, DIMSE or authentication server is in scope."
+    },
+    {
+      "fid": "F-246",
+      "eid": "E38.41",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E38.40",
+        "E38.4"
+      ],
+      "story": "Nearest and linear display interpolation controls in the showcase",
+      "sprint": "S48",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-245",
+        "F-194"
+      ],
+      "notes": "The selector consumes F-194. It does not implement fractional between-slice stack sampling, which is separately F-261. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-247",
+      "eid": "E38.42",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E38.40",
+        "E38.3"
+      ],
+      "story": "DICOM overlay planes and display shutters drawn in the showcase",
+      "sprint": "S48",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-245",
+        "F-193"
+      ],
+      "notes": "F-193 remains the reader. This owns F-204 overlay/shutter consumer remainder and actual image drawing, not a textual overlay panel. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-248",
+      "eid": "E38.43",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E38.40",
+        "E12.3",
+        "E38.21"
+      ],
+      "story": "Image and region histograms in the showcase",
+      "sprint": "S48",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-245",
+        "F-075",
+        "F-211"
+      ],
+      "notes": "F-204 histogram remainder. Existing CPU arithmetic is sufficient for this UI. F-128 retains later GPU compute. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-249",
+      "eid": "E38.44",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E38.40",
+        "E3.8"
+      ],
+      "story": "Searchable recursive metadata browser in the showcase",
+      "sprint": "S48",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-245",
+        "F-225"
+      ],
+      "notes": "F-205 metadata browser remainder, extending existing usable Headers rather than replacing it with a second viewer. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-250",
+      "eid": "E38.45",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.44"
+      ],
+      "story": "Metadata comparison and copy in the showcase",
+      "sprint": "S48",
+      "weeks": 2,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-249"
+      ],
+      "notes": "F-205 compare/copy remainder. Tests use synthetic values only and exercise denied clipboard. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-251",
+      "eid": "E38.46",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E38.12",
+        "E38.40",
+        "E10.2",
+        "E10.3",
+        "E10.4"
+      ],
+      "story": "Labelmap, contour and surface segmentation displays in the showcase",
+      "sprint": "S49",
+      "weeks": 5,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-202",
+        "F-245",
+        "F-064",
+        "F-065",
+        "F-066"
+      ],
+      "notes": "Existing library segmentation rendering must become usable in the same viewer. Unsupported tiers show their real capability reason. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-252",
+      "eid": "E38.47",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E38.19",
+        "E14.2"
+      ],
+      "story": "Patient-space linked cursor in the showcase",
+      "sprint": "S49",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-209",
+        "F-088"
+      ],
+      "notes": "F-203 cursor remainder, beyond current reference lines and a local pointer crosshair. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-253",
+      "eid": "E38.48",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E8.4"
+      ],
+      "story": "MIP, MinIP and average slab controls in the showcase",
+      "sprint": "S49",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-054"
+      ],
+      "notes": "F-203 slab remainder. No new CPU reducer is required by this story or by D-07. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-254",
+      "eid": "E38.49",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E8.6"
+      ],
+      "story": "Patient-space multi-volume fusion in the showcase",
+      "sprint": "S49",
+      "weeks": 5,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-056"
+      ],
+      "notes": "F-203 fusion remainder. It does not create cross-frame registration, which remains F-179/F-180. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-255",
+      "eid": "E38.50",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E9.1",
+        "E8.7"
+      ],
+      "story": "Actual 3D volume viewport in the showcase",
+      "sprint": "S50",
+      "weeks": 6,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-059",
+        "F-057"
+      ],
+      "notes": "F-203 volume viewport remainder. This is not a promise to add CPU ray casting. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-256",
+      "eid": "E38.51",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.50",
+        "E9.2",
+        "E9.3",
+        "E9.4"
+      ],
+      "story": "Volume transfer functions, shading and clipping in the showcase",
+      "sprint": "S50",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-255",
+        "F-060",
+        "F-061",
+        "F-062"
+      ],
+      "notes": "F-203 volume controls remainder, consuming existing library APIs rather than another implementation of their math. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-257",
+      "eid": "E38.52",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.40",
+        "E38.12",
+        "E38.19",
+        "E3.6"
+      ],
+      "story": "Prior-study search and side-by-side reading in the showcase",
+      "sprint": "S50",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-245",
+        "F-202",
+        "F-209",
+        "F-021"
+      ],
+      "notes": "F-203 prior remainder. This is a viewer workflow over an existing service, not a new study server or authentication backend. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-258",
+      "eid": "E38.53",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.40",
+        "E38.25",
+        "E38.6",
+        "E38.15"
+      ],
+      "story": "Rendered exports, document workflows and planned GSPS read/apply in the showcase",
+      "sprint": "S50",
+      "weeks": 5,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-245",
+        "F-215",
+        "F-196",
+        "F-205"
+      ],
+      "notes": "F-205 export remainder. Existing F-215 folder marks and document writers are reused, not duplicated. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft. Source inspection found no existing GSPS document reader or apply API. GSPS read/apply is new planned subset work here, not a claim about PresentationTransform. Full GSPS write remains F-139 in S60. SEG/RTSTRUCT workflows are F-264 and share this export entry point."
+    },
+    {
+      "fid": "F-259",
+      "eid": "E38.54",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E4.10",
+        "E38.37",
+        "E3.10",
+        "E38.40"
+      ],
+      "story": "Safe JPEG XL JPEG Recompression decoding and showcase workflow",
+      "sprint": "S50",
+      "weeks": 5,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-229",
+        "F-239",
+        "F-244",
+        "F-245"
+      ],
+      "notes": "D-28 currently refuses .111. Detailed design must select and prove a safe upgrade, recorded vendor patch or standards-derived implementation before enabling it. No panic-prone path may be enabled to satisfy a label. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-260",
+      "eid": "E38.55",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E3.8",
+        "E3.9"
+      ],
+      "story": "Browser-owned DICOM conformance checks in the showcase",
+      "sprint": "S50",
+      "weeks": 4,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-225",
+        "F-234"
+      ],
+      "notes": "F-225 browser-only generation remainder. It does not widen the rule set or convert the report into a DICOM conformance guarantee. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-261",
+      "eid": "E38.56",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.13",
+        "E38.41",
+        "E8.1"
+      ],
+      "story": "Fractional between-slice stack sampling in the showcase",
+      "sprint": "S49",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-203",
+        "F-246",
+        "F-051"
+      ],
+      "notes": "The missing More stack-between-slices mode gets an explicit new delivery row. Reuse volume reslicing, not a new JavaScript pixel formula. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-262",
+      "eid": "E38.57",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.12",
+        "E38.13",
+        "E38.14",
+        "E38.15",
+        "E38.40",
+        "E38.41",
+        "E38.42",
+        "E38.43",
+        "E38.44",
+        "E38.45",
+        "E38.46",
+        "E38.47",
+        "E38.48",
+        "E38.49",
+        "E38.50",
+        "E38.51",
+        "E38.52",
+        "E38.53",
+        "E38.54",
+        "E38.55",
+        "E38.56",
+        "E38.58",
+        "E38.59",
+        "E4.11",
+        "E4.12",
+        "E38.60"
+      ],
+      "story": "One-viewer feature inventory, parity matrix and standing workflow gate",
+      "sprint": "S50",
+      "weeks": 3,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-202",
+        "F-203",
+        "F-204",
+        "F-205",
+        "F-245",
+        "F-246",
+        "F-247",
+        "F-248",
+        "F-249",
+        "F-250",
+        "F-251",
+        "F-252",
+        "F-253",
+        "F-254",
+        "F-255",
+        "F-256",
+        "F-257",
+        "F-258",
+        "F-259",
+        "F-260",
+        "F-261",
+        "F-263",
+        "F-264",
+        "F-241",
+        "F-242",
+        "F-265"
+      ],
+      "notes": "Final closure of the More inventory and all user-facing library features. Later scheduled AI/WSI/streaming stories must add their workflow and matrix evidence before their own completion. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-263",
+      "eid": "E38.58",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.40",
+        "E38.12",
+        "E38.21",
+        "E38.25"
+      ],
+      "story": "Remaining annotation and manipulation tools in the showcase",
+      "sprint": "S48",
+      "weeks": 6,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-245",
+        "F-202",
+        "F-211",
+        "F-215"
+      ],
+      "notes": "This integrates existing library tool work beyond the S46 folder subset. A library stub uncovered by the inventory must be fixed under a recorded story disposition, never passed off as a UI-only completion. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-264",
+      "eid": "E38.59",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.46",
+        "E38.58",
+        "E13.1",
+        "E15.2",
+        "E15.3"
+      ],
+      "story": "Segmentation editing and DICOM interchange in the showcase",
+      "sprint": "S49",
+      "weeks": 5,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-251",
+        "F-263",
+        "F-080",
+        "F-095",
+        "F-096"
+      ],
+      "notes": "Completes the usable segmentation library surface in the one viewer. No disconnected panel or serialized payload alone is acceptance. User authorized single-viewer completion and S47 to S50 allocation on 2026-11-08. Estimate is a provisional lead engineering estimate, not measured capacity or a calendar promise. Scheduling is authorized, detailed implementation design remains draft."
+    },
+    {
+      "fid": "F-265",
+      "eid": "E38.60",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.40",
+        "E38.12",
+        "E3.2"
+      ],
+      "story": "Bounded ECG waveform reading and display in the single showcase viewer",
+      "sprint": "S48",
+      "weeks": 6,
+      "layer": "All",
+      "milestone": "M21",
+      "depends_fids": [
+        "F-245",
+        "F-202",
+        "F-017"
+      ],
+      "notes": "New bounded waveform parser and same-viewer signal display, not a KOS reference or a library enum. Initial supported signed 16 ECG scope and calibration require detailed DICOM design before implementation. Lead scheduled S48 at a provisional 6 engineer-weeks on 2026-11-08 under the operator single-viewer parity instruction. No runtime parity or clinical interpretation claim."
+    },
+    {
+      "fid": "F-266",
+      "eid": "E38.61",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.27",
+        "E38.34"
+      ],
+      "story": "Built example viewer loads its core from its own output: a vite build with the wasm package present gives a dist whose worker reaches the bundled wasm chunk on any static host, with no absolute build-machine path left in any emitted file, proven by a headless Chromium run of the built dist on a plain static server that reads core ready, and the dev server's fs.allow decoded so a checkout path with a space, unicode or a percent sign serves the package",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "TS",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-217",
+        "F-228"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 1, with the scope kept. Read-only inspection of this tree at 31323a79 still finds examples/viewer-react/vite.config.ts building the wasm URL as /@fs plus the decoded pkg path, defining __OCELLI_WASM_URL__ from it and allowing the percent-encoded repoRoot.pathname, and the worker probing that URL before importing. The recovered drafting evidence records an /@fs probe answering 404 on a plain static server while the bundled chunk answered 200, and vite preview answering 200 text/html for the missing path. The real package was never exercised in a browser in that pass, so the browser run is an acceptance row and not a recorded observation. F-228's csp-probe.mjs serves the built dist by mapping /@fs paths to repository files, so it does not catch this. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Lands in S47 after F-237 packaging and beside F-245's one showcase distribution contract, because the built example viewer is the built front door and its dist must load its own core on any static host. No new viewer is created. Both dependencies must be DONE before implementation. If F-228 carries out of S46, this story follows its completion and does not concurrently edit its CSP probe."
+    },
+    {
+      "fid": "F-267",
+      "eid": "E38.62",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.22",
+        "E3.4"
+      ],
+      "story": "Folder viewer corners on enhanced multiframe CT and MR: slice thickness, kVp, mAs, TR and TE read from the shared and per-frame functional groups for the shown frame, FD values formatted by one rule with a fixture citing its PS3.3 macro, the top-level attribute first where both exist, and a field that is absent from both left empty rather than guessed",
+      "sprint": "S47",
+      "weeks": 2,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-212",
+        "F-019"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 3, the follow-up F-212's design question 4 asks the sprint lead to file. The operator answered on 2026-11-05 that enhanced multiframe acquisition fields stay empty in F-212 and a follow-up story is filed at /complete-feature, and AS_BUILT's F-212 notes record that it was not filed by that commit. Read-only inspection of this tree at 31323a79 confirms push_corner_fields in examples/folder-viewer/src/preview.rs reads slice location, slice thickness, kVp, repetition time and echo time through corner_decimal and exposure through corner_text on the top-level object only, so enhanced CT and MR corners are empty today. The exact functional group sequences and attributes are named by the story's design against PS3.3, not by this filing. The corner provider is shared and the fields surface through the existing viewer front door under the same contract F-245 and F-202 consumers use, never a new viewer page, and a Rust-side helper alone is not end-user acceptance. Estimate 2w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. S47 holds both dependencies done, beside the metadata work."
+    },
+    {
+      "fid": "F-268",
+      "eid": "E19.8",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "depends_eids": [],
+      "story": "Rustdoc links resolve: no public item's documentation links to a private item and no intra-doc link is unresolved in any workspace crate, the private and unresolved positions a fresh workspace doc run at implementation enumerates fixed in place, and a workspace cargo doc check with those two rustdoc lints denied proposed through the normal workflow",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Build",
+      "milestone": "M20",
+      "depends_fids": [],
+      "notes": "Filed from the recovered S46 close draft, original item 4, with its inherited count inconsistency resolved in the row. The drafting prose claimed eleven private errors plus one unresolved warning while its own location table enumerates ten private positions plus that warning, so the row carries no count and implementation runs a fresh workspace doc check with a scratch target directory. Raised at S46 close as four private intra-doc link errors in ocelli-render, widened by a workspace run in the same pass. No gate in bin/ocelli.sh, .github/workflows or scripts runs cargo doc, read at 31323a79, which is why none was caught. F-229 working pass 4 N2 found the same gap for --document-private-items in ocelli-codec. Both broken_intra_doc_links and private_intra_doc_links are proposed denied through explicit RUSTDOCFLAGS. Whether the check sits on the floor or the sprint profile remains a design decision, and floor integration is a PROPOSED choice needing normal workflow approval, never an existing gate or an authorized policy change. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Early S47 tooling so S48 to S50 additions inherit the approved documentation check."
+    },
+    {
+      "fid": "F-269",
+      "eid": "E4.14",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "depends_eids": [
+        "E4.13"
+      ],
+      "story": "Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87: every comment in vendor/ritk-codecs-0.6.0/src/jpeg_ls that states a fact about the code or the standard is checked against the code below it and the clause it names, each false one corrected or removed with the vendored pins refreshed, the four F-243 pass 8 listed first, and the cap on k recorded as resting on the in_coded_range refusal",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-243"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 5, the sprint-close audit story F-243's lead ruling names. F-243 review pass 8 lists four false or doubtful upstream comments under its audit backlog heading, on lines F-243 did not write, and records that the proof that the k cap never binds depends on F-243's in_coded_range refusal, a dependence written nowhere in the code. Comment and pin changes only, no decode change. The audit uses T.87 only and reads no CharLS source, as F-243's own reviews did not. Read-only inspection of this tree at 31323a79 finds the four comments present at vendor/ritk-codecs-0.6.0/src/jpeg_ls/context/mod.rs:1, :15 and :296 and scan.rs:164 to :166, the same positions as the F-243 tip pass 8 cites. Lands after F-243 because it edits the files F-243 patches, and its pin refresh coordinates with the reviewed F-239 vendor union so the vendored pins move once, with no new formal dependency declared. If F-243 carries out of S46, this story follows it. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-270",
+      "eid": "E4.15",
+      "phase": "P1",
+      "epic": "E4 Pixel pipeline & codecs",
+      "epic_key": "E4",
+      "depends_eids": [
+        "E4.4",
+        "E38.37"
+      ],
+      "story": "JPEG 2000 irreversible decode within a measured bound of OpenJPEG: the vendored ritk-codecs dequantisation and 9/7 reconstruction compared per channel against OpenJPEG on rate-truncated 8, 12 and 16-bit monochrome and colour .91 codestreams, the cause of the difference of thousands of codes at 16 bits found and fixed in the vendored decoder against ISO/IEC 15444-1 Annex E and F, and the remaining difference recorded as a D14 divergence",
+      "sprint": "S48",
+      "weeks": 3,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-026",
+        "F-239"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 6. Carried to the lead by F-239 codec review pass 3 as an out-of-range concern worth a backlog story. The MCT 0 controls show the inverse ICT is not the cause, so it is ritk's dequantisation or 9/7 reconstruction, which predates F-239. F-239 is what exposes it to colour .91 data, and monochrome .91 already takes the same path. OpenJPEG is compared by decoding through a host-side tool only, and its source is not read. Pass 3's limits carry into the story: a monochrome 16-bit .91 control was not run because the adapter refused that pass's opj_compress PGM output with UnsupportedPixelFormat, and ISO/IEC 15444-1 Annex G and OpenJPEG's mct.c were not read. Read-only inspection of this tree at 31323a79 finds step_size at vendor/ritk-codecs-0.6.0/src/jpeg_2000/quantization.rs:154, dequantize at :198 and inverse_dwt_9_7 at wavelet_9_7.rs:63, the starting points and not a finding. Retained in S48. Coordinates with F-202's decode consumer and with later S49 and S50 display stories if those workflows accept .91 files, without inventing a universal hard dependency where explicit format refusal remains supported. Estimate 3w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-271",
+      "eid": "E38.63",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "depends_eids": [
+        "E38.38"
+      ],
+      "story": "ICC PCS to sRGB inverse measured both ways: a D50 to linear sRGB matrix derived from the IEC 61966-2-1 primaries with Bradford adaptation compared with the printed-note inverse F-240 ships, both against Little CMS's transicc on every AC12 row, and the derived matrix adopted only if it is closer to Little CMS on every row, otherwise the measurement recorded and the printed matrix kept",
+      "sprint": "S48",
+      "weeks": 2,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-240"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 7, from F-240's lead rulings after pass 3: the matrix choice stays for F-240, and a backlog story is filed at sprint close to measure an inverse derived from the sRGB primaries with Bradford adaptation against Little CMS across every AC12 row and to adopt it only if it is closer on every row. The adoption rule is all or nothing, so a derived matrix closer on most rows and further on one is not adopted. Little CMS is the host-side transicc tool as AC12 uses it, and its source is not read. Read-only inspection of this tree at 31323a79 finds PCS_TO_SRGB at crates/ocelli-pixel/src/icc.rs:397. The experiment is not performed at filing. Retained in S48. Any adopted matrix propagates through ocelli-pixel stage 4 into the single viewer's colour contract before later fusion and export stories, and if the measurement keeps the printed matrix no dependency is claimed. Estimate 2w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-272",
+      "eid": "E2.8",
+      "phase": "P1",
+      "epic": "E2 Differential oracle & corpus",
+      "epic_key": "E2",
+      "depends_eids": [
+        "Y1.16"
+      ],
+      "story": "Oracle tests write nothing into the checkout: every produce.rs test that runs the producer when the reference run or the corpus is absent points its reference subset, candidate run and dispositions file at a per-process temporary directory, so cargo test never creates or overwrites tools/oracle/compare-out, with a test that fails if a test run changes that directory",
+      "sprint": "S47",
+      "weeks": 1,
+      "layer": "Test",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-X021"
+      ],
+      "notes": "Filed from the recovered S46 close draft, original item 8. Found by S46 oracle test fix review pass 1 as N1 and left optional for the lead. Read-only inspection of this tree at 31323a79 still finds applicable_monochrome_rows_reach_the_comparator, uniform_slice_edge_matches_the_reference_within_one_lsb and rendered_pair passing checkout paths to the producer on the absent branch, whose reference-run-absent and corpus-absent returns both write dispositions into tools/oracle/compare-out, and a_missing_reference_run_is_unrun at produce.rs:2286 is the temp_dir pattern to copy. The path is gitignored, so git is unaffected, but a real compare-out/dispositions.json in a tree with no reference is overwritten with a reference-run-absent record, which the review observed in the ocelli-wt-f-223 worktree. This filing ran no test and touched no output directory. Early S47 test isolation, coordinated with F-244 and F-239 oracle evidence work so a test run does not replace a real comparison artifact. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved."
+    },
+    {
+      "fid": "F-273",
+      "eid": "E38.64",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Reference scalar normalization for the equipped comparison: implement a reviewed scalar and upload route that preserves full-range signed values, then use that same declared route for pixel precheck and the complete timed protocol without changing the native pixel arithmetic or acceptance thresholds",
+      "layer": "All",
+      "weeks": 3,
+      "depends_eids": [
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-216"
+      ],
+      "notes": "Filed under the approved F-223 pixel-refusal follow-up rule. Future route choice requires normal design approval and remains draft. Provisional 3w GLM-proposed estimate, not measured effort. F-223 AC18 and AC19 remain open and named here in carry prose, without a structural dependency cycle. Stock and diagnostic refusal evidence remains retained, with no native arithmetic, package, tolerance, baseline or timing change at filing.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-274",
+      "eid": "E38.65",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Window link sends the numeric window: a linked viewport receives the source viewport's window centre and width, as cornerstone3D 5.8.2's VOI synchronizer sends them, instead of the index of a window in the file, so linked series whose files carry different windows show the same values",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.19",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-209",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S1. Cornerstone-floor rule: cornerstone3D 5.8.2 synchronizes VOI by its numeric range, the F-209 index copy is weaker than that, and every feature must be at least what 5.8.2 does. Changing F-209's documented design choice needs normal design approval. S47 already exceeds both packing caps, so the story is in S48. Estimate 2w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-275",
+      "eid": "E38.66",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Pooled series window after a file changes: when F-224 refuses a changed file in a series whose window F-227 pooled, the folder viewer applies one designed rule to that window, and the window is never recomputed from the refused file",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E5.7",
+        "E38.33",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-224",
+        "F-227",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S2. Today the pooled window stays in force, and dropping it would recompute from a file F-224 now refuses, so the rule is a design decision rather than a repair. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-276",
+      "eid": "E30.8",
+      "phase": "P1.5",
+      "epic": "E30 Out-of-core volume streaming",
+      "epic_key": "E30",
+      "story": "Pyramid means across differing rescales and padding: a coarser ocelli-volume level either refuses a box whose slices carry different Rescale Slope or Intercept or averages each slice through its own rescale, chosen at design, and samples in the Pixel Padding Value range never enter a level mean, with hand-computed fixtures citing PS3.3 C.11.1 and C.7.5.1.1.2",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E30.1",
+        "E30.7"
+      ],
+      "depends_fids": [
+        "F-119",
+        "F-222"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S3 and pass 2 smell S3. crates/ocelli-volume/src/levels.rs averages stored values across slices that may carry different rescales, latent until F-120 consumes the pyramid, so F-120 depends on this story and it is scheduled the sprint before F-120's. Estimate 2w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M14",
+      "sprint": "S50"
+    },
+    {
+      "fid": "F-277",
+      "eid": "E38.67",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Per-image auto window memory bounded: the full-frame allocation the folder viewer's local process makes for a per-image automatic window, outside the counted resident term, measured at the largest frame the viewer admits and then either counted in that term or bounded by a named limit with a test at the limit",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.33",
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-227",
+        "F-216"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S5, examples/folder-viewer/src/preview.rs. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-278",
+      "eid": "E38.68",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Comparison page states what it is: the generator of docs/benchmarks/cornerstone-comparison.md writes that the figures are a synthetic controlled observation, with its date and host conditions, says the equipped acceptance is open, and writes each unavailable-cell bullet once",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.64"
+      ],
+      "depends_fids": [
+        "F-273"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S8 and nitpick N5. The page is generated by tools/bench/src/comparison_run.mjs, so the fix is in its generator. F-273 owns strict publication in S47 and its backlog row carries no notes, so this is its own story after F-273. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-279",
+      "eid": "E38.69",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "S46 review hygiene: a linked region window drops its region label, the region window tool says by name that it does not apply to a colour frame, the palette ICC arm looks its profile up once, and ContentId refuses a sample shape that disagrees with the frame description",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.19",
+        "E38.23",
+        "E5.7",
+        "E38.37",
+        "E38.38",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-209",
+        "F-213",
+        "F-224",
+        "F-239",
+        "F-240",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 nitpicks N1, N2, N3 and N4. Nitpicks named by the closing S46 review pass, in its review file, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-280",
+      "eid": "E38.70",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Viewer window has one owner: every folder viewer window setter, the pump, a preset, a drag, Reset, a linked copy, the region window and the series window, goes through one window change entry point that owns the latest choice, so a late reply never overwrites a newer window, with a real browser control per setter that holds the late request",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.18",
+        "E38.19",
+        "E38.23",
+        "E38.33"
+      ],
+      "depends_fids": [
+        "F-208",
+        "F-209",
+        "F-213",
+        "F-227"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 3, which found the third late window reply in a third setter. Pass 3 N3, a double tile paint in one pump iteration, folds in. Pass 5 N1, a failed series-window request kept as a refusal for the whole open, and N6, refreshFrameWindows painting tiles without the series-window guard, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
     }
   ]
 }

@@ -10,7 +10,9 @@ import {
   type DicomwebResponseKind,
   type WasmMemory,
 } from "./bulk.js";
-import { DicomwebClient } from "./dicomweb.js";
+import { DicomwebClient, type DicomwebCacheMode } from "./dicomweb.js";
+import { OcelliError } from "./ocelli-error.js";
+import { WADO_INSTANCE_REQUEST_KEYS, refuseUnknownOptions } from "./options.js";
 
 export interface WadoInstanceRequest {
   readonly studiesServiceUrl: string;
@@ -20,11 +22,17 @@ export interface WadoInstanceRequest {
   readonly seriesUid: string;
   readonly instanceUid: string;
   readonly post: (bytes: Uint8Array, boundary: string) => void;
+  /**
+   * The cache mode passed to the client. The client's own default is
+   * `"no-cache"`.
+   */
+  readonly cache?: DicomwebCacheMode;
 }
 
 const PAGE = 65536;
 
 export async function postWadoInstance(request: WadoInstanceRequest): Promise<void> {
+  refuseUnknownOptions("WadoInstanceRequest", request, WADO_INSTANCE_REQUEST_KEYS);
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 1024 });
   const wasm: WasmMemory = { memory };
   let held: Uint8Array | null = null;
@@ -34,6 +42,7 @@ export async function postWadoInstance(request: WadoInstanceRequest): Promise<vo
     wadoUriUrl: request.wadoUriUrl,
     fetch: request.fetch,
     wasm,
+    ...(request.cache === undefined ? {} : { cache: request.cache }),
     sink: {
       alloc(len: number): number {
         if (!Number.isSafeInteger(len) || len < 0) {
@@ -66,7 +75,7 @@ export async function postWadoInstance(request: WadoInstanceRequest): Promise<vo
     request.instanceUid,
   );
   if (held === null) {
-    throw new Error("the instance body was not committed");
+    throw new OcelliError("CommitRefused", "the instance body was not committed");
   }
   request.post(held, boundary);
 }

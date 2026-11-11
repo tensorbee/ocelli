@@ -1,10 +1,11 @@
 //! ISO 14495-1 JPEG-LS scan decoder.
 //!
-//! Implements both regular-mode and run-mode decoding per §A.3–§A.6.
+//! Implements both regular-mode and run-mode decoding per §A.3 to §A.7 and
+//! Annex F, F.1.
 //! Processes one single-component scan; multi-component support is not
 //! implemented by RITK's grayscale DICOM codec boundary.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use super::bitstream::BitReader;
 use super::context::{
@@ -13,7 +14,7 @@ use super::context::{
 };
 use super::reconstruction::ReconstructionRows;
 
-/// Golomb run-length table `J[0..32]` — ISO 14495-1 Table C.1.
+/// Golomb run-length table `J[0..32]` — ISO 14495-1 §A.2.1 step 3.
 ///
 /// `J[i]` is the Golomb order: at run index i, a hit extends the run by `2^J[i]`.
 /// Shared by the scan decoder and the [`super::encoder`] (single source of truth).
@@ -22,33 +23,34 @@ pub(super) const J: [u32; 32] = [
     14, 15,
 ];
 
-/// JPEG-LS predictor modes specified in the SOS header (ISO 14495-1 §C.2.4).
+/// Predictor modes carried by upstream as exhaustive match arms in `predict()`.
 ///
-/// All 8 modes are defined by the ISO 14495-1 standard and remain present as
-/// exhaustive match arms in `predict()` for standard compliance. DICOM JPEG-LS
-/// lossless production decode uses the adaptive predictor.
+/// ISO 14495-1 defines one predictor, the edge-detecting predictor of §A.4.1,
+/// and the SOS header selects none. DICOM JPEG-LS production decode uses the
+/// adaptive predictor.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Predictor {
-    /// Predictor 0: no prediction (Px = 0 for first sample, left for others).
+    /// Predictor 0: Px = 0. At the image edges `predict` gives 0 for the first
+    /// sample, b in the first column and a in the first row.
     None = 0,
     /// Predictor 1: left neighbor (a).
     Left = 1,
     /// Predictor 2: above neighbor (b).
     Up = 2,
-    /// Predictor 3: above-left diagonal (c). ISO 14495-1 mode 3.
+    /// Predictor 3: above-left diagonal (c).
     UpLeft = 3,
-    /// Predictor 4: a + b − c. ISO 14495-1 mode 4.
+    /// Predictor 4: a + b − c.
     UpPlusLeftMinusUpLeft = 4,
-    /// Predictor 5: b + (c − a)/2. ISO 14495-1 mode 5.
+    /// Predictor 5: b + (c − a)/2.
     UpPlusHalfDiff = 5,
-    /// Predictor 6: a + (c − b)/2. ISO 14495-1 mode 6.
+    /// Predictor 6: a + (c − b)/2.
     LeftPlusHalfDiff = 6,
-    /// Predictor 7: ISO edge-detecting adaptive predictor (§6.3.1, default).
+    /// Predictor 7: ISO edge-detecting adaptive predictor (§A.4.1).
     Adaptive = 7,
 }
 
-/// ISO 14495-1 §6.3.1 edge-detecting predictor.
+/// ISO 14495-1 §A.4.1 edge-detecting predictor.
 ///
 /// Proof:
 /// - c ≥ max(a,b): both a and b are below the diagonal → select min(a,b).
@@ -69,8 +71,8 @@ fn predict_adaptive(a: i32, b: i32, c: i32) -> i32 {
 
 /// Compute the predictor for sample at (row, col) given causal neighborhood.
 ///
-/// Boundary conditions per ISO 14495-1 §A.3:
-/// - (0, 0): Px = 0 (mid-value = 0 for convenience; standard uses MAXVAL/2 but test data matches 0).
+/// Boundary conditions per ISO 14495-1 §A.2.1:
+/// - (0, 0): Px = 0.
 /// - (r, 0): Px = above = b.
 /// - (0, c): Px = left = a.
 #[inline(always)]
@@ -117,7 +119,8 @@ pub(super) struct ScanParams {
 
 /// Decode a single-component JPEG-LS scan into sample values.
 ///
-/// Implements ISO 14495-1 §A.3 (regular mode) and §A.6 (run mode).
+/// Implements ISO 14495-1 §A.3 to §A.6 (regular mode, decoded per F.1 steps 2
+/// to 17) and §A.7 (run mode, decoded per F.1 step 18).
 ///
 /// # Arguments
 /// * `reader` — Bit reader positioned at the start of scan data.
@@ -157,7 +160,7 @@ pub(super) fn decode_scan(
             // Causal neighborhood
             let (a, b, cc, d) = reconstructed.neighborhood(c, current_line_left_guard);
 
-            // Local gradients (ISO 14495-1 §A.2)
+            // Local gradients (ISO 14495-1 §A.3.1)
             let d1 = d - b; // vertical gradient (above-right − above)
             let d2 = b - cc; // horizontal gradient (above − above-left)
             let d3 = cc - a; // diagonal gradient (above-left − left)
@@ -168,27 +171,28 @@ pub(super) fn decode_scan(
             let q3 = quant(d3, t1, t2, t3, near);
 
             if q1 == 0 && q2 == 0 && q3 == 0 {
-                // ── Run mode (ISO 14495-1 §A.6) ──────────────────────────────
+                // ── Run mode (ISO 14495-1 §A.7, F.1 step 18) ─────────────────────
                 let run_val = a;
                 let remaining = cols - c;
                 let mut run_len = 0usize;
 
-                // Decode run length using J-table Golomb coding
+                // Decode run length using J-table Golomb coding.
+                //
+                // Ocelli F-243, ITU-T T.87 F.1 step 18 (informative): a hit
+                // adds min(2^J[RUNindex], samples left on the line), and
+                // RUNindex rises only when that count is the full segment. A
+                // hit that only fills the rest of the line leaves it alone.
                 loop {
                     let idx = ctx.run_index.min(31);
                     if reader.read_bit() == 1 {
-                        // Run hit: extend by 2^J[idx]
-                        run_len += 1usize << J[idx];
-                        if run_len >= remaining {
-                            run_len = remaining;
-                            // Increment run index (capped at 31)
-                            if ctx.run_index < 31 {
-                                ctx.run_index += 1;
-                            }
-                            break;
-                        }
-                        if ctx.run_index < 31 {
+                        let full = 1usize << J[idx];
+                        let count = full.min(remaining - run_len);
+                        run_len += count;
+                        if count == full && ctx.run_index < 31 {
                             ctx.run_index += 1;
+                        }
+                        if run_len == remaining {
+                            break;
                         }
                     } else {
                         // Run miss: read J[idx] remainder bits
@@ -198,7 +202,11 @@ pub(super) fn decode_scan(
                             0
                         };
                         run_len += rem;
-                        run_len = run_len.min(remaining);
+                        // A remainder that carries the run past the line is
+                        // not a stream any encoder writes (Ocelli F-243).
+                        if run_len > remaining {
+                            bail!("JPEG-LS run length passes the end of line {r}");
+                        }
                         break;
                     }
                 }
@@ -219,6 +227,9 @@ pub(super) fn decode_scan(
                     let k = ri_ctx.compute_k(qbpp);
                     let me = reader.read_golomb(k, limit - J[run_index] - 1, qbpp);
                     let errval = ri_ctx.compute_error_value(me + ri_ctx.run_interruption_type(), k);
+                    if !in_coded_range(errval, cp.range) {
+                        bail!("JPEG-LS run interruption error outside the coded range in line {r}");
+                    }
                     ri_ctx.update(errval, me);
 
                     let rx = if ri_ctx.run_interruption_type() == 1 {
@@ -238,7 +249,7 @@ pub(super) fn decode_scan(
                 continue;
             }
 
-            // ── Regular mode (ISO 14495-1 §A.3) ──────────────────────────────
+            // ── Regular mode (ISO 14495-1 §A.3 to §A.6) ──────────────────────
             let (nq1, nq2, nq3, sign) = sign_normalize(q1, q2, q3);
             let qi = context_index(nq1, nq2, nq3);
             debug_assert!(qi < 365, "context index out of range: {}", qi);
@@ -258,6 +269,9 @@ pub(super) fn decode_scan(
             if k == 0 {
                 errval_canon ^= error_correction(ctx_reg, params.near);
             }
+            if !in_coded_range(errval_canon, cp.range) {
+                bail!("JPEG-LS prediction error outside the coded range in line {r}");
+            }
             let errval = sign * errval_canon;
 
             // Reconstruct sample
@@ -270,8 +284,48 @@ pub(super) fn decode_scan(
         }
         samples.extend_from_slice(reconstructed.current());
         reconstructed.finish_row(current_line_left_guard);
+        // Ocelli F-243: past the end of the data the reader returns zero
+        // bits, which decode as plausible samples, so running out is refused.
+        if reader.exhausted() {
+            bail!("JPEG-LS scan ran out of entropy-coded data in line {r}");
+        }
     }
 
+    Ok(())
+}
+
+/// Whether a decoded prediction error is one an encoder can write (Ocelli
+/// F-243). T.87 A.4.5 reduces every error modulo RANGE into
+/// `[-floor(RANGE / 2), ceil(RANGE / 2) - 1]` before coding, so a value outside
+/// it is a damaged scan, which would otherwise wrap or clamp to some sample.
+/// CharLS 2.4.4 was measured to open some such scans.
+fn in_coded_range(errval: i32, range: i32) -> bool {
+    -(range / 2) <= errval && errval < (range + 1) / 2
+}
+
+/// Refuse a scan that does not end where its last sample does (Ocelli F-243).
+///
+/// ISO 14495-1 §A.1 pads the final byte to a byte boundary. The bits after
+/// the last sample must all be zero, there may be at most 7 of them, the rest
+/// of one byte, and the marker after them must be EOI, which 0xFF fill bytes
+/// may precede. A non-zero bit there is how a damaged final data bit shows,
+/// and a whole byte more is how a damaged scan that reads as a shorter valid
+/// one shows, so both are refused. Bytes after that EOI are the adapter's to
+/// judge. A scan that ran out of data was already refused by `decode_scan`.
+pub(super) fn verify_scan_end(reader: &BitReader<'_>) -> Result<()> {
+    let end = reader.segment_end();
+    if !end.unread_zero {
+        bail!("JPEG-LS scan leaves non-zero entropy-coded bits after its last sample");
+    }
+    if end.unread_bits > 7 {
+        bail!(
+            "JPEG-LS scan leaves {} entropy-coded bits unread before its marker",
+            end.unread_bits
+        );
+    }
+    if !end.eoi {
+        bail!("JPEG-LS scan is not followed by the EOI marker");
+    }
     Ok(())
 }
 

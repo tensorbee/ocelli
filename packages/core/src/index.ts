@@ -25,6 +25,7 @@
 
 export {
   acceptTransferredFrame,
+  contentId,
   exportDecodedFrame,
   holdSessionBytes,
   sessionBulkSink,
@@ -48,13 +49,16 @@ export type {
 } from "./bulk.js";
 
 export { DicomwebClient, DicomwebError } from "./dicomweb.js";
+export { OcelliError } from "./ocelli-error.js";
 export { postWadoInstance } from "./instance-bytes.js";
 export type { WadoInstanceRequest } from "./instance-bytes.js";
 export type {
+  DicomwebCacheMode,
   DicomwebClientOptions,
   DicomwebErrorCode,
   QidoSearchOptions,
 } from "./dicomweb.js";
+export type { OcelliErrorCode } from "./ocelli-error.js";
 
 export { drainRing, readEvent, HEADER_BYTES } from "./ring.js";
 export type { DrainResult, OcelliEvent } from "./ring.js";
@@ -220,6 +224,7 @@ export { cropDrag, cropPlanes } from "./crop.js";
 export { eraseNearest, mipIndex, sculptVertex } from "./sculpt.js";
 
 export { contentTree, provenanceItems } from "./sr.js";
+export type { Concept, ContentItem, GraphicType, Relationship } from "./sr.js";
 
 export {
   annotationsForFrame,
@@ -231,17 +236,27 @@ export {
 
 export { loadMeasurements, persistMeasurements } from "./measurement-persist.js";
 
-export { readTid1500, writeTid1500 } from "./tid1500.js";
-export type { TidSource } from "./tid1500.js";
+export { readTid1500, readTid1500Groups, writeTid1500, writeTid1500Groups } from "./tid1500.js";
+export type { DocumentReference, ReportSource, TidGroups, TidSource } from "./tid1500.js";
 
-export { readKeyObject, writeKeyObject } from "./tid2010.js";
-export type { KeyObjectDocument, KeyObjectRequest } from "./tid2010.js";
+export { readKeyObject, readKeyObjects, writeKeyObject, writeKeyObjects } from "./tid2010.js";
+export type { KeyObjectDocument, KeyObjectRequest, KeyObjects, KeyReference } from "./tid2010.js";
 
 export { readSecondaryCapture, writeSecondaryCapture } from "./secondary-capture.js";
 export type { SecondaryCaptureImage, SecondaryCaptureRequest } from "./secondary-capture.js";
 
 export { disableElement, dispatchOnElement, enableElement } from "./seam.js";
 export type { ElementSeam, SeamEvent } from "./seam.js";
+
+export {
+  frameResident,
+  releaseSeries,
+  releaseStudy,
+  requestFramePressure,
+  setFrameBudget,
+  showResident,
+} from "./frame-cache.js";
+export type { FrameCacheExports, ResidentFrameRequest } from "./frame-cache.js";
 
 export { attachSideBySide } from "./alongside.js";
 export type { SideBySide } from "./alongside.js";
@@ -353,6 +368,7 @@ export type {
   CacheBudgetChangedPayload,
   CacheKeyPayload,
   CachePressurePayload,
+  CacheReleasedPayload,
   CornerstoneEventRow,
   EventDelivery,
   FramePresentedPayload,
@@ -360,6 +376,20 @@ export type {
   OcelliNamedEvent,
   UnmappedEvent,
 } from "./events.js";
+
+export {
+  CONFORMANCE_RULES,
+  CONFORMANCE_SCOPE,
+  SOP_CLASS_NOTES,
+  readConformanceReport,
+} from "./conformance.js";
+export type {
+  ConformanceFinding,
+  ConformanceMeasure,
+  ConformanceModules,
+  ConformanceReport,
+  ConformanceSopClassNote,
+} from "./conformance.js";
 
 /** Package version, kept in step with the crate versions by `/release`. */
 export const VERSION = "0.1.0";

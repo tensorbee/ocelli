@@ -29,6 +29,8 @@
 //! F-101's session is `session`. `coreAvailable()` in the package stays false
 //! until a built module is loaded.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 // F-110. The canvas and the session are the render worker. `decode-worker`
 // does not compile them, so that build does not link the renderer.
 #[cfg(all(target_arch = "wasm32", feature = "render-worker"))]

@@ -108,15 +108,72 @@ RITK_ADDITIONS = {
     "PATCH-PROVENANCE.md",
 }
 RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f71da0cb351"
-RITK_PROVENANCE_SHA256 = "3161785b1cbf76437756c68d13ba6b5d53dfc26f88f0dd285d2af0e395aedeff"
+# The reviewed patch record, rewritten when a patch changes. F-239 added the
+# three-component colour decode to the published decoder and F-243 the
+# JPEG-LS run-mode, end-of-scan and default-threshold patch.
+RITK_PROVENANCE_SHA256 = "0d589a00f49f8e387bceb316af58e1a5dca537ee32101661a7eacaf82aa78acf"
+# Every published source file this repository has patched, with the exact
+# bytes of the reviewed patch. Anything else must stay byte-identical to the
+# archive.
 RITK_PATCHED_HASHES = {
+    # F-239 and D-31. The colour decode: three-component LRCP packet walking,
+    # the inverse component transform before the level shift, and the exports.
+    "src/jpeg_2000/image.rs": "8c7a1c8b1147369c60b11fdd3132339cf798b2f4c40327ac00ffd34ca3f30e44",
+    "src/jpeg_2000/mod.rs": "a3e14bca44ec66090df7a1d3a69da08e74f01f2b8cbcd769c9073c300bf7d52a",
+    "src/jpeg_2000/packet/reader.rs": "2ed1bf22d0607915048fcb807f6ccaa599c05eb29057a2b19c95ef73e611efc1",
+    "src/lib.rs": "accfac2f2cfe750a0b8df2f3409e00a46c98ed2eeeef338469a84ad997ed7def",
+    # F-243 and D-20. ITU-T T.87 A.7.1 run mode, the context RESET, the end of
+    # scan held to CharLS 2.4.4 and C.2.4.1.1.1 default thresholds, with the
+    # encoder's code segment A.16 mirror and one published test edited by the
+    # lead's ruling.
+    "src/jpeg_ls/bitstream.rs": "49367ccb7467dd91b267a2dfe5a1f70f70d872bf28243fdbbf817e9a34a68cbb",
+    "src/jpeg_ls/context/mod.rs": "7a39478fed96333a1654ce3f8ad4029866abe2e28db26262fc8618e54d586a95",
+    "src/jpeg_ls/decoder.rs": "d898917107a8d2575a04cc47ba53748785f04c1b661235f283ede6744f8a4b11",
+    "src/jpeg_ls/encoder.rs": "be209fabf20a8b54b53c6156eb4de9922464c5192e600f3a6b88da6d5aa4b988",
+    "src/jpeg_ls/scan.rs": "5fa6512032ced5ec593394d65111ae296ecb3702dbdc1dfe178a27dacdd2c559",
+    "src/jpeg_ls/tests/conformance.rs": "aee89d4a0a49b21d8f6ebc4229e4458cc4c037300dad36babcb17f08f4acc512",
+}
+# The manifest-only patch D-20 records, checked as TOML as well as by hash.
+RITK_MANIFEST_PATCHED_HASHES = {
     "Cargo.toml": "a4832241153ecc35ddb1de5b246f0a244e2d4d301852944aa09952aba7b306d2",
     "Cargo.toml.orig": "527ba797ed392fed09da5f771c84c6462b59100741ac2177c3223f43c6c176ae",
 }
-RITK_PATCHED = set(RITK_PATCHED_HASHES)
+RITK_PATCHED = set(RITK_PATCHED_HASHES) | set(RITK_MANIFEST_PATCHED_HASHES)
 RITK_LICENCE_HASHES = {
     "LICENSE-MIT": "8ff8d4621b3a1aa9df7006e0eaeacd5dfb686dcaa328e86c692374fbf2c4874f",
     "LICENSE-APACHE": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+}
+
+# F-244 and D-18. The published dicom-object 0.10.0 package with ONE source
+# patch, the `first = false;` line in collector.rs that PS3.5 A.4's empty
+# Basic Offset Table needs. The patched file is pinned by its whole digest, so
+# a second change beside the first is an undeclared change.
+DICOM_OBJECT_VENDOR = ROOT / "vendor" / "dicom-object-0.10.0"
+DICOM_OBJECT_ARCHIVE_SHA256 = (
+    "0504b87987f0e7624cf7ee063fe7ffdb438c66c092620817fb9bb0f130686b85"
+)
+DICOM_OBJECT_VCS = "39603cef65da125e47daffbb32310c6826f2f62b"
+DICOM_OBJECT_TAG_COMMIT = "2941c54cae434dd63a54d0a5546b3b0df42e9f6c"
+DICOM_OBJECT_PUBLISHED_FILES = 13
+DICOM_OBJECT_ADDITIONS = {
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "PACKAGE-INVENTORY.sha256",
+    "PATCH-PROVENANCE.md",
+}
+DICOM_OBJECT_INVENTORY_SHA256 = (
+    "9097f089c5ad85896529eec52cf5a8edcb45fc57b85ed6bf019894c25c7d9c1d"
+)
+DICOM_OBJECT_PROVENANCE_SHA256 = (
+    "51532f1ee265afc5ae20ef0d4ad61eefca5696c63a1a33c551507c2cbdadf508"
+)
+DICOM_OBJECT_PATCHED_HASHES = {
+    "src/collector.rs":
+        "69f08d0ebf59e3d4fe377912d8e0729d79f980d266500d378d49558413620656",
+}
+DICOM_OBJECT_LICENCE_HASHES = {
+    "LICENSE-MIT": "77fbf925c55b05c210868fa639de038b4f01d9a19b9309f7db46f32ce0d5661f",
+    "LICENSE-APACHE": "ae8a8e2f408f02b92bbaa5a4b482209288ec1d9dac85b5722b001040f1f13a9d",
 }
 
 OPENJPH_VENDOR = ROOT / "vendor" / "openjph-core-0.1.0"
@@ -126,19 +183,32 @@ OPENJPH_INVENTORY_SHA256 = (
     "f6aef8e7211a9ab5b562414d673f5df5db01f99a3cf926ee90d01d0e65a14772"
 )
 OPENJPH_PUBLISHED_FILES = 50
-# The notice material F-027 could not obtain. crates.io reports no repository
-# URL for this package, so there is nowhere to fetch a root LICENSE from.
+# Upstream OpenJPH LICENSE at tag 0.26.3. The redistribution check pins these
+# bytes. crates.io still reports no repository URL, so the file is fetched
+# from the OpenJPH tag the port names.
+OPENJPH_LICENCE_SHA256 = "5ddf5177863dfc9ab65fa129d587db651241f00e21ed2427b218bea997591f98"
 OPENJPH_NOTICE_FILES = ("LICENSE", "LICENCE", "COPYING", "NOTICE")
-# What this repository may add beside the published archive. Unlike the ritk
-# vendor there is no patch, because the published manifest already yields the
-# graph section 15.2 wants.
-#
-# **The notice filenames are permitted additions even though none is present.**
-# The probe `pins.openjph-notice` measured why: without them, obtaining the BSD
-# notice and placing it here would trip "carries an unrecorded file" and the
-# redistribution gate could never be satisfied by the only action that is
-# supposed to satisfy it. A gate with no reachable green state is not a gate.
-OPENJPH_ADDITIONS = {"PACKAGE-INVENTORY.sha256", *OPENJPH_NOTICE_FILES}
+# What this repository may add beside the published archive. The notice
+# filenames stay permitted so a later notice is not an unrecorded file, and
+# F-239's D-31 patch adds its own provenance record.
+OPENJPH_ADDITIONS = {
+    "PACKAGE-INVENTORY.sha256",
+    "PATCH-PROVENANCE.md",
+    *OPENJPH_NOTICE_FILES,
+}
+# The reviewed patch record, hashed like its ritk counterpart.
+OPENJPH_PROVENANCE_SHA256 = "8619d0c0d8710d7b5562c844dba2eab1a99f2ff27999d5e8f204b8b8d6433d8b"
+# The published files D-31's patch changes, with the exact bytes of the
+# reviewed patch. The decode path runs the codestream's own inverse colour
+# transform before the DC level shift and its clamp, which the published
+# package never does, and the inverse coefficients are pinned to Annex G
+# equation G-6's literals. Every other published file must stay
+# byte-identical.
+OPENJPH_PATCHED_HASHES = {
+    "src/transform/colour.rs": "8d13e0db444ac9b9049b70dc5a65fe42b69568a3aeb717156fe12f7234cda829",
+    "src/codestream/tile.rs": "551f0f6f174c38e663bbff2f68573e602e7a7eff64b8195d64290e9853b59b0a",
+    "src/codestream/tile_comp.rs": "0585e14229f26b83c16fb8e1c7ab1aefb1edef42bdea0f31299cd01cd98c469c",
+}
 
 PACKAGE_LICENCES = ("LICENSE-MIT", "LICENSE-APACHE")
 
@@ -321,9 +391,15 @@ def check_ritk_vendor(
         if fact not in provenance_text:
             problems.append(f"ritk-codecs provenance does not record {fact}")
 
-    for manifest_name in sorted(RITK_PATCHED):
+    for name, digest in sorted(RITK_PATCHED_HASHES.items()):
+        path = vendor / name
+        if path.is_file() and file_sha256(path) != digest:
+            problems.append(
+                f"ritk-codecs {name} has undeclared changes beyond its "
+                "recorded patch")
+    for manifest_name in sorted(RITK_MANIFEST_PATCHED_HASHES):
         path = vendor / manifest_name
-        if path.is_file() and file_sha256(path) != RITK_PATCHED_HASHES[manifest_name]:
+        if path.is_file() and file_sha256(path) != RITK_MANIFEST_PATCHED_HASHES[manifest_name]:
             problems.append(
                 f"ritk-codecs {manifest_name} has undeclared changes beyond "
                 "the exact jpeg-decoder default-features patch")
@@ -361,6 +437,106 @@ def check_ritk_vendor(
             problems.append(
                 f"Rayon is present in dependency graph {index + 1}: "
                 f"{', '.join(rayon)}")
+    return problems
+
+
+def check_dicom_object_vendor(
+    vendor: Path = DICOM_OBJECT_VENDOR,
+    workspace: Path = CARGO,
+) -> list[str]:
+    """Prove the exact published package, its one patch and its licences.
+
+    F-244 and deviation D-18. Every published file but the patched one must
+    match the archive inventory byte for byte, the patched one must match its
+    recorded digest, and the inventory and provenance digests are rooted here,
+    outside the vendor tree, so a coordinated edit of a file and its record
+    still fails.
+    """
+    label = "dicom-object"
+    problems = []
+    inventory_path = vendor / "PACKAGE-INVENTORY.sha256"
+    if not inventory_path.is_file():
+        return [f"{label} vendor has no PACKAGE-INVENTORY.sha256"]
+    if file_sha256(inventory_path) != DICOM_OBJECT_INVENTORY_SHA256:
+        problems.append(
+            f"{label} published-package inventory digest does not match "
+            "the immutable crates.io archive inventory")
+    inventory = {}
+    for line in inventory_path.read_text().splitlines():
+        digest, separator, name = line.partition("  ./")
+        if not separator or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            problems.append(f"{label} inventory row is invalid: {line!r}")
+            continue
+        if name in inventory:
+            problems.append(f"{label} inventory repeats {name}")
+        inventory[name] = digest
+    if len(inventory) != DICOM_OBJECT_PUBLISHED_FILES:
+        problems.append(
+            f"{label} inventory has {len(inventory)} published files, "
+            f"expected the archive's exact {DICOM_OBJECT_PUBLISHED_FILES}")
+
+    actual = {
+        str(path.relative_to(vendor)) for path in vendor.rglob("*")
+        if path.is_file()
+    }
+    expected = set(inventory) | DICOM_OBJECT_ADDITIONS
+    for name in sorted(set(inventory) - actual):
+        problems.append(f"{label} published file is absent: {name}")
+    for name in sorted(actual - expected):
+        problems.append(f"{label} carries an unrecorded file: {name}")
+    for name, digest in sorted(inventory.items()):
+        path = vendor / name
+        if path.is_file() and name not in DICOM_OBJECT_PATCHED_HASHES \
+                and file_sha256(path) != digest:
+            problems.append(f"{label} published file changed: {name}")
+    for name, digest in sorted(DICOM_OBJECT_PATCHED_HASHES.items()):
+        path = vendor / name
+        if path.is_file() and file_sha256(path) != digest:
+            problems.append(
+                f"{label} {name} has undeclared changes beyond the exact "
+                "empty Basic Offset Table patch")
+
+    try:
+        vcs = json.loads((vendor / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        vcs = None
+    if vcs != DICOM_OBJECT_VCS:
+        problems.append(
+            f"{label} VCS revision is {vcs!r}, expected {DICOM_OBJECT_VCS}")
+
+    for name, digest in DICOM_OBJECT_LICENCE_HASHES.items():
+        path = vendor / name
+        if not path.is_file() or file_sha256(path) != digest:
+            problems.append(
+                f"{label} {name} is absent or not the exact upstream text")
+    provenance = vendor / "PATCH-PROVENANCE.md"
+    if not provenance.is_file() \
+            or file_sha256(provenance) != DICOM_OBJECT_PROVENANCE_SHA256:
+        problems.append(
+            f"{label} PATCH-PROVENANCE.md has undeclared changes from "
+            "the exact reviewed patch record")
+    provenance_text = provenance.read_text() if provenance.is_file() else ""
+    for fact in (DICOM_OBJECT_ARCHIVE_SHA256, DICOM_OBJECT_VCS,
+                 DICOM_OBJECT_TAG_COMMIT, "PS3.5 A.4", "MIT alternative",
+                 *DICOM_OBJECT_PATCHED_HASHES.values()):
+        if fact not in provenance_text:
+            problems.append(f"{label} provenance does not record {fact}")
+
+    try:
+        root = tomllib.loads(workspace.read_text())
+        exclude = root["workspace"]["exclude"]
+        dependency = root["workspace"]["dependencies"]["dicom-object"]
+    except (FileNotFoundError, KeyError, tomllib.TOMLDecodeError):
+        exclude, dependency = [], None
+    if "vendor/dicom-object-0.10.0" not in exclude:
+        problems.append("workspace does not exclude vendor/dicom-object-0.10.0")
+    if not isinstance(dependency, dict) or dependency.get("version") != "=0.10.0" \
+            or dependency.get("path") != "vendor/dicom-object-0.10.0":
+        problems.append(
+            "workspace dicom-object dependency is not the exact path and version")
+    elif dependency.get("default-features") is not False:
+        # D-18 keeps every dicom-rs component's defaults off.
+        problems.append("workspace dicom-object dependency enables default features")
     return problems
 
 
@@ -499,9 +675,11 @@ def check_openjph_vendor(
 ) -> list[str]:
     """Prove the exact published package and its workspace wiring.
 
-    Deviation D-22. There is no patch, so unlike the ritk vendor every
-    published file must match the archive byte for byte and the only addition
-    is the inventory this repository writes.
+    Deviation D-22 with the D-31 patch recorded beside it: every published
+    file must match the archive byte for byte except the two patched source
+    files, which are held to their own reviewed digests. The additions this
+    repository writes are the inventory, the patch provenance and the
+    licence notice.
     """
     problems = []
     inventory_path = vendor / "PACKAGE-INVENTORY.sha256"
@@ -536,10 +714,11 @@ def check_openjph_vendor(
         problems.append(f"openjph-core carries an unrecorded file: {name}")
     for name, digest in sorted(inventory.items()):
         path = vendor / name
-        if path.is_file() and file_sha256(path) != digest:
+        if path.is_file() and name not in OPENJPH_PATCHED_HASHES \
+                and file_sha256(path) != digest:
             problems.append(
-                f"openjph-core published file changed: {name}. The vendored "
-                f"package carries no patch, so every file is the archive's")
+                f"openjph-core published file changed: {name}. The recorded "
+                f"patch covers only {sorted(OPENJPH_PATCHED_HASHES)}")
 
     try:
         vcs = json.loads((vendor / ".cargo_vcs_info.json").read_text())["git"]["sha1"]
@@ -547,6 +726,18 @@ def check_openjph_vendor(
         vcs = None
     if vcs != OPENJPH_VCS:
         problems.append(f"openjph-core VCS revision is {vcs!r}, expected {OPENJPH_VCS}")
+
+    provenance = vendor / "PATCH-PROVENANCE.md"
+    if not provenance.is_file() or file_sha256(provenance) != OPENJPH_PROVENANCE_SHA256:
+        problems.append(
+            "openjph-core PATCH-PROVENANCE.md is absent or does not match "
+            "the exact reviewed patch record")
+    for name, digest in sorted(OPENJPH_PATCHED_HASHES.items()):
+        path = vendor / name
+        if path.is_file() and file_sha256(path) != digest:
+            problems.append(
+                f"openjph-core {name} has undeclared changes beyond the "
+                "exact D-31 colour-transform patch")
 
     try:
         root = tomllib.loads(workspace.read_text())
@@ -564,39 +755,37 @@ def check_openjph_vendor(
 
 
 def check_openjph_redistribution(vendor: Path = OPENJPH_VENDOR) -> list[str]:
-    """Refuse to publish while the BSD notice material is absent.
+    """Refuse to publish while the BSD notice is absent or its bytes differ.
 
-    **This refusal is expected to fire.** `openjph-core` 0.1.0's published
-    archive carries no `LICENSE`, `LICENCE`, `COPYING` or `NOTICE`, and
-    crates.io reports no repository URL where a root file could be obtained.
-    Its registry metadata and normalized manifest both declare `BSD-2-Clause`,
-    which permits redistribution **with its notice conditions retained**, and
-    the material that would satisfy them is what this repository does not have.
-
-    `docs/SOURCE-POLICY.md` decided `Depend? yes` for this package and recorded
-    the missing notice as a distribution risk. The S09 design round decided that
-    risk is held by a gate rather than by a note, so this check exists, fails
-    today, and names what would close it.
+    `openjph-core` 0.1.0's published archive carries no notice. The file at
+    `vendor/openjph-core-0.1.0/LICENSE` is the upstream OpenJPH text at tag
+    0.26.3, and `OPENJPH_LICENCE_SHA256` pins those bytes. A missing LICENSE
+    keeps the original refusal, including when some other notice name is
+    present. A present LICENSE whose bytes differ is refused on the hash.
 
     It is NOT in the `pins` gate and therefore not in `--floor`, `--sprint` or
-    `--all`, which in this repository are the same set. Those profiles gate
-    development, and the decision was that development proceeds while
-    publication cannot. `/release` invokes this flag, and
-    `guards.openjph-notice` is what proves the refusal still refuses.
+    `--all`. `/release` invokes this flag. The probes `pins.openjph-notice`
+    and `pins.openjph-notice-hash` prove both refusals.
     """
-    present = [name for name in OPENJPH_NOTICE_FILES if (vendor / name).is_file()]
-    if present:
-        return []
-    return [
-        "openjph-core 0.1.0 carries no BSD notice or copyright material, so it "
-        "cannot be redistributed. Its crates.io archive has no "
-        f"{', '.join(OPENJPH_NOTICE_FILES)} and the registry reports no "
-        "repository URL to obtain one from. BSD-2-Clause permits "
-        "redistribution only with its notice conditions retained. Obtain the "
-        f"complete notice, place it at {vendor.name}/LICENSE, record its hash "
-        "beside the other vendored licence hashes, and see D-22 in "
-        "docs/hld/DEVIATIONS.md."
-    ]
+    licence = vendor / "LICENSE"
+    if not licence.is_file():
+        return [
+            "openjph-core 0.1.0 carries no BSD notice or copyright material, so it "
+            "cannot be redistributed. Its crates.io archive has no "
+            f"{', '.join(OPENJPH_NOTICE_FILES)} and the registry reports no "
+            "repository URL to obtain one from. BSD-2-Clause permits "
+            "redistribution only with its notice conditions retained. Obtain the "
+            f"complete notice, place it at {vendor.name}/LICENSE, record its hash "
+            "beside the other vendored licence hashes, and see D-22 in "
+            "docs/hld/DEVIATIONS.md."
+        ]
+    digest = file_sha256(licence)
+    if digest != OPENJPH_LICENCE_SHA256:
+        return [
+            "openjph-core 0.1.0 LICENSE sha256 is "
+            f"{digest}, expected {OPENJPH_LICENCE_SHA256}"
+        ]
+    return []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -611,6 +800,7 @@ def main(argv: list[str] | None = None) -> int:
 
     problems = check_pins()
     problems.extend(check_ritk_vendor())
+    problems.extend(check_dicom_object_vendor())
     problems.extend(check_openjph_vendor())
     if args.require_redistribution:
         problems.extend(check_openjph_redistribution())

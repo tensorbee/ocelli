@@ -1,0 +1,95 @@
+# F-241 review, pass 6, Rust demux slice
+
+**Reviewed**: work/f-241-demux, range e7353d80..d457a217 at tip d457a217, three commits: 1928ed13 (pass 5 remediation and the convergence sweep), 82ee0c4f (lead ruling on reserved HEVC NAL types) and d457a217 (reserved HEVC NAL types ignored). Before and after the pass, `git status` shows only the untracked `.venv` and `tools/oracle/out`, plus this file.
+**Author / reviewer**: the author is a Claude implementer agent, and 82ee0c4f carries the lead's ruling. Every commit carries the operator's git identity. The reviewer is an independent Claude reviewer agent that wrote none of the range.
+**Result**: 0 defects, 1 smell, 2 nitpicks
+
+## Acceptance challenged
+
+- **Pass 5 S1 and N1**, replayed with pass 5's own mutant, the l1 override mutant pass 5 left unrun, and every bound row's full access unit table at both ends of the range.
+- **The convergence sweep**, rerun from the implementer's script against a `git archive` of the tip, then audited clause by clause against H.264 7.3.3, 7.3.3.1, 7.3.3.2 and 7.3.3.3 and against H.265 7.3.6.1 up to slice_pic_order_cnt_lsb, from the ITU texts in the scratchpad. The sweep's mutants mostly drop a read. I wrote 33 more, mostly the other direction (a field read where its condition says absent), plus the reserved NAL ruling's own conditions.
+- **The two equivalence arguments**, `H-marking-idr-width` and `E-no-output-to-cra`, judged from the parser's code and the clauses.
+- **The new builder output**: P, B, I, SP and SI slices, colour_plane_id, the PPS id, the POC type 1 IDR, the HEVC PPS and slice segment headers, all read by ffmpeg `trace_headers` as a host tool, or decoded by hand where ffmpeg refuses the stream.
+- **The HEVC seven-picture POC expectation**, derived by hand from 8.3.1 before reading the test's array.
+- **The reserved NAL ruling** against H.265 7.4.2.2, Table 7-1 and 7.4.2.4.4, including where a reserved unit's bytes land and what a downstream decoder does with them.
+- **No valid stream refused**: pass 3's 117 fresh clips and the six b-pyramid and VideoToolbox clips, dumped and compared with ffprobe.
+
+## Evidence
+
+| Command / selected cases | Source and input identity | Executed now / prior receipt | Exit and observation |
+|--------------------------|---------------------------|------------------------------|----------------------|
+| `cargo test -q -p ocelli-codec --lib --test video_demux`, scratch `CARGO_TARGET_DIR` | `git archive d457a217` (`f241-p6-sweep`) | now | exit 0. lib 45 passed, video_demux 45 passed |
+| `cargo clippy -q -p ocelli-codec --all-targets -- -D warnings` and `cargo fmt -p ocelli-codec --check` | export of d457a217 (`f241-p6-extra-tree`), diffed equal to the worktree first | now | both exit 0 |
+| `f241-impl-sweep.py <export> --check`, then the full run | implementer's script, unchanged, against the tip export | now | 89 of 89 anchors unique. 87 killed, `H-marking-idr-width` and `E-no-output-to-cra` survive. Log `f241-p6-sweep.log`. Every verdict matches `f241-record/sweep-p5-after-h264.log` and `-hevc.log` |
+| `f241-record/sweep-p5-before.log` | implementer's pre-remediation run | prior receipt | 28 survivors of 89, which matches the commit message's "left 28 survivors" |
+| `f241-p6-extra.py`, 33 reviewer mutants with the same harness | tip export | now | 26 killed, 7 survive. Log `f241-p6-extra.log`, and the survivors are discussed below |
+| the two S1 rows added in a third export (`f241-p6-fix`), then the two S1 mutants | tip plus rows | now | rows green as written. Both mutants killed by the new rows. Log `f241-p6-fixcheck.log` |
+| `every_h264_bound_is_exact` with each row's table printed (order, random access flag, size) | `git archive e7353d80` and `d457a217`, one `eprintln!` added to each | now | 96 rows at base, 102 at tip. No verdict changed and no refusal text changed. 88 tables identical, 8 differ only in the IDR, see Verified clean |
+| `OCELLI_F241_ROW_DUMP=f241-p6-rows cargo test --lib every_` | `f241-p6-fix` | now | 183 row streams |
+| ffmpeg 9.0.2 `-bsf:v trace_headers` on every `marking`, `slice_type_9`, `pps_id_255` and `segments` row, HEVC with pass 3's VPS in front | `f241-p6-rows` | now | field order and values per 7.3.3 and 7.3.6.1, see Verified clean. `colour_plane_id 2` (H.264) is refused by ffmpeg's decoder ("separate color planes are not supported"), so it was decoded by hand with `f241-p6-cp.py` |
+| harness `dump` built against the worktree at the tip, then `f241-p2-ffcmp.py` | `f241-p3-clips`, 117 clips | now | `117 clips compared, 0 disagree`. Dump byte for byte `f241-p3-dump-fresh.tsv` |
+| same | `f241-p5-clips`, `h264_bpyramid` and `h264_p5_vt_b3` as .h264, .mp4 and .m2t | now | `6 clips compared, 0 disagree`. Dump byte for byte `f241-p5-dump-new.tsv` |
+| `python3 scripts/prose_check.py`, plus a grep of the added lines and the three commit messages for U+2013, U+2014 and prose semicolons | worktree at d457a217 | now | exit 0, no hits |
+
+## Defects
+
+None.
+
+## Smells
+
+### S1, the sweep tests POC type 1's two presence conditions only with the field dropped, and a parser that reads them where 7.3.3 says absent stays green
+
+**Where**: crates/ocelli-codec/src/video/h264.rs:549 to :562, the `PocType::One { delta_always_zero: false, .. }` arm and its `bottom_field_pic_order_in_frame_present` test at :558. The builder writes delta_pic_order_always_zero_flag as a constant 0 at h264.rs:1619, and no type 1 slice row has bottom_field_pic_order_in_frame_present_flag 0. The only such row, "type 1 at 2^31", is refused in the SPS before any slice is read.
+**What**: 7.3.3 reads delta_pic_order_cnt[ 0 ] only when `pic_order_cnt_type == 1 && !delta_pic_order_always_zero_flag`, and delta_pic_order_cnt[ 1 ] only when bottom_field_pic_order_in_frame_present_flag is also 1. The sweep's `H-type1-delta0-absent` and `H-type1-delta1-absent` drop the reads where they are present. The other direction is not in the sweep, and two mutants of it survive the lib tests and video_demux:
+- `R-type1-delta-when-always-zero`: the arm matches `PocType::One { .. }`, so both deltas are read when delta_pic_order_always_zero_flag is 1.
+- `R-type1-delta1-always`: `if true` in place of the bottom flag test at :558, so delta_pic_order_cnt[ 1 ] is read when the PPS says it is absent.
+**Why it matters**: each one reads one or two extra se(v) values out of the following fields, so every later field of the slice header is misaligned, including dec_ref_pic_marking. That is the same mechanism as passes 3, 4 and 5, where a missed or invented operation 5 moves a picture under 8.2.1 with no error. Its type 0 counterpart, `R-bottom-always`, is killed by many rows, and the type 1 one is not. The lead's convergence ruling asks for a one-change mutant of every presence condition, and a presence condition has two wrong directions.
+**Evidence**: `f241-p6-extra.log`, both `SURVIVED`. In `f241-p6-fix` a `Craft` field `always_zero` written at h264.rs:1619 and tested at :1717 (`self.poc_type == 1 && !self.always_zero`), plus these two rows in `every_presence_condition_reaches_the_marking`, are green as written and kill both mutants (`f241-p6-fixcheck.log`):
+```rust
+(
+    "delta_pic_order_cnt 3, no bottom",
+    Craft { poc_type: 1, type_1: Some((0, 0, vec![2])), delta: [3, 0], ..five() },
+),
+(
+    "delta_pic_order_always_zero_flag 1",
+    Craft { poc_type: 1, type_1: Some((0, 0, vec![2])), always_zero: true, bottom: true, ..five() },
+),
+```
+`trace_headers` reads the first as bottom_field_pic_order_in_frame_present_flag 0 with delta_pic_order_cnt[0] 3 and no [1], and the second as delta_pic_order_always_zero_flag 1 with no delta in either slice. Both end in operations 5 and 0.
+**Fix**: add the `always_zero` builder field and the two rows above, or equivalent rows.
+**Scope and regression**: present at d457a217, in test coverage only. No verdict on any stream changes today. The consumer is `h264::access_units` and every container route through it. The 22 H.264 Annex B clips from host encoders in `f241-p3-clips` and `f241-p5-clips` carry pic_order_cnt_type 0 (16) or 2 (6) and none carries 1, so synthetic rows are the only coverage.
+
+## Nitpicks
+
+- N1, crates/ocelli-codec/src/video/h265.rs:800. The `!reserved_vcl(kind)` that d457a217 adds to the `after_vcl` condition cannot change anything. `after_vcl` is set only when `picture` is `Some`, and cleared only where `close` sets `picture` to `None`, so at that line `after_vcl` already equals `picture.is_some()`. Mutant `E-reserved-after-vcl-dropped` survives, as it should. The reserved arm at :781 is what keeps a reserved unit out of a picture, and the `a_reserved_vcl_unit_is_ignored` test kills its removal. Deleting the added clause, or the whole `after_vcl` line, changes nothing.
+- N2, crates/ocelli-codec/src/video/h265.rs:1221 and :1257. When dependent slices are off, the second, independent slice segment of the TRAIL_R picture is written with slice_pic_order_cnt_lsb 0, and the picture's first segment has 3. 7.4.7.1 says slice_pic_order_cnt_lsb shall have the same value in every slice segment header of a coded picture. The parser reads only the first segment, so no verdict changes. If that constraint is ever checked, these rows go red for the wrong reason, the same shape as pass 5 N1. Passing the picture's lsb to the later segment avoids it.
+
+## Verified clean
+
+- **Pass 5 S1, closed.** The two rows are in the bound table as the ruling wrote them. `H-weights-l1-count-from-l0`, which is pass 5's `P5-l1-count-from-l0`, is killed by exactly those two rows. `H-l1-override-dropped`, the mutant pass 5 left unrun, is killed by the same two rows.
+- **Pass 5 N1, closed.** The IDR now writes delta_pic_order_cnt_bottom 0 for type 0. For type 1 it writes delta_pic_order_cnt[ 0 ] 0 and delta_pic_order_cnt[ 1 ] = -min(offset_for_top_to_bottom_field, 0). By 8-6 to 8-8 the IDR's expectedPicOrderCnt is 0, so TopFieldOrderCnt is 0 and BottomFieldOrderCnt is offset + delta[ 1 ], which is max(offset, 0), and Min is 0 either way. Type 2 is 0 by 8.2.1.3. The table diff confirms it: the 8 rows whose tables changed changed only in the IDR, from POC -15, -16, -(2^31 - 1), 2^31 - 1 or -6442450941 to 0, and in the IDR's byte count. The second picture's order, flags and size are unchanged in all 96, and so is every refusal. The bound values these rows test are still written, in the second picture.
+- **The sweep reruns to 87 of 89.** The script's anchors are all unique on the tip, and each verdict matches the implementer's logs.
+- **The sweep list against the clauses.** Every syntax element of 7.3.3 up to dec_ref_pic_marking has a mutant in the list, and so does every element of 7.3.3.1, 7.3.3.2 and 7.3.3.3 and of 7.3.6.1 up to slice_pic_order_cnt_lsb. The parser stops there, so cabac_init_idc, slice_qp_delta and later are not read and not in scope. The ref_pic_list_mvc_modification branch for nal_unit_type 20 and 21 is not reached, because `parse_slice` is called only for types 1 and 5 (h264.rs:987). In H.265, dependent_slice_segment_flag and slice_segment_address are not reached either, since the parser returns at a later segment's first_slice_segment_in_pic_flag 0. What the list misses is the read-where-absent direction of most conditions. I ran it for all of them:
+  - **H.264, killed:** colour_plane_id, field_pic_flag, delta_pic_order_cnt_bottom, redundant_pic_cnt, direct_spatial_mv_pred_flag, the override for I and SI, the l1 override for P, list 1's modification for P, list 1's weights for P, pred_weight_table for B under weighted_pred_flag, for I under weighted_pred_flag and for P under weighted_bipred_idc 1, the chroma weight flag at ChromaArrayType 0, slice_type taken without `% 5`, idc 2 and operation 2 read with the picture number bound, and first_mb_in_slice against twice the area.
+  - **H.264, surviving:** the two type 1 conditions of S1.
+  - **H.265, killed:** pic_output_flag read without output_flag_present_flag, colour_plane_id read without separate_colour_plane_flag, and slice_pic_order_cnt_lsb read for an IDR.
+- **`H-marking-idr-width` is equivalent for any NAL unit that has its rbsp_stop_one_bit.** For an IDR, dec_ref_pic_marking is the last thing `parse_slice` reads. The only later check is the operation 5 bound, and `mmco5` is false in an IDR. Reading one bit in place of two can therefore change the outcome only through `Truncated`, and only for a NAL unit that ends on no_output_of_prior_pics_flag. By 7.3.2.8 the rbsp has slice_data and rbsp_slice_trailing_bits after the header, so a unit with its stop bit always has a bit to read as long_term_reference_flag. The parser does not check truncation anywhere after the marking either: a P slice that ends after operation 0 is accepted. I accept the argument.
+- **`E-no-output-to-cra` is equivalent.** It narrows the range to 16..=21 and differs only for 22 and 23. After d457a217 those reach the reserved arm at h265.rs:781 before the slice arm, so `first_slice_poc_lsb` never sees them. My `E-no-output-from-15` survives for the same reason: 15 is reserved too.
+- **The builder against the clauses, by `trace_headers`.** In the SP row the second slice reads slice_type 8, the override with num_ref_idx_l0_active_minus1 1, list 0's modification flag, both denominators, two l0 entries (3, -2) and (4, 1) with chroma flags 0, operations 5 and 0, slice_qp_delta, then sp_for_switch_flag and slice_qs_delta, which is 7.3.3's order. The SI row has slice_type 9, no override, no modification, no weights, operations 5 and 0, then slice_qs_delta with no sp_for_switch_flag. The I row (slice_type 7, nal_unit_type 1) has no modification and adaptive marking. The field_pic_flag row reads field_pic_flag 0 after frame_num in both slices. The no_output_of_prior_pics_flag row reads 1 in the IDR with slice_qp_delta 2. The PPS id rows read 255 in the slice. The type 1 row reads delta_pic_order_cnt 0 and 0 in the IDR and 3 and -2 in the P slice. Hand decoding of the colour plane row gives colour_plane_id 2 after pic_parameter_set_id and before frame_num in both slices, then operations 5 and 0 in the P slice. The only complaints are the decoder's concealment lines on the one-byte slice data.
+- **The HEVC builder, by `trace_headers`.** Every segments row reads first_slice_segment_in_pic_flag, no_output_of_prior_pics_flag for types 16 to 21 only, slice_pic_parameter_set_id, the slice_segment_address of the later TRAIL_R segment, slice_reserved_flag bits, slice_type 2 for IRAP and 1 otherwise, pic_output_flag where the PPS has it, colour_plane_id 2 for the 4:4:4 row and slice_pic_order_cnt_lsb outside IDR pictures. In the dependent row the later segment reads dependent_slice_segment_flag 1 and its address and nothing else, as 7.3.6.1 gives. The CRA and BLA segments carry an explicit st_ref_pic_set with no pictures. The pps id 64 row is refused by ffmpeg too ("PPS id out of range: 64").
+- **The seven-picture POC by hand, 8.3.1, MaxPicOrderCntLsb 256.** The IDR_W_RADL is the first picture, NoRaslOutputFlag 1, so (0, 0). TRAIL_R lsb 3 against prevTid0Pic (0, 0) has no wrap, so PicOrderCntMsb 0 and (0, 3), and it becomes prevTid0Pic. The CRA is neither first nor after an end of sequence, so NoRaslOutputFlag 0. Lsb 6 against 3 gives Msb 0, so (0, 6). The BLA_W_LP has NoRaslOutputFlag 1 and opens a new coded video sequence at Msb 0, so (1, 2). TRAIL_R lsb 4 gives (1, 4). The IDR_N_LP opens a third sequence, (2, 0), and TRAIL_R lsb 1 gives (2, 1). That is the test's array exactly.
+- **The reserved NAL ruling against H.265.**
+  - Table 7-1 reserves VCL types 10 to 15 and 22 to 31, which is `reserved_vcl` exactly. The test covers 10, 13, 15, 22, 23, 24 and 31, and dropping either range or narrowing 22..=31 to 22..=23 turns it red. Dropping the arm reproduces the pre-change code, and the test goes red.
+  - 7.4.2.2 says decoders ignore, "remove from the bitstream and discard", the contents of every NAL unit with a reserved type "for purposes other than determining the amount of data in the decoding units". The demuxer only finds boundaries. Keeping the unit's bytes in the access unit it falls in leaves the byte count intact, which is the one purpose 7.4.2.2 keeps. A conforming decoder downstream then discards the unit itself, so passing it on is safe.
+  - Placement is safe in every case I traced. A reserved unit after a picture's VCL units goes into that picture's access unit. After a starter it goes into the access unit the starter opened. Before the first picture it goes into the first access unit. At the end of the stream it goes into the last.
+- **Reserved non-VCL 41 to 44 per 7.4.2.4.4.** The clause lists them with nuh_layer_id 0 among the units that open an access unit after the last VCL unit, and h265.rs:747 to :753 does exactly that for layer 0 only. Types 45 to 47 "shall not precede the first VCL NAL unit" and are not starters, and they fall to `_ => {}`. The parser never reads their contents, which matches 7.4.2.2. See the limitation below on tests.
+- **No valid stream refused.** 117 of 117 of pass 3's clips and 6 of 6 b-pyramid and VideoToolbox clips agree with ffprobe, and both dumps are byte for byte the earlier passes'.
+- **Scope and prose.** The range changes `crates/ocelli-codec/src/video/` in two non-test places only, `reserved_vcl` with its arm and the `after_vcl` clause. Everything else is under `#[cfg(test)]`, plus one plan section. It adds no `unsafe`, no `as` cast, no `#[allow]` and no dependency. Prose check is clean, and the three user documents mention none of this module. The commit messages' claims (28 survivors, 26 killed, 2 argued equivalent, seven reserved types, red before the change) check against the logs and the mutants above.
+
+## Limitations and handoff
+
+- **Outside this range, untested and not counted.** The 41 to 44 starter condition at h265.rs:751 is correct, but nothing tests it. `E-nvcl41-not-starter` (the range dropped) and `E-nvcl-44-not-starter` (44 dropped) both survive. `parse_pps` at h265.rs:541 bounds pps_seq_parameter_set_id at 15 with no row at 15, and `E-pps-sps-id-bound` (14) survives. Both lines predate e7353d80, and neither is in the sweep's clauses, so they are not findings here. A row with a type 41 and a type 44 unit between two pictures, and a PPS row at sps id 15, would close them if the lead wants that.
+- The implementer's written equivalence arguments were not on disk. The two verdicts above are this pass's own.
+- My mutant `R-idr-from-type` (nal_ref_idc 3 taken as IDR) survives. It is not a condition of any clause, so it is not a finding.
+- Not exercised: field-coded streams outside MP4, multi-program TS and MV-HEVC. No oracle, GPU or browser job was run, as instructed, and `gate --floor` was not rerun.
+- Next: implementation takes S1, and optionally N1 and N2, then a fresh independent pass 7. Scratch inputs are in the session scratchpad under `f241-p6-`: the sweep and extra logs, the extra mutant script, the fix check, the row dumps, both row-table listings, the clip dumps and the hand decoder. The source exports were deleted after the pass.

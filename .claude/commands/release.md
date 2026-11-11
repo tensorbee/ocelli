@@ -30,12 +30,10 @@ Refuse before any tag or push if one fails:
 5. **`python3 scripts/pin_and_size_check.py --require-redistribution` passes.**
    No development profile runs this flag, deliberately. `--floor`, `--sprint`
    and `--all` gate development and this gates publication, which is the
-   difference between depending on a package and shipping it. **It fails today**
-   on `openjph-core` 0.1.0, whose published archive carries no licence text and
-   whose registry entry names no repository to obtain one from, and whose
-   BSD-2-Clause terms permit redistribution only with its notice conditions
-   retained. See D-22 in `docs/hld/DEVIATIONS.md`. The refusal names the file
-   that would close it.
+   difference between depending on a package and shipping it. F-217 placed the
+   upstream OpenJPH notice at `vendor/openjph-core-0.1.0/LICENSE`. The check
+   passes while that file matches the recorded hash. See D-22 in
+   `docs/hld/DEVIATIONS.md`.
 6. `python3 scripts/sprint_workflow.py release-notes vX.Y.Z --check` passes,
    and the rendered body is inspected. Its source is the `CHANGELOG.md`
    section headed by the exact tag at this HEAD.
@@ -43,9 +41,17 @@ Refuse before any tag or push if one fails:
    internal dependencies resolve against this reviewed source graph rather than
    registry placeholders. A dry run uploads nothing.
 8. `npm pack` for each published package, contents listed. **The wasm module
-   must be present in `@ocelli/core` and must be the one this HEAD builds**,
-   not a stale artefact left in `pkg/` by an earlier build. Rebuild it first
-   and compare the digest.
+   ships as `@ocelli/wasm`**, which `@ocelli/core` peer-depends on at the
+   same version. Its tarball carries both modules and their
+   glue, `THIRD_PARTY_LICENSES`, `THIRD_PARTY_NOTICES`, and
+   `dist/build-id.json`. `python3 scripts/release_wasm.py HEAD` runs HERE,
+   before any tag, push or publish: HEAD is the commit step 2 tags, and the
+   script does not need the tag. It builds HEAD cold in a temporary checkout
+   with an empty cargo target directory, refuses unless the packed build id
+   names that SHA and its tree, records no unstaged tracked changes, and
+   carries digests equal to that build's and to the tarball's own bytes, and
+   copies the verified `.tgz` to `target/release-wasm`. Keep that exact file
+   for publish step 5 below.
 9. `ocelli-wasm` is `publish = false`, and no test-only or private package is
    in either allowlist.
 10. `docs/hld/DEVIATIONS.md` carries no row whose reason has expired. **A
@@ -75,9 +81,15 @@ The order runs from most recoverable to least, and reverses nothing.
 4. **crates.io**, in dependency order, one at a time, with a wait between
    layers for the index to propagate. A publish that races the index fails on
    a dependency that exists but is not yet visible.
-5. **npm**, `@ocelli/core` then `@ocelli/react`. After crates.io, because the
-   npm package embeds the wasm module and a failed crate publish should stop
-   the release before anything reaches npm.
+5. **npm**, in this order. Publish the exact `.tgz` that preflight 8
+   verified and its script printed, with `npm publish <file>`, which runs no
+   prepack, so the published bytes are the compared bytes. Re-running
+   `release_wasm.py` against the tag is optional, since step 2 tags that
+   exact HEAD. Then publish `@ocelli/core`, then `@ocelli/react`.
+   npm is after crates.io because the crates and the packages version
+   together and a failed crate publish should stop the release before
+   anything reaches npm. A failed module publish stops the release before
+   the shell that peer-depends on it.
 6. Create the GitHub release from the rendered notes, and compare the published
    body byte for byte against a fresh render from the released SHA.
 

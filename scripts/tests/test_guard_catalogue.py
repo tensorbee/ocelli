@@ -3,10 +3,11 @@
 
     python3 -m unittest discover -s scripts/tests -p 'test_guard_catalogue.py'
 
-Needs nothing but the standard library, and nothing here builds a sandbox: the
-sandbox's own refusals are covered by `scripts/guard_probe.py --self-test`,
-which the `guards` gate runs, and building one per test would make this file
-slower than the harness it tests.
+Needs nothing but the standard library. One close-state regression builds a
+real disposable sandbox to distinguish inherited fixture handoffs from a
+handoff planted after setup. A launcher regression observes actual child PID
+and URL propagation in a disposable fixture. The sandbox's own refusals are covered by
+`scripts/guard_probe.py --self-test`, which the `guards` gate runs.
 
 **These are assertions about the DECLARATION.** That every entry is well
 formed, that its citation resolves to a real section or a real deviation row,
@@ -17,11 +18,13 @@ probe runner's job and not this file's.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -29,7 +32,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from guards import census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS, _workspace_manifest_with_exclusion)
+                              GUARDS, _close_preflight,
+                              _example_dev_reaches_a_url, _write_close_state,
+                              _workspace_manifest_with_exclusion)
 
 
 class SandboxCopyPreservesTrackedShape(unittest.TestCase):
@@ -132,6 +137,63 @@ class SandboxCopyPreservesTrackedShape(unittest.TestCase):
                 )
 
 
+
+class CloseStateHandoffIsolation(unittest.TestCase):
+    def test_copied_and_planted_handoffs_are_distinct(self) -> None:
+        source_handoffs = ROOT / ".claude" / "handoffs"
+        before = {p.name: p.read_bytes()
+                  for p in source_handoffs.glob("*-ready.md")}
+
+        def commit_handoff(box: sandbox.Sandbox, name: str) -> str:
+            relative = f".claude/handoffs/{name}-ready.md"
+            box.write(relative, "Own synthetic handoff for close-state control.\n")
+            box.git("add", "--", relative)
+            box.git("commit", "-q", "-m", "probe inherited handoff", "--", relative)
+            return relative
+
+        def ready(box: sandbox.Sandbox) -> None:
+            result = _close_preflight(box)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("is ready to close", result.stdout)
+            self.assertEqual(box.git("status", "--porcelain").stdout, "")
+
+        try:
+            with sandbox.sandbox() as box:
+                inherited = commit_handoff(box, "probe-inherited")
+                # Exercise the actual lazy control, which prepares state once.
+                ready(box)
+                self.assertFalse((box.path / inherited).exists())
+                self.assertEqual(list((box.path / ".claude/handoffs").glob("*-ready.md")), [])
+
+                # The second setup has an already-done backlog and ignored
+                # run state. It must not force that old state into the index.
+                again = commit_handoff(box, "probe-inherited-again")
+                _write_close_state(box)
+                self.assertFalse((box.path / again).exists())
+                ready(box)
+
+                planted = commit_handoff(box, "probe-unconsumed")
+                sprint = re.search(r"^#\s+Current sprint,\s*(S[\d.]+)",
+                                   box.read("docs/sprints/CURRENT_SPRINT.md"), re.M)
+                self.assertIsNotNone(sprint)
+                state_path = f".claude/scratch/{sprint.group(1)}-run.json"
+                data = json.loads(box.read(state_path))
+                tree = box.git("write-tree").stdout.strip()
+                data["sprint_reviews"][-1]["tree"] = tree
+                data["verifications"][-1]["tree"] = tree
+                box.write(state_path, json.dumps(data) + "\n")
+                result = _close_preflight(box)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("handoffs remain: probe-unconsumed-ready.md", result.stdout)
+                self.assertNotIn("stale", result.stdout)
+                self.assertNotIn("working tree is not clean", result.stdout)
+                self.assertNotIn("is not HEAD tree", result.stdout)
+                self.assertTrue((box.path / planted).is_file())
+        finally:
+            after = {p.name: p.read_bytes()
+                     for p in source_handoffs.glob("*-ready.md")}
+            self.assertEqual(after, before, "source handoffs remain byte-identical")
+
 class WorkspaceExcludeProbeBuilder(unittest.TestCase):
     def test_it_extends_an_existing_exclusion_without_a_duplicate_key(
             self) -> None:
@@ -152,6 +214,111 @@ class WorkspaceExcludeProbeBuilder(unittest.TestCase):
             ["vendor/ritk-codecs-0.6.0", "tools/oracle"],
         )
         self.assertEqual(updated.count("\nexclude = "), 1)
+
+    def test_multiline_exclusions_comments_and_quoted_brackets_stay_valid(self) -> None:
+        manifest = (            '[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n'
+            'exclude = [\n "vendor/a]", # a comment containing ]\n'
+            ' "vendor/b",\n] # closing comment\n'
+            '[workspace.package]\nversion = "0.1.0"\n')
+        updated = _workspace_manifest_with_exclusion(manifest, "tools/oracle")
+        before = tomllib.loads(manifest)
+        after = tomllib.loads(updated)
+        before["workspace"]["exclude"].append("tools/oracle")
+        self.assertEqual(after, before)
+        self.assertEqual(_workspace_manifest_with_exclusion(updated, "tools/oracle"), updated)
+
+    def test_missing_empty_and_single_line_lists_preserve_other_tables(self) -> None:
+        for row in ["", "exclude = []\n", 'exclude = ["vendor/a"] # comment\n']:
+            with self.subTest(row=row):
+                manifest = ('[workspace]\nmembers = ["member"]\n' + row +
+                            '[package]\nname = "other"\nexclude = ["leave-alone"]\n')
+                expected = tomllib.loads(manifest)
+                expected["workspace"].setdefault("exclude", []).append("tools/oracle")
+                self.assertEqual(tomllib.loads(_workspace_manifest_with_exclusion(
+                    manifest, "tools/oracle")), expected)
+
+    def test_current_workspace_multiline_list_is_retained(self) -> None:
+        manifest = (ROOT / "Cargo.toml").read_text()
+        expected = tomllib.loads(manifest)
+        excluded = expected["workspace"].setdefault("exclude", [])
+        if "tools/oracle" not in excluded:
+            excluded.append("tools/oracle")
+        self.assertEqual(tomllib.loads(_workspace_manifest_with_exclusion(
+            manifest, "tools/oracle")), expected)
+
+    def test_unsupported_fixture_layouts_fail_before_a_duplicate_key(self) -> None:
+        cases = [
+            ('workspace = { members = [] }\n', r'no \[workspace\] table'),
+            ('[workspace]\n"exclude" = []\n', 'unsupported spelling'),
+            ('[workspace]\nexclude = ["""vendor/\n[fixture]\n"""]\n',
+             'could not be delimited'),
+        ]
+        for manifest, message in cases:
+            with self.subTest(manifest=manifest):
+                tomllib.loads(manifest)  # Valid TOML can still be an unsupported fixture layout.
+                with self.assertRaisesRegex(AssertionError, message):
+                    _workspace_manifest_with_exclusion(manifest, "tools/oracle")
+
+
+class LintModuleProbeWitness(unittest.TestCase):
+    def test_exact_increment_is_independent_of_repository_module_count(self) -> None:
+        from guards.catalogue import _one_added_lint_path, _record_lint_path_baseline
+        import subprocess
+        for baseline in [0, 3, 41]:
+            box = mock.Mock()
+            text = f"OK: {baseline} `#[path]` module(s) followed"
+            box.run.return_value = subprocess.CompletedProcess([], 0, text, "")
+            _record_lint_path_baseline(box)
+            box.write.assert_called_once_with("probe-shared/baseline-path-count.json", str(baseline))
+            box.read.return_value = str(baseline)
+            for offset in [0, 1, 2]:
+                box.run.return_value = subprocess.CompletedProcess(
+                    [], 0, f"OK: {baseline + offset} `#[path]` module(s) followed", "")
+                result = _one_added_lint_path(box)
+                self.assertEqual(result.returncode, 0 if offset == 1 else 1)
+                self.assertEqual("one additional `#[path]` module followed" in result.stdout,
+                                 offset == 1)
+
+    def test_guard_failure_propagates_and_countless_success_has_no_witness(self) -> None:
+        from guards.catalogue import _one_added_lint_path, _record_lint_path_baseline
+        import subprocess
+        box = mock.Mock()
+        failure = subprocess.CompletedProcess([], 1, "actual guard refusal", "detail")
+        box.run.return_value = failure
+        self.assertIs(_one_added_lint_path(box), failure)
+        with self.assertRaisesRegex(AssertionError, "baseline guard failed"):
+            _record_lint_path_baseline(box)
+        box.run.return_value = subprocess.CompletedProcess([], 0, "OK: no count", "")
+        box.read.return_value = "0"
+        with self.assertRaisesRegex(AssertionError, "did not report followed"):
+            _one_added_lint_path(box)
+
+
+class ExampleDevControlKeepsBackgroundChild(unittest.TestCase):
+    def test_the_control_observes_its_background_pid_and_exported_url(self) -> None:
+        launcher = (ROOT / "bin/example-dev.sh").read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            box = sandbox.Sandbox(path=Path(directory))
+            target = box.write("bin/example-dev.sh", launcher)
+            target.chmod(0o755)
+            original_run = box.run
+
+            def observed_run(argv, **kwargs):
+                # The witness follows both assertions. An EXIT trap may mask a
+                # shell failure's status, so status alone cannot prove these ran.
+                box.append(
+                    "bin/example-dev.sh",
+                    '\ntest -n "${pid-}" || exit 71\n'
+                    'test "${VITE_EXAMPLE_SERVER-}" = http://127.0.0.1:9 || exit 72\n'
+                    'printf "%s\\n" "fixture: child PID and URL observed"\n')
+                return original_run(argv, **kwargs)
+
+            with mock.patch.object(box, "run", side_effect=observed_run):
+                done = _example_dev_reaches_a_url(box)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("example helper http://127.0.0.1:9", done.stderr)
+            self.assertIn("fixture: child PID and URL observed", done.stdout)
+        self.assertEqual((ROOT / "bin/example-dev.sh").read_bytes(), launcher)
 
 
 class CatalogueIsWellFormed(unittest.TestCase):
@@ -186,6 +353,7 @@ class CatalogueIsWellFormed(unittest.TestCase):
                 "test_gen_sprint_plan.py",
                 "test_guard_readers.py",
                 "test_staged_readers.py",
+                "test_release_wasm.py",
             ],
         )
 

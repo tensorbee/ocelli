@@ -22,6 +22,7 @@ export const OCELLI_EVENTS = [
   "cache.refused",
   "cache.pressure",
   "cache.budgetChanged",
+  "cache.released",
   "frame.presented",
   "viewport.mounted",
   "viewport.unmounted",
@@ -84,6 +85,12 @@ export interface FramePresentedPayload {
   readonly flags: number;
 }
 
+export interface CacheReleasedPayload {
+  readonly series: bigint;
+  readonly frames: number;
+  readonly bytes: bigint;
+}
+
 export type OcelliNamedEvent =
   | {
       readonly name: "cache.evicted";
@@ -120,6 +127,12 @@ export type OcelliNamedEvent =
       readonly viewport: number;
       readonly seq: bigint;
       readonly payload: FramePresentedPayload;
+    }
+  | {
+      readonly name: "cache.released";
+      readonly viewport: number;
+      readonly seq: bigint;
+      readonly payload: CacheReleasedPayload;
     };
 
 export interface CornerstoneEventRow {
@@ -160,7 +173,7 @@ const CORE_ROWS: readonly CornerstoneEventRow[] = [
   { cornerstone: "VOLUME_LOADED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "no Ocelli volume event yet" },
   { cornerstone: "VOLUME_LOADED_FAILED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "no Ocelli volume event yet" },
   { cornerstone: "IMAGE_CACHE_IMAGE_ADDED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "an admission is not a cache ring kind" },
-  { cornerstone: "IMAGE_CACHE_IMAGE_REMOVED", source: "core", ocelli: "cache.evicted", delivery: "ring", producer: "ocelli-cache CacheEvent::Evicted", reason: "removal is the 5.8.2 event closest to frame-cache eviction" },
+  { cornerstone: "IMAGE_CACHE_IMAGE_REMOVED", source: "core", ocelli: "cache.evicted", delivery: "ring", producer: "ocelli-wasm session frame cache via ocelli-cache CacheEvent::Evicted", reason: "removal is the 5.8.2 event closest to frame-cache eviction" },
   { cornerstone: "VOLUME_CACHE_VOLUME_ADDED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "the volume cache is not the frame cache" },
   { cornerstone: "VOLUME_CACHE_VOLUME_REMOVED", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "volume removal is not frame-cache eviction" },
   { cornerstone: "STACK_NEW_IMAGE", source: "core", ocelli: null, delivery: "unavailable", producer: null, reason: "the selected slice is viewport state" },
@@ -276,6 +289,12 @@ export const UNMAPPED_EVENTS: readonly UnmappedEvent[] = [
     reason: "5.8.2 has no budget-changed event",
   },
   {
+    name: "cache.released",
+    delivery: "ring",
+    producer: "ocelli-cache CacheEvent::Released",
+    reason: "5.8.2 reports a removed image per image, and a series release is a different observation",
+  },
+  {
     name: "viewport.resized",
     delivery: "shell",
     producer: "shell ResizeObserver",
@@ -287,6 +306,7 @@ const CACHE_KEY_BYTES = 24;
 const PRESSURE_BYTES = 32;
 const BUDGET_BYTES = 28;
 const PRESENTED_BYTES = 16;
+const RELEASED_BYTES = 24;
 
 function payloadView(payload: Uint8Array): DataView {
   return new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
@@ -385,6 +405,22 @@ function readPresented(payload: Uint8Array): FramePresentedPayload | null {
   };
 }
 
+/**
+ * Released payload. `CacheEvent::encode` writes series at 0, frames at 8, a
+ * zero u32 at 12 and bytes at 16.
+ */
+function readReleased(payload: Uint8Array): CacheReleasedPayload | null {
+  if (payload.byteLength < RELEASED_BYTES) {
+    return null;
+  }
+  const view = payloadView(payload);
+  return {
+    series: view.getBigUint64(0, true),
+    frames: view.getUint32(8, true),
+    bytes: view.getBigUint64(16, true),
+  };
+}
+
 function named(
   name: "cache.evicted" | "cache.displaced" | "cache.refused",
   event: OcelliEvent,
@@ -432,6 +468,12 @@ export function decodeNamedEvent(event: OcelliEvent): OcelliNamedEvent | null {
     return payload === null
       ? null
       : { name: "frame.presented", viewport: event.viewport, seq: event.seq, payload };
+  }
+  if (event.kind === RING_EVENT_KIND.released) {
+    const payload = readReleased(event.payload);
+    return payload === null
+      ? null
+      : { name: "cache.released", viewport: event.viewport, seq: event.seq, payload };
   }
   return null;
 }

@@ -2,19 +2,49 @@
 //!
 //! The page chooses the folder. This crate parses with `parse_part10`,
 //! decodes with the codec registry, and maps samples with `LutChain`.
-//! It does not read a path of its own.
+//! The only paths it reads are the built `@ocelli/core` modules and dcmjs's
+//! ES build, which `GET /lib/` serves by an allowlist of names from fixed
+//! directories of the repository it was built in, for the page's region
+//! window. It reads no path a request names.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
+mod colour;
+mod corners;
+mod link;
+mod measure;
 mod preview;
 mod synthetic;
+mod value;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod held;
+#[cfg(not(target_arch = "wasm32"))]
+mod series_window;
 #[cfg(not(target_arch = "wasm32"))]
 mod serve;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod csp;
+
+pub use colour::ColourUnavailableReason;
+pub use corners::{
+    age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
+    person_name_text,
+};
+pub use link::plane_from_token;
+pub use measure::{
+    FREEFORM_POINT_CAP, MeasureShape, RegionExtent, measure_frame, region_extent_frame,
+};
 pub use preview::{
-    FrameFacts, FrameRequest, Preview, PreviewError, headers_json, inspect_json,
-    preview_first_frame, preview_frame, window_function_from_token, window_preset_from_token,
+    AutoSource, FRAME_LIST_CAP, FrameFacts, FrameRequest, Preview, PreviewError, conformance_json,
+    headers_json, inspect_json, plane_token, preview_first_frame, preview_frame,
+    window_function_from_token, window_preset_from_token,
 };
 pub use synthetic::{SLICES, slice};
+pub use value::{ImagePoint, value_frame};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use serve::{handle_connection, serve};
+pub use held::{Viewer, ViewerConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use serve::{handle_connection, handle_connection_with, serve, serve_on};

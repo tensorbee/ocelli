@@ -1,0 +1,329 @@
+# Operator-approved licence exceptions and the Python licence table.
+# The allowlist lives in deny.toml. This file does not widen it.
+# decided 2026-11-05 by the operator, for the rows that are exceptions.
+
+[[python]]
+package = "et-xmlfile"
+version = "2.0.0"
+spdx = "MIT AND Python-2.0"
+metadata = "MIT"
+
+[[python]]
+package = "imagecodecs"
+version = "2026.10.10"
+spdx = "BSD-3-Clause"
+metadata = "BSD-3-Clause"
+
+[[python]]
+package = "numpy"
+version = "2.5.2"
+spdx = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+metadata = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+
+[[python]]
+package = "openpyxl"
+version = "3.1.5"
+spdx = "MIT"
+metadata = "MIT"
+
+[[python]]
+package = "pydicom"
+version = "3.0.2"
+spdx = "MIT"
+metadata = "License :: OSI Approved :: MIT License"
+
+[[python]]
+package = "pyjpegls"
+version = "1.5.1"
+spdx = "MIT"
+metadata = "MIT"
+
+[[python]]
+package = "pylibjpeg"
+version = "2.1.0"
+spdx = "MIT"
+metadata = "License :: OSI Approved :: MIT License"
+
+[[python]]
+package = "pylibjpeg-openjpeg"
+version = "2.5.0"
+spdx = "MIT"
+metadata = "MIT"
+
+[[python]]
+package = "pylibjpeg-rle"
+version = "2.2.0"
+spdx = "MIT"
+metadata = "MIT"
+
+[[python]]
+package = "pyyaml"
+version = "6.0.3"
+spdx = "MIT"
+metadata = "MIT"
+
+[[exception]]
+ecosystem = "npm"
+package = "caniuse-lite"
+version = "1.0.30001810"
+licence = "CC-BY-4.0"
+reason = "CC-BY-4.0 browser-support data. An attribution licence for data is not on the allowlist. The root lock marks it dev-only. The copy under tools/oracle is tooling and is never published."
+scope = "dev-only, tool"
+decided = "2026-11-05"
+decided_by = "operator"
+
+[[exception]]
+ecosystem = "npm"
+package = "rechoir"
+version = "0.6.2"
+licence = "MIT"
+reason = "Its package.json uses the legacy licenses array, which npm does not copy into the lock. The package is MIT."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+
+[[exception]]
+ecosystem = "python"
+package = "numpy"
+version = "2.5.2"
+licence = "LGPL-2.1-or-later"
+reason = "Bundled GCC runtime, tooling only, dynamically loaded, never redistributed."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+platform = "linux-x86_64"
+file = "numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0"
+
+[[exception]]
+ecosystem = "python"
+package = "numpy"
+version = "2.5.2"
+licence = "GPL-3.0-or-later WITH GCC-exception-3.1"
+reason = "Bundled GCC runtime, tooling only, dynamically loaded, never redistributed."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+platform = "linux-x86_64"
+file = "numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0"
+
+[[exception]]
+ecosystem = "python"
+package = "imagecodecs"
+version = "2026.10.10"
+licence = "GPL-3.0-or-later WITH GCC-exception-3.1"
+reason = "Bundled GCC runtime, tooling only, dynamically loaded, never redistributed."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+platform = "linux-x86_64"
+file = "imagecodecs.libs/libgomp-6a29c32d.so.1.0.0"
+
+# A row with markers or empty = true waives a refusal, so it carries the same
+# fields as an exception. The version is the package version in uv.lock.
+# licence = "no-licence-text" means the file states no licence. It is accepted
+# only together with empty = true. A waiver of text that grants a copyleft
+# licence records decided_by = "operator". A waiver of an allowlisted text
+# that grants nothing copyleft, or of an empty placeholder, records
+# decided_by = "lead" and the reason says what the file is. The three runtime
+# library exceptions above stay the operator's decision.
+
+[[licence_file]]
+package = "imagecodecs"
+version = "2026.10.10"
+path = "imagecodecs/licenses/LICENSE-heif"
+empty = true
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for HEIF, a codec not compiled into this wheel. imagecodecs reports HEIF unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for HEIF, a codec not compiled into this wheel. imagecodecs reports HEIF unavailable and the file grants nothing."
+
+[[licence_file]]
+package = "imagecodecs"
+version = "2026.10.10"
+path = "imagecodecs/licenses/LICENSE-jetraw"
+empty = true
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for JETRAW, a codec not compiled into this wheel. imagecodecs reports JETRAW unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for JETRAW, a codec not compiled into this wheel. imagecodecs reports JETRAW unavailable and the file grants nothing."
+
+[[licence_file]]
+package = "imagecodecs"
+version = "2026.10.10"
+path = "imagecodecs/licenses/LICENSE-libjxs"
+empty = true
+licence = "no-licence-text"
+reason = "The file is an empty placeholder for JPEG XS, a codec not compiled into this wheel. imagecodecs reports JPEGXS unavailable and the file grants nothing."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+note = "The file is an empty placeholder for JPEG XS, a codec not compiled into this wheel. imagecodecs reports JPEGXS unavailable and the file grants nothing."
+
+[[licence_file]]
+package = "imagecodecs"
+version = "2026.10.10"
+path = "imagecodecs/licenses/LICENSE-lzf"
+spdx = "BSD-2-Clause"
+markers = ["GPLv2"]
+licence = "BSD-2-Clause"
+reason = "BSD-2-Clause is the licence in use. The GPLv2 relicensing alternative is not taken."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+note = "BSD-2-Clause is the licence in use. The GPLv2 relicensing alternative is not taken."
+
+[[licence_file]]
+package = "numpy"
+version = "2.5.2"
+path = "numpy-2.5.2.dist-info/licenses/LICENSE.txt"
+markers = ["GNU General Public License", "GNU Affero General Public License", "GPL-3.0", "LGPL-2.1", "GPLv3"]
+licence = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+reason = "The file embeds the notices for the GCC runtimes the Linux wheel bundles, libquadmath under LGPL-2.1 and libgfortran under GPL-3.0 with the GCC runtime library exception, which the operator approved as tool exceptions in the S46 design round. The file is present on every platform."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "operator"
+note = "The file embeds the notices for the operator-approved GCC runtimes and is present on every platform."
+
+[[licence_file]]
+package = "et-xmlfile"
+version = "2.0.0"
+path = "et_xmlfile-2.0.0.dist-info/LICENCE.python"
+markers = ["GNU General Public License"]
+spdx = "Python-2.0"
+licence = "Python-2.0"
+reason = "The file is the CPython licence stack: PSF, BeOpen, CNRI, CWI and a 0BSD docs grant. The GPL marker that matches is in the CNRI governing-law clause and grants nothing. et_xmlfile/incremental_tree.py is PSF-licensed CPython code."
+scope = "tool"
+decided = "2026-11-05"
+decided_by = "lead"
+
+[bundle.darwin-arm64.imagecodecs]
+libs = [
+  "imagecodecs/.dylibs/libImath-3_2.30.3.2.3.dylib",
+  "imagecodecs/.dylibs/libLerc.4.dylib",
+  "imagecodecs/.dylibs/libOpenEXRCore-3_5.34.3.5.2.dylib",
+  "imagecodecs/.dylibs/libSPERR.0.8.5.dylib",
+  "imagecodecs/.dylibs/libSZ3c.3.4.0.dylib",
+  "imagecodecs/.dylibs/libaec.0.1.7.dylib",
+  "imagecodecs/.dylibs/libaom.3.15.1.dylib",
+  "imagecodecs/.dylibs/libavif.16.4.2.dylib",
+  "imagecodecs/.dylibs/libblosc.1.21.6.dylib",
+  "imagecodecs/.dylibs/libblosc2.3.3.5.dylib",
+  "imagecodecs/.dylibs/libbrotlicommon.1.1.0.dylib",
+  "imagecodecs/.dylibs/libbrotlidec.1.1.0.dylib",
+  "imagecodecs/.dylibs/libbrotlienc.1.1.0.dylib",
+  "imagecodecs/.dylibs/libcharls.2.4.4.dylib",
+  "imagecodecs/.dylibs/libcpcodec.dylib",
+  "imagecodecs/.dylibs/libdeflate.0.dylib",
+  "imagecodecs/.dylibs/libgif.7.2.0.dylib",
+  "imagecodecs/.dylibs/libisal.2.dylib",
+  "imagecodecs/.dylibs/libjpeg.8.3.2.dylib",
+  "imagecodecs/.dylibs/libjpegxr.1.2.dylib",
+  "imagecodecs/.dylibs/libjxl.0.12.0.dylib",
+  "imagecodecs/.dylibs/libjxl_cms.0.12.0.dylib",
+  "imagecodecs/.dylibs/libjxl_threads.0.12.0.dylib",
+  "imagecodecs/.dylibs/libjxrglue.1.2.dylib",
+  "imagecodecs/.dylibs/liblcms2.2.dylib",
+  "imagecodecs/.dylibs/liblz4.1.10.0.dylib",
+  "imagecodecs/.dylibs/liblzfse.dylib",
+  "imagecodecs/.dylibs/liblzma.5.8.4.dylib",
+  "imagecodecs/.dylibs/liblzokay-c.dylib",
+  "imagecodecs/.dylibs/liblzokay.dylib",
+  "imagecodecs/.dylibs/libmeshoptimizer.dylib",
+  "imagecodecs/.dylibs/libopenjp2.2.5.4.dylib",
+  "imagecodecs/.dylibs/libopenjph.0.32.0.dylib",
+  "imagecodecs/.dylibs/libpng16.16.59.0.dylib",
+  "imagecodecs/.dylibs/libsharpyuv.0.1.2.dylib",
+  "imagecodecs/.dylibs/libsnappy.1.3.1.dylib",
+  "imagecodecs/.dylibs/libsz.2.0.1.dylib",
+  "imagecodecs/.dylibs/libtiff.6.3.0.dylib",
+  "imagecodecs/.dylibs/libuhdr.2.0.2.dylib",
+  "imagecodecs/.dylibs/libwavpack.1.dylib",
+  "imagecodecs/.dylibs/libwebp.7.2.0.dylib",
+  "imagecodecs/.dylibs/libwebpdemux.2.0.17.dylib",
+  "imagecodecs/.dylibs/libwebpmux.3.1.2.dylib",
+  "imagecodecs/.dylibs/libz-ng.2.3.3.dylib",
+  "imagecodecs/.dylibs/libz.1.3.2.dylib",
+  "imagecodecs/.dylibs/libzfp.1.0.1.dylib",
+  "imagecodecs/.dylibs/libzopfli.1.0.3.dylib",
+  "imagecodecs/.dylibs/libzstd.1.5.7.dylib",
+]
+
+[bundle.darwin-arm64.numpy]
+libs = []
+
+[bundle.linux-x86_64.imagecodecs]
+libs = [
+  "imagecodecs.libs/libImath-3_2-98e3d33b.so.30.3.2.3",
+  "imagecodecs.libs/libLerc-df6790a3.so.4",
+  "imagecodecs.libs/libOpenEXRCore-3_5-03809dcc.so.34.3.5.2",
+  "imagecodecs.libs/libSPERR-dc3d0728.so.0.8.5",
+  "imagecodecs.libs/libSZ3c-6a88cd36.so.3.4.0",
+  "imagecodecs.libs/libaec-c0dd3176.so.0.1.7",
+  "imagecodecs.libs/libaom-7da175d7.so.3.15.1",
+  "imagecodecs.libs/libavif-db7cb030.so.16.4.2",
+  "imagecodecs.libs/libblosc-0efaad68.so.1.21.6",
+  "imagecodecs.libs/libblosc2-590d2cdb.so.3.3.5",
+  "imagecodecs.libs/libbrotlicommon-07842895.so.1.2.0",
+  "imagecodecs.libs/libbrotlidec-5769cbf8.so.1.2.0",
+  "imagecodecs.libs/libbrotlienc-9fe3119c.so.1.2.0",
+  "imagecodecs.libs/libcharls-566c43a9.so.2.4.4",
+  "imagecodecs.libs/libcpcodec-98458ccc.so",
+  "imagecodecs.libs/libdeflate-b54823bf.so.0",
+  "imagecodecs.libs/libgif-aabd972d.so.7.2.0",
+  "imagecodecs.libs/libgomp-6a29c32d.so.1.0.0",
+  "imagecodecs.libs/libisal-3b8462c8.so.2.0.32",
+  "imagecodecs.libs/libjpeg-4aec5838.so.8.3.2",
+  "imagecodecs.libs/libjpegxr-2edf22aa.so.1.2",
+  "imagecodecs.libs/libjxl-75330aa4.so.0.12.0",
+  "imagecodecs.libs/libjxl_cms-ef1f7d64.so.0.12.0",
+  "imagecodecs.libs/libjxl_threads-3d12e8e4.so.0.12.0",
+  "imagecodecs.libs/libjxrglue-df256756.so.1.2",
+  "imagecodecs.libs/liblcms2-da5b85cc.so.2.0.19",
+  "imagecodecs.libs/liblz4-c4659bb8.so.1.10.0",
+  "imagecodecs.libs/liblzfse-513e1a5b.so",
+  "imagecodecs.libs/liblzhamcomp-5a03cdcc.so",
+  "imagecodecs.libs/liblzhamdecomp-41688b69.so",
+  "imagecodecs.libs/liblzhamdll-184978f3.so",
+  "imagecodecs.libs/liblzma-7b394f0f.so.5.8.4",
+  "imagecodecs.libs/liblzokay-6a69d3ec.so",
+  "imagecodecs.libs/liblzokay-c-f8c30da9.so",
+  "imagecodecs.libs/libmeshoptimizer-391f53b3.so",
+  "imagecodecs.libs/libopenjp2-987144be.so.2.5.4",
+  "imagecodecs.libs/libopenjph-7b3eb4bd.so.0.32.0",
+  "imagecodecs.libs/libpng16-ef6567a5.so.16.59.0",
+  "imagecodecs.libs/libsharpyuv-cb5f1fcc.so.0.1.2",
+  "imagecodecs.libs/libsnappy-cca70641.so.1.3.1",
+  "imagecodecs.libs/libsz-44043f37.so.2.0.1",
+  "imagecodecs.libs/libtiff-f2a29c65.so.6.3.0",
+  "imagecodecs.libs/libuhdr-254e1160.so.2.0.2",
+  "imagecodecs.libs/libwavpack-8549a446.so.1.2.8",
+  "imagecodecs.libs/libwebp-2220ae37.so.7.2.0",
+  "imagecodecs.libs/libwebpdemux-978e374e.so.2.0.17",
+  "imagecodecs.libs/libwebpmux-6cbe5162.so.3.1.2",
+  "imagecodecs.libs/libzfp-927a0c39.so.1.0.1",
+  "imagecodecs.libs/libzopfli-48905519.so.1.0.3",
+  "imagecodecs.libs/libzstd-8e2c7e29.so.1.5.7",
+]
+
+[bundle.linux-x86_64.numpy]
+libs = [
+  "numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0",
+  "numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0",
+  "numpy.libs/libscipy_openblas64_-61654e39.so",
+]
+
+[[required_library]]
+platform = "linux-x86_64"
+file = "numpy.libs/libquadmath-2284e583-a9307bba.so.0.0.0"
+
+[[required_library]]
+platform = "linux-x86_64"
+file = "numpy.libs/libgfortran-83c28eba-468e71e5.so.5.0.0"
+
+[[required_library]]
+platform = "linux-x86_64"
+file = "imagecodecs.libs/libgomp-6a29c32d.so.1.0.0"

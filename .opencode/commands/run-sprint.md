@@ -6,7 +6,7 @@ description: "Run an entire sprint autonomously, design through consolidated ver
 
 Canonical source: `.claude/commands/run-sprint.md`.
 
-Source SHA-256: `cf0db66f6ba23f9205bdf24de20ab8388b786b517796ba552f12ab0f61599b58`.
+Source SHA-256: `017151d85683a93f10df7ed54e3bed483a769965bcf3881a4631599ffdf6ceb4`.
 
 Arguments: $ARGUMENTS
 

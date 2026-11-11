@@ -192,3 +192,52 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-201 | Example measurement document and shortcut | S44 | 4w | not measured, serial implementation in the canonical worktree included a shortcut key that was ignored and a TID line copied from the loaded document, both restored after the tests went red, so no isolated duration was captured | 2026-11-04 |
 | F-206 | Folder viewer synthetic study, spacing, edge letters and preset window | S45 | 5w | not measured, serial implementation in the canonical worktree included three review passes, the last at 0 defects and 0 smells, an intercept mutation, and staged feature verification, so no isolated duration was captured | 2026-11-05 |
 | F-207 | Folder viewer layout, gestures, marks and image controls | S45 | 8w | not measured, serial implementation in the canonical worktree included three review passes, the last at 0 defects and 0 smells, and staged feature verification, so no isolated duration was captured | 2026-11-05 |
+| F-119 | Brick decomposition and multiscale pyramid generation | S46 | 10w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with five review passes and three verification runs, so no isolated duration was captured | 2026-11-05 |
+| F-217 | Licence hygiene | S46 | 2w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with five review passes, so no isolated duration was captured | 2026-11-05 |
+| F-219 | Sprint plan checker refusals that no guard probe triggers | S46 | 1w | not measured, implemented by an external coding agent in a parallel worktree, with one review pass, so no isolated duration was captured | 2026-11-05 |
+| F-222 | Pyramid means skip non-finite F32 samples | S46 | 1w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with two review passes, so no isolated duration was captured | 2026-11-05 |
+| F-218 | Dependency advisories in shipped packages | S46 | 1w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with five review passes, so no isolated duration was captured | 2026-11-05 |
+| F-221 | Published package contents | S46 | 1w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with three review passes, so no isolated duration was captured | 2026-11-05 |
+| F-230 | Public options refuse unknown keys, one coded shell error, and loadCore keeps its cause | S46 | 2w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with seven review passes, so no isolated duration was captured | 2026-11-05 |
+| F-220 | Shipped binary notices | S46 | 2w | not measured, implemented by an external coding agent in a parallel worktree beside other stories, with nine review passes, so no isolated duration was captured | 2026-11-05 |
+| F-216 | Folder viewer performance | S46 | 4w | not measured, implemented by an external coding agent and then Claude implementer agents in a parallel worktree beside other stories, with fourteen review passes, so no isolated duration was captured | 2026-11-06 |
+| F-210 | Folder viewer value at the pointer | S46 | 3w | not measured, implemented by Claude implementer agents in a parallel worktree beside other stories, with five review passes, so no isolated duration was captured | 2026-11-06 |
+| F-211 | Folder viewer measurements | S46 | 6w | not measured, implemented by Claude implementer agents in a parallel worktree beside other stories, with five review passes, so no isolated duration was captured | 2026-11-06 |
+| F-208 | Folder viewer viewports | S46 | 6w | not measured, implemented by Claude implementer agents in a parallel worktree beside other stories, with nine review passes, so no isolated duration was captured | 2026-11-07 |
+| F-209 | Folder viewer linked viewports | S46 | 4w | not measured, implemented by a Claude implementer agent in a parallel worktree beside other stories, with two review passes, so no isolated duration was captured | 2026-11-07 |
+| F-226 | Release by series and study | S46 | 3w | not measured, implemented by GLM for the library half and by Claude implementer agents for the library test fix and the folder viewer half, in a parallel worktree beside other stories, with ten review passes, so no isolated duration was captured | 2026-11-07 |
+| F-229 | JPEG XL decoding | S46 | 3w | not measured, implemented by GLM across many fix rounds with Claude rounds for some fixes, and the viewer and documentation half by GLM, in a parallel worktree beside other stories, with fourteen review passes, so no isolated duration was captured | 2026-11-07 |
+| F-232 | Unsafe guard soundness | S46 | 2w | not measured, implemented by GLM in two rounds and by a Claude implementer after the pass 3 ruling moved doctest enforcement to the compiler, in a parallel worktree beside other stories, with nine review passes, so no isolated duration was captured | 2026-11-07 |
+| F-233 | SIMD wasm builds compile SIMD code | S46 | 1w | not measured, implemented by GLM and by a Claude implementer for the pass 1 repair and the structural pin, in a parallel worktree beside other stories, with three review passes, so no isolated duration was captured | 2026-11-07 |
+| F-212 | Folder viewer four corners at parity | S46 | 4w | 40 minutes measured for the first round, 09:19 to 09:59 GMT on 2026-11-07, by a Claude implementer in a head-to-head pair beside a GLM implementer, plus one fix round after the blind review whose duration was not measured | 2026-11-07 |
+| F-224 | Frame identity | S46 | 3w | not measured, the library and package half implemented by GLM across a first round and one fix round with a Claude implementer for one documentation row, and the folder viewer half by a Claude implementer across three rounds, in a parallel worktree beside other stories, with seven review passes, so no isolated duration was captured | 2026-11-07 |
+| F-231 | Session frame cache | S46 | 4w | not measured, implemented by GLM in a first round and two fix rounds and by Claude implementers for the documentation rounds after review passes 3 and 4, in a parallel worktree stacked on F-224 and F-226, with six review passes, so no isolated duration was captured | 2026-11-07 |
+| F-213 | Folder viewer window presets by modality on number keys | S46 | 3w | not measured, implemented by a Claude implementer across a first round, a ruling round and five fix rounds after review passes 1 to 5, in a parallel worktree beside other stories, with seven review passes, so no isolated duration was captured | 2026-11-07 |
+| F-236 | acceptTransferredFrame stack position | S46 | 1w | not measured, implemented by GLM in a first round and three fix rounds after review passes 1 to 3, pulled forward from S47 into a parallel worktree beside other stories, with four review passes, so no isolated duration was captured | 2026-11-08 |
+| F-243 | JPEG-LS run mode decoded per T.87 | S46 | 3w | not measured, implemented and reviewed in a parallel worktree, so no isolated duration was captured | 2026-11-09 |
+| F-225 | DICOM conformance report and Checks section | S46 | 4w | not measured | 2026-11-09 |
+| F-244 | Encapsulated Pixel Data with an empty Basic Offset Table | S46 | 2w | not measured | 2026-11-09 |
+| F-234 | Bounded sequence depth in parse_part10 | S46 | 1w | not measured | 2026-11-09 |
+| F-228 | The Content Security Policy Ocelli needs | S46 | 2w | not measured | 2026-11-09 |
+| F-237 | @ocelli/wasm npm packaging with release preflight tooling | S46 | 1w | not measured | 2026-11-09 |
+| F-239 | Folder viewer colour frames through the library's colour stage | S46 | 12w | not measured | 2026-11-09 |
+| F-240 | Matrix and tone-curve ICC profiles in stage 4 | S46 | 5w | not measured | 2026-11-09 |
+| F-238 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | S46 | 2w | not measured | 2026-11-09 |
+| F-214 | Folder viewer mouse profiles and preferences | S46 | 2w | not measured | 2026-11-10 |
+| F-215 | Folder viewer marks saved as TID 1500 and key images as a Key Object Selection | S46 | 4w | not measured | 2026-11-10 |
+| F-227 | Automatic window per series when the file has none | S46 | 3w | not measured | 2026-11-11 |
+
+## S46 acceptance status correction, 2026-11-09
+
+F-208, F-209, F-212 and F-213 have delivered and reviewed implementation, but their original completion notes explicitly leave numbered final-tree browser observations open. Their current backlog state is corrected to `in-progress`, with reviewed implementation and acceptance pending. `/complete-feature` requires those observations or an explicitly approved scope change. The operator kept the checklist pending, which supplies no observation, waiver or carry decision.
+
+- F-208, AC8 to AC12, final-tree viewport observations.
+- F-209, AC16 to AC20 and AC22, final-tree linking observations. AC21 is an implementation mutation with existing recorded evidence.
+- F-212, AC12, the three scale-bar browser measurements.
+- F-213, AC13, the synthetic CT and MR preset click-through.
+
+All earlier implementation entries, source, reviews, durations and delivery dates remain historical evidence. They do not establish these still-unperformed acceptance rows. No source capability is removed or rescheduled. The existing operator checklist remains the observation procedure.
+
+## S46 operator acceptance closure, 2026-11-10
+
+The operator's Chrome observations were recorded as passed on 2026-11-10: F-208 AC8 to AC12, F-209 AC16 to AC20 and AC22, F-212 AC12, F-213 AC13, F-214 AC12 and F-215 AC18. F-208, F-209, F-212 and F-213 return to `done`, and F-214 and F-215 are completed. Their earlier rows keep their original completion dates and durations, and no duration was measured for the observations. F-215 AC19 was optional and not chosen. F-227 is not part of this closure.

@@ -5,7 +5,7 @@ Append-only record of every completed F-ID. New entries land at the **bottom**.
 references the original, because the value of this file is that it records what
 was believed at the time.
 
-Written by `/complete-feature` step 2.
+Written by `/complete-feature` step 1.
 
 ## Entry format
 
@@ -25,6 +25,8 @@ Written by `/complete-feature` step 2.
 **Tier coverage.** {per tier: A (WebGPU), B (WebGL2 downlevel), C (CPU).
                     full, degraded (how), unavailable, or n/a. All three.}
 **LLD updated.** {docs/lld/*.md files updated}
+**User-facing documentation.** {places changed in README.md, use.html and more.html,
+                                or "no change" and the reason}
 **Deviations from the design plan.** {list with reasons, or "none"}
 **Notes for future sessions.** {non-obvious details, limitations, follow-up F-IDs}
 ```
@@ -5065,3 +5067,1031 @@ this branch had not touched since the base.
 **Deviations from the design plan.** The recovery sentence was corrected. A failed preview hides the previous grey image and shows the fault, so the viewport does not keep the previous slice under the fault text. The state table says a drawing-tool drag moves the mark and a navigation drag does not.
 
 **Notes for future sessions.** Pass 3 reported 0 defects, 0 smells and 3 nitpicks. A drawing-tool move does not latch after 5 pixels. A colour frame can still take a drawing from the previous image size. Leaving 2 by 2 because a neighbour is over 32 MiB does not re-enable the drawing buttons. None of those block. Reviewer Claude Code, read only, with no shell. The live page was not clicked. Do not push this commit. The sprint push needs a later sprint-profile record with comparison evidence. This story does not publish.
+
+## F-119, Brick decomposition and multiscale pyramid generation, completed 2026-11-05
+
+**What was built.** `Volume::downsample_level` builds one coarser level and `Volume::generate_pyramid` builds all of them, each straight from level 0 with an exact-overlap box filter over stored container values. `Volume::cut_level_brick` cuts a brick from any stored level against that level's grid, and `Volume::level_voxel_to_level0` maps a level voxel centre back to level 0. A successful `place` drops every level above 0.
+
+**HLD sections implemented.** `docs/hld/` section 19 (the level axis and bricks), section 30 and 30.1 (out-of-core volume streaming), and decision D11. The filter, value domain, rounding, child dimensions, stop rule and level origin are local decisions recorded in `.claude/plans/F-119-design.md`, because the HLD and DICOM do not specify a pyramid.
+
+**Deviations.** none
+
+**Crates / packages modified.** `crates/ocelli-volume`.
+
+**Tests added.** `crates/ocelli-volume/tests/pyramid.rs`, 28 integration cases with hand-computed fixtures, and unit tests in `crates/ocelli-volume/src/levels.rs`.
+
+**Fixture provenance.** Pixel arithmetic over stored values. No DICOM section defines a pyramid, so each fixture's expected value is hand-computed from the plan's filter definition and shown in a comment, and rescale commutes with the mean per PS3.3 C.11.1 before rounding. Review passes 1 to 5 recomputed every fixture independently.
+
+**Verification.** Feature profile on the staged worker tree, `bin/ocelli.sh gate --floor` plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 3987833.
+
+**Corpus.** pass, 95 verified, 0 missing, 0 mismatched. This story adds no corpus row.
+
+**Tier coverage.** Generation runs on the CPU and gives the same bytes on tier A (WebGPU), tier B (WebGL2 downlevel) and tier C (CPU). F-120 selects levels, F-121 corrects opacity per level and F-122 budgets level bricks.
+
+**LLD updated.** `docs/lld/volumes.md`, `docs/lld/cache.md` and the `docs/lld/README.md` index rows.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe pyramids, and nothing outside the crate calls the new methods until F-120.
+
+**Deviations from the design plan.** None in behaviour. The plan sentence promising a test for a valid prefix after a failure mid-pyramid was removed, because that path is unreachable without fault injection. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** What a non-finite F32 sample does to a coarser level is an open operator question in `docs/sprints/CURRENT_SPRINT.md`, pinned by `non_finite_floats_keep_the_current_bits`, to be answered before F-120. `VoxelStore::slice_mut` is public and can write level 0 without dropping coarser levels, which predates this story.
+
+## F-217, Licence hygiene, completed 2026-11-05
+
+**What was built.** No copyleft dependency remains in any tracked manifest. The corpus JPEG read-back moves from the GPL-3 `pylibjpeg-libjpeg` to `imagecodecs` (BSD-3-Clause, libjpeg-turbo), and Vite moves to 7.3.7 so the MPL-2.0 `lightningcss` is no longer installed. One allowlist in `deny.toml` is read by cargo-deny and by `scripts/licence_check.py` for npm, the Python lock and installed wheels. Exceptions and licence file waivers live in `ci/licences.toml` with reason, scope, date and decider, matched to their version and refused when stale. `THIRD_PARTY_NOTICES` carries the OpenJPH and ritk notices and `NOTICE` names Tensorbee Limited.
+
+**HLD sections implemented.** Section 27.2 R7, `docs/SOURCE-POLICY.md`.
+
+**Deviations.** D-22 amended to record the OpenJPH notice as present.
+
+**Crates / packages modified.** `deny.toml`, `ci/licences.toml`, `scripts/licence_check.py`, `scripts/source_provenance_check.py`, `scripts/guards/catalogue.py`, `pyproject.toml` and `uv.lock`, the npm manifests and lockfiles, `examples/viewer-react/vite.config.ts`, `.github/workflows/ci.yml`, `bin/ocelli.sh`, the licence and notice files, and `corpus/decode-digests.tsv`.
+
+**Tests added.** `scripts/tests/test_licence_check.py` (31 cases), provenance unit tests, and floor and deep guard probes for every new refusal. The census records 1032 refusals with none watched by nothing.
+
+**Fixture provenance.** The lossless JPEG and JPEG-LS rows read back byte-identical to the previous decoder, measured against an outside-the-repository venv built from the old lock. `.50` and `.51` were re-baselined, with maximum differences of 3 and 1 against the old decoder, within `YBR_EIGHT_BIT_MAX` and `TRANSFORM_MAX` against the uncompressed original.
+
+**Verification.** Feature profile on the staged worker tree, the floor's 27 gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of e3fc29a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes tooling, manifests and notices, not rendering.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/corpus.md`, `docs/lld/codecs.md`, `docs/lld/release-policy.md` and `docs/lld/typescript-packaging.md`.
+
+**User-facing documentation.** `README.md` names the licence and notice files. The Use book and the More page have no licence, decoder or dependency sentence this story changes.
+
+**Deviations from the design plan.** The plan's exception owner rule was amended by the lead under the operator's delegation: a lead may waive licence file text that is an allowlisted licence granting nothing copyleft, or an empty file, and every such waiver is listed for the operator in `docs/sprints/CURRENT_SPRINT.md`. `examples/viewer-react/vite.config.ts` sets `worker.format` to `es`, which Vite 7 requires. Implemented by an external coding agent over five independent review passes.
+
+**Notes for future sessions.** AC17's Linux half is the corpus-tooling CI job on the pushed head and is confirmed at sprint close. F-220 follows up with full notices for every crate in shipped binaries. A lead waiver over text that really grants a copyleft licence while naming an allowlisted licence cannot be refused mechanically and stays a human rule.
+
+## F-219, Sprint plan checker refusals that no guard probe triggers, completed 2026-11-05
+
+**What was built.** The four refusals in `scripts/gen_sprint_plan.py` that no guard probe triggered now each have a floor probe and a unit test, keyed by a fragment only that refusal prints: a row absent from every sprint table, a row for a story the backlog does not schedule, a sprint with no goal line, and goal titles out of order. The stale goal line probe's fragment is narrowed so it names one refusal.
+
+**HLD sections implemented.** Section 27.2 and the F-X009 guard harness.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/guards/catalogue.py`, `scripts/tests/test_gen_sprint_plan.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`.
+
+**Tests added.** Five unit tests and four floor probes. Deleting each refusal turns only its own probe and test green, measured by the implementer and again by the reviewer.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the staged worker tree, 27 floor gates plus the corpus gate, in the worker's own build directory. The verify ledger entry is in the commit trailer of 7a43b4b.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`. The `docs/lld/README.md` index and `docs/lld/codecs.md` header also gain F-217, which F-217's integration missed.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not describe the sprint plan checker.
+
+**Deviations from the design plan.** The plan's consumer map said `guard_census.py --record` re-measures wall clock. `guard_probe.py --record-budget` does, and wall clock was left as recorded because the gate stays inside it. The plan line is corrected. Implemented by an external coding agent, reviewed clean on the first pass.
+
+**Notes for future sessions.** The census counts per entry, not per refusal, so a refusal added to `gen_sprint_plan.py` later needs its own probe by review. Uniqueness of every probe fragment across all fourteen messages is a recorded hand check, not an automated test.
+
+## F-222, Pyramid means skip non-finite F32 samples, completed 2026-11-05
+
+**What was built.** An F32 coarser pyramid level now leaves NaN and both infinities out of each mean and divides by the overlap weight of the finite samples only, accumulated in f64. A box with no finite sample is written as the NaN `0x7fc0_0000`, decided by a flag rather than a float compare, and a mean that narrows to negative zero is written as positive zero. Integer means, `narrow_f32` and `level_voxel_to_level0` are unchanged. This is the operator's answer of 2026-11-05 to F-119's open question.
+
+**HLD sections implemented.** Section 26's multiscale pyramid, the F32 half of F-119's mean.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-volume`.
+
+**Tests added.** Six new pyramid fixtures, AC1 to AC6, with expected bits hand-computed from IEEE 754 in their comments, and `non_finite_floats_keep_the_current_bits` replaced by `non_finite_centres_follow_ieee_arithmetic`. The implementer saw each new fixture fail on the old mean. The reviewer ran eleven mutations and ten went red. The survivor removes the empty-box early return, which `narrow_f32` makes equivalent today.
+
+**Fixture provenance.** Hand-computed from IEEE 754 binary32 and the Float Pixel Data layout of PS3.3 C.7.6.24, values cited by bit pattern in each fixture.
+
+**Verification.** Feature profile on the merged worker tree, 27 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 2a7e79a.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** CPU generation, so the same bytes on tiers A, B and C. Identity on wasm32 is argued from the arithmetic, not observed, because this crate has no wasm test runner.
+
+**LLD updated.** `docs/lld/volumes.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. Nothing in production calls `generate_pyramid` and a volume refuses 32-bit frames, so no page reaches an F32 coarse level. F-120 updates the pages when one becomes reachable.
+
+**Deviations from the design plan.** none. Implemented by an external coding agent. Two review passes, the first finding two false test comments that the sprint lead corrected.
+
+**Notes for future sessions.** The empty-box flag is defence in depth that no test can tell apart from `narrow_f32`'s own NaN today. Keep it if `narrow_f32` changes.
+
+## F-218, Dependency advisories in shipped packages, completed 2026-11-05
+
+**What was built.** `scripts/advisory_check.py` and a floor gate `advisories` audit the dependency closure `@ocelli/core` ships against `npm audit`, refusing any high or critical advisory without a row in `ci/advisories.toml`. The one row is adm-zip 0.5.17, reached through dcmjs 0.52.2, with scope `unreachable`. That scope is accepted only while `gate packages` installs the packed tarball into a consumer, traces every module the smoke run loads through a `registerHooks` hook, and finds no adm-zip load, with an injection test that plants a load and watches the check go red. npm aliases are resolved through the lock nodes. An override of a closure package is refused, because a root override never reaches a consumer.
+
+**HLD sections implemented.** Section 27.2, the guard harness, and the packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/advisory_check.py`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/advisories.toml`, `ci/guard-probe-budget.json`, `bin/ocelli.sh`, `.github/workflows/ci.yml`.
+
+**Tests added.** 48 unit tests in `scripts/tests/test_advisory_check.py`, the injection test `scripts/tests/test_unreachable_injections.py` run inside `gate packages`, and the new advisory and wiring probes in the guard catalogue.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 79f3f63.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging and guard tooling only.
+
+**LLD updated.** `docs/lld/guards.md`, `docs/lld/typescript-packaging.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, `packages/core/README.md` and the Use book state the advisory, what the packages gate checks and its limit, and the consumer override recipe for adm-zip 0.6.1.
+
+**Deviations from the design plan.** none. The CI half of AC3 is confirmed by the CI run on the pushed head. Implemented by an external coding agent. Five review passes, the last three on wording that said the gate proves unreachability where it checks the paths it runs.
+
+**Notes for future sessions.** Removing the injection test from `gate packages` is noticed by no guard today, a pass 3 nitpick. The exception row goes stale when dcmjs stops declaring adm-zip, and the gate then refuses it.
+
+## F-221, Published package contents, completed 2026-11-05
+
+**What was built.** Each package's `tsconfig.json` stays the library project and now excludes tests. A sibling `tsconfig.test.json` per package references the library and typechecks the tests into an ignored cache under `node_modules/.cache/ocelli-tsc/`, with its own `tsBuildInfoFile`, and the root solution references both test projects. `build` removes `dist` and `tsconfig.tsbuildinfo` before `tsc --build`, because `tsc --build` does not re-emit a deleted `dist` while its build info survives. `scripts/package_check.py` refuses any tarball entry whose basename contains `.test.` or `.spec.` or whose path has a `__tests__` segment.
+
+**HLD sections implemented.** The packaging rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core` and `@ocelli/react` build configuration, root `tsconfig.json`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`.
+
+**Tests added.** A level-1 probe for the test-file refusal with `latest.js` and `contest.d.ts` controls. Pass 1 applied seven mutations to the rule and each went red. Vitest stays at 57 files and 468 tests.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree f98e8e7.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes packaging only.
+
+**LLD updated.** `docs/lld/typescript-packaging.md` and its `docs/lld/README.md` index row.
+
+**User-facing documentation.** no change. README.md, the Use book and the More page do not list tarball contents.
+
+**Deviations from the design plan.** The plan measured 281 core entries and 141 test paths. A fresh build gives 278 and 138, because a stale `dist/cursor.probe.test.*` with no source is not recreated. The non-test count, 140, is what AC1 requires. Each test project also names its own `tsBuildInfoFile`, which the plan did not, after pass 1 found the two shared one path and never settled. Implemented by an external coding agent. Three review passes.
+
+**Notes for future sessions.** The plan's decision 1 still lists a three-entry exclude for react, which is now two globs. The tree is the authority.
+
+## F-230, Public options refuse unknown keys, one coded shell error, and loadCore keeps its cause, completed 2026-11-05
+
+**What was built.** `packages/core/src/options.ts` holds one key list per checked type, `OPTION_KEY_LISTS`, for the eight in scope: `DicomwebClientOptions`, `QidoSearchOptions`, `PointerDispatchOptions`, `CursorControllerOptions`, `WadoInstanceRequest`, `KeyObjectRequest`, `SecondaryCaptureRequest` and `FrameCommitMeta`. `refuseUnknownOptions` refuses an unknown own key with `OcelliError` code `UnknownOption` before any side effect, and a non-object with `InvalidOptions`. The lists use `satisfies` and a completeness check, so a type and its list cannot drift without a typecheck failure. `OcelliError` in `ocelli-error.ts` is the shell's one coded error, with a closed set of string codes separate from the numeric ring codes. `DicomwebError` extends it, and the bulk, command and instance errors use it. `loadCore` returns `Promise<true>` and rejects with `CoreLoadFailed` carrying the cause, with a shared pending load and a retry after failure.
+
+**HLD sections implemented.** The public API rules of the TypeScript shell.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core` (`ocelli-error.ts` and `options.ts` new, `dicomweb.ts`, `bulk.ts`, `commands.ts`, `instance-bytes.ts`, `pointer.ts`, `cursor.ts`, `tid2010.ts`, `secondary-capture.ts`, `load.ts`, `index.ts`), `examples/viewer-react/src/core-worker.ts`.
+
+**Tests added.** Vitest grows from 57 files and 468 tests to 60 and 486, with `options.test.ts`, `errors-class.test.ts` and `load.types.test.ts`. Pass 1 applied 19 mutations and each went red. The compile-time drift check was confirmed by adding a field without listing it.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 695abf3.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes the TypeScript shell's options and errors only.
+
+**LLD updated.** `docs/lld/public-api.md`, `docs/lld/errors.md`, `docs/lld/dicomweb.md`, `docs/lld/typescript-packaging.md` and their `docs/lld/README.md` index rows. The public-api row also gains F-199, F-200 and F-201, which that file's header already listed.
+
+**User-facing documentation.** `README.md` states that an unknown client option is refused. The Use book chapters 5.1, 5.6 and 15 describe `loadCore`'s rejection, the `OcelliError` branch in the DICOMweb sample, and the two error namespaces. The More page does not describe the shell's options or errors.
+
+**Deviations from the design plan.** AC6 no longer covers the engine `RangeError` from a view over an out-of-range sink pointer, which passes through by decision 6. AC2 allows one declared test change, a `dicomweb.test.ts` call that spread an object carrying an extra key. Both are recorded as lead amendments in the plan. Implemented by an external coding agent. Seven review passes, the last four on documentation sentences and one test.
+
+**Notes for future sessions.** `acceptTransferredFrame` accepts but ignores `stackIndex` and `stackEpoch`, which predates this story and is recorded for the operator in `CURRENT_SPRINT.md`.
+
+## F-220, Shipped binary notices, completed 2026-11-05
+
+**What was built.** `THIRD_PARTY_LICENSES`, a tracked root file generated by `python3 scripts/licence_check.py --write binaries` from `cargo metadata --locked --offline` over the third-party closure of `ocelli-wasm` on wasm32 and `ocelli-native`. Each crate's packaged licence files are reproduced, each distinct text once. A crate whose package ships no licence file takes the licence file pinned from its own repository at the package's published commit, read from `.cargo_vcs_info.json`. Where that commit holds no licence text, as for the objc2 family, the notice reproduces the repository's `LICENSE.md` and a licence template with the declared authors or the crate's authors and repository as holder, and says so. The four MIT-only objc2 crates also reproduce the earlier `Copyright (c) Steven Sheldon` file. The MIT and Zlib templates have one copyright line the generator fills, the MIT template is credited under CC BY 3.0 in the file itself, and Apache-2.0 is the apache.org text as published. The Rust standard library's notice is pinned from rust-docs and refused when the recorded toolchain differs from `rust-toolchain.toml`. The `binaries` section of the licences gate regenerates and compares offline. `verify-upstream` re-fetches every crate pin and earlier pin from its recorded URL and commit, outside every gate. `scripts/package_check.py` refuses a tarball carrying a `.wasm` without both notices files.
+
+**HLD sections implemented.** The release rules for shipped artefacts.
+
+**Deviations.** none
+
+**Crates / packages modified.** `scripts/licence_check.py`, `scripts/package_check.py`, `scripts/guards/catalogue.py`, `ci/notices/`, `ci/guard-probe-budget.json`, `.github/workflows/ci.yml`, `THIRD_PARTY_LICENSES`.
+
+**Tests added.** The licence suite grows to 72 tests, with probes for every new refusal including a pin at the wrong commit, a missing CC BY credit, a foreign holder in a template, an unfilled placeholder and an earlier row whose file is absent.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the merged worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 2a48ab8.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This story changes release tooling only.
+
+**LLD updated.** `docs/lld/release-policy.md`, `docs/lld/guards.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, Licence section, names `THIRD_PARTY_LICENSES` and how it is regenerated. The Use book and the More page do not describe release notices.
+
+**Deviations from the design plan.** Four lead amendments, recorded in the plan: pinned texts are templates, a crate without a licence file takes its upstream file at its published commit, the gate checks that commit offline, and the binaries section stays offline with `verify-upstream` outside every gate. Nothing checks that an earlier row's commit is the parent of `cfb19922`. Implemented by an external coding agent. Nine review passes.
+
+**Notes for future sessions.** The `rust` section's `cargo deny` call from F-217 runs without `--offline` and downloads the registry on an empty `CARGO_HOME`. Whether the objc2 crates may be redistributed under Apple's SDK terms is recorded for the operator in `CURRENT_SPRINT.md`.
+
+## F-216, Folder viewer performance, completed 2026-11-06
+
+**What was built.** The local folder viewer posts each file once and the process holds it by id in one budgeted `Lru` from `ocelli-cache`, whose value is an enum over held file bytes and decoded frames, inside the `OCELLI_CACHE_MIB` budget with a 256 MiB default. A multi-frame object keeps its encoded bytes while any frame is not held, and a single-frame object drops them once frame 0 is held. A decoded frame is reused across window changes, and a window step renders from the held frame with no preview body. Two long-lived decode threads take four body slots, decoded-frame buffers are recycled from a free list inside the budget, and the viewer binary uses mimalloc. Grey output is admitted through a cap equal to the bound's grey term, counting unwritten replies and each decode thread's kept grey. Previews that wait are admitted in the order they first waited, a frame over the design size draws alone and is never kept by a worker and a reply has 60 s to be written. `ocelli-pixel` gains `stored_sample_table`. Five benchmark subjects, `viewer.open`, `viewer.first_image`, `viewer.scroll_rate`, `viewer.window_step` and `viewer.resident_memory`, have runners and a recorded baseline on the operator's machine, and `bin/ocelli.sh bench --tolerance` takes a per-subject form.
+
+**HLD sections implemented.** Section 26's benchmark subjects for the folder viewer, and section 8's cache tiers as a consumer outside the core.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-pixel`, `tools/bench`, `bin/ocelli.sh`, `ci/bench-baseline.json`, `ci/guard-probe-budget.json`, `scripts/guards/catalogue.py`, `eslint.config.js`, the workspace `Cargo.toml` and `Cargo.lock` for mimalloc 0.1.52.
+
+**Tests added.** Gate, queue and accounting unit tests in the viewer library, server tests for oversized frames, arrival order, starvation, vanished clients and every release path, a corpus pixel identity test that compares each reply with a fresh decode, bench runner and argument tests, and `stored_sample_table` tests.
+
+**Fixture provenance.** `stored_sample_table` is checked against `LutChain::apply` for every stored integer the Bits Stored and Pixel Representation allow, citing PS3.3 C.11.2.1.2 and C.11.2.1.3, so it adds no arithmetic of its own. The viewer's pixel replies are checked against a fresh decode through the existing LUT chain, with 0 differences over the corpus.
+
+**Verification.** Feature profile on the worker tree after merging sprint/s46, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree f765df5.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The folder viewer renders grey on the local process and the page draws it to a 2D canvas, which no tier owns.
+
+**LLD updated.** `docs/lld/cache.md`, `docs/lld/benchmarks.md`, `docs/lld/pixel-pipeline.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer", gives the release commands, the cache budget, the order previews are served in and the large frame rule. The Use book's "Build from source" gives the release command and the same rules. The More page's `#worker` section says the file is posted once and held by id in the local process.
+
+**Deviations from the design plan.** The operator chose mimalloc in the viewer, recycled frame buffers, and that a frame over the design size draws alone. The lead ruled that waiters are admitted in arrival order, that the resident bound is stated for frames within the design size, that a kept grey counts against the cap, and that `--tolerance` takes a per-subject form so the baseline is still written only by `--accept`. All are recorded in the plan. Implemented first by an external coding agent and then by Claude implementer agents. Fourteen review passes.
+
+**Notes for future sessions.** One client that stops reading while holding half the grey cap, with one large frame queued behind it, delays later previews until its 60 s write deadline. A per-subject tolerance for a subject the run cannot measure is dropped without a refusal, which no tracked registry row reaches today.
+
+## F-210, Folder viewer value at the pointer, completed 2026-11-06
+
+**What was built.** `POST /value` on the local folder viewer answers the modality value and its unit at a list of image points for a held file id, with no Part 10 bytes in the body. Stage 1 is the held frame's own modality recipe, so the value and the preview share one modality stage and an attribute the value never reads cannot refuse it. The unit is HU on a CT whose Rescale Type is HU, or that names none and is not multi-energy, Units on a PET, the file's Rescale Type otherwise, and unspecified when nothing names one. A padded sample reports padding and no number. A point outside the image, a Modality LUT Sequence and a non-finite value are refused. The value's facts are charged to F-216's cache budget, every claim route makes room for its whole cost including the longest legal unit, and a frame a reply is reading is passed over rather than evicted. The page asks for the value under the pointer and sends no pixels, slope or intercept. `ocelli-dicom` gains `read_padding`, the reader `open_frame` already used.
+
+**HLD sections implemented.** The modality stage of section 18 as a readout, through `ocelli-pixel`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-dicom`.
+
+**Tests added.** A hand-computed value fixture per acceptance row citing PS3.3 C.11.1 and C.8.2.1, PS3.5 8.1.1 and PS3.3 C.7.6.3.3 for masking and sign extension, and C.7.5.1.1.2 for padding, route tests on the in-process viewer and the process server for every refusal and for the in-flight charge, and cache tests for every claim route.
+
+**Fixture provenance.** Every expected value is hand-computed with its working in the test, citing the PS3.3 or PS3.5 section it follows.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 8368232.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The value is computed on the local process from the held frame and drawn as text.
+
+**LLD updated.** `docs/lld/frame-open.md` for `read_padding`, and its `docs/lld/README.md` index row. The plan's LLD impact said none, which `read_padding` made stale.
+
+**User-facing documentation.** `README.md` step 7 gives the value under the pointer and its unit rule. The Use book names `read_padding`. The More page needed no change.
+
+**Deviations from the design plan.** Lead rulings recorded in the plan: corrected transcriptions of C.8.2.1, C.8.9.4 and C.11.1.1.2 against PS3.3 2026d, no assumed unit for a multi-energy CT, Units deciding on a PET, stage 1 from the held recipe, the value's facts charged to the budget, and the claim covering the longest LO unit. Implemented by Claude implementer agents. Five review passes.
+
+**Notes for future sessions.** AC16, the browser check, and AC17, the pydicom check, are left for sprint close. On a cache within a few hundred bytes of full, the steal route's full-cost room can evict one more entry than before.
+
+## F-211, Folder viewer measurements, completed 2026-11-06
+
+**What was built.** `POST /measure` on the local folder viewer answers a mark's numbers for a held file id: length, angle, Cobb angle and bidirectional lengths in millimetres or pixels, and for a rectangle, ellipse, polygon or freeform region its area, mean, SD, minimum and maximum in modality units from the held frame's modality stage, with padded samples left out. The page draws angle, Cobb, bidirectional, arrow, probe and region marks with editable handles and a measurement list, asks the local process for every number, the probe through F-210's `POST /value`, and drops a reply that arrives after its mark changed. Calibration comes from `select_calibration` in `ocelli-geom`: a present valid Pixel Spacing that differs from Imager Pixel Spacing decides, an equal pair is the detector plane unless a usable magnification factor corrects it per PS3.3 10.7.1.1, and a factor that is present but unusable is refused. `ocelli-geom` gains region sampling at pixel centres and `polygon_crosses_itself`, which refuses an outline whose edges touch or cross. `ocelli-core` gains `spacing_pair_agrees`, the one definition of an equal spacing pair, which `ocelli-dicom` and `ocelli-geom` share.
+
+**HLD sections implemented.** The measurement tools of the folder viewer over the modality stage of section 18 and the calibration rules of F-195.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer`, `crates/ocelli-geom`, `crates/ocelli-core`, `crates/ocelli-dicom`, `crates/ocelli-seg` (dev dependency only).
+
+**Tests added.** Hand-computed geometry fixtures for every region shape and boundary tie, angle, Cobb and bidirectional fixtures with anisotropic spacing, calibration provenance rows for every route, crossing cases, the route's refusals and caps, and page pins.
+
+**Fixture provenance.** Every expected value is hand-computed with its working in the test, citing PS3.3 C.7.6.2.1.1 for Pixel Spacing order, 10.7.1.1, C.8.11.4 and C.8.7.5 for Imager Pixel Spacing and magnification, and C.7.5.1.1.2 for padding.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus the corpus gates, in the worker's own build directory, recorded for tree 1d5980c.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. The numbers are computed on the local process and drawn as text and SVG.
+
+**LLD updated.** `docs/lld/geometry.md`, `docs/lld/calibration.md`, `docs/lld/core-types.md`, `docs/lld/dicom-ingest.md` and their `docs/lld/README.md` index rows.
+
+**User-facing documentation.** `README.md` step 8 gives the tools and the calibration rule. The Use book's chapter 10 gives the calibration sources and the outline rule.
+
+**Deviations from the design plan.** The operator chose detector plane for equal spacings. Lead rulings recorded in the plan: the touch-or-cross outline rule, first present spacing source wins, one rule for an unusable factor on both imager routes, and one shared definition of an equal pair moved to `ocelli-core`. Implemented by Claude implementer agents. Five review passes.
+
+**Notes for future sessions.** AC18, the browser check, is left for sprint close. `F-020-design.md` and an earlier AS_BUILT entry still cite PS3.3 C.7.6.1.1.5 for the spacing relationship, which is Lossy Image Compression in 2026d.
+
+## F-208, Folder viewer viewports, completed 2026-11-07
+
+**What was built.** The local folder viewer's image page lays out 1 by 1 up to 3 by 3 viewports from a picker on `G`, every cell cloned from one template. The view state that was a set of page globals, the series, image index, fit, zoom, pan, turn and flip, window, preset, invert, tile mode and the request tokens, is now one record per viewport from `blankViewport`, kept across layout changes so a cell that is hidden and shown again keeps its series, image, zoom and window. A series row dragged onto a cell opens there under the page's own drag type, a click or double-click opens it in the outlined cell, a new cell takes the next series not already shown, and an empty cell reads "Drag a series here." The four-image view is a tile mode of one viewport on `Shift G`, with its sentences and the 32 MiB cap kept, and tiles always drawn pixelated. Bare digits no longer choose a layout, so F-213 may bind them. The pointer cross, its readout and the magnifier are placed from the cell under the pointer, hide when the picture moves under a still pointer, and show the image the cell shows or hide. A new `viewer-browser` gate runs two headless Chromium checks through the pinned Playwright of `tools/bench`: `aspect.mjs` measures the displayed aspect of the single view, the four tiles and the four 2 by 2 cells, and `readout.mjs` checks the readout and magnifier cases. The gate sits outside the floor, runs in a new `viewer-browser` CI job, and its three refusals are registered with guard probes. `tools/bench/src/viewer_work.mjs` reaches the window and image index through `activeViewport`.
+
+**HLD sections implemented.** None directly. Section 10's split keeps DOM, pointer events and the tool state machines in the page, and section 18's chain stays in the local process, where each viewport sends its own window command to F-206's `/preview`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer` (the page and its tests), `tools/bench` (the viewer driver), `bin/ocelli.sh`, `scripts/ci_floor_check.py`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`, `.github/workflows/ci.yml` and `eslint.config.js`.
+
+**Tests added.** `the_page_has_viewport_cells` in `examples/folder-viewer/tests/preview.rs` pins the picker, the template, no top-level view state, the drag type, tile mode and its sentences, the empty-cell sentence and the `G` and `Shift G` keys. `examples/folder-viewer/tests/browser/aspect.mjs` and `readout.mjs` run under `bin/ocelli.sh gate viewer-browser`, with refuse probes `viewer-browser.aspect-swapped`, `viewer-browser.aspect-no-canvas` and `viewer-browser.readout-survives`.
+
+**Fixture provenance.** No pixel arithmetic is added. The one expected value is AC14's displayed aspect on the synthetic study, 128 columns by 96 rows with Pixel Spacing `0.7\0.5`, so `128 * 0.5 : 96 * 0.7` = `64 : 67.2` = 0.952381, hand-computed in the plan from PS3.3 10.7.1.3, where Pixel Spacing is row spacing then column spacing. Pass 1 re-derived it and the swapped value 1.866667 independently.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus corpus, corpus-tests and viewer-browser, in the worker's own build directory, recorded for tree 3a882f3.
+
+**Corpus.** pass, 95 verified, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A and B, because the page opens no device. Tier C full for each cell's grey image, which is F-206's CPU preview. Layout, cells and drag are page state over those bytes.
+
+**LLD updated.** none, as the plan's `## LLD impact` says. The local example is not the published API.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer": the opening sentence gives up to nine viewports, step 3 says the arrow keys act on the outlined viewport and the wheel on the viewport under the pointer, a new step 4 gives the drag, the click and "Drag a series here.", step 6 gives Layout `G` and Four images `Shift G`, and step 8 gives when the cross, readout and magnifier hide. `examples/folder-viewer/src/more.html`, the lede and `#series`, says the image page shows several series side by side in its own grid and keeps linked scroll and synced window as not built. `examples/folder-viewer/src/use.html`, the opening note, says each viewport's image.
+
+**Deviations from the design plan.** The operator answered the plan's five questions: `G` and `Shift G` with the digits freed for F-213, marks belonging to the image, tile mode per viewport, a click loading into the active cell, and new cells taking the next series. Lead rulings recorded in the review reports: a click on the series already open starts its window and fit again (pass 1 D2), the key pins cover only the `G` and `Shift G` routes so F-213 stays free (pass 1 and 3 S1), the readout, cross and magnifier clear whenever the view geometry under them can change and stay through an ordinary move (pass 5), the magnifier shows the image the cell shows or hides (pass 5 D2), and a cell showing a fault has no readout or cross (pass 6 N2). The pointer readout check in `readout.mjs` is beyond the plan's AC list and was added to hold those rulings. Implemented by Claude implementer agents. Nine review passes.
+
+**Notes for future sessions.** AC14, the aspect row carried from the F-207 polish review S1, is satisfied: the `viewer-browser` gate measures all nine canvases within 1e-3 of 0.952381 (pass 4 records single view 0.952365, tiles 0.952346, cells 0.952363), and pass 1's mutation control M1, `aspectX` and `aspectY` swapped at their assignment, read 1.866688 and turned the check red. AC8 to AC12, browser observations B1 to B7, were observed by the reviewer in pass 4 but are left for sprint close, because the plan asks for the operator's recorded run against the final tree with a screenshot per step. The tile-gap, drag, image-step, empty-tile, thrown-layout and faulted-cell branches of `readout.mjs` have no guard probe, as the runbook declares.
+
+## F-209, Folder viewer linked viewports, completed 2026-11-07
+
+**What was built.** `ocelli_viewport::link`, a new `no_std` module, holds the geometry of linked scroll and reference lines over a list of planes that need not be uniformly spaced. `same_frame_of_reference` is true only when both Frame of Reference UIDs are present and equal, and `SyncScene::set_point` now calls it, so the UID rule lives in one function. `closest_coplanar` chooses the image whose Image Position (Patient) is nearest the source's, with a strict `<` so a tie keeps the lower index, and refuses when `abs(dot)` of the normals is not above `COPLANAR_DOT`, 0.9. `reference_segment` cuts the source's corner-pixel edges with the target plane, choosing the edge pair by `PLANE_EPSILON`, 1e-3, and answers two points in the target's index space. `LinkError` is `NotCoplanar`, `Parallel` and `Degenerate`. The folder viewer's `inspect_json`, and so `POST /file`, gains `frameOfReferenceUid`, reported empty unless it is digits and `.`, and `planes`, one token of thirteen numbers per frame written with `{:e}`, or `null` when `FrameGeometry::derive` refuses, capped at `FRAME_LIST_CAP`. A new `POST /link` in `examples/folder-viewer/src/link.rs` rebuilds each token through the `ocelli-pixel` constructors, calls the library, and answers per target an index, a line and a reason, behind its own declared-length `LINK_BODY_CAP` and an `X-Ocelli-Error: link` refusal. The half-pixel shift between index space and page pixels moved onto `ImagePoint::to_index` and `from_index` in `value.rs`, so F-211's `measure_frame` and the new handler share one `PAGE_PIXEL_CENTRE`. The image page gains a Link menu with Scroll, Window and Zoom, off at load, over every visible viewport with the outlined one as the source, and a Reference lines toggle, on at load, drawing into a sibling `svg.ref-lines` layer under the marks. The request loop is page-global, one in flight, and a reply applies to a target only when its ticket, `loadToken` and `viewIndex` are those sent. Window copies on release, preset and Reset, sending no preset to a non-CT target and no window to or from a non-monochrome image. Zoom copies the source's scale over each target's own fit and never pan. The corner of a non-monochrome image reads `Window not applicable` at every layout. The page treats a token as opaque text and computes no geometry.
+
+**HLD sections implemented.** None directly. Section 10's split keeps the tool state machines in the page and the geometry in Rust, section 16's `Index` and `World` spaces type the segment, and section 5.1's one call per user intent is the coalesced `/link`.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-viewport` (`link.rs` new, `sync.rs`, `lib.rs`), `examples/folder-viewer` (`link.rs` new, `preview.rs`, `serve.rs`, `value.rs`, `measure.rs`, `lib.rs`, the page, Use and More pages, and its tests), `bin/ocelli.sh`, `scripts/guards/catalogue.py`, `docs/runbooks/guard-verification.md`, `docs/lld/viewport.md` and `README.md`.
+
+**Tests added.** `crates/ocelli-viewport/tests/link.rs`, module `link`: `the_thresholds_are_the_oracle_constants`, `closest_keeps_the_lower_index_on_a_tie`, `coplanar_needs_more_than_0_9`, `orthogonal_series_do_not_scroll`, `an_empty_stack_is_degenerate`, `axial_cuts_coronal_at_row_10`, `sagittal_cuts_coronal_at_column_20`, `parallel_planes_have_no_line`, `an_empty_uid_links_nothing` and `a_singleton_axis_target_has_no_line`, and module `epsilon`, four cases either side of the parallel and perpendicular thresholds. `examples/folder-viewer/tests/preview.rs`: `inspect_reports_the_plane_token`, `the_frame_list_caps_agree`, `a_plane_field_is_at_most_24_characters`, `a_plane_token_round_trips`, `inspect_writes_at_most_the_frame_list_of_planes`, the `link_route_` tests for the axial level, the nearest position, another frame, a missing plane, each target, a malformed body, the line on the moved image, the scroll refusal first and a target past the frame list, `link_body_cap_admits_the_largest_body` and `the_page_links_viewports`. `examples/folder-viewer/tests/browser/link.mjs` runs under `bin/ocelli.sh gate viewer-browser`, with refuse probe `viewer-browser.link-stale-line`.
+
+**Fixture provenance.** No grey-value arithmetic is added, and the line and index arithmetic is hand-computed. AC1 to AC7 and AC23 use the plan's axial, coronal `C` and sagittal `G` planes, derived from PS3.3 C.7.6.2.1.1, Equation C.7.6.2.1-1, with Pixel Spacing row spacing first per PS3.3 10.7.1.3, and the frame rule from PS3.3 C.7.4.1.1.1. Axial at z = 5 cuts `C` at target index `(0,10)` and `(127,10)`, and `G` cuts `C` at `(20,0)` and `(20,12)`. AC8's token for synthetic slice 3 is `0e0,0e0,7.5e0,1e0,0e0,0e0,0e0,1e0,0e0,7e-1,5e-1,96,128`, and AC10's line on `C` from slice 2 is `[0.5,10.5,127.5,10.5]` in page pixels. The epsilon cases were computed in exact fractions. Pass 1 re-derived AC1 to AC7 and AC23 with an independent Python reference, and pass 2 re-derived the epsilon and tilted-stack values the same way. The rules are transcribed from cornerstone3D 5.8.2 and the tests show agreement with that transcription, not a differential measurement against the oracle.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus corpus, corpus-tests and viewer-browser, in the worker's own build directory, recorded for tree 335c951.
+
+**Corpus.** pass, 95 verified, 0 missing, 0 mismatched, 17 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A and B, because the page opens no device and the geometry is not drawn by a GPU. Tier C full, because the geometry is `f64` CPU arithmetic in the local process and each cell's grey image is F-206's CPU preview. The library module gives the same answer on every tier, since it creates no device.
+
+**LLD updated.** `docs/lld/viewport.md`, a new "Linked viewports" section naming `same_frame_of_reference`, `closest_coplanar`, `reference_segment`, `COPLANAR_DOT` and `PLANE_EPSILON` with their cornerstone3D 5.8.2 source, and the `SyncScene` paragraph now naming the shared UID rule.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer": the opening sentence says Link can make the other viewports follow the outlined one, step 4 ends with what Scroll, Window, Zoom and Reference lines do and their refusals, step 6's layout group gains Link and Reference lines with no key, and the limits paragraph gives `Window not applicable` and the 65536-image link limit. `examples/folder-viewer/src/more.html`, `#reference` names `link::reference_segment` as what the image page draws its lines with and says it projects the plane, and `#series` says the image page has linked scroll, synced window and synced zoom through `ocelli_viewport::link`, keeping priors and the `npm run dev` example's "unavailable" wording. `examples/folder-viewer/src/use.html`, chapter "Geometry and spacing", gains a paragraph and example naming the three functions, the two constants and the three refusals.
+
+**Deviations from the design plan.** The operator answered the plan's five questions: the geometry in `ocelli-viewport`, no coronal synthetic series with the reference-line observation on the operator's own MR study, one link set with Scroll, Window and Zoom off and Reference lines on, zoom without pan, and targets updated on release. The lead amendments recorded in the plan held: the colour-target rule, geometry through `POST /file`, `{:e}` tokens, a UID per listed image, `LINK_BODY_CAP`, the shared `PAGE_PIXEL_CENTRE`, the sibling `ref-lines` layer, `LinkError`'s three refusals and AC20 to AC23. Pass 1's D1, a reference line kept after the outlined viewport became a cell with no image, was fixed by clearing every line when there is no source image, and is held by a third browser check. That remediation added `examples/folder-viewer/tests/browser/link.mjs`, `scripts/guards/catalogue.py`, `docs/runbooks/guard-verification.md` and `bin/ocelli.sh`, outside the plan's amended write set, and the `viewer-browser` gate now runs three browser checks, `aspect.mjs`, `readout.mjs` and `link.mjs`. Implemented by a Claude implementer agent. Two review passes by independent Claude agents.
+
+**Notes for future sessions.** AC17, browser B2 on the operator's pseudo-PHI MR study on the operator's host, is left for sprint close as an external observation, and that study never enters the repository. Pass 1 observed B1 and B3 equivalents on a synthetic in-memory folder, covering AC16, AC18 and AC19, but AC16 to AC20 and AC22 are owed the recorded sprint-close run the plan asks for, and AC20 and AC22 were exercised by neither pass. Pass 2's four nitpicks stand: README step 4 has one line past the wrap width, an `It` in the LLD's last paragraph reads ambiguously, `link.mjs` does not check that the outlined cell became 5, and the epsilon tests bracket rather than pin the thresholds, which `the_thresholds_are_the_oracle_constants` pins by value. The nothing-shown branch of `link.mjs` has no guard probe, as the runbook declares.
+
+## F-226, Release by series and study, completed 2026-11-07
+
+**What was built.** `Lru::remove_range` releases every live key in a range in ascending key order, gives back the bytes each entry was admitted with, and does not move the use tick, so it is `remove`'s rule applied to a range and not an eviction. `ImageCache::release_series` releases every frame of one series over the range `FrameKey::new(series, 0, 0)..=FrameKey::new(series, u32::MAX, u32::MAX)` and returns one `CacheEvent::Released { series, frames, bytes }`, or nothing when the series held nothing, with `frames` saturating at `u32::MAX`. `BrickCache::release_volume` releases every brick of every level of one volume and returns a `ReleaseSummary { entries, bytes }`, with no ring kind because volumes and bricks have no event. `KIND_RELEASED` is 7, its payload is series `u64` at 0, frames `u32` at 8, a zero `u32` at 12 and bytes `u64` at 16, little-endian, with `viewport` `u32::MAX`. `RING_EVENT_KINDS` grows to seven and `generated.ts` is regenerated. `@ocelli/core`'s `decodeNamedEvent` decodes kind 7 as `cache.released` with `CacheReleasedPayload`, refuses a payload under 24 bytes, and lists the name in `OCELLI_EVENTS` and `UNMAPPED_EVENTS`, because cornerstone3D 5.8.2 reports a removed image per image. No TypeScript release function is added, which is F-231's. The cache has no study, so a study is released by its owner's series and volumes. The folder viewer gains `POST /forget`, a body of held ids one per line, every line parsed before anything is removed, answering `{"files","frames","bytes","unknown"}` with the JSON content type of the other routes. `Viewer::forget` removes each file with `Lru::remove` and its frames with one `Lru::remove_range` over `HeldKey`, through `forget_frame` and `reclaim_held`, so the frame order, the counts and the free buffer lists stay as if the file had never been held. It replaced the test-only `forget_file`, so there is one forget path. A decode in flight cannot undo a forget: `preview_source` counts each handout of posted bytes in `in_flight`, a forget of a counted id dooms it, and `store_frame_with` stores nothing for a doomed id. The page sends the previous open's ids on every new open, folder or synthetic study, and `ensureFile` posts only a file of the current open, so a late `410` does not post the old file again. Each page load makes a random 32-digit token sent as `X-Ocelli-Page` with every `/file` post, and `pagehide` sends one 37-byte beacon, `page <token>`, after which `Viewer::forget_page` forgets every file posted under that token through the same `forget_ids`. `sweep_pages` keeps the token record bounded once eviction leaves it stale.
+
+**HLD sections implemented.** Section 8's explicit release beside eviction in the decoded tier, section 20's `Lru` with a range release that allocates only on the release call, and section 17.3's fixed 48-byte event stride for kind 7. Decision D4 holds, since the release is one event per series in the polled ring.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-cache` (`lru.rs`, `image.rs`, `brick.rs`, `lib.rs` and three test files), `ocelli-viewport` (`boundary.rs`, `tests/typegen.rs`), `@ocelli/core` (`events.ts`, `events.test.ts`, `generated.ts`, `index.ts`), `examples/folder-viewer` (`held.rs`, `serve.rs`, the page, the Use and More pages, `tests/preview.rs` and the new `tests/browser/forget.mjs`), `bin/ocelli.sh`, `scripts/guards/catalogue.py`, `docs/runbooks/guard-verification.md`, `docs/lld/cache.md`, `docs/lld/events.md`, `docs/lld/public-api.md`, `docs/lld/viewport.md` and `README.md`.
+
+**Tests added.** `crates/ocelli-cache/src/lru.rs`: `remove_range_returns_the_keys_ascending_and_releases_their_bytes` (AC1), `remove_range_releases_the_bytes_admitted_and_not_the_bytes_reported_now`, `an_inverted_or_equal_excluded_range_releases_nothing_and_changes_nothing` and `a_release_over_every_bound_shape_returns_exactly_the_keys_named`. `crates/ocelli-cache/tests/invariants.rs`: both properties gain `RemoveRange`, drawn unsorted, and `SetBudget` (AC2). `crates/ocelli-cache/tests/image_cache.rs`: `release_series_releases_one_series` (AC3). `crates/ocelli-cache/src/image.rs`: `a_released_event_encodes_the_series_release_payload` (AC4). `crates/ocelli-cache/tests/bricks.rs`: `release_volume_releases_every_level_and_leaves_other_volumes` (AC8). `packages/core/src/events.test.ts`: kind 7 decoded from AC4's bytes, a 23-byte payload and kind 8 null, seven ring kinds (AC5 to AC7). `examples/folder-viewer/src/held.rs`: `a_forget_during_a_decode_is_not_undone_by_its_store` (AC12), `a_forgotten_file_leaves_the_cache_as_if_never_held`, `page_records_of_evicted_files_are_swept` and `a_sweep_keeps_an_id_whose_frame_is_held`. `examples/folder-viewer/src/serve.rs`: `a_forget_during_a_pooled_decode_is_not_undone_by_its_store`, `a_forget_during_a_value_decode_is_not_undone_by_its_store`, `a_forget_during_a_direct_decode_is_not_undone_by_its_store` and `a_forgotten_decode_that_waits_for_grey_answers_gone`. `examples/folder-viewer/tests/preview.rs`: `forget_drops_files_and_frames` (AC10), `forget_refusals` (AC11) and `forget_by_page_drops_only_that_pages_files`. `examples/folder-viewer/tests/browser/forget.mjs` (AC13 to AC15) runs under `bin/ocelli.sh gate viewer-browser`, catalogued as `viewer-browser.forget` with refuse probes `viewer-browser.forget-left-folder` and `viewer-browser.forget-late-post`.
+
+**Fixture provenance.** No pixel or geometry arithmetic, so no DICOM-section fixture is owed. The byte counts are hand-computed in each test: AC1's keys 1 to 9 at 2^(k-1) bytes sum to 511 and `3..=6` releases 60, leaving 451, AC3 under the pass 2 amendment holds a frame at each end of the series range, 192 bytes released to 32, and AC8 releases 56 of 120. AC4's wire image is written byte by byte and the TypeScript test reads the same bytes. Review passes re-derived each figure and applied the plan's named mutations, among them the range ending at `(series + 1, 0, 0)` inclusive, a skipped `used` release, a store that ignores `doomed`, a removed `ensureFile` guard and one beacon per id, and each went red.
+
+**Verification.** Feature profile on the worker tree, 28 floor gates plus corpus, corpus-tests and viewer-browser, in the worker's own build directory, recorded for tree 9e9effe. The `viewer-browser` gate now runs four browser checks, `aspect.mjs`, `readout.mjs`, `link.mjs` and `forget.mjs`.
+
+**Corpus.** pass, 95 verified, 0 missing, 0 mismatched, 17 syntax decode digests match.
+
+**Tier coverage.** Tiers A, B and C full, because every release is host memory: `release_volume` releases host bricks and touches no texture, which stays F-043's and F-122's, and the decoded tier and the folder viewer process are host memory on every tier. wasm-bindgen is not touched and no pixels cross the boundary.
+
+**LLD updated.** `docs/lld/cache.md`, release through `remove_range`, `release_series` and `release_volume`, the `Released` variant and kind 7's payload, why study membership is the caller's, the F-122 boundary, and the folder viewer's `/forget`, the in-flight rule, the page forgetting on open and the page token on leaving. `docs/lld/events.md`, kind 7 in the ring kinds table, its `UNMAPPED_EVENTS` reason and "above 7" for null. `docs/lld/public-api.md` and `docs/lld/viewport.md` correct their ring kind counts.
+
+**User-facing documentation.** `README.md`, the folder viewer section gains a paragraph on forgetting the folder left, the late reply, a forgotten decode answering 410 Gone or 503, and the page token beacon. `examples/folder-viewer/src/use.html`, 5.3 "The event ring" says seven kinds and names `cache.released`, and 12 "Cache and volume" gains a sample of `release_series` and `release_volume` and the sentence that a study is released by its owner's series. `examples/folder-viewer/src/more.html`, `#worker` says the viewer forgets through `POST /forget` and one beacon, and that `cache.released` reports a Rust release while the worker's own frame cache and `releaseSeries` and `releaseStudy` arrive with F-231.
+
+**Deviations from the design plan.** The plan's nine decisions were lead decisions under the operator's delegation of 2026-11-05, and Q1 was the operator's answer, option A, which moved the TypeScript release functions to F-231. The lead amendments recorded in the plan held. Pass 2 amended AC3's fixture to occupy both range ends. For the folder viewer half, against F-209's tree: there is no `restore_file`, because `preview_source` hands out shared posted bytes, so the in-flight count is taken at that handout and only `store_frame_with` checks `doomed`. The forget goes through `forget_frame` and `reclaim_held`, it is the one forget path, its refusals are catalogued and the census stays at zero unwatched, and `forget.mjs` is wired into `viewer-browser`. The implementer measured in Chromium that the 64 KiB keepalive limit is shared by every beacon in flight from the page, and two beacons of 1,700 ids, 35,699 bytes each, returned true and then false, so decision 7's chunked beacons could never both arrive. The lead ruled that leaving the page forgets by a per-load page token in one 37-byte beacon, and AC15 was restated: a 3,400-file synthetic folder sends exactly one beacon, after which `GET /held` counts none of that page's files while a second page's are unchanged. A forgotten decode whose render waited for grey room stored nothing, so it answers 410 Gone, or 503 if the wait runs out. Implemented by GLM for library rounds 1 and 2 and by Claude implementer agents for the library test fix and the whole folder viewer half. Ten review passes by independent Claude agents, passes 1 to 4 on the library half with pass 4 clean and passes 5 to 10 on the viewer half with pass 10 clean, 0 defects, 0 smells and 0 nitpicks.
+
+**Notes for future sessions.** AC16, F-216's `viewer.open` and `viewer.resident_memory` thresholds after opening two folders in sequence, is a sprint verification observation on the F-216 host and is left open. F-224 and F-231 are stacked on this story's library half, and F-224's viewer half builds on the F-226 worktree, which is kept for that reason. F-122 must call `release_volume` and `remove_range` rather than add a second release path. Pass 4's N2 stands: no test pins that `cache.released` stays unpaired with `VOLUME_CACHE_VOLUME_REMOVED`, which is unavailable today. The 410, beacon count, beacon size, held-after and not-observed branches of `forget.mjs` have no guard probe, as its catalogue entry declares.
+
+## F-229, JPEG XL decoding, completed 2026-11-07
+
+**What was built.** A sixth decoder family in `crates/ocelli-codec/src/jpegxl.rs`, registered by `register_jpegxl_decoders`, decodes PS3.5 A.4.12's JPEG XL Lossless (`.110`) and JPEG XL (`.112`) through `jxl-oxide` 0.12.6 and `jxl-render` 0.12.4 with default features off. `KNOWN_TRANSFER_SYNTAXES` grows from sixteen to nineteen, seventeen of them available. JPEG XL JPEG Recompression (`.111`) is known and unavailable, the same shape as Deflated Explicit VR Little Endian, because `jxl-jbr` 0.2.1 `src/reconstruct.rs:457` panics on a bit-flipped reconstruction stream and the release profile aborts on panic. That is the operator's answer: `.111` stays unavailable until jxl-oxide issue 512 is fixed in a released version, and no Ocelli path calls `reconstruct_jpeg` or any other `jxl-jbr` entry point. Lossless integer grids are read sample by sample and written as stored values range-checked against Bits Stored, never through `write_to_buffer`, which rescales a 12-bit 13 to 208. Float grids are quantised by `quantise_lossy_sample`, `floor(v * (2^BitsStored - 1) + 0.5)` clamped, with a non-finite sample refused. A pre-check in `jpegxl_icc.rs` strips a container to its `jxlc` or ordered `jxlp` codestream so no auxiliary box reaches `jxl-oxide`, parses the header with the dependency's own `ImageHeader::parse`, and refuses an embedded ICC profile or any extra channel before a parse that could grow, failing closed on a header it cannot read. Each decode runs under `AllocTracker::with_limit` at 26 times `FrameDesc::output_len()`, the measured worst peak doubled. `ocelli-pixel` gains `PhotometricInterpretation::Xyb` as a codec-owned colour space and `frame_open` maps `XYB` to it. The corpus gains five synthetic rows, the oracle declares them unsupported by cornerstone3D 5.8.2 from a measured run, the folder viewer registers the family, and `scripts/unsafe_allowlist_check.py`'s string rule no longer ends a string at a continuation.
+
+**HLD sections implemented.** `docs/hld/18-codec-registry.md` section 21, explicit runtime registration of one more family. `docs/hld/12-workspace-and-build.md` section 15.2, departed from under D-28. DICOM PS3.5 2026d sections 8.2.15 and 10.19 and Annex A.4.12, and PS3.3 2026d C.7.6.3.1.2 for XYB.
+
+**Deviations.** D-21, amended to admit JPEG XL among the adapters that may allocate bounded library-owned storage, with F-229 in its Raised column. D-28, the direct `jxl-oxide`, `jxl-render`, `jxl-bitstream` and `jxl-oxide-common` pins in place of dicom-rs's `jpegxl` feature, whose inventory registry section 21 says does not work on WebAssembly.
+
+**Crates / packages modified.** `Cargo.toml`, `Cargo.lock`, `ocelli-codec` (`Cargo.toml`, `jpegxl.rs` and `jpegxl_icc.rs` new, `lib.rs`, `registry.rs`, `tests/jpegxl.rs` new, `tests/registry.rs`, fourteen `.jxl` fixtures, two reference `.raw` files and `tests/fixtures/generate_jpegxl.py`), `ocelli-pixel` (`stored_pixel.rs`, `color.rs`, `lut.rs`, two test files), `ocelli-dicom` (`frame_open.rs`, two test files), `ocelli-render` (`colour.rs`), `ocelli-viewport` (`snapshot.rs`), `examples/folder-viewer` (`preview.rs`, the Use and More pages, `tests/preview.rs`), `tools/oracle` (`src/produce.rs`, `unsupported.json`), `corpus/manifest.tsv`, `corpus/decode-digests.tsv`, `scripts/corpus_synth.py`, `scripts/corpus_check.py`, `scripts/unsafe_allowlist_check.py` and their tests, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`, `docs/SOURCE-POLICY.md`, `docs/hld/DEVIATIONS.md`, five LLDs, the dicom-expert skill and its adapter, `CLAUDE.md` and `README.md`.
+
+**Tests added.** `crates/ocelli-codec/tests/jpegxl.rs`: conformance `jpegxl_lossless_16_matches_the_reference` (AC4), `jpegxl_lossless_12_keeps_stored_values` (AC5), `jpegxl_lossless_rgb8_matches_the_reference` (AC6), `jpegxl_lossy_stays_within_the_recorded_bound` (AC10), `lossless_only_refuses_vardct_and_xyb` (AC11), `descriptor_mismatches_refuse` (AC12), `unsupported_codestreams_report_unavailable` (AC13), `oversized_header_refuses_before_render` (AC17) and `jpegxl_recompression_is_unavailable` (the operator's AC7b), fixture `fixture_lossy_quantiser` (AC9), property `malformed_jpegxl_never_panics` (AC16), and the pre-check and container family named in `docs/SOURCE-POLICY.md`'s malformed-input table. `crates/ocelli-codec/tests/registry.rs`: `registering_jpegxl_twice_refuses` and `preflight_is_atomic` (AC3), the catalogue and six-family tests extended (AC1, AC2). `crates/ocelli-pixel/tests/color.rs`: `xyb_is_codec_owned` (AC14). `crates/ocelli-dicom/tests/frame_open.rs`: `xyb_opens_as_the_named_photometric` and `ybr_full_422_reported_as_rgb_is_converted_once`. `examples/folder-viewer/tests/preview.rs`: `a_jpegxl_lossless_frame_draws`, `a_jpegxl_colour_frame_refuses_not_monochrome`, `a_single_sample_colour_photometric_refuses_not_monochrome` and `every_registration_in_codecs_decodes_a_monochrome_frame`. `scripts/tests/`: the unavailable-row decode-digest refusals, `test_jpegxl_codestreams_are_jpeg_xl`, `test_jpegxl_recompression_is_unavailable`, the three encoder refusals and `test_string_continuation_does_not_blank_following_code`.
+
+**Fixture provenance.** AC9's quantiser fixture is hand-computed and cites PS3.5 8.2.15 for Bits Stored: at 8 bits 0.5 gives 128 from 127.5 and 0.498 gives 127, -0.25 clamps to 0 and 1.25 to 255, at 12 bits 0.5 gives 2048 from 2047.5. AC5 pins the 12-bit trap by value, sample index 2 decoding to 1 and not 16, and the maximum to 4095 and not 65535. The lossless fixtures were encoded by imagecodecs 2026.10.10 with libjxl 0.12.0 from the existing synthetic references, so the round trip is checked against an implementation independent of `jxl-oxide`. AC10's bound is 27 stored units, one and a half times the 18 measured through imagecodecs `jpegxl_decode`. XYB cites PS3.3 C.7.6.3.1.2, which gives no matrix, so the codec owns the conversion.
+
+**Verification.** Feature profile on the worker tree in its own build directory, recorded for tree 88fc77925e41e01b0005fb3e6979ddc024c1d709: floor (28 gates), corpus, corpus-tests and gate wasm. The shipped module measured 2,179,402 bytes against its ceiling of 2,258,755 and the decode module 16,455 against its baseline of 16,455, with no budget file edited, which is AC20's wasm half. `THIRD_PARTY_LICENSES` and `THIRD_PARTY_NOTICES` are unchanged, because neither `ocelli-wasm` nor `ocelli-native` reaches `ocelli-codec`. AC24's oracle gate passed alone on the worker branch at review pass 10's head `a087f610`, with seven unsupported source rows, five of them JPEG XL.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tiers A, B and C full, because decode is CPU work in the process or worker that owns the bytes and hands the same stored bytes to every tier. No wasm module runs the decoder today, so wasm32 byte identity is argued from the integer path rather than observed (AC21). wasm-bindgen is not touched and no pixels cross the boundary.
+
+**LLD updated.** `docs/lld/codecs.md`, the JPEG XL family, `.111` known and unavailable with its reason, the pre-check, exact stored values and the quantiser, the refusal table, lossy modular not detected, signed samples refused, the allocation bound and the forward wasm cost. `docs/lld/corpus.md`, the five rows, the imagecodecs and libjxl producer and the read-back routes. `docs/lld/oracle.md`, the five declared-unsupported rows and corrected counts. `docs/lld/pixel-pipeline.md` and `docs/lld/frame-open.md`, `XYB` as a codec-owned colour space.
+
+**User-facing documentation.** `README.md`, the local series viewer section says the preview registers all six families and opens the monochrome frames of eighteen of the nineteen known syntaxes, with JPEG XL JPEG Recompression refused for every frame. `examples/folder-viewer/src/use.html`, the registry section says nineteen UIDs and six functions, its code block calls `register_jpegxl_decoders`, its table gains the three JPEG XL rows, and seventeen are available. `examples/folder-viewer/src/more.html`, a new partial `#jpegxl` section. `CLAUDE.md`'s transfer-syntax and family counts were brought to the measured numbers.
+
+**Deviations from the design plan.** The operator's answer after the robustness stop replaced the `.111` reconstruction route: `.111` is known and unavailable until jxl-oxide issue 512 is fixed, and AC7, AC8 and AC15's `.111` decoding text gave way to AC7b. The lead amendments after passes 2 and 3 replaced the hand-written ICC walk with the dependency's own header parser, refused on the ICC flag and on any extra channel rather than on a size, and handed `jxl-oxide` the codestream alone, so `jxl-image` is not direct and `jxl-bitstream` and `jxl-oxide-common` are, as D-28 records. The pass 7 ruling fixed the unsafe scanner's string rule in this story and named base commit `4165d1e8` as the audit's scope. The pass 8 ruling deleted the sentence naming which builds compile the `+simd128` regions, and moved the scanner's older blind spots to their own story. The viewer and documentation half used the measured numbers, registered the family in the folder viewer, and withdrew the serialisation clause after F-215 and F-225. **A correction, from F-233's lead ruling of 2026-11-07:** F-229's eighth review pass, defect D2, and the decision 4 premise F-233's plan took from it, said the SIMD verification build's `+simd128` flag never reached the dependencies. F-233 measured that wrong under fat LTO, where code is generated once at the link and the linked modules carry the same SIMD instructions either way. What was missing was each dependency's own `cfg(target_feature = "simd128")` code paths, which a flag passed after `cargo rustc --` leaves uncompiled. Pass 8's review file is historical and is not edited. Implemented by GLM across many fix rounds, with Claude rounds for some fixes, and the viewer and documentation half by GLM with self-review. Fourteen review passes by independent Claude agents, passes 1 to 11 on the library half with pass 11 clean and passes 12 to 14 on the viewer and documentation half with pass 14 clean, 0 defects, 0 smells and 1 nitpick.
+
+**Notes for future sessions.** `.111` turns on in its own story once a released `jxl-oxide` fixes issue 512, and that story builds the reconstruction route through `JpegDecoder::baseline()`. Signed samples and lossy modular detection under `.110` are follow-up decisions recorded in `docs/lld/codecs.md`. If a later story links `ocelli-codec` into a wasm module, F-220's generator picks up the `jxl-*` crates and `brotli-decompressor`, and `alloc-stdlib`, which ships no licence file, then needs a pinned text in `ci/notices/sources.toml`, at a measured forward cost of 940,335 bytes. Pass 14's N1 stands: `examples/folder-viewer/tests/preview.rs:628` cites PS3.5 G.2 and G.3.1 for an RLE header, and `crates/ocelli-codec/tests/rle.rs:74` cites G.2 through G.5, where the citation should read PS3.5 G.3 to G.5. F-232, F-233, F-234 and F-238 are stacked on this story.
+
+## F-232, Unsafe guard soundness, completed 2026-11-07
+
+**What was built.** `Cargo.toml` gains `[workspace.lints.rust] unsafe_code = "forbid"`, one level above HLD 27.1's literal `deny` because an inner `allow` silences a deny and cannot silence a forbid, and Cargo passes it to rustc for every lib, bin, test, bench, build script and example target of every member that inherits the table. Every one of the 16 member library roots carries `#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects into each doctest because no lint table reaches a doctest. `scripts/lint_policy_check.py` stops accepting either mechanism and requires both the table at `forbid` and the script in the `unsafe` gate, and it refuses a library root without the doctest attribute as the first line after the crate's leading `//!`, `//` and blank lines, reading the root as rustc does, UTF-8 split on LF with one trailing CR removed, and refusing a header that holds anything but printable ASCII and tab. `scripts/unsafe_allowlist_check.py` replaces its three regexes with one left-to-right tokenizer over comments, nested block comments, every string, raw string, byte and C string form, character and byte literals, lifetimes and raw identifiers, reads doc text as comment text, reports `unsafe` as a keyword token including inside an attribute such as `#[unsafe(no_mangle)]`, refuses an unterminated literal, comment or attribute by file and line, and refuses `allow`, `expect` or `warn` of `unsafe_code`, inner or outer, with any whitespace or comment between `#` and `[`.
+
+**HLD sections implemented.** `docs/hld/24-agent-code-standards.md` section 27.1's `[workspace.lints.rust]` row, at `forbid`, and section 27.2 R5's allow-list, unchanged.
+
+**Deviations.** none. The table implements 27.1's row at a stronger level, and R5's two allowed files are unchanged.
+
+**Crates / packages modified.** `Cargo.toml`, one attribute line in the library root of each of the 16 members (`ocelli-cache`, `ocelli-codec`, `ocelli-compute`, `ocelli-core`, `ocelli-dicom`, `ocelli-geom`, `ocelli-native`, `ocelli-pixel`, `ocelli-render`, `ocelli-seg`, `ocelli-viewport`, `ocelli-volume`, `ocelli-wasm`, `examples/example-server`, `examples/folder-viewer`, `tools/oracle`), `scripts/unsafe_allowlist_check.py`, `scripts/lint_policy_check.py`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md` and `docs/lld/guards.md`.
+
+**Tests added.** `scripts/tests/test_unsafe_allowlist_check.py`, class `Tokenizer`, 15 unit tests: one per trigger `test_unsafe_after_quote_char_literal` (AC1), `test_unsafe_after_escaped_quote_char_literal` (AC2), `test_unsafe_after_raw_string_ending_in_backslash` (AC3), `test_unsafe_after_raw_string_holding_a_quote` (AC4) and `test_unsafe_after_line_comment_with_a_quote` (AC5), `test_no_keyword_inside_literals_or_comments` and `test_lifetime_is_not_a_char_literal` (AC7), `test_unterminated_literal_is_refused` (AC8), `test_weakening_attribute_is_refused` and `test_weakening_attribute_with_space_or_comment_is_refused` (AC14), and the attribute, line count and doc text tests. `scripts/tests/test_guard_readers.py`, class `EveryLibraryRootForbidsUnsafeDoctests`, 11 unit tests for the attribute's presence and position, the root read as rustc reads it and the printable header. Ten new guard probes: `unsafe.after-quote-char`, `unsafe.after-escaped-quote-char`, `unsafe.after-raw-backslash`, `unsafe.after-raw-quote`, `unsafe.after-comment-quote` and `unsafe.weakening-attribute` (AC14, AC16), and `lint-policy.unsafe-code-not-forbidden`, `lint-policy.unsafe-script-dropped-beside-the-lint`, `lint-policy.doctest-forbid-removed`, `lint-policy.doctest-forbid-behind-a-separator` and `lint-policy.unreadable-library-root` (AC15), with `lint-policy.unsafe-gate-named-only-in-a-comment` updated to the new fragment.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the worker tree, recorded for tree e3ed74afc6578819a1eba78389c88144d564f125: floor (28 gates), corpus, corpus-tests and guards-deep. AC6 is recorded in review pass 1: the 8 new tokenizer tests then present failed against F-229's scanner at `8fb69ae7`. AC11 and AC12 are recorded in pass 1 and pass 2: a planted `unsafe` block in a lib, integration test, example, bench, build script and wasm32 lib, and then a bin, each fails with "usage of an `unsafe` block", and `#![allow(unsafe_code)]` gives E0453. Pass 4 recorded the doctest attribute against 50 doctest shapes, each red with the attribute and green without. AC10 was not recorded on the branch and was measured at integration on 2026-11-07, in a `git archive` copy of `c7f6212c`: one `unsafe` block planted in each of pass 8's six spans, `dicomweb.rs` after line 422, `caps.rs` after 2486, `canvas.rs` after 556, `reply.rs` after 139, `series.rs` after 208 and `preview.rs` after 1336, was named by the new scanner at all six lines in the worktree and `--staged` modes, exit 1, while F-229's scanner named only the `canvas.rs` and `preview.rs` plants. The unplanted copy printed OK over 278 files with 104 and 0 vendored.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match, after replacing a stray local `.venv` in the worktree with the shared one, an environment fix with no tracked change.
+
+**Tier coverage.** Tiers A, B and C n/a, a source lint and a script. wasm-bindgen is not touched, and `#[wasm_bindgen]` expansions compile under the forbid on wasm32.
+
+**LLD updated.** `docs/lld/guards.md`, the `unsafe_code` paragraphs: both mechanisms required, the tokenizer in place of the three regexes, the five triggers and their probes, the doctest attribute and its position rule, and the sequence the first story writing an allowed file must follow.
+
+**User-facing documentation.** no change. `README.md`, `examples/folder-viewer/src/use.html` and `examples/folder-viewer/src/more.html` do not describe the unsafe rule or its guard, measured by `grep -n unsafe` over the three files.
+
+**Deviations from the design plan.** The pass 1 rulings made the scanner report `unsafe` inside an attribute and find a weakening attribute through whitespace or a comment. The pass 2 rulings had the scanner read doctest fences, and the pass 3 ruling withdrew that after pass 3 measured 50 doc items rustdoc compiles that the scanner passed, moving doctest enforcement to the compiler through the crate-root attribute and a lint policy check that it is present. The pass 4 ruling accepts the attribute only at its fixed position, and the pass 5 ruling reads the root as rustc reads it and limits the header to printable ASCII and tab. The write set grew by one line in each member library root as a result. Implemented by GLM in rounds 1 and 2, then by a Claude implementer after the pass 3 ruling. Nine review passes by independent Claude agents, pass 9 clean, 0 defects, 0 smells and 2 nitpicks.
+
+**Notes for future sessions.** The operator still has to rule on CLAUDE.md's hard rule "No `unsafe` outside `ocelli-wasm/src/ring.rs` and `ocelli-core/src/cast.rs`", which names two allow-listed files that do not exist and says nothing of what enforces it. Review pass 1 proposed replacement wording, that rustc forbids it through `[workspace.lints.rust]` and `scripts/unsafe_allowlist_check.py` audits the files rustc does not reach, and since the pass 3 ruling any wording should also say that the crate-root attribute forbids it in doctests. CLAUDE.md is not edited by this story. The workspace has no doctests today, so the floor checks only that the attribute is present, and it acts on the first doctest anyone writes. The first story that writes `ring.rs` or `cast.rs` moves the table to `deny`, adds `#![forbid(unsafe_code)]` to every other crate root, puts `#[allow(unsafe_code)]` on that one `mod` declaration and teaches `lint_policy_check.py` the exception, as the scanner's docstring and `docs/lld/guards.md` record. Pass 9's two nitpicks stand. F-233 and F-238 are stacked on this story.
+
+## F-233, SIMD wasm builds compile SIMD code, completed 2026-11-07
+
+**What was built.** `bin/ocelli.sh native` steps 7 and 11 build the `+simd128` variants of `verify_jpeg2000` and `verify_htj2k` with `cargo build` under `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS="-C target-feature=+simd128"` instead of `cargo rustc -- -C target-feature=+simd128`, so the flag reaches every wasm32 crate and no build script or proc macro, and the SIMD variants keep their own target directory. No cargo config file carries the flag, so `wasm-pack` and the shipped and decode modules are unchanged. New steps 8 and 12 run `scripts/simd_variant_check.py`, which decodes the plain and SIMD linked modules with its own wasm reader and refuses a SIMD module holding no SIMD instruction the plain module lacks, a plain module holding any SIMD instruction, and a module that is missing or does not decode, and its OK line names every SIMD opcode found with its count. The arm prints thirteen steps where it printed eleven. Because the module check cannot tell the F-233 build from the pre-F-233 shape, `build_shape_problems` in the same script reads the native arm and refuses a SIMD variant step that does not pass `+simd128` through the target-scoped variable, and any step passing a target feature after `cargo rustc --`. The `native` gate runs the script's unit suite after the arm. D-22 is revised with what was measured, and `docs/SOURCE-POLICY.md` and `docs/lld/codecs.md` name the renumbered steps.
+
+**HLD sections implemented.** None new. `docs/hld/12-workspace-and-build.md` section 15.2's wasm feature note is unchanged, and the story corrects the verification build behind D-22's F-X013 evidence clause.
+
+**Deviations.** D-22, revised. Its evidence clause now records that F-X013's `+simd128` leg passed the flag to the example crate only, that under the release profile's `lto = "fat"` the HTJ2K module that shape builds holds the same 43 SIMD instructions as a build with the flag on every crate, `v128.load`, `v128.store` and `v128.const` only and no lane arithmetic, 30 of them in openjph-core functions, that the HTJ2K proof executes 25 of the 43, that the flag on every crate changes `cfg(target_feature = "simd128")` source selection in the six closure crates that have such code, openjph-core not among them, and that Node executed both modules on that build with `.201` and `.202` exact and the `.203` checksum unchanged. No new row.
+
+**Crates / packages modified.** No crate. `bin/ocelli.sh`, `scripts/simd_variant_check.py` (new), `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, `docs/runbooks/guard-verification.md`, `docs/hld/DEVIATIONS.md`, `docs/SOURCE-POLICY.md`, `docs/lld/build-targets.md` and `docs/lld/codecs.md`.
+
+**Tests added.** `scripts/tests/test_simd_variant_check.py`, 25 unit tests in three classes: `SimdOpcodes`, 12 tests of the wasm reader, among them a `0xfd` byte inside an immediate not read as an instruction, the sixteen-byte `v128.const` immediate, lane immediates consumed, a bulk-memory instruction not counted as SIMD, and an unknown opcode, a body without its final `end`, a truncated module, trailing bytes and a non-wasm file refused (AC3), `Check`, 6 tests of the module comparison (AC3), and `BuildShape`, 7 tests of the structural pin, the tracked runner passing, the pre-F-233 shape refused, one regressed step among correct ones refused and the variable carrying another feature refused. Two guard probes, `simd-variant.no-simd-instruction` and `simd-variant.cargo-rustc-shape`, each with a control, and the `simd-variant` budget entry at 19.
+
+**Fixture provenance.** no pixel arithmetic. The decoders' samples are checked by the existing `verify_jpeg2000` and `verify_htj2k` examples against their recorded truth.
+
+**Verification.** Feature profile on the worker tree, recorded for tree df93782e92eb317fb34eddc624bc8b6b491c1861, which is the tree of the reviewed head `7052d8d6` and already includes this branch's merge of `sprint/s46` at `39d669c0`: floor (28 gates), corpus, corpus-tests, `gate native` and `gate wasm`. `gate wasm` measured the shipped module at 2,179,402 bytes and the decode module at 16,455 bytes, with no budget edited (AC7). AC6, the recheck, passed in `gate native`: Node executed both modules of both examples on the corrected build. The per-crate `cfg` facts, the SIMD opcode inventory of each module and which instructions the proofs execute were measured once on 2026-11-07 with rustc 1.97.1 and are recorded in `docs/lld/build-targets.md`, not asserted on each run. AC4 is met by the structural pin, which refuses the pre-F-233 `bin/ocelli.sh` with four refusals. The CI `native` job half of AC6 runs on the first push.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tiers A, B and C n/a, codec build verification. The decoders are CPU code on every tier and steps 9 and 13 execute them. wasm-bindgen is not touched.
+
+**LLD updated.** `docs/lld/build-targets.md`, the native arm's thirteen-step table in place of the stale eight, the sentence on the JPEG 2000 and HTJ2K step groups, and a measured section on what the SIMD variant contains: the six crates' `cfg` reach, the opcode inventory of each module, what the proofs execute, and what the module check refuses and passes. `docs/lld/codecs.md` names steps 10 to 13 in place of 9 to 11.
+
+**User-facing documentation.** no change. `README.md`, `examples/folder-viewer/src/use.html` and `examples/folder-viewer/src/more.html` do not mention SIMD, measured by `grep -n -i simd` over the three files.
+
+**Deviations from the design plan.** The approved plan proved the fix by comparing each named crate's rlib between the plain and SIMD target directories. Review pass 1 showed that comparison proves nothing, because any flag change renames and rehashes every rlib, a build-script path leaks into metadata, and under fat LTO the code member is bitcode. The lead ruling after pass 1 replaced it with a check of the final linked modules and moved per-crate reach to a once-measured record. The lead ruling after the pass 1 repair added the structural pin, because the implementer measured that the module check cannot tell the F-233 build from the pre-F-233 shape. **The corrected premise.** The plan's decision 4, taken from F-229's eighth review pass, defect D2, said the `+simd128` flag passed after `cargo rustc --` never reached the dependencies, so that their code was compiled without it. That was wrong under fat LTO, where every crate is code-generated once at the example's link under the example's flags, so the linked modules carry the same SIMD instructions either way. What the old shape left out was each dependency's own `cfg(target_feature = "simd128")` code. F-233 measured that code compiled into the SIMD rlibs of glam, jpeg-decoder, jxl-grid, jxl-modular, jxl-render and memchr, and none of it linked into either module: no function of those crates holds a SIMD instruction, and neither module holds lane arithmetic. The plan's decision 4 and F-229's AS_BUILT entry carry the same correction, and pass 8's review file is historical and is not edited. The backlog row's title still names the rlib comparison and is kept as written. Implemented by GLM, then by a Claude implementer for the pass 1 repair and the structural pin. Three review passes by independent Claude agents, pass 2 clean on the story, 0 defects, 0 smells and 2 nitpicks, and pass 3 clean on the merge of F-232, 0 defects, 0 smells and 0 nitpicks.
+
+**Notes for future sessions.** Nothing asserts on each run that a dependency's `simd128` code is compiled in. The structural pin catches the pre-F-233 spelling and says nothing about a build that reaches the crates some other way, as `docs/lld/build-targets.md` records. A SIMD build of the shipped module is out of scope and belongs to the tier C stories under D-07's A7.1b note. Pass 2's two nitpicks stand. F-238 is stacked on this story.
+
+## F-212, Folder viewer four corners at parity, completed 2026-11-07
+
+**What was built.** The local folder viewer's four corners show the birth date, sex, age, study time, institution, slice location and thickness, kVp, mAs, TR and TE when the file has them. A new `examples/folder-viewer/src/corners.rs` formats them in the local process, `person_name_text` for PN, `dicom_date_text` for DA, `dicom_time_text` for TM, `age_text` for a stored AS or, with no Patient's Age, the age at the study date by Gregorian day count, and `exposure_mas` from Exposure, else Exposure in µAs, under the IS length and range rules, and the page no longer defines `personName` or `dicomDate`. `patient_orientation_letters` gives the edge letters from Patient Orientation on an image without Image Orientation (Patient), an unusable Image Orientation (Patient) is not rescued by it, and Anatomical Orientation Type `QUADRUPED` empties the letters from either attribute. Every new attribute read is non-failing, and a binary or sequence value leaves its corner field empty. The preview reply carries `X-Ocelli-Edge-Source` and the calibration that F-211's `choose_spacing` makes, `X-Ocelli-Calibration-Source`, `-Row` and `-Column`, so the scale bar and the length tool read one choice. The bar follows cornerstone3D 5.8.2's `ScaleOverlayTool` choice rule, is sized per viewport from `vp.dom.cell` inside `layoutViewport`, and says `at the detector` when the calibration source is `detector`.
+
+**HLD sections implemented.** None. The HLD specifies no corner overlay. `docs/hld/15-lut-chain.md` section 18 is not touched, and decision D3 holds because the change adds text fields and headers to the local example's HTTP replies.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/folder-viewer` (`ocelli-folder-viewer`): `src/corners.rs` (new), `src/lib.rs`, `src/measure.rs`, `src/preview.rs`, `src/serve.rs`, `src/page.html`. `README.md`.
+
+**Tests added.** `examples/folder-viewer/tests/preview.rs`, eleven tests: `person_name_text_follows_ps3_5_pn`, `dicom_date_text_follows_ps3_5_da`, `dicom_time_text_follows_ps3_5_tm`, `patient_age_follows_ps3_5_as`, `computed_age_is_the_age_at_the_study`, `exposure_mas_prefers_exposure_then_micro` and `patient_orientation_follows_ps3_3_c_7_6_1_1_1` as fixtures (AC1 to AC7), and `patient_orientation_is_used_only_without_image_orientation`, `inspect_json_reports_the_corner_fields`, `a_corner_attribute_that_is_not_text_does_not_refuse_the_scan` and `the_scale_bar_reads_the_length_tool_calibration` as integration tests (AC8, AC9, amendments 1 to 3). `the_page_offers_a_folder_picker` is extended for AC11. The preview binary runs 87 tests.
+
+**Fixture provenance.** no pixel arithmetic. The text fixtures cite PS3.5 section 6.2 Table 6.2-1 for PN, DA, TM, AS and IS, PS3.3 C.7.6.1.1.1 for Patient Orientation and Anatomical Orientation Type, PS3.3 C.7.6.2.1.1 for the quadruped axes, and PS3.3 10.7.1.3 for the Pixel Spacing order. AC13 was checked by the blind reviewer against PS3.5 and PS3.3 2026d on both sides of the pair, after implementation rather than before it as the plan asked, and the one correction it found, `CA` to `CD`, is in the plan and not in the code.
+
+**Verification.** Feature profile on the worker tree, recorded for tree f79b86f036d66d3bee5d5a03afdb6effd0b44237, which is the tree of the reviewed head `72978bff` and already includes this branch's merge of `sprint/s46` at `c008b425`: floor (28 gates), corpus, corpus-tests and `gate viewer-browser`, all pass. AC12, the scale bar measured in a browser on three worked cases, is a sprint-close click-through and is open.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tiers A, B and C n/a. The change is text and a scale bar on the local example page, drawn by the browser, and touches no rendering or compute path.
+
+**LLD updated.** none. The plan's `## LLD impact` is `none`, because the local example is not the published API.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer" step 8: the new corner fields, the computed age, edge letters from Patient Orientation and their absence for `QUADRUPED`, and the scale bar with its `at the detector` rule. `examples/folder-viewer/src/use.html` and `examples/folder-viewer/src/more.html` no change, as the plan records: `corners.rs` adds no library export and no More card covers corner text or a scale bar.
+
+**Deviations from the design plan.** F-212 was the operator's first head-to-head comparison. Two implementers built it from the same prompt against base `5451cb7d`: GLM in opencode on `work/f-212-glm`, commit `0e896db2`, and a Claude implementer on `work/f-212-claude`, commit `b236d6f2`. A blind reviewer, who did not read authorship data, scored them as A and B. A, the GLM side, had 6 defects, 4 smells and 3 nitpicks, among them a Gregorian day count that added 29 February twice and `QUADRUPED` ignored on the Image Orientation (Patient) path. B, the Claude side, had 1 defect, 2 smells and 2 nitpicks. The reviewer recommended B, and B is the side kept. The GLM worktree was removed and its branch kept. B's fix round, `84880ca7`, corrected README step 8's `at the detector` sentence and added a leap year day row and a non-square calibration row. Both reviewers found that the plan's quadruped list wrote `CA` where PS3.3 C.7.6.1.1.1 writes `CD`, and the plan is corrected to `CD`. That error did not reach the code. Lead amendment 8, F-239 first, was waived by the operator's decision to start the pair early, so F-212 lands before F-239 and its corner text has not been exercised on a colour image. Three review passes on the kept side by independent Claude agents: the blind pair B pass, pass 2 clean on the fix round, 0 defects, 0 smells and 2 nitpicks, and pass 3 clean on the merge of `sprint/s46`, 0 defects, 0 smells and 0 nitpicks. Pair A's review is kept as `.claude/reviews/F-212-pair-A.md` so the comparison is on record.
+
+**Notes for future sessions.** AC12 is open until the sprint-close browser click-through measures the three worked bars. F-239 now lands after this story and places its `colour` field and `X-Ocelli-Channels` header against F-212's fields rather than before them. F-213 follows this story as amendment 6 orders. Pass 2's two nitpicks stand, and its N2, the `tool-length` help sentence on the page saying "Imager Pixel Spacing alone", is F-211's wording. The follow-up story the plan's answer 4 asks the sprint lead to file, enhanced multiframe acquisition fields for the corners, is not filed by this commit. The comparison summary written beside the blind reviews was not preserved, and the two review files are the record.
+
+## F-224, Frame identity, completed 2026-11-07
+
+**What was built.** The decoded tier answers a lookup only for the bytes and metadata a frame was decoded from. `ContentId::of` in `crates/ocelli-cache/src/image.rs` is a 64-bit FNV-1a over the SOP Instance UID, the transfer syntax UID and the encoded bytes, each prefixed by its length as a little-endian `u64` taken through `u64::try_from` with no `as` cast. `FrameSource` is what a lookup presents, that id with the frame's `StoredPixelDescription` and `ImagePlane`, and `FrameLookup` is the answer, `Hit`, `Miss` or `Stale { bytes }`. The `Lru` value is a private `HeldFrame` holding the content id beside the `DecodedFrame`, whose `Budgeted::bytes` is the frame's, so admitted bytes and every event payload are unchanged. `ImageCache::insert` takes the content id beside the key, and `ImageCache::get` compares the content id and the description and plane by their derived equality before it marks the entry used. A mismatch removes the held frame as an explicit release that emits no event and answers `Stale` with the bytes removed. `FrameKey` and its three wire formats, the 16-byte stack key, the 24-byte `HandoffMeta` image and the cache event payload, are unchanged. `StackSequence::samples_for_upload` in `crates/ocelli-viewport/src/scroll.rs` takes a `FrameSource` and maps `Stale` to the new `ScrollError::Stale`. `DicomwebClient` takes an optional `cache`, typed `DicomwebCacheMode`, sent as `RequestInit.cache` on every request with `"no-cache"` as the default, and refuses `"force-cache"`, `"only-if-cached"` or any unknown string with `DicomwebError` code `InvalidRequest` at construction. `postWadoInstance` passes its own optional `cache` through, and `cache` joins F-230's key lists for both types. The folder viewer page keys its grey cache and in-flight map by a per-`File` serial from a `WeakMap`, never by path, size and time, copies the chosen files and then resets the input so the same folder can be chosen again, and probes one byte of each file of the active series, four reads at a time under a generation token, on window focus, on a return to visibility, on series selection and on a change of active viewport. A file whose read is refused is marked in a `WeakSet`, forgotten in the local process through F-226's forget helper and `POST /forget`, has its grey entries dropped, and shows the sentence "This file changed or was removed on disk after the folder was opened. Open the folder again to see it." in its tile while the other tiles still draw, and the status line counts the changed files of the active series.
+
+**HLD sections implemented.** Section 8's decoded tier and section 20's `Lru` key role, kept rather than changed, because the identity is checked at the lookup and not added to the key. Section 10's split holds, the fetch cache mode being a shell option. Decision D3 holds: `ContentId` is computed where the bytes already are, and the folder viewer still receives grey bytes from its local process as F-206 and F-216 accepted.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-cache`: `src/image.rs`, `src/lib.rs`. `ocelli-viewport`: `src/scroll.rs`. `@ocelli/core`: `src/dicomweb.ts`, `src/instance-bytes.ts`, `src/options.ts`, `src/index.ts`. `examples/folder-viewer` (`ocelli-folder-viewer`): `src/page.html`. `bin/ocelli.sh`, the `viewer-browser` arm and its `--list` line, as lead amendment 4 orders. Outside the plan's write set: `eslint.config.js`, four read-only globals the new browser check reads from the page, and `scripts/guards/catalogue.py` with `docs/runbooks/guard-verification.md` for the `viewer-browser.changed` guard entry the census requires of a new check.
+
+**Tests added.** `crates/ocelli-cache/src/image.rs`, `fixture_fnv1a_reference_vectors` (AC1). `crates/ocelli-cache/tests/content_id.rs` (new), `fixture_content_id_values`, `fixture_field_boundaries` and `property_one_byte_change_changes_the_id` (AC2 to AC4). `crates/ocelli-cache/tests/image_cache.rs`, `a_reprocessed_object_in_the_same_slot_is_not_served`, `metadata_changes_are_stale`, `stale_removal_is_explicit` and `a_hit_refreshes_recency_so_the_second_is_evicted` (AC5 to AC7 and pass 1's S1). `crates/ocelli-viewport/tests/scroll.rs`, `a_stale_source_is_refused_and_a_matching_one_is_served` (AC8). AC9 by the existing wire tests unchanged and green. `packages/core/src/dicomweb.test.ts`, `sends the cache mode on every request` and `refuses a cache mode that can serve a stale response` (AC10, AC11), and `packages/core/src/instance-bytes.test.ts`, `sends the requested cache mode and defaults to no-cache` (AC12). `examples/folder-viewer/tests/preview.rs`, `the_page_keys_pixels_by_file_and_probes_for_changes` (AC16's source pins). `examples/folder-viewer/tests/browser/changed.mjs` (new), registered as the fifth `viewer-browser` check and as guard `viewer-browser.changed` (AC13 to AC17).
+
+**Fixture provenance.** no pixel arithmetic. The `ContentId` values of AC1 to AC3 were computed from the FNV-1a definition in draft-eastlake-fnv in a reference script, not from the implementation, and AC1's vectors are the draft's own. Review pass 4 checked the browser check's two greys against PS3.3 C.11.2.1.2.1 LINEAR by hand, stored 1147 to 180.86 and stored 1000 to 86.92.
+
+**Verification.** Feature profile on the worker tree, recorded for tree 1b148e26be9aff81414f89b33a2ad6bd03a3365b, which is the tree of the reviewed head `acf87d8c` and already includes this branch's merge of `sprint/s46` at `a2b3098b`: floor (28 gates), corpus, corpus-tests, `gate viewer-browser` with its five browser checks including `changed.mjs`, and packages, all pass. AC17 measured in review pass 4 at 1,693 one-byte reads of 1,693 files, four in flight at peak, in 145.6 ms against the 1 s bound. AC18, F-216's `viewer.open`, `viewer.first_image`, `viewer.window_step` and `viewer.scroll_rate` thresholds, is a sprint verification observation and is open.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tiers A and B n/a, because the decoded tier is host memory and no texture or shader changes. Tier C full, because the decoded tier and the folder viewer's CPU `LutChain` path are unchanged in arithmetic and only which frame a lookup may return changes.
+
+**LLD updated.** `docs/lld/cache.md`, a "Frame identity" section with `ContentId`'s definition, the exact comparison of description and plane, stale removal as an explicit release and what the decoded tier cannot know, the `ImageCache` row naming the private `HeldFrame`, and the folder viewer paragraph's per-`File` keys and change probe. `docs/lld/dicomweb.md`, "Transport validation and errors", the cache mode, its default and the refused modes. `docs/lld/viewport.md`, the `samples_for_upload` paragraph, the source argument and `ScrollError::Stale`. Each lists F-224 on its contributor line and in `docs/lld/README.md`.
+
+**User-facing documentation.** `README.md`, the folder viewer section, choosing the same folder again, the per-file grey keys, the four triggers of the change probe, the tile sentence and the three limits, and the `DicomwebClient` paragraph, the `cache` option, its `no-cache` default, the refused modes and that a proxy or service worker is outside it. `examples/folder-viewer/src/use.html`, 5.6 "DICOMweb", the `cache` row in the client options table and in the `postWadoInstance` option table, and 12 "Cache and volume", a paragraph and a sample for `ContentId::of`, `FrameSource` and `FrameLookup`. `examples/folder-viewer/src/more.html`, `#worker`, that the library's decoded tier answers only for the bytes a frame was decoded from and that the worker path still holds no frame cache.
+
+**Deviations from the design plan.** The lead ruling after review pass 1 made AC7's counter half a structural fact checked by review, because `ImageCache` never hands an admission to `TierCounters`, and removed the test block that could not fail. AC7's event half stays a test. The lead amendments for the folder viewer half, made against the sprint head after F-226, withdrew decision 8's thumbnail re-keying clause, because thumbnails are keyed by series and have nothing to re-key, so a changed file's thumbnail is refreshed only when its series' thumbnail was drawn from that file. They also kept `cacheKey` shared with F-213 by replacing only its file identity prefix, and wired the new check into `bin/ocelli.sh viewer-browser`. A change of active viewport is a fourth probe trigger beside the three decision 10 names, so a changed file in another tile of Four images is found when that tile becomes active. The edits outside the plan's write set are named under Crates / packages modified. Implemented by GLM for the library and package half, a first round and one fix round, with a Claude implementer for the missing `cache` row in `use.html` that pass 2 found, and by a Claude implementer for the folder viewer half across three rounds. Seven review passes by independent Claude agents: passes 1 to 3 on the library and package half, pass 3 clean, 0 defects, 0 smells and 0 nitpicks, passes 4 to 6 on the folder viewer half, pass 6 clean, 0 defects, 0 smells and 1 nitpick, and pass 7 clean on the merge of `sprint/s46` at `a2b3098b`, 0 defects, 0 smells and 0 nitpicks.
+
+**Notes for future sessions.** AC18 is open until sprint verification reruns F-216's four bench thresholds on the F-216 host. A rewrite that restores a file's modification time is not detected, and `changed.mjs` pins that limit so a later claim of detection has to change the check. Only Chromium 151 was measured. Pass 6's nitpick stands: the `viewer-browser.changed` guard entry's `refuses` text does not name two refusals the check makes, a tile that keeps the changed style after it shows an unchanged image and image 1's canvas differing from the process grey. F-231 is stacked on this story and makes the wasm session the first production caller of `ImageCache`.
+
+## F-231, Session frame cache, completed 2026-11-07
+
+**What was built.** The wasm session keeps its own decoded frame cache. `ocelli-cache` gains `CommittedFrame`, columns, rows and `Stored` samples, whose `Budgeted::bytes` is the sample count times `size_of::<Stored>()` saturating at `usize::MAX`, and `CommittedSource`, a `ContentId` with the extent the commit named. `ImageCache` becomes `ImageCache<V: Budgeted = DecodedFrame>` over a private `HeldValue<V>`, with the insert, the new `set_budget` returning evictions only, F-226's `release_series`, `contains`, `remove`, `pressure` and `len` shared, and one private `lookup` holding F-224's stale rule. `ImageCache<DecodedFrame>::get` keeps F-224's `FrameSource`, and `ImageCache<CommittedFrame>` has `get` and `is_resident`, the latter through the new `Lru::peek`, which reads without marking a use. `FrameLookup` gains its value type with a default. `EventRing::push_with_seq` assigns a sequence number as `push_presented` does. `Session` in `crates/ocelli-wasm/src/session.rs` holds an `ImageCache<CommittedFrame>` with a budget of 0 by default, which is off, the stack keys `configure_stack` parsed, the last reported band and F-034's `TierCounters`, and exports `set_frame_budget`, `commit_cached_frame`, `frame_resident`, `show_resident`, `release_series`, `request_frame_pressure` and `content_id` from `mod bind`. A cached commit pushes the insert's events in order and one `cache.pressure` on a band crossing, a budget change pushes its evictions, then `cache.budgetChanged`, then a crossing, and a release pushes one `cache.released` per series that held frames. `show_resident` refuses any index but the selected one and draws a hit by copying it into the displayed frame's buffers, and the displayed frame is outside the budget. `@ocelli/core` gains `frame-cache.ts` with `setFrameBudget`, `frameResident`, `showResident`, `releaseSeries`, `releaseStudy` and `requestFramePressure`, `contentId` in `bulk.ts` hashing through the `content_id` export so FNV-1a exists once, `FrameCommitMeta.content` routed to `commit_cached_frame`, and `ResidentFrameRequest` in F-230's key lists. `cache.evicted`'s `CORNERSTONE_EVENT_MAP` row names its live producer.
+
+**HLD sections implemented.** Section 8, decoded frames in an LRU sized by the caller, for the session. Section 20's `Budgeted` and `Lru`, used as they are with one non-use read added. Section 17.3's ring, with the cache kinds given a shipped producer and one sequence space. Decisions D2, D3, D4 and D5 hold: every export is in `ocelli-wasm`'s `mod bind`, no export returns pixel data and the new returns are `u32` and `Option<u64>`, events are polled from the existing ring, and the cache lives in the one session of the render worker's instance.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-cache`: `Cargo.toml` (a path dependency on `ocelli-core`), `src/image.rs`, `src/lib.rs`, `src/lru.rs`. `ocelli-viewport`: `src/ring.rs`. `ocelli-wasm`: `src/session.rs`. `@ocelli/core`: `src/frame-cache.ts` (new), `src/bulk.ts`, `src/options.ts`, `src/events.ts`, `src/index.ts`. `Cargo.lock` for the new path edge. `src/lru.rs` is outside the plan's write set, for `Lru::peek`, which `is_resident` needs to be a query that is not a use.
+
+**Tests added.** `crates/ocelli-cache/tests/image_cache.rs`, `a_committed_frame_counts_its_samples_at_four_bytes` (AC1), `a_committed_cache_answers_for_its_own_content_and_extent` and `residency_on_the_committed_tier_is_not_a_use`. `crates/ocelli-viewport/tests/ring.rs`, `three_hundred_events_into_an_empty_ring_push_256_and_count_44` (AC11). `crates/ocelli-wasm/src/session.rs`, module `session_cache`, seventeen native cases over `Session` and `copy_ring`, among them `four_1mib_commits_report_pressure_then_eviction_in_order` (AC2), `a_default_budget_caches_nothing_and_leaves_the_ring_to_kind_6` (AC3), `residency_is_not_a_use` (AC4), `show_resident_displays_and_stale_refuses` and `show_resident_refuses_an_index_that_is_not_the_selection` (AC5), `a_stack_change_keeps_the_cache_and_the_epoch_gates_it` (AC6), `release_series_reports_one_event_and_keeps_the_display` (AC7), `a_shrunk_budget_evicts_then_reports_the_budget_change` and `a_budget_change_that_crosses_a_band_reports_the_pressure_last` (AC8), `a_non_multiple_of_four_and_a_contentless_commit_are_not_cached` (AC9), `a_frame_larger_than_the_whole_budget_is_refused_and_displayed` (AC10), `a_burst_over_the_ring_capacity_counts_the_dropped` (AC11), `a_pressure_reading_carries_the_counts_since_the_previous_one` and `displaced_and_released_frames_are_not_counted_as_evictions` (the real counts ruling), and `content_id_hashes_the_slot_and_drops_it`. `packages/core/src/boundary.wasm.test.ts`, three cases on the built module (AC12, AC13 and the `CommitRefused` ruling). `packages/core/src/frame-cache.test.ts` (new), ten stub cases (AC14, AC15). `packages/core/src/bulk.test.ts`, seven cases for `contentId` and the cached commit routing and refusals. `packages/core/src/events.test.ts`, the live producer row (AC16). `packages/core/src/index.test.ts`, the new exports.
+
+**Fixture provenance.** no pixel arithmetic. The shown samples are copied, not computed. The byte, band and event figures of AC1 to AC11 are the plan's hand-computed values from decision 2 and F-034's integer band edges, and AC12's `0x49e8b650ff1cd3f1` is F-224's AC2 value, computed from the draft-eastlake-fnv definition.
+
+**Verification.** Feature profile on the worker tree, recorded for tree 218cdd1da7184a3d33e6651f79eefd06f964f1e3, which is the tree of the reviewed head `e47bbd05` and already includes this branch's merge of `sprint/s46` at `3f098cd5`: floor (28 gates), corpus, corpus-tests, `gate wasm` and packages, all pass. `gate wasm` measured the shipped module at 2,202,907 bytes against its ceiling of 2,258,755 and the decode module at 16,455 bytes, unchanged, with no budget edited (AC17). Against 2,179,402 bytes, the last recorded measurement at F-233's integration, the module grew 23,505 bytes, which is the session frame cache entering the shipped module. F-224 changed `ocelli-cache` between the two measurements and was not measured alone.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tier A full for host residency and tier B full for the same reason: the cache holds host samples, the session's draw path is the CPU raster on every tier today, and no texture or GPU residency changes. Tier C full: `show_resident` feeds the sample buffer the CPU raster already draws, with arithmetic unchanged.
+
+**LLD updated.** `docs/lld/cache.md`, the `ImageCache` row and the value-type paragraph, and a section "The session's decoded tier, F-231" with the generic cache, `CommittedFrame`, the default-off budget, what fills it, residency against use, and the displayed frame outside the budget. `docs/lld/events.md`, a "Producers" section with the producer of every kind and the event order of an insert, a budget change, a release and a stale removal. `docs/lld/public-api.md`, a "Session frame cache" section with the `frame-cache.ts` calls, `contentId` and `FrameCommitMeta.content`. `docs/lld/build-targets.md`, the seven exports, the export count, and the AC17 figures. Each lists F-231 on its contributor line and in `docs/lld/README.md`. These four were written at integration, as the plan's LLD impact assigns them to `/complete-feature`, and were not part of a review pass.
+
+**User-facing documentation.** `README.md`, "Use the library", a paragraph on the session cache, its default off, the cached commit and its refusal, `frameResident` and `showResident` with the epoch and selection rules, and `releaseSeries` and `releaseStudy` with their events. `examples/folder-viewer/src/use.html`, 5.3 "The event ring", that the session produces the cache kinds, 5.5 "Bytes into the core", a sample of `contentId`, a cached commit, `frameResident` and `showResident`, and 12 "Cache and volume", `CommittedFrame` beside `DecodedFrame`. `examples/folder-viewer/src/more.html`, `#worker`, the built session cache in place of "Not built", with decode in the worker still not built.
+
+**Deviations from the design plan.** Four lead rulings. After review pass 1, on 2026-11-06: `show_resident` shows only the selected slice and refuses any other index with the `Selection` refusal, so AC5 and AC13 were corrected to that. A content id needs its stack position, so a commit carrying `content` without both `stackIndex` and `stackEpoch` is refused with the coded error and `content` is always validated as a `u64`. Pressure readings carry real counts, `evicted`, `evicted_bytes` and `refused` since the previous reading through F-034's `TierCounters`, never a constant zero. After review pass 2: `showResident` throws the coded `CommitRefused` for a `Selection` refusal, as `writeFrame` does, and returns false only for a miss, so the `show_resident` export answers 2 for that refusal. `Lru::peek` is outside the write set, named under Crates / packages modified. Implemented by GLM in a first round and two fix rounds, after review passes 1 and 2, then by Claude implementers for the comment and documentation rounds after passes 3 and 4. Six review passes by independent Claude agents: pass 1, 4 defects, 3 smells and 3 nitpicks, pass 2, 2 defects, 1 smell and 4 nitpicks, pass 3, 3 defects, 0 smells and 2 nitpicks, pass 4, 1 defect, 0 smells and 3 nitpicks, pass 5 clean on the pass 4 remediation, 0 defects, 0 smells and 0 nitpicks, and pass 6 clean on the merge of `sprint/s46` at `3f098cd5`, 0 defects, 0 smells and 2 nitpicks.
+
+**Notes for future sessions.** F-236, pulled forward from S47, depends on this story and can start. Pass 6's two nitpicks stand: `more.html`'s `releaseSeries` sentence does not say a series holding nothing emits no event, which README carries, and the comment on the Low reading in `release_series_reports_one_event_and_keeps_the_display` cites 2,097,152 against 4,194,304 where the deciding comparison is the used 1,048,576 against the half budget 2,097,152. Nothing in the shipped shell sets a budget yet, so the session cache is off for every current caller, the folder viewer included. Wasm linear memory never shrinks, so a release frees cache budget and not module memory.
+
+## F-213, Folder viewer window presets by modality on number keys, completed 2026-11-07
+
+**What was built.** The folder viewer's window list comes from the local process. `FrameRequest` gains `window_index` and `Preview` gains `window_index` and `window_count`. `render_held` in `examples/folder-viewer/src/preview.rs` passes every Window Center and Window Width slot, empty ones included, with the requested index to `VoiTransform::new` and reports the pair it selected through `VoiTransform::window`, so the folder viewer never re-selects. With no index the preview opens at the first slot holding both a centre and a width. The request header `X-Ocelli-Window-Index` and the reply headers `X-Ocelli-Window-Index` and `X-Ocelli-Window-Count` carry it. An index with a preset or a numeric window, out of range, on an empty slot or on a file with a VOI LUT Sequence is the window error before a grey byte is written. `PreviewError` gains `Modality`, code `modality`, for a preset on an image whose Modality is not `CT`, reported after the VOI LUT refusal, and `Region`, code `region`. `inspect_json` gains `presets` from `WindowPreset` on CT only, `windows` with each slot's explanation or `Window n`, `voiLuts` and `windowsPerFrame`, true when any frame's window comes from its own per-frame functional group. `POST /inspect` takes F-216's id form, and a multiframe that is per frame keeps every frame's inspect reply in `CacheState::kept`, outside the LRU, charged at `KeptReplies::bytes` under `KEPT_INSPECT_CAP` of 16 MiB across every id, swept by `sweep_kept`, dropped by `forget_ids` and reported as `kept` in `GET /held`. One `POST /file` parses the file once and builds the kept replies from one `InspectParts`, so a post is linear in the frame count. `POST /region` by id returns the minimum, maximum and count of the modality values whose pixel centre lies in the rectangle, from F-211's region walk factored into `region_samples` in `measure.rs` so the walk exists once, with padding left out. `GET /lib/ocelli-core/<name>.js` and `GET /lib/dcmjs.js` serve the built `@ocelli/core` and dcmjs's ES module from `LIBRARY_FILES`, 48 modules equal to the relative import closure of `packages/core/src/index.ts`, with `frame-cache` added at the merge of `sprint/s46`. `page.html` replaces the three preset buttons with rows built from the inspect reply, binds bare `1` to `9` to the rows with `0` still Fit, keys every viewport's grey by its file window index, carries the index through a linked window copy, adds Region window `Y`, which takes the window from `windowRegion` imported through an import map and reads unavailable without the library build, and names the window in the bottom right corner.
+
+**HLD sections implemented.** Section 18's VOI stage, used as it is: the selected pair of PS3.3 C.11.2.1.2.2's alternative views passed to the one `VoiTransform::new`, and section 18.3's soft-tissue preset with the other two `WindowPreset` values offered on CT only. No pixel arithmetic is added. D2 and D3 hold because this crate has no wasm boundary and `/region` returns three numbers.
+
+**Deviations.** none
+
+**Crates / packages modified.** `ocelli-folder-viewer`: `src/preview.rs`, `src/serve.rs`, `src/lib.rs`, `src/page.html`, `src/use.html`, `src/measure.rs`, `src/held.rs`, `tests/preview.rs`, `tests/measure.rs`, `tests/browser/window.mjs` (new). `@ocelli/core`: `src/manipulation.test.ts`. `bin/ocelli.sh`, `scripts/guards/catalogue.py` and `docs/runbooks/guard-verification.md` for the `viewer-browser.window` check. `measure.rs` (`region_samples`), `held.rs` (the kept pool), `tests/measure.rs`, `tests/browser/window.mjs`, `bin/ocelli.sh`, the guard catalogue and the runbook are outside the plan's write list, and `LIBRARY_FILES` gained `frame-cache` at the merge.
+
+**Tests added.** `examples/folder-viewer/tests/preview.rs`: `a_file_window_index_selects_that_pair` (AC1), `a_file_window_index_is_refused_outside_the_pairs` (AC2), `a_file_window_index_keeps_the_voi_lut_policy` (AC3), `inspect_lists_every_window_by_its_explanation` (AC4), `presets_are_offered_on_ct_only` (AC5), `a_preset_on_mr_is_the_modality_error` (AC6), `a_preset_refuses_a_voi_lut_sequence` with a CT builder (AC7), `windows_per_frame_follows_the_functional_group_source` (AC8), `inspect_by_id_matches_the_posted_body` (AC17), `an_empty_first_window_slot_opens_at_the_first_usable_pair`, `a_compressed_per_frame_multiframe_is_inspected_by_id_after_every_frame_is_held`, `a_file_whose_windows_do_not_change_by_frame_keeps_nothing`, `later_frames_with_their_own_windows_are_per_frame`, `a_middle_frame_alone_with_its_own_window_is_per_frame`, and `the_page_offers_a_folder_picker` extended (AC12, AC17). `examples/folder-viewer/tests/measure.rs`: `region_extent_counts_pixel_centres_in_modality_units` (AC9) and `the_region_route_returns_the_extent` (AC10). `src/serve.rs`: `library_routes_serve_only_listed_modules` and `library_files_match_the_index_closure` (AC16), `one_file_post_parses_and_builds_its_planes_once` and `a_pooled_file_post_parses_and_builds_its_planes_once`. `src/held.rs`: `kept_replies_stay_under_the_cap`, `a_full_pool_sweeps_ids_that_hold_nothing` and `kept_replies_follow_the_id`. `src/preview.rs`: `kept_replies_are_charged_at_their_heap_bytes` and `per_frame_replies_build_the_shared_parts_once`. `packages/core/src/manipulation.test.ts`: one case, a region window from its minimum and maximum equals one from every sample, on the padded AC9 values, which are not symmetric, so a mean centre fails it (AC11). `tests/browser/window.mjs` in headless Chromium: the keys, the index, a shorter list, an MR, the region window, a per-frame multiframe and the interim tile label, run by `bin/ocelli.sh viewer-browser`.
+
+**Fixture provenance.** AC1's greys 134 and 238 are hand-computed in the plan from PS3.3 C.11.2.1.2.1 LINEAR, with `c' = c - 0.5` and `w' = w - 1`, at stored 50 against `40\-600` and `400\1500`, and pass 1 recomputed them with LINEAR_EXACT controls. AC9's count 6, minimum -1024 and maximum -1018, and count 5 and minimum -1023 with Pixel Padding Value 0, are hand-computed from the pixel-centre rule and PS3.3 C.11.1.1's `stored * slope + intercept`. AC11's centre -1021 and width 6 follow the F-087 rule. Every file is synthetic.
+
+**Verification.** Feature profile on the worker tree, recorded for tree a6fddb396dfed030a56206e2275c6ef0ed29e42d, which is the tree of the reviewed head `b48b97b3` and already includes this branch's merge of `sprint/s46` at `aba1cb09`: floor (28 gates), corpus, corpus-tests, viewer-browser with its six browser checks, and `gate wasm`, all pass. `gate wasm` measured the shipped module at 2,202,907 bytes and the decode module at 16,455 bytes, unchanged by this story, with no budget edited. The post of a 2000-frame per-frame multiframe measured 9.6 s before pass 3's remediation and 55 ms after it, on the release binary.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** Tiers A and B n/a, because the folder viewer opens no device. Tier C full: the selected file window, a preset and the region window's numeric override all run through `preview_frame`'s CPU `LutChain`, with arithmetic unchanged.
+
+**LLD updated.** `docs/lld/cache.md`, a paragraph on the kept inspect replies, the one parse per post, `KEPT_INSPECT_CAP` of 16 MiB outside the LRU, `sweep_kept`, `forget_ids` and `GET /held`'s `kept`, and the forget paragraph's bound naming that pool. Reviewed in passes 2 to 6. F-213 is added to its contributor line and to its row in `docs/lld/README.md` at integration. The plan's LLD impact said none, and it is corrected to name `cache.md`.
+
+**User-facing documentation.** `README.md`, "Start the local series viewer", the window list in place of the preset column, its CT presets, file windows by explanation, unchoosable VOI LUT rows, keys `1` to `9` with `0` Fit, the per-frame list and the interim tile label, Region window `Y` with its rule, its divergence from cornerstone3D 5.8.2's `WindowLevelRegionTool` and its need for `npm run build -w @ocelli/core`, the corner word, the kept reply pool beside `OCELLI_CACHE_MIB`, and the modality refusal. `examples/folder-viewer/src/use.html`, chapter 4, that the region window loads the built `packages/core/dist` from the local process, and the kept reply pool beside `OCELLI_CACHE_MIB`. `examples/folder-viewer/src/more.html`: no change, because no card covers window presets or a region window.
+
+**Deviations from the design plan.** The lead amendments before implementation hold: selection in `render_held`, the index in every viewport's cache key and linked copy, F-211's region walk reused in place of a `region_extent` in `preview.rs`, a malformed region header as the header error, Modality reaching the preset check with the VOI LUT refusal first, and explanations keeping their slots. Lead rulings after implementation: the library sentence names `npm run build -w @ocelli/core`, and an empty first window slot opens at the first usable pair while an explicit empty index is refused. Lead rulings after passes 1 to 5: inspect replies are kept only for a multiframe whose windows come from a per-frame functional group, charged at their heap bytes, capped at 16 MiB and reported in `GET /held`, a post parses once on both server paths, a file is per frame when any frame's window is its own, and a Four images tile follows its frame's list with an interim label giving the WW and WL it is drawn at. AC15's check of the PS3.3 C.11.2 rows against the current edition at dicom.nema.org was made by review pass 1, after implementation rather than before it, and confirmed amendment 7's citations. Implemented by a Claude implementer. Seven review passes by independent Claude agents: pass 1, 2 defects, 0 smells and 4 nitpicks, pass 2, 2 defects, 3 smells and 2 nitpicks, pass 3, 4 defects, 0 smells and 5 nitpicks, pass 4, 1 defect, 2 smells and 5 nitpicks, pass 5, 1 defect, 1 smell and 4 nitpicks, pass 6 clean on the pass 5 remediation, 0 defects, 0 smells and 2 nitpicks, and pass 7 clean on the merge of `sprint/s46` at `aba1cb09`, 0 defects, 0 smells and 0 nitpicks.
+
+**Notes for future sessions.** AC13, the click-through on the synthetic CT and an MR, is open until it is performed at sprint close, though `window.mjs` drives the same keys in headless Chromium. Pass 6's two nitpicks stand: `a_pooled_file_post_parses_and_builds_its_planes_once` builds its server by hand where `grey_server` and `post_bytes` exist, and pass 5's carried nitpicks, among them no test for the full-range tile label and a tile that shows its previous picture under a bare `Image N` for one round trip. Two findings outside this story were recorded for the lead: a JPEG-LS decode fault seen on a pydicom-written lossless copy, now F-243, and an RLE refusal of an empty Basic Offset Table. The region window diverges from cornerstone3D 5.8.2's `WindowLevelRegionTool`, which centres on the mean with a width floor of 10, and a library story is filed only if parity is wanted. F-215 lands after this story and uses the `/lib/` routes and the import map.
+
+## F-217 follow-up, the example viewer builds without the wasm pkg under Vite 7, completed 2026-11-07
+
+**What was built.** A fix to F-217, which is already done and whose entry above is unchanged. The cause is F-217's `02c08048`, the Vite 8 to Vite 7 move of the operator's decision Q2(a), which removed the MPL-2.0 `lightningcss`. `examples/viewer-react/vite.config.ts` defines the worker's wasm URL as a constant `/@fs` path, and Vite 7's Rollup worker sub-build resolves that constant dynamic import and loads the file, so a fresh clone with no `crates/ocelli-wasm/pkg` failed `npm run build` with ENOENT on `ocelli_wasm.js`. CI's frontend job builds no wasm and runs that build inside `gate packages`, so it would have failed on push. Every per-story review ran on a machine with a built pkg, which is why none saw it. The config now counts the pkg as built only when the glue and `ocelli_wasm_bg.wasm` both exist, and with it absent marks the URL external for the worker build through `worker.rollupOptions`, so the import stays a runtime import and the core reads as not built, as it did under Vite 8. With the pkg present the output is unchanged, the wasm glue and `.wasm` emitted as their own chunks. The URL carries the decoded path, so a checkout under a path with a space builds, where `%20` was ENOENT. `scripts/viewer_build_check.py` builds a copy of the viewer under a directory name with a space, once with no pkg and once with a stand-in pkg, and refuses the shapes either build must not have.
+
+**HLD sections implemented.** none. A build fix to the example viewer and its gate, with D2 and D3 unaffected.
+
+**Deviations.** none
+
+**Crates / packages modified.** `examples/viewer-react/vite.config.ts`, `scripts/viewer_build_check.py` (new), `bin/ocelli.sh` for the `packages` gate and its description, `scripts/guards/catalogue.py` for the `viewer-build` entry, `ci/guard-probe-budget.json` and `docs/runbooks/guard-verification.md` regenerated for it, and `docs/DEVELOPER_SETUP.md`.
+
+**Tests added.** `scripts/tests/test_viewer_build_check.py`, four cases on the decoded URL, the spaced tree prefix and the refusal of an encoded URL in the worker, run in `gate packages`. The `viewer-build` catalogue entry with floor probes `viewer-build.absent-bundled` and `viewer-build.present-external`. `scripts/viewer_build_check.py` itself is the end-to-end check, run in `gate packages` after `package_check.py`.
+
+**Fixture provenance.** no pixel arithmetic.
+
+**Verification.** Feature profile on the worker tree, recorded for tree ddafe820e1afbe644c7fea46c02f83e25faeb038, which is the tree of the reviewed head `041f00f4`: floor (28 gates, `packages` among them), corpus, corpus-tests, all pass. Review pass 1 ran CI's frontend job step by step in fresh clones, with the pkg absent and present, and all steps exited 0, where the sprint head's `npm run build` with no pkg exited 1.
+
+**Corpus.** pass, 100 verified, 0 missing, 0 mismatched, 21 syntax decode digests match.
+
+**Tier coverage.** n/a on tiers A, B and C. This changes how the example viewer is bundled, not rendering.
+
+**LLD updated.** `docs/lld/typescript-packaging.md`, the build output against the pkg's presence, the external URL, the decoded path, the both-files condition, what `viewer_build_check.py` builds and refuses and what its stand-in proves, and the `packages` gate's steps in order. F-217 is already on its contributor line, and the date is bumped at integration.
+
+**User-facing documentation.** `docs/DEVELOPER_SETUP.md`, that `npm run build` depends on whether the pkg exists and that `bin/ocelli.sh wasm` comes before the build for the bundled form. `README.md`, `examples/folder-viewer/src/use.html` and `examples/folder-viewer/src/more.html`: no change, because none describes the viewer's Vite build or the URL, and README's `core not built` sentences stay true.
+
+**Deviations from the design plan.** No plan was written for the follow-up. It implements the recommendation of the lead's fresh-clone investigation of 2026-11-07, and adds the decoded URL, which the implementer found, and the gate. F-217's plan's AC18 row assumed the frontend CI job would pass, and this restores that. Implemented by a Claude implementer. Two review passes by independent Claude agents: pass 1, 1 defect, 0 smells and 3 nitpicks, the defect prose that credited the worker's `fetch` probe with reporting the core as not built, when Vite's servers answer the missing path with a 200 HTML fallback and it is the import that fails, and pass 2 clean on the remediation, 0 defects, 0 smells and 3 nitpicks.
+
+**Notes for future sessions.** Three open items found by the reviews are outside this fix and belong to a separate story. The built `dist` hard-codes the build machine's absolute `/@fs` path, so the built viewer cannot load the core away from that machine, which was already true on `main`. The viewer page stays `core not built` in Chromium even with the real pkg, at the sprint head and with the fix, and why was not investigated. Dev mode answers 403 for the pkg URL under any checkout path that `URL.pathname` encodes, because `server.fs.allow` is the percent-encoded `repoRoot.pathname`. Pass 2's three nitpicks stand: the decoded URL is wrong for a browser when the path holds a literal `%`, which is not observable while dev mode answers 403, `test_the_gate_builds_under_a_path_with_a_space` checks the `TREE_PREFIX` constant and not its use in `main`, and nothing builds a glue-only pkg, so the both-files condition is unpinned. Only macOS with Node 24.13.0 was measured.
+
+## F-236, acceptTransferredFrame stack position, completed 2026-11-08
+
+**What was built.** `acceptTransferredFrame` in `packages/core/src/bulk.ts` builds its commit object as `{ handoff: meta, ...fields }`, where `fields` is what `frameCommitMeta` validated, in place of a five-field literal that dropped `stackIndex`, `stackEpoch` and `content`. The ticketed sink's existing routing in `sessionBulkSink.commitAllocated` then picks the export as it does for `writeFrame`: `commit_cached_frame` for both stack keys and `content`, `commit_selected_frame` for both stack keys alone, and `commit_frame` with the generation otherwise. A transferred frame into a session with an installed stack now commits at the current index and epoch, a stale one is refused with `CommitRefused` and the slot already released by the session, and a frame carrying `content` is cached. A caller that sets none of the keys sees the earlier behaviour. No signature, Rust file or `options.ts` changed.
+
+**HLD sections implemented.** Section 17.2, the raw-bytes channel, with the view over wasm memory built after `alloc`, used for one `set` and dropped. Decisions D2, D3 and D5 hold: no wasm-bindgen change, no pixel data returned, and the commit goes to the one session of the render worker's instance.
+
+**Deviations.** none
+
+**Crates / packages modified.** `@ocelli/core`: `src/bulk.ts`.
+
+**Tests added.** `packages/core/src/bulk.test.ts`, seven cases: "forwards stackIndex and stackEpoch to the selected-frame export" (AC1), "refuses a stale selection through the selected-frame route and leaves no ticket" (AC2), "refuses a lone key before any allocation" (AC3, the lone-key and `content`-without-both `InvalidValue` refusals), "releases the captured ticket through release_bulk when the selected-frame export is missing" and the same for the cached-frame export (amendment 9), "keeps one reservation and one copy per transferred call on every route" (AC9) and "a transferred frame with content is committed and cached" (AC7). `packages/core/src/boundary.wasm.test.ts`, two cases on the built module: "commits a transferred frame at the current selection and refuses a stale one" (AC5, with a pixel comparison of the kept frame after a `Fit` and a narrow `SetWindow` and a control commit shown to change the blit) and "a transferred frame with content is committed and cached" (AC7). AC4 is the existing "finishes the copy before commit_frame". AC6, the old-source RED: the base `bulk.ts` under the tip tests is 6 red of 35 unit and 2 red of 19 boundary, and the tip is 35 of 35 and 19 of 19.
+
+**Fixture provenance.** no pixel arithmetic. The change forwards three validated keys. AC5's grey levels are a test of which frame is kept, not of the window, and pass 3 derived them independently from PS3.3 C.11.2.1.2.1 `LINEAR` at centre 41 and width 10 as 113, 142, 170 and 198 for 40 to 43.
+
+**Verification.** Feature profile on the worker tree, recorded for tree d9134e54c6d21d22f2b67b739e8e97d453eab6b6, which is the tree of the prepared head `2541d9a7`: floor (28 gates) and corpus, both pass. The worker's merge of `sprint/s46` at `e120c030` changed none of F-236's files apart from the contributor line of `docs/lld/typescript-packaging.md`, and the floor was rerun at integration on the staged result. AC8: `bin/ocelli.sh gate wasm` on `git archive` copies of base `282b9e82` and tip `24bc7d9b` measured `pkg/ocelli_wasm_bg.wasm` at 2,202,907 bytes and `pkg-decode/ocelli_wasm_bg.wasm` at 16,455 bytes on both, with identical md5, so both modules are unchanged, no budget was edited and `--accept-size` was not run. AC9: `packages/core/dist/bulk.js` is 15,592 bytes on base and 15,672 on tip, +80, all of it comment. The doc comment of `acceptTransferredFrame` grows by 216 bytes and the `committed` literal shrinks by 136, so the executable code is 136 bytes smaller.
+
+**Corpus.** pass, carried from the worker's feature profile on tree d9134e54. No decoder, parser or corpus file changed.
+
+**Tier coverage.** n/a on tiers A, B and C. The change is in the TypeScript commit routing, which is tier independent, and adds no rendering or compute path.
+
+**LLD updated.** `docs/lld/typescript-packaging.md`, the `acceptTransferredFrame` order now ends in the ticketed sink's commit, with the three routes, the stale refusal released by the session, the missing export released through `releaseAllocated`, and the refusals before `alloc`. `docs/lld/public-api.md`, the contributor line only, because its `acceptTransferredFrame` sentence was still accurate. Both list F-236 on their contributor lines and in `docs/lld/README.md`.
+
+**User-facing documentation.** no change. `README.md`, `examples/folder-viewer/src/use.html` and `examples/folder-viewer/src/more.html` do not mention `acceptTransferredFrame`, measured by grep at `eb0f81b3` in the plan's amendment 17.
+
+**Deviations from the design plan.** The lead's nineteen amendments before implementation, against the sprint head after F-231, restated the refusal codes as `InvalidValue`, forwarded `content` as well as the two stack keys, because an accepted key silently dropped is the defect this story removes, and added AC7, AC8 and AC9. After review pass 1 the remediation took the review's own regressions for its three defects and its smell, and the plan records no separate lead ruling for that pass. The lead ruling after pass 2 made AC5 compare pixels after a `Fit` and a narrow `SetWindow` with a control commit, and made AC9 count copies, not views, by spying on `set` into wasm memory and on `slice`. The lead ruling after pass 3 fixed AC9's counter on the shared typed-array prototype's `set` and `slice` and on `ArrayBuffer.prototype.slice` for the transferred buffer, narrowed AC9's rejected implementation to a second copy by `set` or `slice` through any typed-array view or of the transferred buffer, said a constructor copy, `Uint8Array.from` and `structuredClone` are outside what a prototype spy sees, and took pass 3's nitpick. Implemented by GLM in a first round and three fix rounds, after review passes 1, 2 and 3. Four review passes by independent Claude agents: pass 1, 3 defects, 1 smell and 0 nitpicks, pass 2, 2 defects, 0 smells and 0 nitpicks, pass 3, 0 defects, 1 smell and 1 nitpick, and pass 4 clean, 0 defects, 0 smells and 0 nitpicks.
+
+**Notes for future sessions.** F-236 was pulled forward from S47, so it is not in the S46 run state that `scripts/sprint_workflow.py` initialised from `allocation.json`. A refusal by epoch is the plan's named departure from cornerstone3D 5.8.2: a frame in flight across a reinstall of identical keys is refused where cornerstone draws it, at the cost of one recommit. On the two stack routes a transferred frame's `generation` is validated and has no effect, as for `writeFrame`. AC9's copy counter does not see a constructor copy, `Uint8Array.from` or `structuredClone`, and the lead's ruling closed that scope. The built-module evidence is the dev build under Node, not a browser worker.
+
+## F-243, JPEG-LS run mode decoded per T.87, completed 2026-11-09
+
+
+**What was built.** JPEG-LS run decoding in the vendored `ritk-codecs` 0.6.0 follows T.87's partial-end-of-line run-index rule. The patch adds read bounds and scan-end validation, named unsupported-preset refusals and threshold CLAMP fixes, with the patched encoder unused by Ocelli. The adapter maps failures to `CodecError` and preserves caller output on failure.
+
+**HLD sections implemented.** HLD 21 (codec registry), 25 (testing) and 27 (fixture and provenance). DICOM PS3.5 A.4.3 plus ITU-T T.87 (06/1998) C.2.4.1.1.1, F.1 step 18 and Annexes A and F.
+
+**Deviations.** D-20 amended, source pins and provenance merged with the F-239 codec patch, no CharLS production dependency. The five recorded vendor JPEG-LS source files and one published test fixture marker F8 to F0 were changed under the explicit lead AC11 amendment, with the test assertion unchanged.
+
+**Crates / packages modified.** The vendored ritk-codecs 0.6.0 JPEG-LS decoder and encoder, and the Ocelli codec adapter.
+
+**Tests added.** Run-mode trigger, scan-end and preset refusal, default, output atomicity, CLAMP, P12 and generated-stream regressions in `crates/ocelli-codec/tests/jpegls.rs`. Recorded current suites pass, 33 JPEG-LS tests and 321 merged vendor tests, the F-243 published 320 plus the F-239 one.
+
+**Fixture provenance.** CharLS lossless 8x4 and 32x32 banded references from an independent source formula, NEAR 3 bounded and CharLS exact, truncation 90/50/10, end marker, FF fill, padding, preset defaults, MAXVAL, RESET, mixed threshold order, CLAMP NEAR 34, run miss past line, P12 without LSE, and 150 generated streams plus 61 mutations with explicit scope. 149 of 150 undamaged generated streams open and match CharLS, the remaining hand-built stream refuses on both. A damaged scan can still encode another valid image, not all are refused. Fixture binaries are own synthetic bare codestreams and raw truths, DICOM stays in ignored corpus data.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** Three generated banded rows comprise one uncompressed reference and two JPEG-LS compressed rows, lossless and near-lossless. The dated `8fdee914` corpus gate verified the manifest and decode digests. DICOM data remains ignored behind the manifest. Final corpus results are in the completion receipt.
+
+**Tier coverage.** Tiers A and B are n/a for this CPU codec fix, whose decoding precedes the rendering tier. Tier C native decode and consumer observations are recorded separately. They do not supply new GPU-tier rendering proof or a new wasm boundary.
+
+**LLD updated.** docs/lld/codecs.md, docs/lld/corpus.md and docs/lld/benchmarks.md describe the current implementation and observations. The codecs and corpus contributor headers and dates were completed with this entry.
+
+**User-facing documentation.** `README.md`, the syntax paragraph, `examples/folder-viewer/src/use.html`, the codec paragraph, and `examples/folder-viewer/src/more.html`, the decoder registry paragraph, were already reviewed. JPEG-LS follows the run mode, named preset and bounded refusal statements.
+
+**Deviations from the design plan.** AC13 named unverified host and instrument gap, user approved 2026-11-09, a matching idle run on the compatible host and instrument is still owed. The registered 0.1215 actual is incomparable and not a comparison pass. Old banded base medians measured wrong pixels, never a speedup, baseline, bands and tolerances unchanged.
+
+**Notes for future sessions.** Dated `8fdee914` source evidence includes feature-floor and corpus exits 0, 33 JPEG-LS and 321 merged vendor tests passing, and native candidate comparison SHA256 `842a9dbb5b9396b671b739308985bd5b73cbbf75bd9c7ce1731fd0e4110c263e`: 133 views, 74 pass, 59 unmeasured, 0 fail, 0 absent, with both banded JPEG-LS rows scored pass. Isolated F243 wasm modules are unchanged at 2,202,907/16,455 bytes. The dated 8f whole union measured 2,205,614/16,455 bytes within existing budgets, without attributing unrelated stack growth to F243. AC13 remains incomparable, not pass, with the user-approved matching host/instrument and idle-run gap still owed. The separate AC14 standard review and current source/evidence audit remain distinct from implementation. Initial implementation was by Claude. Completion metadata was drafted through GLM and corrected by Codex participants. The optional F269 comment audit remains future work. These records complete no other sprint story.
+## F-225, DICOM conformance report and Checks section, completed 2026-11-09
+
+**What was built.** The Rust checker produces scoped VR, VM and Type-rule findings, with a generated catalogue and validating `@ocelli/core` reader. `POST /conformance` accepts an encoded-held id or file body, and the folder viewer requests a background badge and a Checks section in Headers. Findings carry no file value and never gate display, while presence covers CR with six modules and CT, MR and PET with seven, including the listed decidable 1C and 2C rules, not full DICOM certification.
+
+**HLD sections implemented.** Operator-added scope outside the HLD checker specification. The rule sources are DICOM PS3.5, PS3.3 and PS3.6, as transcribed in the approved plan.
+
+**Deviations.** none.
+
+**Crates / packages modified.** `crates/ocelli-dicom`, `packages/core`, `examples/folder-viewer`, their generated contract and tests, and benchmark/browser acceptance tooling. No Rust `ocelli-core` change is attributed to this story.
+
+**Tests added.** 42 Rust conformance fixture tests, one typegen regression and three checker unit tests. Core reader/export tests, HTTP/page fixtures and `conformance.mjs` headless controls cover the other consumers. Counts beyond these named categories were not isolated.
+
+**Fixture provenance.** No pixel arithmetic. Synthetic element fixtures follow PS3.5 6.1.2.2, 6.2, 6.4, 7.4 and 9.1, the declared PS3.3 modules and PS3.6 VR/VM rows.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** At the dated `8fdee914` source checkpoint, 133 manifest rows verified and 46 syntax decode digests matched. Final completion-tree corpus results are bound by the completion receipt.
+
+**Tier coverage.** A (WebGPU) n/a, the checker adds no GPU path. B (WebGL2 downlevel) n/a. C (CPU) integration draw and badges observed, not a new all-tier pixel proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md, docs/lld/public-api.md, docs/lld/benchmarks.md.
+
+**User-facing documentation.** `README.md`, Start the local series viewer, `use.html`, Conformance report, and `more.html`, conformance scope/card. They distinguish the local producer from future browser-owned production.
+
+**Deviations from the design plan.** Approved viewer amendments include direct body fallback after ID410, immediate sheet requests and stale-generation recovery. The later AC35 evidence-stage amendment accepts a fresh independent counterfactual while preserving unavailable historical chronology. No finding, tolerance or rendering rule changed.
+
+**Notes for future sessions.** Other SOP classes leave presence unevaluated while value checks run. Browser-owned production remains future F-202/F-260. Checker SHA256 prefix `6ee2d61d` and fixture SHA256 prefix `4a5f56fd` match the recorded `8fdee914` source. AC35 records 42 GREEN, five empty-checker missing-finding failures and four fault failures at exit101, then restored 42 GREEN, not historical pre-code or test-first proof. Image observations 967 ms open, CT 11.3/DX 30.3 ms first and 108.774 fps meet unchanged absolute limits. Native reply medians 0.382875/0.535041/4.779375 ms are separately qualified, not browser latency, checker CPU or idle-host evidence. Implementation and review crossed GLM, Claude and Codex roles, with no isolated total effort measurement.
+
+## F-244, Encapsulated Pixel Data with an empty Basic Offset Table, completed 2026-11-09
+
+**What was built.** A recorded one-line vendored `dicom-object` collector patch accepts an empty Basic Offset Table, including nested icons without adding icon rendering. Shared `EncapsulatedFrameIndex::from_parsed` serves the viewer and oracle candidate, applies Extended tables and validates frame boundaries/counts. Logical marker reads cross even Fragments, impossible declared counts refuse before allocation, and ambiguous RLE/JPEG XL splitting remains refused.
+
+**HLD sections implemented.** Encapsulation is specified by PS3.5 A.4/8.2 and PS3.3 C.7.6.3, not HLD pixel arithmetic. `docs/hld/12-workspace-and-build.md` section 15.2 dependency control is recorded through amended D-18.
+
+**Deviations.** Amended D-18 in docs/hld/DEVIATIONS.md, the vendored dicom-object dependency and its publication caveat.
+
+**Crates / packages modified.** `crates/ocelli-dicom`, `vendor/dicom-object-0.10.0`, folder-viewer/oracle consumers, corpus generation/manifest/decode records, pins and guard/provenance tooling.
+
+**Tests added.** Feature-only source comparison identifies five Part10 fixtures, nine frame-index fixtures, one preview fixture and one ignored corpus conformance test. Reviewed suite totals 46/18 are not new-test counts. Separate independent review exercised 1,024 cut pairs and real SV1/J2K two-byte fragments. Python/vendor/pin refusal controls and 19 generated corpus rows complete the coverage.
+
+**Fixture provenance.** No pixel arithmetic in the new parser or index code. The preview hand check runs the existing CPU chain on a hand-computed RLE fixture, 10/20/30/40 to 0/85/170/255, citing PS3.5 G.2 and G.3.1 for RLE and PS3.3 C.11.2.1.3.2 for the full-range window. Parser and index provenance is PS3.5 A.4 and PS3.3 C.7.6.3.1.8.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt. The dated `8fdee9143dc09891f5540619dc0ee4cee9d7bbdf` checkpoint supplies earlier source evidence, not the verification tree for these appended completion records.
+
+**Corpus.** At the dated `8fdee914` source checkpoint, 133 manifest rows verified and 46 syntax decode digests matched. The 19 new rows comprise 14 syntax and 5 shape cases. Final completion-tree corpus results are bound by the completion receipt.
+
+**Tier coverage.** A (WebGPU) n/a, the new parser and index add no GPU path. B (WebGL2 downlevel) n/a. C (CPU) observed through the native consumer, the reference GPU is software and is not product tier proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md, docs/lld/corpus.md, docs/lld/oracle.md, docs/lld/build-targets.md.
+
+**User-facing documentation.** README.md empty Basic Offset Table note, use.html Rust parse usage, more.html transfer syntax rule.
+
+**Deviations from the design plan.** Approved review amendments added cross-Fragment marker inspection, early impossible-count refusal and fallible reservation. A later oracle metadata-prefix amendment restores EOT metadata without a generic OV parser or partial-error dataset. The approved HTJ2K split policy is lenient interoperability, not standard conformance.
+
+**Notes for future sessions.** D-18 prohibits publishing `ocelli-dicom` until an upstream release carries the collector fix and the vendor is removed, since cargo publish discards the path patch. No upstream issue publication is claimed. Exact F244 feature-only `5efae178` to `3aec4ae5` release pairs measure render 2,202,907/decode 16,455 bytes unchanged, independently of later aggregate wasm sizes. The repaired oracle/reference and native candidate retain 74 pass, 59 unmeasured, 0 fail, 0 absent. Weak content and software SwiftShader reference are not scored parity or hardware-tier proof. JPEG XL reference rows remain declared `unsupported_source`, with native synthetic-byte evidence separate. The `0 absent` count refers to candidate-census coverage. Claude implemented the parser, root repaired critical marker/count paths and independent Codex reviews challenged them. Total effort was not measured.
+
+## F-234, Bounded sequence depth in parse_part10, completed 2026-11-09
+
+**What was built.** The non-recursive structural preflight counts open Sequences and returns the fixed patient-safe Copy variant ParseError::SequenceTooDeep before dicom-rs recurses. MAX_SEQUENCE_DEPTH is 64. Depth 64 is accepted and 65 refused, including after Deflate adaptation. Items add no separate depth and sibling Sequences do not accumulate depth. The folder viewer returns 400 not-part10 and serves the next request.
+
+**HLD sections implemented.** HLD 23, docs/hld/20-errors-and-panics.md. DICOM PS3.5 sections 7.5 and 7.1 govern Sequence nesting and tag order.
+
+**Deviations.** None.
+
+**Crates / packages modified.** crates/ocelli-dicom, folder-viewer integration tests and documentation. No new dependency or pixel arithmetic.
+
+**Tests added.** At-limit parsing and MetadataSet projection on a 2 MiB debug thread, one-past refusal, 100000 levels on a 256 KiB thread stack, defined/undefined lengths, implicit little endian, Deflate, mixed-form proptest, fixed Copy message, sibling reset and measured fixture depth. Independent F-234-working-pass-4.md reports 0 defects, 0 smells and 3 nonblocking nits. Parser blob 7ce07c0c63c6c7cb396a3659f30042269264e0e7 is unchanged through 9a4456b6.
+
+**Fixture provenance.** No pixel arithmetic or new corpus file. The known SR shape follows PS3.16 TID 1500 to 1501 to 300 to 301 row 11 to 315 row 2, with PS3.3's Measured Value, Measurement Units and optional Equivalent Code Sequences. It measures 8 open Sequences and 10 inside the de-identification wrapper. 64 satisfies the approved four-times margin. These Extensible templates do not define a universal maximum.
+
+**Verification.** Final feature verification and corpus results are bound to the exact tree in this completion commit's hook-generated Ocelli-Verify receipt. Earlier source evidence includes source 752/b889's 29-gate floor, exit 0/501.193643459s, with native Step 6. Canonical 9a4456b6/tree ee761522 passed 29-gate floor 0/595.748784834s and corpus 0/3.851860542s after the prior three completion records. Neither earlier checkpoint verifies this appended entry.
+
+**Corpus.** No additions. Review 4's dated observation covered 100 files at deepest 2. The recorded TID 1500 writer depth 5, KOS 2 and SC 0 are historical measurements of known inputs, not current global maxima.
+
+**Tier coverage.** A, B and C are n/a for this pre-render parser bound. Native consumer behavior was observed, without claiming new GPU-tier proof.
+
+**LLD updated.** docs/lld/dicom-ingest.md lists F-234 and describes the 64 limit, measured known shape and refusals.
+
+**User-facing documentation.** The Use book lists SequenceTooDeep and MAX_SEQUENCE_DEPTH. README and More do not enumerate parser variants and require no change for this story. The changelog records the bounded refusal.
+
+**Deviations from the design plan.** Approved lead amendments expanded the measured writer/template inputs and made AC10 the actual 400 not-part10 response followed by a served request. The final known shape is 10 wrapped and the constant remains 64.
+
+**Notes for future sessions.** AC7 uses retained historical reviews. Review 1 quotes the original implementer's old one-past parser Ok record. Reviews 2/3 observed guard-removed AC3 and deep HTTP stack overflows. The original scratch handoff is unavailable in the known locations, so no original raw receipt or fresh pre-code execution is claimed. Implementation was by GLM with independent Claude reviews. Closure metadata was drafted through GLM and corrected by Codex. Effort was not measured. Historical parallel coding preceded dependency closure, while F-225 and F-229 are now formally complete.
+
+## F-228, The Content Security Policy Ocelli needs, completed 2026-11-09
+
+**What was built.** The embedding policy has four directives, defined once and quoted in the documentation, with DICOMweb origins added only to connect-src. Browser probes prove the every-response rule, worker policy, named minimality refusals and blob-worker failure. The native folder viewer derives and caches strict script and style hashes from each compiled page, including its import map, without unsafe-inline, unsafe-eval, blob or wasm-unsafe-eval. No library API changed.
+
+**HLD sections implemented.** The operator-added CSP scope builds on docs/hld/07-concurrency-and-typescript.md sections 9 and 10, docs/hld/21-worker-protocol.md section 24, and docs/hld/11-decision-log.md D5. These provide worker and transfer context, not a new claim that this story proves the entire worker protocol.
+
+**Deviations.** none.
+
+**Crates / packages modified.** examples/viewer-react, examples/folder-viewer, their browser and policy tests, Cargo dependency wiring, README and the TypeScript packaging LLD.
+
+**Tests added.** 13 policy unit tests in examples/viewer-react/src/csp-policy.test.ts, 15 native policy unit tests in examples/folder-viewer/src/csp.rs, one native HTTP policy contract in tests/preview.rs, and explicit React and folder browser probes. The latter include positive behavior and named negative controls.
+
+**Fixture provenance.** No new pixel arithmetic. The folder probe compares seven synthetic lossless compressed rows with the same page's uncompressed reference. This is decode identity over existing F-206 and F-216 arithmetic fixtures, not independent absolute pixel gold. CSP hash and base64 vectors cite RFC 4648 and FIPS 180-4.
+
+**Verification.** Final feature verification is bound to this completion commit's exact-tree hook-generated Ocelli-Verify receipt. The dated 9a4456b6a027d2fb1755a2f8bcccb5d64c8853f2 source proof supplies current explicit acceptance, not verification of later completion metadata. React passed 13 cases with zero failed or not run. The folder probe passed six groups, including seven compressed pairs. Both used Chromium 151.0.7922.34 and preserved 165 source and artifact hashes.
+
+**Corpus.** F-228 adds no manifest rows. Seven lossless syntax rows and their uncompressed reference were present and observed. Final completion-tree corpus results remain bound to the completion receipt.
+
+**Tier coverage.** A (WebGPU) not observed. B (WebGL2 downlevel) not observed. C (CPU) worker compilation and canvas publication observed under the embedding policy, with native folder drawing under its separate policy. No all-tier rendering or physical-display calibration claim.
+
+**LLD updated.** docs/lld/typescript-packaging.md describes the embedding policy, worker response requirement, blob refusal, decode-gap guard and distinct cached folder-page hash policy.
+
+**User-facing documentation.** README.md, Start the example viewer, gives the marked policy blocks and probe commands. use.html chapter 5.1 covers worker loading, DICOMweb and CDN origins. more.html #worker distinguishes embedding from native folder policy.
+
+**Deviations from the design plan.** Approved AC2 amendments replace free-prose matching with exact marked blocks and extend the check to the Use page. Runtime wiring uses a typed page identity and target gating matching serve. No policy, tolerance or acceptance gate was weakened.
+
+**Notes for future sessions.** F-215's integrated capability and actual SR save/reload flow were exercised under CSP. Its separate human Chrome AC18 remains open. The current proof is f228-current-canonical-probe-proof.json. The initial combined snapshot failed before writing because it included a not-yet-built folder binary. Its first React pass remains preserved, and the final bound-input repeat supplies the valid source proof. F-266 retains the arbitrary-static-host build-path follow-up. No Firefox, WebKit, isolated wasm-size cost, CI, publication or sprint-close acceptance is claimed. Claude, GLM and Codex contributed without an isolated total effort measurement.
+
+## F-237, The wasm module ships outside the @ocelli/core tarball, completed 2026-11-09
+
+**What was built.** The `@ocelli/wasm` package carries the full module, JS glue and types, its decode split, and both third-party notice files. `@ocelli/core` declares the matching exact-version peer. `loadCore` keeps its caller-supplied initialization API. Release preflight cold-builds the revision in a fresh checkout/target, compares packed identity and digests before any tag, push or publication, and publishes the checked tarball. npm order is wasm, core, react after crates.io. Build identity records HEAD, staged tree and unstaged tracked status. Packaging refuses unstaged tracked work, while release requires the clean tag revision.
+
+**HLD sections implemented.** Published packages use the `@ocelli` scope. TypeScript shell/core and the sole wasm-bindgen crate retain their existing boundary. The HLD did not specify the distribution route, which the approved package decision supplies.
+
+**Deviations.** None.
+
+**Crates / packages modified.** `packages/wasm`, the matching core peer, package/release tooling including `bin/ocelli.sh`, and release documentation.
+
+**Tests added.** Synthetic package notices, identity, version, cold-comparison and release-wiring controls, plus the external packed consumer proof. Latest feature pass 5 reran 69 unit tests and two lint-policy probes. This suite total is not a count of new tests.
+
+**Fixture provenance.** Synthetic packaging/identity fixtures, no DICOM fixture or pixel arithmetic.
+
+**Verification.** `F-237-working-pass-5.md` records 0 defects, 0 smells and 1 nonblocking nit. The later close-fixture sandbox repair independently retained the real outstanding-handoff refusal. Authorized CI run 42576164087 at 8fdee9143dc09891f5540619dc0ee4cee9d7bbdf passed Ubuntu TypeScript job 129024252656 including packages, within a failed workflow. The same packaging sources also passed TypeScript job 129070985616 in run 42590597505 at b88932771f17026f634046629f85315af31941bf, within the completed failed workflow. Rust, Viewer browser and Guards failed, while that TypeScript job and the wasm-size, verification-evidence and corpus-tooling jobs passed. The final CI snapshot retains those results, not an in-progress Rust assumption. Neither job is a green whole-CI claim. Canonical 9a4456b6/tree ee761522 supplied earlier 29-gate feature-floor and corpus exits 0. Final feature verification and corpus bind to the exact tree in this completion commit's hook-generated `Ocelli-Verify` receipt, not an earlier checkpoint.
+
+**Corpus.** No additions or pixel-path changes.
+
+**Tier coverage.** A, B and C are n/a for packaging, no new rendering proof.
+
+**LLD updated.** `docs/lld/typescript-packaging.md` and `docs/lld/release-policy.md` describe the package and release rules. Contributor headers include F-237, with current completion dates.
+
+**User-facing documentation.** README, Use and More describe module distribution and matching versions. `docs/RELEASE.md` and the release command agree on preflight and order.
+
+**Deviations from the design plan.** Approved rulings record staged-tree identity, make cold comparison a pre-publication precondition and accept the authorized qualification CI observation before formal completion. Current allocation is S46, preserving historical S47 intake quotes.
+
+**Notes for future sessions.** AC3's actual real-release end-to-end comparison and AC5's registry installation remain owed release-time observations under the approved evidence stages. Packed consumer tests are not registry publication. F-220 is complete. F-228 closes in this same atomic batch, with its current explicit CSP observations. Final metadata verification binds this completion tree. Effort was not measured. Source work and its independent Claude reviews precede this GLM-drafted, Codex-corrected completion record.
+
+## F-239, Folder viewer colour frames through the library's colour stage, completed 2026-11-09
+
+**What was built.**
+
+Native folder viewer draws supported RGB, YBR and PALETTE COLOR through the ocelli-pixel colour stage and byte rule on the decoder's reported output space: per-channel window and invert, ROI statistics, named layout/depth/palette controls, JPEG 2000 and HTJ2K component transforms before level shift and clamp, refusals by name for unsupported shapes, mixed-kind window links.
+
+**HLD sections implemented.**
+
+Section 18 colour stage, section 25 fixture/oracle evidence, native viewer consumer, reviewed codec extensions.
+
+**Deviations.**
+
+D-29: colour window parity after stage 4. D-30: unapplied profiles named, narrowed by F-240. D-31: codec vendor patches. No colour parity or new colour tolerance claimed.
+
+**Crates / packages modified.**
+
+ocelli-pixel, ocelli-render, ocelli-codec, ocelli-dicom, folder viewer, codec vendor sources, synthetic corpus tooling, oracle and benchmark instruments, documentation and guards.
+
+**Tests added.**
+
+Hand RGB/YBR/palette/depth/window fixtures, compressed output/refusal cases, raw-value and one-walk ROI controls, held-cache admission/refusal/reuse, mixed-kind links, browser canvas/readout/statistics and corrupted-reply controls, named mutants, unmeasured lossy JPEG aggregates, hand-checked statistic controls.
+
+**Fixture provenance.**
+
+Own synthetic inputs from PS3.3 C.7.6.3, PS3.5 JPEG 2000 and accessible T.800 Annex G, DICOM 2026d and retired 2017b YBR text, takeover timing explicit, bare fixtures distinct from the ignored corpus.
+
+**Verification.**
+
+Reviews are source-bound, not a whole-feature approval. Matched Node 24 five-subject values (967 ms open, 11.3 ms first, 108.774 fps scroll, 2.2 ms window, 464125952 bytes resident) pass unchanged bands and absolute budgets after the required repair, not otherwise idle. Four largest native cases (raw sha256 6f32db8e4cc0b525a28c95bb973747973ae9bed1a774440300d13bcfaeabd3c4): first decoded, nine held windows each valid, positive RSS, RGB/palette first+window 2171.469/2699.735 and 2503.991/3087.126 ms, ICC8 6080.290/6567.662, ICC16 6369.414/6748.776. Five colour comparisons complete (raw SHA identities in LLD, controlled synthetic, unscored), 22 numerically higher latency medians (19 separated, 3 overlap), target misses NOT PASSED, open cause unisolated. They do not satisfy F-223's actual operator root AC18/19/decision 12. The completion receipt is the exact final staged-tree feature record read by the commit-msg hook. Prior measurements do not certify this metadata tree.
+
+**Corpus.**
+
+Manifest/digest and candidate evidence retained, comparison at 133 views: 74 pass, 0 fail, 59 unmeasured, 0 absent, colour statistics unscored.
+
+**Tier coverage.**
+
+Native folder display is the CPU consumer: A/B acquire no device, no GPU colour-window entry point, no wasm pixel crossing, native HTTP replies carry display bytes.
+
+**LLD updated.**
+
+Reviewed pixel-pipeline, render-graph, codecs, frame-open, oracle, corpus, build-targets and benchmarks text covers the consumer and measured limits.
+
+**User-facing documentation.**
+
+README, Use and More's matrix describe drawing, controls, refusals and profile notices.
+
+**Deviations from the design plan.**
+
+Bounded scratch, palette admission, one-draw validation, exact final-byte storage, nearest inverse coefficients, AC20 instrument, colour census and unmeasured JPEG fixtures ruled, first-image regression fixed within bands, not waived.
+
+**Notes for future sessions.**
+
+No idle-host, universal JPEG bound or colour-pixel pass claimed.
+
+## F-240, Matrix and tone-curve ICC profiles in stage 4, completed 2026-11-09
+
+**What was built.**
+
+The supported RGB matrix/TRC subset applies in the native CPU colour path after device-code normalization: held frames retain the resolved transform and device tables charged before cache admission, unsupported kinds stay named and unapplied with device RGB drawn, applied profiles remove the warning, GPU callers report ICC unavailable.
+
+**HLD sections implemented.**
+
+Section 18 stage 4 and the colour-management requirement, scoped to the approved matrix/TRC subset.
+
+**Deviations.**
+
+D-30 narrows to unsupported kinds, approved printed matrix, clipping and D14 divergence remain, F-271 comparison separate, no full ICC or display-calibration claim.
+
+**Crates / packages modified.**
+
+ocelli-pixel, native render/viewer integration and reader fields, synthetic profile/corpus tooling, benchmark extension, documentation and guards.
+
+**Tests added.**
+
+Counted gamma, table, parametric, matrix-column and stored-depth fixtures, classification/fallback and untagged-identity controls, table capacity/admission, GPU unavailability, applied/refused profile browser cases, named mutants.
+
+**Fixture provenance.**
+
+Reviewed basis is ICC.1:2022-05 and the ICC April 2015 sRGB note. IEC publisher text was not read. The source-basis limitation is explicit. Six own profiles form the comparison.
+
+**Verification.**
+
+Component remediations have bounded clean reviews. In the four largest native cases (raw sha256 shared with F-239), ICC16 uses the 512MiB cache only. CMM: six profiles, 132 native, 264 reference observations, bounded maximum 0.3534772098 on 0..255, six unbounded above-one flags investigated as existing clipping, no discarded data, no numerical waiver. Large untagged literal-base reductions: accepted non-regression lead, NOT within noise, normalized control diagnostic, no baseline change, no isolated ICC cost. Render 2205614 and decode 16455 release bytes, budgets unchanged, nonzero STACK attribution not ICC-only. The completion receipt is the exact final staged-tree feature record read by the commit-msg hook. Prior measurements do not certify this metadata tree.
+
+**Corpus.**
+
+Synthetic profile rows and classification under the existing manifest/digest, colour reference rows unscored.
+
+**Tier coverage.**
+
+Native CPU supports the declared subset, A/B ICC explicitly unavailable, outside-subset application named and omitted, not a whole-image refusal.
+
+**LLD updated.**
+
+Reviewed pixel-pipeline, frame-open, corpus, feature-availability, build-targets, benchmarks and render-graph text describes the native subset and measured limits.
+
+**User-facing documentation.**
+
+README, Use and More's matrix distinguish applied profiles from named unsupported kinds, no display-calibration claim.
+
+**Deviations from the design plan.**
+
+Approved source matrix and clipping stand, AC14 lead accepted non-regression, ICC16 alone 512MiB.
+
+**Notes for future sessions.**
+
+Runtime source 0fad to b889 to 9a445 unchanged, ICC vs reference device RGB different semantics, misses retained.
+
+## S46 acceptance status correction, 2026-11-09
+
+F-208, F-209, F-212 and F-213 have delivered and reviewed implementation, but their original completion notes explicitly leave numbered final-tree browser observations open. Their current backlog state is corrected to `in-progress`, with reviewed implementation and acceptance pending. `/complete-feature` requires those observations or an explicitly approved scope change. The operator kept the checklist pending, which supplies no observation, waiver or carry decision.
+
+- F-208, AC8 to AC12, final-tree viewport observations.
+- F-209, AC16 to AC20 and AC22, final-tree linking observations. AC21 is an implementation mutation with existing recorded evidence.
+- F-212, AC12, the three scale-bar browser measurements.
+- F-213, AC13, the synthetic CT and MR preset click-through.
+
+All earlier implementation entries, source, reviews, durations and delivery dates remain historical evidence. They do not establish these still-unperformed acceptance rows. No source capability is removed or rescheduled. The existing operator checklist remains the observation procedure.
+
+## F-238, Native build without wgpu's Metal backend: the resolved Apple graphs contain no objc2 crate while development keeps Metal for the tier A gate, completed 2026-11-09
+
+**What was built.** A Metal-free shipped native build configuration. The native arm of bin/ocelli.sh builds ocelli-native bins in release with --no-default-features, omitting the default metal forwarding that pulls ocelli-render, metal and wgpu's Metal backend, so the resolved normal and build graphs for aarch64-apple-darwin and x86_64-apple-darwin contain no objc2 or objc2-* crate and ocelli-compute stays out of the shipped graph. Development restores Metal through native dev-dependencies and keeps the tier A gate, and the empty compiled backend set is checked before wgpu Instance creation and GL paths, returning a reported NoAdapter or Cpu result instead of a panic.
+
+**HLD sections implemented.** Build and target policy in HLD 15.2 and the tier material in HLD 7 and 31. No pixel arithmetic is involved. D-33 is the recorded backend and tier deviation.
+
+**Deviations.** D-33, the shipped Metal-free backend and tier policy, recorded beside D-27. The gles feature remains named in the shipped feature list, its native GL backend is not active on Apple without angle, and neither explicit Apple graph resolves an objc2 crate, so the gles feature itself is not excluded.
+
+**Crates / packages modified.** ocelli-render manifest, probe.rs and caps.rs, ocelli-native manifest and lib.rs, and the ocelli-compute manifest. Scripts and inputs adapted to the shipped graph: the native arm of bin/ocelli.sh, scripts/shipped_native_check.py, the decode_graph_check and licence_check scripts, and the notices inputs.
+
+**Tests added.** Source inventory at 1d, not a fresh execution count: eight unit test methods in scripts/tests/test_shipped_native_check.py, one a_development_build_compiles_at_least_one_backend test in probe.rs, one shipped-native.metal-planted guard probe, nine runner.step6-* probes and decode-graph shipped-floor and forwarding controls. Step 6 extracts exactly one fresh ocelli-desktop executable from compiler-artifact JSON and refuses zero, multiple, nonzero-exit, no-tier, override and stale-path cases.
+
+**Fixture provenance.** Fixtures are synthetic dependency-graph controls: decode-graph fixtures and runner Step 6 compiler-artifact and tier-report probes. No patient data and no pixel arithmetic. Fixtures do not encode a host outcome, host observations are separate Verification and Tier coverage.
+
+**Verification.** F238 verification: tree 2f5202d3b66a, corpus pass. Hook trailer profile=feature with 31 named gates: 29 floor plus corpus plus deep. 133 native views: 74 pass, 59 unmeasured, 0 fail, 0 absent. Actual Linux CI run 42635328935 attempt 1 on exact head 1d627bd93f0c0e3b44231be9a0f3e76607a8eeb9: all 7 jobs SUCCESS. Rust job 129221862749 passed workspace tests, JPEG observations and vendored tests, fetched block2 v0.6.2. Native arm: step 5 resolved both Apple graphs (aarch64-apple-darwin, x86_64-apple-darwin) with no objc2 or objc2-* names. Step 6 compiled the shipped native graph fresh in release, logged 55.12s. All 15 native steps green. Guards job 129221862595 passed normal and deep suites. Current local 1d Mac step 6 passed, log preserving step 6 then step 7. Prior runs 42576164087, 42590597505, 42607216734 remain failed. The plan records two digest-bearing provenance labels, ObservationJSONSHA6138bd93312037d51c5ec9b183e72b28ac1b0e945da4008e1a9913ba41d7f426 and RustlogSHA3d804419cc3b3c8bb4e55511c64b7dcafaa3f1906644478d85fe3525c6245c87, which hash the independent observation JSON and the Rust job log, not a compiled Linux binary, and successful CI arm printed no compiled binary SHA. Permanent as-built proof is the completion commit's actual Ocelli-Verify receipt. Linux literal tier, path and binarySHA not printed. No approval, waiver or publication claimed.
+
+**Corpus.** The corpus manifest has 133 rows and corpus passed at the 1d checkpoint. The Linux CI Corpus tooling job passed as one of the seven SUCCESS jobs. No new corpus result is claimed beyond these observations.
+
+**Tier coverage.** Tier A: Apple development is Tier A, decided by Benchmark via Metal, from the AC3 record of 79 actual GPU tests passed on 2026-11-08 at 2f90ce0f on the M4 Max, and selected native, render and compute files, wgpu and naga lock rows and the workspace wgpu declaration unchanged from 2f90ce0f to 1d are source identity only, not a new GPU run or compiler and driver equivalence. Tier B: none observed, because the shipped macOS compiled backend set is empty and no A/B report exists for the shipped Apple build. Tier C: the shipped macOS report is Tier C from step 6, historical and current local evidence, the literal historical report being Tier Cpu decided NoAdapter, while the Linux step 6 tier-report predicate passed in run 42635328935 with no literal Linux tier, artifact path or binary hash retained and none invented. Windows and Intel Mac executions beyond cargo-tree remain accepted named unverified gaps, and macOS evidence is never substituted for Linux.
+
+**LLD updated.** build-targets.md, section 'The shipped native build, and deviation D-33', and tier-resolution.md, section 'A build with no backend compiled resolves tier C and says so', describe the shipped Metal-free graph, the per-target resolution check and the reported no-backend fallback, with F-238 contributors and macOS historical observations. No pending Linux claim is added there. The acceptance observation lives in the plan and AS_BUILT. The LLD needs no further amendment.
+
+**User-facing documentation.** The README third-party paragraph describes the shipped build. Historical regenerated THIRD_PARTY_LICENSES holds 105 crate/version entries over 103 unique names with no objc2, the union of per-target shipped graphs over five desktop triples. No new shipped artifact, release publication or scan was performed, and pinned notices texts remain in inputs for verify-upstream.
+
+**Deviations from the design plan.** The approved amendments recorded for this task are measured gles retention in the shipped feature list, no unused compute forwarding feature, fresh unique compiler-artifact executable selection for step 6, and a qualified CI-before-completion stage with the required observation unchanged. Earlier dated review rulings, including their identifiers and nitpick dispositions, stand as recorded and are not relabeled here.
+
+**Notes for future sessions.** Windows AC4 and Intel Mac AC1 beyond cargo-tree remain accepted named unverified gaps, never passes. Prior runs 42576164087 and 42590597505 failed before native step 6, and c27 run 42607216734 failed at native step 5 on missing locked block2 with step 6 skipped plus three deep fixture failures, which 1d repairs, all three remaining recorded failures. Run 42635328935 proves exact 1d Linux, not a later metadata tree. Selected eight native, render and compute files, wgpu and naga lock rows and workspace wgpu are byte-identical from 2f90ce0f to 1d, source only, not a new GPU run or compiler and driver identity. No new release published. The actual completion commit Ocelli-Verify is the delivery proof.
+
+## S46 operator acceptance closure, 2026-11-10
+
+This entry closes the numbered rows that the 2026-11-09 status correction left open. It edits no earlier entry. The operator performed the Chrome click-throughs on a local preview of the folder viewer built from source `f79fc8b0`, an ancestor of this tree with no change since under `examples/folder-viewer`, `crates` or `packages`, and answered that every row passed. Each row below is recorded as operator Chrome observation, pass, 2026-11-10. No study detail, screenshot or per-image value was recorded, and none is claimed here.
+
+- F-208, AC8 to AC12, final-tree viewport observations.
+- F-209, AC16 to AC20 and AC22, final-tree linking observations. AC21 is the implementation mutation already recorded in the F-209 entry and its review passes, not an operator row.
+- F-212, AC12, the three scale-bar browser measurements.
+- F-213, AC13, the synthetic CT and MR preset click-through.
+- F-214, AC12, and F-215, AC18, recorded in their own entries below.
+
+F-208, F-209, F-212 and F-213 return from `in-progress` to `done`. Their completion entries of 2026-11-07 stand as the record of what was built, and the notes in them that say these rows are open are superseded by this entry. The reconciliation that rolled their completed state back was correct when it was made, because the rows had not been observed. No implementation changed for this closure. F-227 is not closed by this entry, because its AC17 timing is still owed.
+
+## F-214, Folder viewer mouse profiles and preferences, completed 2026-11-10
+
+**What was built.** The folder viewer's MOUSE section offers three profiles from a frozen `PROFILES` table that `pointerMode` reads: Ocelli, the earlier binding and the default, Scroll on left and Window on left. The left button is always the active tool and Control with the left button pans in all three. The profile, the play rate and the two hidden side columns are kept in `localStorage` under `ocelli.*` keys, every access inside `try`, with an unknown or unreadable value falling back to the default. `ocelli-dicom` gains a public `cine_timing` that reads one object's cine timing alone through the existing `read_timing`, and the inspect reply gains `cine` and `frameTimeMs`, so Play waits a file's Frame Time `(0018,1063)` between frames of that file and the FPS control otherwise, with a line saying which and Use the slider to override.
+
+**HLD sections implemented.** `docs/hld/07-concurrency-and-typescript.md` section 10, pointer bindings stay in the page. The cine source is the F-192 series-open reader. DICOM PS3.3 C.7.6.5 and C.7.6.5.1.1 for Frame Time.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-dicom/src/series_open.rs` and `src/lib.rs`, `examples/folder-viewer/src/page.html`, `preview.rs`, `more.html` and `use.html`, `README.md`, and the tests below.
+**Tests added.** `unit`, 4 in `crates/ocelli-dicom/tests/series_open.rs`: `cine_timing_matches_display_timing`, `cine_timing_reads_frame_time_40_in_milliseconds`, `cine_timing_ignores_a_bad_playback_value` and `cine_timing_single_frame_zero_is_unavailable`. `contract` and `fixture`, 7 in `examples/folder-viewer/tests/preview.rs`: `the_page_offers_mouse_profiles`, `every_storage_access_is_guarded`, `inspect_reports_frame_time`, `each_file_reports_its_own_frame_time`, `a_frame_declaration_refusal_makes_no_frame_time_claim`, `play_uses_the_file_frame_time` and `more_says_the_page_keeps_four_choices`. One browser step in `examples/folder-viewer/tests/browser/window.mjs`, `observeProfileKeys`, run by the `viewer-browser` gate. Counted from the story's commits `4c14691b` to `5f9ec1ce`.
+**Fixture provenance.** No pixel arithmetic. The timing fixtures are synthetic objects written in the tests with no patient attributes, Frame Time 40 ms read as 40 ms per PS3.3 C.7.6.5, a Frame Time Vector per C.7.6.5.1.2, and a one-frame Frame Time of zero as unavailable per C.7.6.5.1.1. The per-second label is display text and is not a measurement.
+**Verification.** Review pass 3 on `5f9ec1ce` ran `cargo test -p ocelli-folder-viewer --test preview`, clippy, fmt, prose and the `viewer-browser` gate, all green, with five mutants red and one argued equivalent. The reviewed `series_open.rs` and its tests are byte-identical in this tree. AC12 is operator Chrome observation, pass, 2026-11-10, per the closure entry above. The final staged-tree record for this completion is the completion commit's own Ocelli-Verify trailer, and no earlier record certifies this metadata tree.
+**Corpus.** absent. The story reads no corpus row, and its fixtures are synthetic.
+**Tier coverage.** A (WebGPU) n/a, the page opens no device. B (WebGL2 downlevel) n/a. C (CPU) full and unchanged, the grey still comes from the CPU preview, and profiles and cine change which frame is asked for and when, not its pixels.
+**LLD updated.** `docs/lld/series-open.md`, `cine_timing` in the public boundary and a paragraph in Cine, F-214 added to its contributor line and its row in `docs/lld/README.md`, written at this completion because the plan's LLD impact had not been applied.
+**User-facing documentation.** `README.md`, "Start the local series viewer", the Play step naming the file's Frame Time, the fallbacks and Use the slider, and the mouse step naming the three profiles, Control with the left button and the `OCELLI_PORT` limit. `examples/folder-viewer/src/more.html` `#preferences`, the four kept choices with the Partial status. `examples/folder-viewer/src/use.html` chapter 7, `cine_timing(&metadata)`. All present in this tree.
+**Deviations from the design plan.** The plan's signature for `cine_timing` took the parsed object and returned the playback too. The lead amendment of 2026-11-07 made it read the timing alone, from the metadata projection, so a bad Preferred Playback Sequencing never hides a good Frame Time, and made cine timing per object. Lead rulings after passes 1 and 2 kept a key pressed on the profile control from changing the profile, reported `unusable` only for a Cine refusal, and named the third fallback. The operator showcase status rule of 2026-11-08 made More's Preferences Partial. Implemented by a Claude implementer agent. Three review passes by independent Claude reviewers, pass 3 clean, 0 defects, 0 smells and 0 nitpicks. Integrated into `sprint/s46` through the S46 prepared-source checkpoint `e729d82b` rather than by a merge of `work/f-214-xai`.
+**Notes for future sessions.** Days actual is not measured. Mutant MO, the `profileKeyed` reset in the `change` handler, survived and was argued equivalent in pass 3. A zero Cine Rate is guarded only by this viewer's fixture, not by `cargo test -p ocelli-dicom`. Shared preferences in the showcase are F-205.
+
+## F-215, Folder viewer marks saved as TID 1500 and key images as a Key Object Selection, completed 2026-11-10
+
+**What was built.** Save marks in the folder viewer downloads one Comprehensive 3D SR per study holding a TID 1410 Image Region group for each Freeform, Rectangle, Ellipse, Length and Text mark, and one Key Object Selection per study for the key images, through `@ocelli/core`. Nothing is written into the opened folder. Opening the folder again with those files, or Load marks, places each group by SOP Instance UID and frame, skips a report a later one names in Predecessor Documents Sequence, and counts every refusal. `@ocelli/core` gains `writeTid1500Groups`, `readTid1500Groups`, `writeKeyObjects` and `readKeyObjects`, `GraphicType` gains `ELLIPSE` and an `IMAGE` item an optional `frame`. The page module is `examples/folder-viewer/src/mark-documents.mjs`, served with the built package under the F-213 `/lib/` routes and import map. Remembered documents reset per folder, by the operator's decision of 2026-11-08.
+
+**HLD sections implemented.** Decision D13, the annotation type is a DICOM SR content tree. DICOM PS3.3 Table C.18.6-1 and C.18.6.1.2 for Graphic Data and Graphic Type, C.17.2 and C.17.6 for the document modules, C.12.1.1.2 for Specific Character Set, PS3.10 Table 7.1-1 for the file meta, and PS3.16 TID 1500, TID 1410 and TID 2010.
+**Deviations.** none
+**Crates / packages modified.** `packages/core/src/sr.ts`, `tid1500.ts`, `tid2010.ts`, `secondary-capture.ts`, `index.ts` and `dcmjs.d.ts`, `examples/folder-viewer/src/mark-documents.mjs` and `.d.mts`, `page.html`, `serve.rs`, `preview.rs`, `more.html` and `use.html`, `examples/folder-viewer/tsconfig.json`, `bin/ocelli.sh` for the `viewer-browser` arm, `README.md`, `docs/lld/public-api.md` and `docs/lld/key-object.md`.
+**Tests added.** `unit` and `fixture`, `packages/core/src/tid1500-groups.test.ts`, new, 31 cases, and `examples/folder-viewer/src/mark-documents.test.ts`, new, 40 cases. `unit`, 12 cases added across `packages/core/src/tid2010.test.ts` and `sr.test.ts`, with further assertions in `secondary-capture.test.ts` and `index.test.ts`. `contract`, 4 in `examples/folder-viewer/tests/preview.rs`: `inspect_reports_sop_class_and_study`, `inspect_reports_the_stored_study_time`, `the_mark_documents_module_is_served` and `the_page_and_the_module_read_the_same_document_classes`. Browser, `examples/folder-viewer/tests/browser/marks.mjs`, new, in the `viewer-browser` gate. Counted from `3abfeaf6` to `5c355367`.
+**Fixture provenance.** Graphic Data for rectangle, ellipse, freeform, length and text is hand computed in `mark-documents.test.ts` from PS3.3 Table C.18.6-1, (column,row) pairs from the top left corner of the top left pixel, and C.18.6.1.2, a closed POLYLINE and ELLIPSE major axis then minor axis. The length NUM `85.4400374532` mm is `hypot(30 * 1, 40 * 2)` from row then column spacing, carried as the mark's own `/measure` reply under lead amendment 1, with that arithmetic held in `tests/measure.rs`. The page itself does no pixel arithmetic.
+**Verification.** Review pass 13 on staged tree `d01534d9` is clean, replaying the pass 12 pending-save defect through the real Save listener with a generation-guard mutant red. The reviewed library and mark files are byte-identical to `5c355367` in this tree. F-228's completion exercised the integrated save and reload under its Content Security Policy. AC18 is operator Chrome observation, pass, 2026-11-10, per the closure entry above. The final staged-tree record for this completion is the completion commit's own Ocelli-Verify trailer, and no earlier record certifies this metadata tree.
+**Corpus.** absent. The story reads no corpus row, and every document and image in its tests is synthetic with no patient data.
+**Tier coverage.** A (WebGPU) n/a, writing and reading documents does not draw. B (WebGL2 downlevel) n/a. C (CPU) n/a, the grey image path is unchanged.
+**LLD updated.** `docs/lld/public-api.md`, the four exports, `ELLIPSE`, the IMAGE frame and the character set rules, with F-215 added to its contributor line at this completion. `docs/lld/key-object.md`, the multi-reference writer and the attributes it fills. F-215 added to both rows in `docs/lld/README.md`.
+**User-facing documentation.** `README.md`, "Start the local series viewer", the marks step on Save marks, Load marks, the per-folder reset, the predecessor rule, the unsaved kinds and `npm run build`, and the skipped-files paragraph naming the SR and Key Object classes read as documents. `examples/folder-viewer/src/more.html` `#documents`, with the four new exports and the Partial status, and the matrix row on SR measurements and key images. `examples/folder-viewer/src/use.html` chapter 14 with `ELLIPSE`, the frame and the four exports, and chapter 4 naming Save marks and Load marks beside the region window build. All present in this tree.
+**Deviations from the design plan.** The lead amendments of 2026-11-07 made a saved length the mark's own `/measure` reply, made supersession explicit for SR and Key Object Selection, wrote key images as IMAGE items, clamped coordinates into the image and required the mandatory template content. Lead rulings after passes 1 to 11 are recorded in the plan, among them reading text by the file's own Specific Character Set, an empty report for delete-all, the predecessor rule for reports placed in part, and stable identifiers for untracked groups. The operator's decision after pass 10 reset remembered state per folder. F-211's kinds are named as not saved rather than written. The plan's write set named `CHANGELOG.md`, and the line was added at this completion. Implemented by Claude implementer agents through pass 10 and by root Codex from pass 11. Thirteen review passes, passes 1 to 10 by independent Claude reviewers with pass 8 clean in its range and passes 11 to 13 by an independent Codex participant, pass 13 clean, 0 defects, 0 smells and 0 nitpicks.
+**Notes for future sessions.** Days actual is not measured. AC19, a second DICOM reader showing the saved regions, was optional and was not chosen, so no interoperability beyond Ocelli is claimed. dciodvfy was not run because it is not installed on this host. No cornerstone3D hydration of the TID 1410 groups is claimed. Saving angle, Cobb, bidirectional, arrow and probe marks is a later story, and F-258 and F-263 build on these writers.
+
+## F-227, Automatic window per series when the file has none, completed 2026-11-11
+
+**What was built.** `ocelli-pixel` gains `crates/ocelli-pixel/src/auto_window.rs`, the one implementation of a window for a greyscale image that stores none: `series_sample` picks up to 16 images spread through a series, first and last included, and `AutoWindowPool` pools modality values from each through its own rescale, leaves out stored zero and that frame's Pixel Padding Value range, splits a cap of 2^20 values over the declared frames, and returns a LINEAR_EXACT window from the 1st and 99th nearest ranks, accepted only when the transform that draws it maps both percentiles, and each moved up to 16 f32 units inward, to the output minimum and maximum. `auto_window` is a pool of one. The folder viewer gains `POST /series-window`, the `X-Ocelli-Series-Window` request header and the `X-Ocelli-Auto-Window` reply header, a page cache of one window per series, the corner label `Auto window` and `Auto window, this image` for the per-image fallback, and F-213's `Auto window` row. At most `P` rounds run at once, so the pools are F-216's named term `P * 4 MiB`, and the fixed constant drops from 32 MiB to 24 MiB so F-216's bound stays 528,194,192 bytes. Any window in the file is still used as it is.
+
+**HLD sections implemented.** `docs/hld/15-lut-chain.md` section 18, stage 2, and sections 18.1 to 18.3 for LINEAR_EXACT, with DICOM PS3.3 C.11.1, C.11.2.1.3.2, C.7.5.1.1.2, C.7.6.3.1 and C.7.6.16.2.9. The default window is a viewer policy the HLD does not specify, chosen by the operator on 2026-11-05.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-pixel/src/auto_window.rs` (new) and `src/lib.rs`, `examples/folder-viewer/src/series_window.rs` (new), `lib.rs`, `preview.rs`, `held.rs`, `serve.rs`, `page.html`, `use.html` and `more.html`, `tools/bench/src/viewer_work.mjs`, `tools/bench/subjects.json`, the independent acceptance instrument `tools/bench/auto_window_reference.py`, `window_reference.py` and `export_active_window_check.js` with their procedures, `bin/ocelli.sh` for the `viewer-browser` arm, `scripts/guards/catalogue.py`, `README.md`, `docs/lld/pixel-pipeline.md`, `docs/lld/cache.md` and `docs/lld/benchmarks.md`.
+**Tests added.** `fixture` and `unit`, 32 in `crates/ocelli-pixel/tests/auto_window.rs` (new), among them `fixture_pet_like_frame_leaves_out_background_zeros`, `fixture_series_pool_is_one_window`, `fixture_series_pool_uses_each_frame_rescale`, `fixture_series_pool_excludes_per_frame`, `fixture_stored_zero_is_left_out_not_modality_zero`, `fixture_cap_is_split_across_frames`, `fixture_series_sample_spacing`, `fixture_nearest_rank_is_exact`, `fixture_ranks_round_up`, `fixture_constant_background_signed_and_two_values` and `auto_window_pool_refusals`, with 4 unit tests in `auto_window.rs`. `fixture` and `contract` in `examples/folder-viewer/tests/preview.rs`, among them `a_missing_window_is_labelled_auto`, `a_zero_length_window_is_auto`, `the_series_window_pools_each_file_rescale`, `a_windowed_image_ignores_the_series_window`, `a_half_window_is_not_auto`, `a_mixed_series_skips_windowed_images`, `a_padded_file_leaves_out_its_padding` and `the_series_window_refuses_conflicts`, with `the_series_window_is_not_recomputed_per_preview` and the round admission and scratch tests in the viewer library. Browser, `examples/folder-viewer/tests/browser/auto.mjs` (new), in the `viewer-browser` gate. Benchmark runner cases in `tools/bench/tests/viewer_work_test.mjs` and `export_active_window_check_test.mjs`, and synthetic Python controls in `tools/bench/tests/test_auto_window_*.py`.
+**Fixture provenance.** AC1 to AC9 are hand computed from PS3.3 C.11.1 per frame for the modality stage, C.11.2.1.3.2 for LINEAR_EXACT, C.7.5.1.1.2 for Pixel Padding Value, C.7.6.3.1 for Photometric Interpretation and C.7.6.16.2.9 for per-frame functional groups, cross-checked by the plan author with an independent `numpy.float32` script and not the implementation. The lead clarification of 2026-11-09 fixed the binary32 reference procedure that the independent AC16 calculator follows, and that calculator imports no Ocelli code. AC10, AC11 and AC13 carry the same citations through the route.
+**Verification.** Review pass 21 on `c01fd6ed`, clean, ran `cargo test -p ocelli-folder-viewer`, clippy, fmt, prose, `viewer_work_test.mjs`, `auto.mjs` twice and `viewer.resident_memory` on a release build, with the pass 20 mutants red. The round concurrency test repair was reviewed clean on 2026-11-09, the independent AC16 reference was reviewed clean in its own passes, and `auto_window.rs` is byte-identical to `c01fd6ed` in this tree. AC16 is operator Chromium observation on a release build, pass, 2026-11-10, recorded below. AC17 is the 2026-11-11 run recorded below. AC18: no F-227 commit touches `tools/oracle`, and the oracle verdicts ride on `bin/ocelli.sh gate --sprint`. The final staged-tree record for this completion is the completion commit's own Ocelli-Verify trailer, and no earlier record certifies this metadata tree.
+**Corpus.** absent. Every library and viewer fixture is synthetic with no patient attributes. AC16 used the operator's own study outside the checkout, and nothing from it is recorded here.
+**Tier coverage.** A (WebGPU) n/a in this story, no GPU consumer calls the pool, and a later consumer passes `AutoWindow::transform` into the chain so `VoiParams::from_chain` reads the same centre and width. B (WebGL2 downlevel) n/a, the same reason. C (CPU) full, the local process computes the window and runs the one CPU `LutChain`. The shader's fused rescale on Apple GPUs found by review passes 4 and 5 is F-235's, in S47.
+**LLD updated.** `docs/lld/pixel-pipeline.md`, "The automatic window" under the VOI stage. `docs/lld/benchmarks.md`, the `pet_no_window` workload, its informational rows and the AC17 run of 2026-11-11. `docs/lld/cache.md`, the `P * 4 MiB` term and the 24 MiB constant. F-227 is on all three contributor lines and `docs/lld/README.md` rows, with `cache.md` added at this completion because the plan's LLD impact had omitted it, and the plan corrected.
+**User-facing documentation.** `README.md`, "Start the local series viewer", the automatic window paragraph and the `Auto window` row in the window step. `examples/folder-viewer/src/use.html` chapter 9, the `AutoWindowPool` example over `series_sample(n)` beside the `open_frame` example that still invents nothing. `examples/folder-viewer/src/more.html` `#auto-window`, the series rule, the per-image fallback, where the function lives and that it is not a cornerstone3D parity row. All present in this tree.
+**Deviations from the design plan.** Lead amendments after passes 1 to 6 replaced exact f32 edges with a check by the drawing transform, a geometric narrowing and widening search of at most 48 changes, a 16 unit margin, and the constant window for percentiles fewer than three f32 units apart. Lead rulings after passes 16 to 20 named and re-posted every gone file, left a changed file out of the pool, folded each sampled image inside its decode job with no hold, bounded concurrent rounds at `P` and added the `P * 4 MiB` term. The operator kept F-216's 528,194,192 byte budget on 2026-11-07. The lead clarification and scope clarification of 2026-11-09 added the independent binary32 calculator and the private export helper to the acceptance write set. The library half was implemented by GLM in opencode through pass 3 and by Claude implementer agents from pass 4, with one GLM round before pass 15, the viewer half by Claude implementer agents, and the concurrency test repair by a Codex participant. Twenty-one working review passes by independent Claude reviewers, pass 21 clean, 0 defects, 0 smells and 4 nitpicks. Integrated into `sprint/s46` through the S46 prepared-source checkpoint `e729d82b` and later reviewed integration commits rather than by a merge of `work/f-227-xai`.
+**Notes for future sessions.** Days actual is not measured.
+
+AC16, operator browser evidence on the operator's study, release build, Chromium, pass, 2026-11-10. For each of the five PT series and the MG Secondary Capture series the operator confirmed the `Auto window` label and the same `WW` and `WL` through the series, and the independent calculator's match. A windowed CT and MR showed no `Auto window`. No study detail, screenshot or per-image value is recorded.
+
+AC17, run on 2026-11-11 by the coordinator with `bin/ocelli.sh bench viewer.open viewer.first_image`, release build, nine samples each, host class darwin 27.0.0 arm64 Apple M4 Max, 16 CPUs, 48 GiB, record key `darwin|27.0.0|arm64|Apple_M4_Max|16|51539607552`. `viewer.open` median 940 ms against 1,100 ms. First image CT median 10.1 ms against 20 ms, DX median 28.2 ms against 250 ms. `thresholds_met` true. Informational `pet_no_window` first image median 14 ms, against the expectation stated before measurement of under 30 ms, and `pet_no_window` open median 106 ms. `restart_recovered` true. The run record is private evidence kept outside the checkout. That key is the one F-216's viewer baselines are recorded under in `ci/bench-baseline.json`, so the host class is F-216's. That it is the same physical machine is not established by the record. Conditions: coordinator lanes paused, the operator's foreground applications open, load average 3.20 before and 4.20 after. The host was therefore not otherwise idle as the plan's resources line asks, and the thresholds were met under that load. The sampled-image second decode cost was observed separately on 2026-11-09 and is in `docs/lld/benchmarks.md`. It was not measured again in this run.
+
+The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchmark against cornerstone3D 5.8.2 is F-223, carried to F-273.

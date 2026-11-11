@@ -229,6 +229,20 @@ const config = tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // F-227 acceptance helper runs as a classic script in the existing page.
+    // These are its actual browser and page lexical inputs, not new APIs.
+    files: ["tools/bench/export_active_window_check.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        window: "readonly", document: "readonly", URL: "readonly", Blob: "readonly",
+        setTimeout: "readonly", cacheGeneration: "readonly", activeViewport: "readonly",
+        seriesOf: "readonly", seriesWindowJobs: "readonly", currentImage: "readonly",
+        seriesWindowRefused: "readonly", seriesWindows: "readonly", seriesHeader: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
@@ -349,6 +363,32 @@ const config = tseslint.config(
     },
   },
   {
+    // F-228's CSP probes run under node and the callbacks they
+    // pass to Playwright run in the acceptance Chromium, so both sets of
+    // globals are named. It is not a wasm memory view and it does not touch
+    // the allowance list.
+    files: ["examples/viewer-react/csp-probe.mjs", "examples/folder-viewer/csp-probe.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+        document: "readonly",
+        window: "readonly",
+        fetch: "readonly",
+        DOMParser: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        currentGeneration: "readonly",
+        activeViewport: "readonly",
+        currentImage: "readonly",
+        imageToClient: "readonly",
+        dragWindow: "readonly",
+        notes: "readonly",
+        showIndex: "readonly",
+      },
+    },
+  },
+  {
     // The repository's own node scripts. Plain ESM JavaScript, run by
     // `bin/ocelli.sh`, never bundled and never shipped. The globals are listed
     // rather than pulled from a `globals` package, for the reason the oracle
@@ -427,6 +467,118 @@ const config = tseslint.config(
         URL: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+      },
+    },
+  },
+  {
+    // F-223 is a Node controller with callbacks serialized into the two real
+    // browser pages. These names describe those execution contexts only.
+    // No rule or wasm-memory allowance is changed.
+    files: ["tools/bench/src/comparison_run.mjs", "tools/bench/tests/comparison_page_test.mjs"],
+    languageOptions: { globals: {
+      window: "readonly", document: "readonly", fetch: "readonly",
+      CanvasRenderingContext2D: "readonly", MutationObserver: "readonly",
+      KeyboardEvent: "readonly", requestAnimationFrame: "readonly", btoa: "readonly",
+      activeViewport: "readonly", chooseWindow: "readonly", currentImage: "readonly",
+      CACHE_BYTE_BUDGET: "readonly",
+    } },
+  },
+  {
+    // F-216's viewer workload driver. The file runs under node and takes the
+    // node globals from the bench block above. The callbacks it hands to
+    // Playwright run in Chromium against the folder viewer, so the browser
+    // globals they use, other than the bench block's timers, are named here,
+    // and `fetch` is used on both sides. It is not a wasm memory view and it
+    // does not touch the allowance list. These names cover the whole file, so
+    // the bench block's split does not catch this file's node side reaching
+    // for `document` or a page name.
+    //
+    // The second set is the page's own. `examples/folder-viewer/src/page.html`
+    // loads one classic script, so its top-level `let`, `const` and function
+    // declarations are reachable by name from a Playwright callback. The one
+    // the driver assigns is writable and the rest are read only. F-208 moved
+    // the window and the image index into one record per viewport, which the
+    // driver reaches through `activeViewport`.
+    files: ["tools/bench/src/viewer_work.mjs"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        performance: "readonly",
+        fetch: "readonly",
+        queueMicrotask: "readonly",
+        MutationObserver: "readonly",
+        KeyboardEvent: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        cacheBytes: "writable",
+        cache: "readonly",
+        activeViewport: "readonly",
+        showIndex: "readonly",
+        currentImage: "readonly",
+        postPreview: "readonly",
+        requestGrey: "readonly",
+        drawGrey: "readonly",
+      },
+    },
+  },
+  {
+    // F-208's browser checks of the folder viewer, the displayed aspect and
+    // the pointer readout. They run under node and hand Playwright callbacks
+    // that read the page's DOM and call the page's own top-level functions
+    // by name. The readout check wraps `paintSelection` to inject a throw,
+    // holds `paintTiles` at entry, and replaces `requestGrey` to fail a preview. The
+    // changed-file check reads the id the page holds for a file through
+    // `seriesByKey` and `filePosts`, before it rewrites that file, and counts
+    // that file's grey keys through `fileSerials` and `cache`.
+    files: ["examples/folder-viewer/tests/browser/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        document: "readonly",
+        imageToClient: "readonly",
+        activeViewport: "readonly",
+        paintSelection: "readonly",
+        paintTiles: "writable",
+        dropCache: "readonly",
+        seriesByKey: "readonly",
+        filePosts: "readonly",
+        fileSerials: "readonly",
+        cache: "readonly",
+        Event: "readonly",
+        window: "readonly",
+        // S46 review remediation, auto.mjs logs tile labels with a
+        // MutationObserver and window.mjs waits on the page's inflight map.
+        MutationObserver: "readonly",
+        inflight: "readonly",
+        // F-215's marks.mjs reads the page's marks and key images, and
+        // fetches the synthetic study's slices under node.
+        notes: "readonly",
+        keyImages: "readonly",
+        fetch: "readonly",
+        // F-225's conformance.mjs times the page's paints and its report
+        // requests from an init script, and reads the page's checks state
+        // and its two busy counts when each request is sent. It raises and
+        // lowers each busy count once to observe the wait.
+        performance: "readonly",
+        CanvasRenderingContext2D: "readonly",
+        checks: "readonly",
+        filePostsOpen: "writable",
+        thumbRuns: "writable",
+        // F-239's colour probe reads the page state and response headers.
+        Headers: "readonly",
+        location: "readonly",
+        currentGeneration: "readonly",
+        currentImage: "readonly",
+        viewports: "readonly",
+        chooseWindow: "readonly",
+        showIndex: "readonly",
+        clearTimeout: "readonly",
+        seriesOf: "readonly",
+        cacheKey: "readonly",
+        PLAIN_VIEW: "readonly",
       },
     },
   },

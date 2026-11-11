@@ -1,0 +1,28 @@
+# F-273 design review, pass 4
+
+**Reviewed**: private PROPOSED-F-273-design-v51-before-own.md SHA256 b963f2ada054175ad16a28cb92cf42796fba605dc88132a6fdcad0c53e6ab830, exact diff157a8a473f138f192fa517d71b2b922cf10e710647d2c748a4108ebb0b3deab5 against previously reviewed88a6720. Completed own-v52 precedes this review. Read all changed CLI, observer, colour-refusal, generic-stock, test and AC material and traced the installed stock image constructor.
+**Author / reviewer**: GLM amendment and own review, independent Codex root review. Root supplied the scoped-policy rulings, not product implementation. Prior peer source reviews cover those rulings, not new runtime acceptance.
+**Result**: 1 new defect, 0 smells, 0 new nits. The earlier shared-caller defect is closed. Implementation approval remains held for the source-log contract below.
+
+## Prior shared-caller finding closed
+
+Explicit variant use is restricted to non-colour cornerstone comparison, including a programmatic entry check. Existing subject calls and supplemental colour calls without a variant retain their formats. A separate scalarReferenceState getter leaves the shared metadata shape unchanged and is read only for the intended Cornerstone actor contexts. Native and colour contexts have tripwire coverage in the plan.
+
+The earlier colour calibration refusal is included, not only the successful colour record. Generic stock view size now uses the actual typed-array view byteLength and components, preserving a mixed-folder RGB-first selection without widening reference admission. Required unsupported reference selection still blocks AC24. Pure record-shape support for nine numeric kinds is not a claim of demonstrated decode fidelity for every kind. Actual installed createImage supplies the pixel view, numberOfComponents and voxel manager together. Its default non-RGBA conversion uses three-component storage. Public type breadth and optional generic interface fields alone do not falsify this actual caller contract.
+
+Own-v52 wording and test-granularity suggestions are not additional blocking defects. Missing future browser execution is an acceptance obligation, not proof a draft contract is wrong. Full actual browser and equipped work remains owed.
+
+## D1, post-delegate palette refusal cannot prevent an existing pixel-value log
+
+**Where**: installed pinned tools/oracle/node_modules/@cornerstonejs/dicom-image-loader/dist/esm/imageLoader/createImage.js, palette conversion block around164 to208, and the proposed delegate-before-domain-validation lifecycle. tools/oracle/build-page.mjs does not strip console calls.
+**Concrete trigger**: a valid PALETTE COLOR image reaches the existing image constructor. isColorConversionRequired.js explicitly returns true for palette. The conversion block invokes console.log with imageId, a pixel-data slice, palette descriptor and LUT samples before the delegate resolves. The reference wrapper then validates and refuses the image only after yielding that object. Stock mixed-folder selection can also reach the same constructor.
+**Expected**: comply with the repository's no-patient-data-in-logs rule before any actual selected study can reach that source log. A later safe refusal or a Node fixed-error wrapper cannot undo a browser log. Synthetic-only source work and controls are still permissible.
+**Observation**: verified source path and statements, not a claimed clinical exposure or an executed palette browser case. No clinical file was read or run in this review. Exact source hashes and scope are recorded in /private/tmp/ocelli-s46-codex/f273-palette-console-source-observation.json. The fact this code is in an installed dependency does not make a later admission check early enough.
+**Normative contract**: AGENTS and WORKFLOW no patient data in logs, microscope unchanged-consumer tracing. This is a concrete new source finding, not the prior shared-caller issue persisting unchanged.
+**Repair**: author one minimal explicit benchmark policy that prevents the value-bearing log before delegate execution or prevents the log from reaching any browser or captured sink. Keep stock rendering/pixels, existing artifacts and measurement protocol qualifications explicit. Do not silently edit node_modules, hide output only after it was recorded, change tolerances, or treat a refused required input as AC24 success. If source-bound preflight refusal is chosen, define its scope and fixed refusal before loading selected affected inputs. If log-sink handling is chosen, define exact surfaces and prove it executes before the dependency. Use wholly synthetic palette data to demonstrate the wrong path logs and the chosen repair prevents it, without capturing clinical values or introducing an uncontrolled diagnostic channel.
+
+## Verified clean and handoff
+
+The new scalar format cannot automatically apply to subject and colour outputs. Current colour calibration/refusal reports retain an explicit caller-specific contract rather than becoming a loophole for new scalar provenance downgrade. view.byteLength distinguishes a subview from its larger backing allocation, and reference scalar flags remain a separate successful-object proof. Real observations remain outside the original clocks and full CPU/memory windows. No native arithmetic, N, endpoint, band, workload or publication authority changes.
+
+The same plan needs the bounded D1 policy and completed GLM own review, then root reviews its exact amendment. All real-study execution through the affected path remains held until resolution. No source implementation, new clinical observations, final feature verification, source integration or push is claimed by this review.

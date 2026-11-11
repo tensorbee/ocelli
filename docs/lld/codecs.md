@@ -1,14 +1,14 @@
 # Codec registry
 
-**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-023, F-024, F-025, F-026, F-027, F-028, F-030, F-X021, F-217, F-229, F-239, F-243
+**Last updated:** 2026-11-09
 
 `ocelli-codec` owns decoder capability, registration, and exact Transfer
 Syntax UID dispatch. Concrete adapters cover native Implicit and Explicit VR
 Little Endian, native Explicit VR Big Endian, RLE Lossless, JPEG Baseline
 `.50`, JPEG Extended `.51`, JPEG Lossless `.57`, JPEG Lossless SV1 `.70`,
-JPEG 2000 `.90` and `.91`, JPEG-LS `.80` and `.81`, and HTJ2K `.201`, `.202`
-and `.203`.
+JPEG 2000 `.90` and `.91`, JPEG-LS `.80` and `.81`, HTJ2K `.201`, `.202`
+and `.203`, and JPEG XL `.110` and `.112`, with `.111` known and unavailable.
 The crate builds for native and `wasm32-unknown-unknown` from the same Rust
 implementation.
 
@@ -28,10 +28,10 @@ decoders as `Arc<dyn Decoder>` so one adapter can serve every syntax it owns.
 
 The public `Decoder::decode` contract reflects D-21. Registry lookup and
 dispatch add no allocation of their own. Raw plus RLE implementations remain
-allocation-free per call. Concrete JPEG and JPEG 2000 adapters may allocate
-bounded dependency-owned decoded storage and may copy encoded input when a
-safe packet API requires owned bytes. Every adapter retains caller-owned
-output and must not modify it before complete success.
+allocation-free per call. Concrete JPEG, JPEG 2000, JPEG-LS, HTJ2K and JPEG XL
+adapters may allocate bounded dependency-owned decoded storage and may copy
+encoded input when a safe packet API requires owned bytes. Every adapter
+retains caller-owned output and must not modify it before complete success.
 
 Registration is setup work. It may allocate the hash tables and clone `Arc`
 handles. Capability lookup and one-frame dispatch borrow existing state and do
@@ -46,17 +46,55 @@ inspector owns SIZ geometry, precision and signedness checks, COD transform and
 MCT checks, QCD quantization-style and segment-length checks, and terminal EOC
 plus necessary DICOM NULL padding. The supported domain is one MONOCHROME1 or
 MONOCHROME2 component in an 8-bit or 16-bit signed or unsigned container with
-identity rescale. Per DICOM PS3.5 A.4.4, `.90` requires reversible 5/3 and QCD
+identity rescale, and, since F-239, a three-component colour codestream whose
+photometric is RGB, YBR_FULL, YBR_RCT or YBR_ICT in an 8-bit or 16-bit
+container. Per DICOM PS3.5 A.4.4, `.90` requires reversible 5/3 and QCD
 no-quantization style. `.91` accepts reversible 5/3 or irreversible 9/7 with
 any valid Part 1 QCD style. Missing or duplicate QCD, invalid style lengths, a COC coding override, and a
 QCC quantization override are refused before decode. Lossless-only `.90` also
-refuses a tile-part COD, COC, QCD or QCC. Colour and MCT are refused.
+refuses a tile-part COD, COC, QCD or QCC.
+
+**F-239's colour decode, deviation D-31.** The vendored `ritk-codecs` decoder
+refused `Csiz != 1` and `MCT != 0` outright, so a colour JPEG 2000 codestream
+could not be read at all. The recorded patch generalises the LRCP packet walk
+to three components of one shared geometry and applies the codestream's own
+inverse component transform inside the decode, before the DC level shift is
+restored: the reversible 5/3 kernel pairs with the RCT and the irreversible
+9/7 kernel with the ICT, ISO/IEC 15444-1 Annex G, because the forward
+transform runs after the shift. The ICT consumes the unrounded float
+reconstruction, and its one rounding runs after the transform. The adapter
+reports `DecodePhotometricInterpretation::Rgb` for `YBR_RCT` and `YBR_ICT`
+descriptors, which PS3.5 8.2.4 makes the two codes that name the codestream's
+own transform, and `Preserved` for everything else, so an RGB data set stays
+RGB through the colour stage. A codestream that applied the transform under
+any other descriptor, an RGB one included, is refused rather than decoded.
+The monochrome entry point is unchanged: its
+own refusal of a three-component codestream is what the published package's
+test suite still asserts.
+
+What the adapter refuses for colour, and why: two components, because no
+photometric of Table 8.2.4-1 has two samples and no colour transform is
+defined over them. Components of unequal depth or signedness or any
+sub-sampled component are refused, because one DICOM descriptor describes all
+three, as openjph-core's own validity check also requires. A three-component
+codestream against a one-sample descriptor and the reverse is refused,
+because the codestream would contradict the data set. `MCT 0` under a
+`YBR_RCT` or `YBR_ICT` descriptor is refused, because PS3.5 8.2.4's note
+names those two codes as the transform's markers, and `MCT 1` under any
+other descriptor is refused the same way, because that note permits no
+other photometric once the transform is on and the decode would hand back
+RGB samples the descriptor does not declare. A progression other than
+LRCP is the vendored reader's own refusal. A `PALETTE COLOR` codestream under
+`.90` stays refused: the palette
+belongs to the colour stage's descriptor path and no row needs it.
 
 A deterministic fixture generator rewrites the tracked reversible fixture's
 expounded QCD segment into a legal scalar-derived segment and asks OpenJPEG
 2.5.4 for the independent reference bytes. The resulting `.91` fixture proves
 QCD style 1 is decoded, while the `.90` mode refuses the same codestream before
-decode because A.4.4 requires no quantization.
+decode because A.4.4 requires no quantization. The colour fixtures are
+extracted from the manifest rows by `generate_colour.py` beside them, with
+the saturated RGB reference and OpenJPEG's own decode of the two lossy rows.
 
 The vendored decoder returns owned `f32` samples. The adapter accepts only a
 complete output of exact length whose samples are finite, integral and in the
@@ -73,6 +111,22 @@ unchanged HLD 25.1 mono16 predicate. The native gate executes these checks
 natively and in Node from plain and `+simd128` wasm modules. The wasm gate does
 not exercise this codec.
 
+**The F-239 colour rows, and what they measured.** The four rows are encoded
+from `syntax/reference_rgb8_saturated.dcm`, whose first four pixels are pure
+red, pure green, pure blue and the plan's worked `200 100 50` triple, so the
+component transform's edge cases are in the decoded bytes. Both lossless rows
+reproduce that reference byte for byte, and they agree with each other byte
+for byte: two independent encoders' decodes, one anchor. The `.91` lossy row
+differs from OpenJPEG's own decode of the same codestream by at most one code
+per channel, measured at 43 of 18,432 samples, and the `.203` lossy row
+agrees with OpenJPEG byte for byte. With the inverse left out the same
+comparison differs at 18,345 of 18,432 samples on the `.91` row and 18,353 on
+the `.203` row, by up to 255 codes per channel. That comparison is a
+recorded bound and not a coefficient pin: the coefficients are pinned at
+AC25's hand values by the vendored patches' own unit tests.
+The pydicom read-back route for all four rows is `pylibjpeg`, because OpenJPEG
+applies the codestream's own inverse, so the plugin hands back RGB.
+
 ## JPEG-LS
 
 `1.2.840.10008.1.2.4.80` lossless and `1.2.840.10008.1.2.4.81` near-lossless,
@@ -87,6 +141,83 @@ The vendored dependency is single-component only and refuses rather than
 producing a wrong pixel. The adapter decodes one further shape itself: 8-bit
 RGB, `NEAR` zero, three components, sample interleaved. Every other
 multi-component codestream is still refused.
+
+### Run mode, the context reset, the end of the scan and the default thresholds, F-243
+
+The published single-component scan decoder returned `Ok` with wrong samples on
+flat or banded frames and on frames encoded from real CT slices. F-243 patches
+five source files and one published test of the vendored `jpeg_ls` module,
+recorded in `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md` and hashed by the
+pins gate under D-20. The T.87 clauses named here were checked against ITU-T
+T.87 (06/1998) from itu.int, recorded in
+`.claude/reviews/F-243-ac14-standard-check.md`.
+
+- **Run mode, ITU-T T.87 F.1 step 18.** A run hit adds
+  `min(2^J[RUNindex], samples left on the line)`, and RUNindex rises only when
+  that count is the full segment. The published loop raised it on the hit that
+  only fills the end of a line, so every later run read the wrong `J` and the
+  scan lost synchronisation. That needs content flat across several runs, so
+  the ramp every earlier fixture and corpus row carries never reached it. The
+  reported Enhanced CT frame, two bands of 224 and 1064 across 32 by 32,
+  decoded with 916 of 1,024 samples wrong. Ocelli's own colour scan,
+  `sample_interleaved.rs`, already followed the rule. The vendored encoder,
+  which no shipped path calls, carries the code segment A.16 mirror so the published round
+  trips pair it with the fixed decoder.
+- **The context RESET.** When a context's N reaches RESET, A, B and N are
+  halved. B is halved with an arithmetic shift, which floors, as CharLS was
+  measured to, since every undamaged stream that CharLS opens decodes to its
+  samples. The published `/ 2` rounded an odd negative B toward zero, which
+  moved the bias correction and desynchronised almost every realistic frame.
+  On the original
+  tree `aba1cb09` a synthetic CT-like 64 by 64 slice at P 12 decoded with
+  `Ok` and 1,596 of 4,096 samples wrong, and 2,035 at NEAR 2. Review pass 1
+  measured frames encoded from real corpus CT slices at up to 114,504 of
+  115,600 wrong on the base.
+- **A miss past the line** is refused rather than clamped. CharLS refuses the
+  hand-built case too.
+- **Damaged scans.** A decoded prediction error outside the range an encoder
+  reduces it to is refused, in regular mode and at a run interruption, where
+  the published code wrapped or clamped it to some sample. A limited-length
+  Golomb code whose prefix runs past `LIMIT - qbpp - 1` zeros is refused. No
+  encoder writes either. Review pass 2 measured CharLS opening some streams of
+  both kinds, so these are refusals where CharLS draws a picture.
+- **The end of the scan.** The bit reader used to return zero bits past the
+  end of the data, which decode as plausible samples, so a scan that runs out
+  is refused. After the last sample the bits left before the marker must all
+  be zero and at most 7, the rest of one byte, and that marker must be EOI,
+  after any 0xFF fill bytes, which T.87 D.2 allows before a marker. A
+  non-zero bit there is how a damaged final data bit shows, and a whole byte
+  more is how a damaged scan that reads as a valid scan one byte shorter
+  shows. Review pass 2 measured 71 such streams opening to wrong samples under
+  a 15-bit allowance. Bytes after the first EOI are the adapter's to judge.
+- **What is and is not claimed.** Every undamaged stream of the generated
+  corpus that CharLS opens, 149 of 150, decodes to the samples CharLS 2.4.4
+  gives. A damaged scan can read as a valid scan of another image, which no
+  decoder can detect, so Ocelli does not claim to refuse every damaged scan.
+  On the generated corpus no damaged case decodes to samples that are neither
+  CharLS's nor the stream's own.
+- **The generated corpus.** `tests/fixtures/generate_jpegls.py` writes 150
+  streams, 148 encoded by CharLS over P 8, 12 and 16, NEAR 0 and 3, four
+  shapes and six contents plus the F-243 fixtures, and 2 built by hand, and
+  applies 61 mutations to each, giving 9,259 cases. Each records its damage
+  class, CharLS's verdict and CharLS's sample digest. The test pins how many
+  cases of each class agree and how many fall in each kind of difference, and
+  fails if any count moves. The named differences, all refusals where CharLS
+  draws the stream's own samples, are 136 with one 0x00 byte inserted before
+  EOI, 79 with zero bytes inserted inside the scan, 8 with final bytes
+  dropped and 8 with an EOI inserted before the last scan byte. A further 124
+  are refusals where CharLS draws a damaged stream to other samples.
+- **Default thresholds, C.2.4.1.1.1.** `CLAMP(i, j, MAXVAL)` is `j` when `i` is
+  above MAXVAL or below `j`, not a saturating clamp. At P 8 and NEAR 34 that is
+  T3 177 where the published function gave 255, and CharLS writes no LSE for
+  such a stream, so the defaults are its thresholds.
+- **LSE presets.** The vendored decoder always takes MAXVAL as `2^P - 1` and
+  RESET as 64, and uses all three thresholds when T1 is non-zero and all three
+  defaults otherwise. The adapter refuses every LSE ID 1 segment asking for
+  anything else as `CodecError::UnsupportedPreset`, naming the parameter, on
+  the single-component path and before any sample is written. Zero MAXVAL,
+  zero RESET and all three thresholds zero select the defaults per C.2.4.1.1
+  and decode. The colour path still refuses any LSE.
 
 ### The two UIDs are not interchangeable
 
@@ -118,6 +249,14 @@ A unit test pins the exact payload `pyjpegls` 1.5.1 emits, including a row where
 | `NEAR` disagreeing with the UID | codestream | `FrameMismatch` |
 | A stray SOI or EOI where a marker segment belongs | codestream | `InvalidCodestream` |
 | Bytes after a complete image | codestream | `TrailingData` |
+| An LSE MAXVAL other than 0 or `2^P - 1` | codestream | `UnsupportedPreset(MaxVal)` |
+| An LSE RESET other than 0 or 64 | codestream | `UnsupportedPreset(Reset)` |
+| One or two LSE thresholds zero beside a non-zero one | codestream | `UnsupportedPreset(PartialDefaultThresholds)` |
+| Non-zero LSE thresholds outside `NEAR + 1 <= T1 <= T2 <= T3 <= MAXVAL` | codestream | `UnsupportedPreset(ThresholdOrder)` |
+| A run miss whose remainder passes the end of the line | scan | `DecoderFailure` |
+| A scan that runs out of entropy-coded data | scan | `DecoderFailure` |
+| A prediction error outside the coded range, or a limited-length code whose prefix does not end with a 1 | scan | `DecoderFailure` |
+| Non-zero or more than 15 bits left after the last sample, or a marker other than EOI after the scan | scan | `DecoderFailure` |
 
 **The descriptor and codestream checks are not redundant.** The descriptor check
 catches a frame declared as colour. The codestream check catches a
@@ -155,15 +294,16 @@ count other than three.
 18 requires that arithmetic to exist exactly once, in `ocelli-pixel`. The
 adapter pins slope `1.0` and intercept `0.0` at its one call site, which is the
 same pin `jpeg2000.rs` uses, and a fixture asserts that decoded sample `n` is
-exactly `n` over a full ramp. Moving either value fails eight of the fifteen
-JPEG-LS tests.
+exactly `n` over a full ramp, and a fixture fails if either value moves.
 
 ### The stored-domain boundary
 
 The dependency returns `Vec<f32>` and the stored domain is integer. The
 conversion back lives in `sample_convert`, shared with the JPEG 2000 adapter
 rather than copied, and refuses any sample that is not exactly an integer inside
-the descriptor's declared stored range.
+the descriptor's declared stored range. A colour frame carries three samples
+per pixel in that slice, sample-interleaved, so the expected count is the
+pixel count times Samples per Pixel.
 
 **The round trip is proven over the full range rather than over a sample.** A
 256 by 256 fixture carries all 65,536 unsigned 16-bit values exactly once, and
@@ -188,6 +328,12 @@ another CharLS reading is not independent evidence. Two anchors are:
 
 `.81` is lossy by design, so "the output differs from the source" is expected
 there and is not evidence of a defect. The same statement about `.80` would be.
+
+F-243's run-mode fixtures add a third anchor for `.81`: CharLS 2.4.4's own
+decode, stored beside each near-lossless fixture and written by the generator
+with the CharLS version pinned. CharLS is what cornerstone3D 5.8.2 decodes with,
+and its output is deterministic, so equality to it is the parity floor while
+the NEAR bound against the two-band formula stays the specification's anchor.
 
 ## HTJ2K
 
@@ -253,7 +399,7 @@ re-measured rather than assumed if the digest ever moved.
 
 ### Cross-target identity is standing, not a spike result
 
-`bin/ocelli.sh gate native` steps 9 to 11 run `examples/verify_htj2k.rs` over
+`bin/ocelli.sh gate native` steps 12 to 15 run `examples/verify_htj2k.rs` over
 all three syntaxes natively, as plain wasm and as `+simd128` wasm. That is the
 standing version of F-X013's central claim, through the production adapter
 rather than the throwaway harness, which is deleted.
@@ -267,6 +413,26 @@ touched and the write is one `copy_from_slice`, so an error leaves the buffer
 byte-unchanged. The `decode.transfer_syntax.htj2k` benchmark measures the cost
 rather than describing it.
 
+### The colour decode, which is D-31's patch
+
+F-239 teaches `openjph-core`'s decode path the codestream's own inverse
+component transform: `read_tile_data` defers the DC level shift and its
+clamp when the COD declares the transform and three components are present,
+calls the crate's existing `gen_rct_backward` or `gen_ict_backward`, whose
+inverse coefficients the patch pins to equation G-6's literals, across
+those components, choosing by the wavelet per PS3.5 8.2.4, and then finishes
+the deferred shift. Annex G applies the forward transform after the level
+shift, so the inverse runs before the shift is undone, and the shift's clamp
+would otherwise cut RCT's chroma, which spans one bit more than the depth.
+The adapter pulls the three components row by row into one sample-interleaved
+buffer and reports `Rgb` and `Interleaved` for the two transform-naming
+photometrics. The patch is recorded in the package's `PATCH-PROVENANCE.md`
+and in the pins gate, and the published package's own 151 tests pass
+unmodified with it, beside the three tests the patch adds to `tile.rs`.
+The encoder path is untouched: `openjph-core` 0.1.0
+never applies a forward colour transform, and the F-239 hand-value fixtures
+rely on that to push already-transformed components through it.
+
 ### Sample conversion, and why there is no cast
 
 The dependency returns `i32`. `Stored`'s representation is `f32`, which carries
@@ -278,29 +444,175 @@ lossless, and refuses anything outside that union. `i32 as f32` would round
 silently on exactly the values the function exists to catch, and a unit test
 sweeps all 98,304 values of the union rather than sampling them.
 
-### The redistribution condition, which is open
+### The redistribution condition
 
 `openjph-core` 0.1.0's published archive carries no `LICENSE`, `LICENCE`,
 `COPYING` or `NOTICE`, and crates.io reports no repository URL to obtain one
-from. Its metadata declares BSD-2-Clause, which permits redistribution **with
-its notice conditions retained**.
+from. Its metadata declares BSD-2-Clause, which permits redistribution with
+its notice conditions retained.
 
-`python3 scripts/pin_and_size_check.py --require-redistribution` refuses while
-that material is absent and `/release` step 5 runs it. **No development profile
-does**, because `--floor`, `--sprint` and `--all` gate development and this
-gates publication. The refusal names the file that would close it. Probe
-`pins.openjph-notice` proves both directions: it fires today, and it stops
-firing once a notice is placed.
+F-217 placed the upstream OpenJPH LICENSE from tag 0.26.3 at
+`vendor/openjph-core-0.1.0/LICENSE` and copied those bytes into
+`THIRD_PARTY_NOTICES`. `python3 scripts/pin_and_size_check.py
+--require-redistribution` passes. No development profile runs that flag,
+because `--floor`, `--sprint` and `--all` gate development and this gates
+publication. Probe `pins.openjph-notice` deletes the vendor LICENSE and must
+refuse. Probe `pins.openjph-notice-hash` appends a newline and must refuse on
+the recorded hash.
 
 The package's 104 `unsafe` constructs are a recorded number rather than an
 invisible one. `scripts/unsafe_allowlist_check.py` refuses a vendored package
 whose count moves, one with no record, and a record for a package not in the
 tree. The per-file audit is in `docs/SOURCE-POLICY.md`.
 
+## JPEG XL
+
+PS3.5 A.4.12 gives three syntaxes. `.110` is JPEG XL Lossless, `.111` is JPEG
+XL JPEG Recompression, and `.112` is JPEG XL, the general form. The adapters
+live in `crates/ocelli-codec/src/jpegxl.rs` under deviation **D-28**:
+`jxl-oxide` 0.12.6 renders and `jxl-render` 0.12.4 carries the grids, both
+with default features off, because dicom-rs reaches this family through its
+inventory registry, which section 21 says does not work on WebAssembly.
+
+### `.111` is known and unavailable
+
+`register_jpegxl_decoders` claims only `.110` and `.112`, and preflights all
+three UIDs before either adapter is registered. `.111` stays
+`KnownUnavailable`, the same shape as Deflated Explicit VR Little Endian. The
+reason is a measured defect: `jxl-jbr` 0.2.1 `src/reconstruct.rs:457` is an
+unconditional `expect("is_last not found")` in the DHT branch of JPEG
+reconstruction, filed upstream as jxl-oxide issue 512, and under the release
+profile's `panic = "abort"` that panic ends the process. No Ocelli path calls
+`reconstruct_jpeg` or any other `jxl-jbr` entry point, so the reconstruction
+route through `JpegDecoder::baseline()`, which PS3.5 10.19's note would
+make byte-identical to the `.50` source, is not built. A `.111` frame is
+refused by the registry, before any byte reaches `jxl-oxide`. A released
+dependency that fixes the defect turns the syntax on in its own story.
+
+### The pre-check runs before `jxl-oxide` parses anything
+
+`crates/ocelli-codec/src/jpegxl_icc.rs` strips a container to its codestream
+and refuses a header that would make the dependency allocate against its own
+declaration. The measured reason is that `jxl-oxide` 0.12.6 `aux_box.rs:72`
+inflates a `brob` box into an unbounded `Vec` outside the `AllocTracker`, and
+`jxl-jbr` 0.2.1 `lib.rs:59` does the same for `jbrd`: a 1,129 byte container
+with a compressed `brob` box measured a peak resident set of 1,095,647,232
+bytes on 2026-11-06 and then decoded. So `prepare` collects the `jxlc` payload
+or the `jxlp` payloads in index order and hands `jxl-oxide` that codestream
+alone. No other box is copied or parsed. A container with no codestream, two
+`jxlc` boxes, a `jxlc` beside `jxlp` boxes, `jxlp` boxes out of order, or
+`jxlp` boxes without the last flag is refused before decode.
+
+The header is read by the dependency's own `ImageHeader::parse`, the same
+parse `try_init` runs, so there is no hand-written walk to desynchronise from
+the parser it protects. A header that declares an embedded ICC profile or any
+extra channel refuses with `UnsupportedPixelFormat`, and a header that cannot
+be read to those fields refuses fail-closed. On the crafted streams above, a
+probe that parsed the header and then read the encoded ICC size behind the
+flag peaked at 2,260,992 bytes of resident set against 270,811,136 for the
+unguarded parse.
+
+### Exact stored values, and the float quantiser
+
+`jxl-oxide`'s `ImageStream::write_to_buffer` is not used for integer output.
+A 12-bit stored value would be rescaled into the full `u16` range: measured
+on 2026-11-05, a ramp sample of 13 renders as 208, because 13 times 65,535
+over 4,095 is 208.05. Integer grids (`I16`, `I32`) are instead read sample by
+sample, range-checked against Bits Stored, and written as the stored value.
+Lossless `.110` and `.112` frames therefore reproduce the synthetic source's
+stored values exactly.
+
+A float grid, which a VarDCT or XYB frame renders to, is quantised by
+`quantise_lossy_sample`: `q = floor(v * (2^BitsStored - 1) + 0.5)`, clamped
+to `[0, 2^BitsStored - 1]`, computed in `f64` from the `f32`. Half rounds
+away from zero on a non-negative operand. A non-finite sample refuses with
+`DecoderFailure` before anything is written. This is the decoder's own output
+contract, because neither PS3.5 nor ISO/IEC 18181-1 assigns DICOM stored
+values to a float render.
+
+The output layout is `Interleaved` in every mode. A three-sample frame
+reports `Rgb`, because `jxl-oxide` renders XYB into the declared encoding and
+the colour stage applies no second conversion. One sample reports
+`Preserved`.
+
+### What is refused, and where
+
+| Condition | Where | Error |
+|-----------|-------|-------|
+| Pixel Data VR other than OB | descriptor | `UnsupportedPixelFormat` |
+| Pixel Representation 1 | descriptor | `UnsupportedPixelFormat` |
+| Bits Allocated other than 8 or 16 | descriptor | `UnsupportedPixelFormat` |
+| Orientation other than 1 | codestream header | `UnsupportedPixelFormat` |
+| A float sample bit depth | codestream header | `UnsupportedPixelFormat` |
+| Any extra channel (alpha, black, spot) | codestream header | `UnsupportedPixelFormat` |
+| A colour encoding given as an ICC profile | codestream header | `UnsupportedPixelFormat` |
+| An enum colour space other than RGB or grey | codestream header | `UnsupportedPixelFormat` |
+| A PQ or HLG transfer function | codestream header | `UnsupportedPixelFormat` |
+| `bits_per_sample` differing from Bits Stored | codestream header | `FrameMismatch` |
+| Width or height differing from Columns or Rows | codestream header | `FrameMismatch` |
+| Colour channels differing from Samples per Pixel | codestream header | `FrameMismatch` |
+| Other than one keyframe | after load | `FrameMismatch` |
+| A VarDCT frame under `.110` | after load | `FrameMismatch` |
+| `xyb_encoded` under `.110` | codestream header | `FrameMismatch` |
+| A sample outside the stored range | after render | `UnsupportedPixelFormat` |
+| Bytes after the codestream, except one `0x00` pad on an odd length | after load | `TrailingData` |
+
+Bits Allocated 24 never reaches the adapter: `FrameDesc::new` accepts only 1,
+8, 16 and 32. A declared 65,535 by 65,535 frame under a 64 by 96 descriptor
+is refused by the header checks before any grid is allocated.
+
+### Lossy modular under `.110` is not detected
+
+`.110` refuses a VarDCT frame encoding and an image header with
+`xyb_encoded` set, which is what libjxl writes for its lossy routes. A lossy
+modular frame, quantised squeeze with `xyb_encoded` false, is a modular
+encoding the header check cannot see, and `.110` does not detect it. The
+tracked `jpegxl_modular_xyb.jxl` fixture is the detected shape. Closing the
+modular gap would need the frame's own quantisation evidence and is a
+follow-up decision, not a silent acceptance.
+
+### Signed samples refuse
+
+PS3.5 8.2.15 says the JPEG XL bit stream is capable of encoding signed
+values, and PS3.5 does not say how a signed sample lands in the DICOM
+container. Pixel Representation 1 is refused with `UnsupportedPixelFormat`
+rather than decoded through a guessed offset or a two's-complement
+reinterpretation, which is the quietly wrong pixel. A follow-up story is
+filed when a reference signed file exists.
+
+### The allocation bound, and what sits outside it
+
+Each decode builds its image with `AllocTracker::with_limit(n)` where `n` is
+`ALLOC_LIMIT_NUMERATOR` times `FrameDesc::output_len()`. The numerator is the
+measured worst tracked peak over the fixtures, doubled: the suite fails up to
+a numerator of 12 and passes from 13, and the binding case is the 64 by 96
+lossy 12-bit `jpegxl_lossy_12.jxl`, measured on 2026-11-05. A decode that
+exceeds the doubled limit returns `DecoderFailure` and writes nothing.
+
+Two bounds sit outside the tracker by measurement and are recorded in the
+module documentation: the extracted codestream copy of a container, at most
+the input length, and the extra channel vector the header parser grows while
+it parses a header that declares them, constant bounded by the format's own
+limits. Extra channels refuse in the pre-check after that parse, so the
+refusal stops the `try_init` reparse, not the growth.
+
+### The forward wasm cost, which no shipped module pays today
+
+A wasm32 `cdylib` that reads a JPEG XL image and renders frame 0 through
+`jxl-oxide` 0.12.6, built with the workspace release profile and no
+wasm-opt, measured 940,335 bytes on 2026-11-05, against 75 bytes for an empty
+`cdylib` at the same profile. That is what a decode worker pays when a later
+story links `ocelli-codec` into a wasm module. Neither `ocelli-wasm` nor
+`ocelli-native` reaches `ocelli-codec`, so both shipped size budgets are
+unchanged by this family. If that link happens, `alloc-stdlib` enters the
+closure and ships no licence file, so F-220's generator would need a pinned
+text in `ci/notices/sources.toml`. Every other crate that closure adds carries
+a licence file or an allow-listed declaration.
+
 ## Known does not mean available
 
-`KNOWN_TRANSFER_SYNTAXES` is the explicit sixteen-UID catalogue shared with the
-corpus surface. A new `Registry` begins with every one of those UIDs in
+`KNOWN_TRANSFER_SYNTAXES` is the explicit nineteen-UID catalogue shared with
+the corpus surface. A new `Registry` begins with every one of those UIDs in
 `KnownUnavailable`. No native or compressed syntax is inferred to work merely
 because its UID is common or because `ocelli-dicom` can parse its data set.
 
@@ -344,7 +656,11 @@ and RLE Lossless. Deflated Explicit VR Little Endian is intentionally absent.
 Its compressed stream wraps the data set rather than one frame and remains an
 `ocelli-dicom` ingest responsibility. It therefore remains
 `KnownUnavailable` in the frame registry even when all F-025 adapters are
-registered.
+registered. `register_jpegxl_decoders` preflights all three JPEG XL UIDs the
+same way and registers only `.110` and `.112`, leaving `.111` known and
+unregistered. `crates/ocelli-codec/tests/registry.rs` asserts the partition:
+nineteen known, seventeen available, Deflated and JPEG XL JPEG Recompression
+the two unavailable.
 
 ## Frame description and output ownership
 
@@ -373,9 +689,27 @@ colour interpretation or sample layout changed by a decoder.
 `DecodePhotometricInterpretation` and `DecodeSampleLayout` are the typed output
 descriptions for those facts. Raw decoding reports `Preserved` layout. RLE and
 JPEG report `Interleaved`. JPEG also reports `Rgb` after its dependency
-converts a three-sample colour codestream. Registry forwards both queries by
-exact UID. This reports conversions for a future pixel-stage consumer but
-does not enforce their use. No production consumer is wired in F-025.
+converts a three-sample colour codestream, and since F-239 the two JPEG 2000
+adapters report `Rgb` for `YBR_RCT` and `YBR_ICT` descriptors, which PS3.5
+8.2.4 makes the two codes that name the codestream's own transform. Registry
+forwards both queries by exact UID. This reports conversions for a future
+pixel-stage consumer but does not enforce their use.
+
+**The decoded output length is the decoder's fact**, by the operator's answer
+to F-239 question 1. `Decoder::decoded_output_len` defaults to
+`FrameDesc::output_len`, the container's own
+`Rows * Columns * Samples per Pixel * Bits Allocated / 8`, and
+`Registry::decode` checks the caller's buffer against the selected decoder's
+answer. The raw decoder overrides it for native `YBR_FULL_422` and
+`YBR_PARTIAL_422`, whose stored sample count is two of the frame's three
+samples per pixel (PS3.3 C.7.6.3.1.2 stores each pixel pair as `Y1 Y2 Cb
+Cr`), so a native 4:2:2 frame is four bytes for a two-pixel frame and not
+six. The stored count also sizes `frame_bits`, so a complete native Value and
+each of its frames are sized by what is stored rather than by Samples per
+Pixel. An odd Columns on such a frame is refused as `FrameMismatch`, because
+a pixel pair has no partner and PS3.3 names no rule that joins it across
+rows. The production callers that size a buffer from the container length
+move to the query with the viewer part of the story.
 
 ## Native Pixel Data normalization
 
@@ -512,8 +846,13 @@ touch the GPU, so rendering tiers A, B, and C do not select different registry
 behavior. `ocelli-codec` imports neither `wgpu` nor `wasm-bindgen`, and it uses
 no unsafe code.
 
-JPEG 2000, JPEG-LS and HTJ2K are registered. The sections above are their
-contracts. A known UID with no adapter remains `KnownUnavailable`.
+JPEG 2000, JPEG-LS, HTJ2K and JPEG XL are registered, the last with `.111`
+left known and unavailable. The sections above are their contracts. A known
+UID with no adapter remains `KnownUnavailable`. The folder viewer's
+`codecs()` in `examples/folder-viewer/src/preview.rs` registers all six
+families, and its preview draws monochrome frames only: a three-sample frame
+is refused `NotMonochrome` before decode, and a decoder that reports `Rgb`
+output is refused the same way.
 
 ## Evidence and measurement boundary
 

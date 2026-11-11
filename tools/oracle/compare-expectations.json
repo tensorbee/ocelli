@@ -22,11 +22,26 @@
     "syntax__htj2k_lossless": [
       "weak"
     ],
+    "syntax__htj2k_lossless_empty_bot": [
+      "weak"
+    ],
     "syntax__htj2k_lossless_rpcl": [
       "weak"
     ],
+    "syntax__htj2k_lossless_rpcl_empty_bot": [
+      "weak"
+    ],
+    "syntax__htj2k_lossless_ybr_rct": [
+      "unstated-threshold"
+    ],
     "syntax__htj2k_lossy": [
       "weak"
+    ],
+    "syntax__htj2k_lossy_empty_bot": [
+      "weak"
+    ],
+    "syntax__htj2k_lossy_ybr_ict": [
+      "unstated-threshold"
     ],
     "syntax__implicit_vr_le": [
       "weak"
@@ -34,22 +49,61 @@
     "syntax__j2k_lossless": [
       "weak"
     ],
+    "syntax__j2k_lossless_empty_bot": [
+      "weak"
+    ],
+    "syntax__j2k_lossless_multiframe_eot": [
+      "weak"
+    ],
+    "syntax__j2k_lossless_multiframe_fragmented_empty_bot": [
+      "weak"
+    ],
+    "syntax__j2k_lossless_ybr_rct": [
+      "unstated-threshold"
+    ],
     "syntax__j2k_lossy": [
       "weak"
     ],
+    "syntax__j2k_lossy_empty_bot": [
+      "weak"
+    ],
+    "syntax__j2k_lossy_ybr_ict": [
+      "unstated-threshold"
+    ],
     "syntax__jpeg_baseline_rgb8": [
+      "unstated-threshold"
+    ],
+    "syntax__jpeg_baseline_rgb8_empty_bot": [
       "unstated-threshold"
     ],
     "syntax__jpeg_extended_12": [
       "weak"
     ],
+    "syntax__jpeg_extended_12_empty_bot": [
+      "weak"
+    ],
     "syntax__jpeg_lossless_p14": [
+      "weak"
+    ],
+    "syntax__jpeg_lossless_p14_empty_bot": [
       "weak"
     ],
     "syntax__jpeg_lossless_p14_sv1": [
       "weak"
     ],
+    "syntax__jpeg_lossless_p14_sv1_empty_bot": [
+      "weak"
+    ],
+    "syntax__jpeg_lossless_p14_sv1_multiframe_fragmented_empty_bot": [
+      "weak"
+    ],
     "syntax__jpegls_lossless": [
+      "weak"
+    ],
+    "syntax__jpegls_lossless_empty_bot": [
+      "weak"
+    ],
+    "syntax__jpegls_lossless_fragmented_empty_bot": [
       "weak"
     ],
     "syntax__jpegls_lossless_rgb8": [
@@ -58,13 +112,25 @@
     "syntax__jpegls_near_lossless": [
       "weak"
     ],
+    "syntax__jpegls_near_lossless_empty_bot": [
+      "weak"
+    ],
     "syntax__reference_mono12": [
       "weak"
     ],
     "syntax__reference_rgb8": [
       "unstated-threshold"
     ],
+    "syntax__reference_rgb8_saturated": [
+      "unstated-threshold"
+    ],
     "syntax__rle_lossless": [
+      "weak"
+    ],
+    "syntax__rle_lossless_empty_bot": [
+      "weak"
+    ],
+    "syntax__rle_multiframe_empty_bot": [
       "weak"
     ],
     "synthetic__ct_unsigned_16": [
@@ -74,6 +140,24 @@
       "unstated-threshold"
     ],
     "synthetic__sc_palette_color_16": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc_gamma1": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc_gamma22": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc_lut": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc_srgb_para": [
+      "unstated-threshold"
+    ],
+    "synthetic__sc_rgb_icc_swap": [
       "unstated-threshold"
     ],
     "synthetic__sc_rgb_interleaved": [

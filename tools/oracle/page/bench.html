@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ocelli bench, cornerstone3D 5.8.2 comparator</title>
+    <style>
+      /* The page is never looked at by a person. The harness drives it
+         through `window.__bench` and the #view element, so the stylesheet
+         exists to keep the viewport element a predictable box and nothing
+         else. #view is the enabled element: cornerstone3D creates its own
+         viewport div and canvas inside it, and the harness may resize it to
+         an image's native columns and rows for a capture. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+      }
+      #bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 32px;
+        margin: 0;
+        padding: 0 8px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: #000;
+        color: #ddd;
+        font: 12px/1 sans-serif;
+      }
+      #status {
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #view {
+        position: absolute;
+        top: 32px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        line-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <input id="folder" type="file" webkitdirectory disabled />
+      <p id="status"></p>
+    </div>
+    <div id="view"></div>
+    <script type="module" src="./bench.js"></script>
+  </body>
+</html>

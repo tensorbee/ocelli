@@ -159,6 +159,78 @@
       "subject_story": "F-004",
       "feeds": ["A7.2"],
       "note": "F-004 owns this micro-benchmark and F-006 only records it. The permanent runner invokes F-004's own ignored release instrument and parses its pixel rate. It reimplements no GPU workload. A machine with no suitable adapter reports runner failure rather than a fabricated value."
+    },
+    {
+      "id": "viewer.open",
+      "title": "Open a folder of 1,693 synthetic CT files to the series sentence",
+      "definition_hld": "23-performance-rules.md section 26",
+      "definition": "Starts at setInputFiles on #folder and ends when the status text matches the series sentence. The workload is 1,693 synthetic 512 by 512 16-bit files in one series. The figure is the median of 9 fresh pages.",
+      "unit": "ms",
+      "dimensions": ["host", "profile", "files"],
+      "tiers": ["C"],
+      "subject_story": "F-216",
+      "feeds": ["F-216"],
+      "note": "An increase is worse."
+    },
+    {
+      "id": "viewer.first_image",
+      "title": "Time from the series sentence to the first drawn image",
+      "definition_hld": "23-performance-rules.md section 26",
+      "definition": "Starts when the series sentence appears and ends at the first putImageData on #view. Measured on the 1,693-file CT series and on one 3000 by 2900 16-bit file. The recorded value is the CT median. A restart on the same port is a step in this subject, and the next frame must draw without a reload.",
+      "unit": "ms",
+      "dimensions": ["host", "profile", "rows", "columns"],
+      "tiers": ["C"],
+      "subject_story": "F-216",
+      "feeds": ["F-216"],
+      "note": "An increase is worse."
+    },
+    {
+      "id": "viewer.scroll_rate",
+      "title": "Presented frames per second while ArrowDown repeats",
+      "definition_hld": "23-performance-rules.md section 26",
+      "definition": "Starts at the first ArrowDown and ends 3 seconds later plus a 300 ms settle. One ArrowDown is dispatched per requestAnimationFrame callback on the 1,693-file series. A frame is presented when the image index the page drew changed since the previous callback. The figure is presented frames per second. Detail carries keys delivered, blank samples and the plain setTimeout(16) ceiling measured on the host. The median is taken over 5 runs. Fewer than 120 keys is not a measurement.",
+      "unit": "frames_per_second",
+      "dimensions": ["host", "profile", "files"],
+      "tiers": ["C"],
+      "subject_story": "F-216",
+      "feeds": ["F-216"],
+      "note": "An increase is better."
+    },
+    {
+      "id": "viewer.window_step",
+      "title": "One held window change from requestGrey to drawGrey",
+      "definition_hld": "23-performance-rules.md section 26, 15-lut-chain.md section 18",
+      "definition": "Starts at a requestGrey call from the page and ends when drawGrey returns. Nine window steps are taken on the 512 by 512 series and on the 3000 by 2900 file. The recorded value is the CT median. The runner counts bodies on /preview.",
+      "unit": "ms",
+      "dimensions": ["host", "profile", "rows", "columns"],
+      "tiers": ["C"],
+      "subject_story": "F-216",
+      "feeds": ["F-216"],
+      "note": "An increase is worse."
+    },
+    {
+      "id": "viewer.resident_memory",
+      "title": "Peak resident set size across one pass of the viewer subjects",
+      "definition_hld": "23-performance-rules.md section 26, 17-cache-and-allocation.md section 20",
+      "definition": "Starts when the viewer process starts and ends after viewer.open, viewer.first_image, viewer.scroll_rate and viewer.window_step have each run once in that process and the pet_no_window folder has been opened three times, so a series window is asked for. The figure is the peak of ps -o rss= sampled every 20 ms, in bytes. Detail carries GET /held and the page heap.",
+      "unit": "bytes",
+      "dimensions": ["host", "profile"],
+      "tiers": ["C"],
+      "subject_story": "F-216",
+      "feeds": ["F-216"],
+      "note": "An increase is worse. The bound is the formula in the F-216 design, not a second budget invented here."
+    },
+    {
+      "id": "viewer.colour_frame",
+      "title": "First colour /preview and nine held colour window steps on an 8192 by 8192 frame",
+      "definition_hld": "23-performance-rules.md section 26, 15-lut-chain.md section 18",
+      "definition": "Four synthetic native Part 10 files of 8192 by 8192 pixels, one 8-bit RGB and one 16-bit PALETTE COLOR as F-239 wrote them, plus an 8-bit RGB frame carrying the F-240 AC2 curv gamma 0x0233 profile and a 16-bit RGB frame carrying a derived two-entry curv table profile, each measured against its own release viewer process. POST /file ingests each file before timing. The first id-only POST /preview is timed through the last reply byte and must report X-Ocelli-Source decoded, including decode, colour resolve, profile apply, palette read, conversion and bytes. Nine later id-only numeric colour window steps must report Source held, at centres 100 to 108 and width 200. Every reply is consumed in full and representative bytes are validated: the F-239 pair against the synthetic pattern, the ICC pair against precomputed hand vectors at neutral marker pixels. The profiled /file reports must carry icc_applied true and icc_kind \"\". The 16-bit ICC workload alone starts its child with OCELLI_CACHE_MIB=512, recorded with the actual /held budget and asserted to agree, and every other workload inherits the default. For the two ICC workloads only, a held census after the first decode and after the window steps must hold at least the decoded samples plus the TRC tables, 3 * 2^bits * 4 bytes, and stay stable across the warm draws. This proves retained charged residency, not the absence of transient or same-sized rebuilding. Source and lifetime checks and actual timings supply separate work-once evidence. The two established untagged workloads retain their original HTTP protocol without those extra census reads. Peak ps -o rss= is sampled every 20 ms from the URL announcement to the last measured preview, with actual readings, count, failures and budget/held metadata retained. The recorded value is the untagged 8-bit RGB median of the nine window steps. No threshold.",
+      "unit": "ms",
+      "dimensions": ["host", "profile", "rows", "columns", "photometric", "icc"],
+      "tiers": ["C"],
+      "subject_story": "F-239",
+      "feeds": ["F-239"],
+      "note": "An increase is worse. The reply is three bytes per pixel with X-Ocelli-Channels: 3 and no alpha. Each workload runs in its own viewer process, because two held 8192 by 8192 frames would exceed one held budget together, and the 16-bit ICC workload cannot be held under the default 256 MiB at all: its 384 MiB encoded and 384 MiB decoded samples are why F-240's amendment authorises an explicit 512 MiB for that child alone, recorded as requested and actual. The row is registered before measurement: AC31 runs bin/ocelli.sh bench viewer.colour_frame on the F-216 host when the colour viewer lands, and no baseline is recorded until then. F-240 AC15's ICC cases run through this same subject and the recorded value stays the untagged 8-bit RGB median, so the F-239 figure is comparable across the extension."
     }
   ]
 }

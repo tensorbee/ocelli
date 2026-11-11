@@ -6,8 +6,8 @@
 //! Sagittal row `(0,1,0)` and column `(0,0,-1)` give normal `(-1,0,0)`.
 
 use ocelli_dicom::{
-    CineTiming, DisplaySeries, ParsedDicom, ParsedFrame, Playback, SeriesOpenError,
-    SeriesOpenReason, SpatialOrder, assemble_display, parse_part10,
+    CineTiming, DisplaySeries, MetadataSet, ParsedDicom, ParsedFrame, Playback, SeriesOpenError,
+    SeriesOpenReason, SpatialOrder, assemble_display, cine_timing, parse_part10,
 };
 
 const AXIAL: &str = "1\\0\\0\\0\\1\\0";
@@ -33,6 +33,7 @@ struct Slice {
     cine_rate: Option<&'static str>,
     playback: Option<u16>,
     playback_cs: Option<&'static str>,
+    frames: Option<&'static str>,
 }
 
 fn slice(sop: &'static str) -> Slice {
@@ -53,6 +54,7 @@ fn slice(sop: &'static str) -> Slice {
         cine_rate: None,
         playback: None,
         playback_cs: None,
+        frames: None,
     }
 }
 
@@ -581,6 +583,139 @@ fn series_open_frame_index_past_the_end_is_an_error() {
     assert_eq!(error.index(), 0);
 }
 
+/// One object's timing alone, through the public projection.
+fn object_timing(part: &Slice) -> Result<CineTiming, SeriesOpenError> {
+    let parsed = parse_slice(part);
+    let metadata = MetadataSet::from_object(parsed.object());
+    assert!(metadata.is_ok(), "the fixture projects");
+    let Ok(metadata) = metadata else {
+        unreachable!("asserted immediately above")
+    };
+    cine_timing(&metadata)
+}
+
+/// Every frame of one object, in frame order.
+fn assemble_object(part: &Slice, frames: u32) -> Result<Vec<DisplaySeries>, SeriesOpenError> {
+    let parsed = parse_slice(part);
+    let list: Vec<ParsedFrame<'_>> = (0..frames)
+        .map(|frame| ParsedFrame::new(&parsed, frame))
+        .collect();
+    assemble_display(&list)
+}
+
+/// One object with every timing source this fixture set varies.
+fn timed(
+    frames: Option<&'static str>,
+    time: Option<&'static str>,
+    vector: Option<&'static str>,
+    rate: Option<&'static str>,
+    cine: Option<&'static str>,
+) -> Slice {
+    let mut part = slice("2.25.40");
+    part.position = Some("0\\0\\0");
+    part.frames = frames;
+    part.frame_time = time;
+    part.frame_time_vector = vector;
+    part.recommended_rate = rate;
+    part.cine_rate = cine;
+    part
+}
+
+#[test]
+fn cine_timing_matches_display_timing() {
+    // F-214 AC9. Each fixture is one object, so assembly's own length check
+    // and the object's declared frame count are the same number. Frame Time
+    // is PS3.3 C.7.6.5 in milliseconds and the vector is C.7.6.5.1.2.
+    let cases: [(Slice, u32); 9] = [
+        (timed(None, Some("100"), None, None, None), 1),
+        (timed(Some("2"), Some("40"), None, None, None), 2),
+        (timed(Some("2"), Some("33.3"), None, Some("10"), None), 2),
+        (timed(Some("2"), None, Some("0\\40"), None, None), 2),
+        (timed(Some("2"), Some("100"), Some("0\\40"), None, None), 2),
+        // A vector of three values on two frames is skipped, so Frame Time wins.
+        (
+            timed(Some("2"), Some("100"), Some("0\\40\\40"), None, None),
+            2,
+        ),
+        (timed(Some("2"), None, None, Some("25"), None), 2),
+        (timed(Some("2"), None, None, None, Some("30")), 2),
+        (timed(Some("2"), None, None, None, None), 2),
+    ];
+    for (part, frames) in &cases {
+        let group = one_group(assemble_object(part, *frames));
+        assert_eq!(object_timing(part), Ok(group.timing()));
+    }
+    // The refusals agree too. A later vector component of zero and a Frame
+    // Time of zero on two frames do not fall through to Frame Time or a rate.
+    for part in [
+        timed(Some("2"), Some("100"), Some("40\\0"), None, None),
+        timed(Some("2"), Some("0"), None, Some("10"), None),
+    ] {
+        let assembled = assemble_object(&part, 2).map(|_| ());
+        let alone = object_timing(&part).map(|_| ());
+        assert_eq!(
+            alone.map_err(SeriesOpenError::reason),
+            Err(SeriesOpenReason::Cine)
+        );
+        assert_eq!(
+            assembled.map_err(SeriesOpenError::reason),
+            Err(SeriesOpenReason::Cine)
+        );
+    }
+}
+
+#[test]
+fn cine_timing_reads_frame_time_40_in_milliseconds() {
+    // PS3.3 C.7.6.5. Frame Time is DS in milliseconds, so 40 is 40 ms and
+    // 1000 / 40 is 25 frames per second. It is not a rate.
+    let part = timed(Some("2"), Some("40"), None, Some("10"), Some("30"));
+    let Ok(CineTiming::FrameTime { milliseconds }) = object_timing(&part) else {
+        unreachable!("Frame Time comes before either rate")
+    };
+    assert_eq!(milliseconds.to_bits(), 40.0_f64.to_bits());
+}
+
+#[test]
+fn cine_timing_ignores_a_bad_playback_value() {
+    // F-214 amendment 2. Preferred Playback Sequencing 2 is not 0 or 1,
+    // PS3.3 C.7.6.5, so assembly refuses the object. The timing alone is
+    // still Frame Time 40.
+    let mut part = timed(Some("2"), Some("40"), None, None, None);
+    part.playback = Some(2);
+    expect_reason(assemble_object(&part, 2), SeriesOpenReason::Playback);
+    let Ok(CineTiming::FrameTime { milliseconds }) = object_timing(&part) else {
+        unreachable!("the playback value does not hide Frame Time")
+    };
+    assert_eq!(milliseconds.to_bits(), 40.0_f64.to_bits());
+}
+
+#[test]
+fn cine_timing_single_frame_zero_is_unavailable() {
+    // F-214 amendment 4. One frame has no interval between frames, so a
+    // Frame Time of 0 there is not refused. It is not replaced by the rate
+    // either, because Frame Time was present.
+    let alone = timed(None, Some("0"), None, None, None);
+    assert_eq!(object_timing(&alone), Ok(CineTiming::Unavailable));
+    let declared = timed(Some("1"), Some("0"), None, Some("10"), None);
+    assert_eq!(object_timing(&declared), Ok(CineTiming::Unavailable));
+    // A negative interval is never legal, PS3.3 C.7.6.5 gives Frame Time as
+    // a time in milliseconds, so one frame of -40 stays the Cine refusal.
+    let negative = timed(None, Some("-40"), None, None, None);
+    assert_eq!(
+        object_timing(&negative).map_err(SeriesOpenError::reason),
+        Err(SeriesOpenReason::Cine)
+    );
+    // Two frames with Frame Time 0 stay unusable.
+    let two = timed(Some("2"), Some("0"), None, None, None);
+    assert_eq!(
+        object_timing(&two).map_err(SeriesOpenError::reason),
+        Err(SeriesOpenReason::Cine)
+    );
+    // A one-value vector on one frame is still the vector, which comes first.
+    let vector = timed(None, Some("0"), Some("0"), None, None);
+    assert_eq!(object_timing(&vector), Ok(CineTiming::FrameTimeVector));
+}
+
 fn enhanced_pair() -> ParsedDicom {
     enhanced_parsed(true, true)
 }
@@ -670,6 +805,9 @@ fn encode(part: &Slice) -> Result<Vec<u8>, &'static str> {
     }
     if let Some(temporal) = part.temporal {
         data.extend(short_le((0x0020, 0x9128), *b"UL", &temporal.to_le_bytes())?);
+    }
+    if let Some(frames) = part.frames {
+        data.extend(text_element((0x0028, 0x0008), *b"IS", frames)?);
     }
     data.extend(short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?);
     data.extend(short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?);

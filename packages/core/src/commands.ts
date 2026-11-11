@@ -14,6 +14,7 @@ import {
   PRESET_BYTE,
   VOI_FUNCTION_BYTE,
 } from "./generated.js";
+import { OcelliError } from "./ocelli-error.js";
 import type { Colormap, Invert, VoiFunction, WindowPreset } from "./viewport.js";
 
 export { COMMAND_ID };
@@ -180,7 +181,8 @@ function append(out: number[], viewportId: number, command: PackedCommand): void
   const payload = payloadOf(command);
   const expected = COMMAND_PAYLOAD_BYTES[command.kind];
   if (payload.length !== expected) {
-    throw new RangeError(
+    throw new OcelliError(
+      "InvalidValue",
       `${command.kind} payload is ${payload.length} bytes and the Rust table declares ${expected}`,
     );
   }
@@ -231,7 +233,7 @@ function payloadOf(command: PackedCommand): number[] {
 
 function u16(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
-    throw new RangeError(`${name} ${value} is not a u16`);
+    throw new OcelliError("InvalidValue", `${name} ${value} is not a u16`);
   }
   return value;
 }
@@ -251,14 +253,14 @@ function pushU32(out: number[], value: number): void {
 
 function u32(value: number, name: string): number[] {
   if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
-    throw new RangeError(`${name} ${value} is not a u32`);
+    throw new OcelliError("InvalidValue", `${name} ${value} is not a u32`);
   }
   return [value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff];
 }
 
 function i32(value: number): number[] {
   if (!Number.isInteger(value) || value < -0x8000_0000 || value > 0x7fff_ffff) {
-    throw new RangeError(`step ${value} is not an i32`);
+    throw new OcelliError("InvalidValue", `step ${value} is not an i32`);
   }
   const bits = value < 0 ? value + 0x1_0000_0000 : value;
   return [bits & 0xff, (bits >> 8) & 0xff, (bits >> 16) & 0xff, (bits >> 24) & 0xff];

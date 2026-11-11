@@ -67,6 +67,8 @@
 //! needs `std`. That is part of deviation D-10 and it is recorded there rather
 //! than left as an unexplained absence.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 pub mod brick_upload;
 pub mod caps;
 pub mod clip;
@@ -96,9 +98,13 @@ pub use caps::{
     TierSignals, candidate_order, classify, compute_available, opens_a_device, recovers_from,
 };
 pub use clip::ClipPlane;
-pub use colour::{ColourLut, ColourLutError, PresetId, colour_lut_for, display_index};
+pub use colour::{
+    ColourLut, ColourLutError, IccProfilePresence, PresetId, colour_lut_for, display_index,
+};
 pub use contour::{ContourDrawError, ContourView};
-pub use cpu::{CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult};
+pub use cpu::{
+    CpuRaster, RasterColor, RasterError, RasterGrid, RasterQuality, RasterResult, colour_bytes_into,
+};
 pub use extent::{ExtentError, css_from_device, device_extent};
 pub use fusion::{
     FusionError, FusionLedger, FusionRequest, colour_after_voi, composite, composite_sample,

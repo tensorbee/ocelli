@@ -1,7 +1,7 @@
 # Events
 
-**F-IDs that contributed:** F-032, F-034, F-101, F-103
-**Last updated:** 2026-10-27
+**F-IDs that contributed:** F-032, F-034, F-101, F-103, F-226, F-231
+**Last updated:** 2026-11-07
 
 The shell's names for what the ring delivers and for what stays in the shell.
 Decision D4. The catalogue is `packages/core/src/events.ts`. This file says
@@ -35,20 +35,49 @@ The numbers are `RING_EVENT_KIND` in the generated module.
 | 4 | `cache.pressure` | tier `u8`, used `u64`, budget `u64`, entries `u32`, evicted `u32`, refused `u32` |
 | 5 | `cache.budgetChanged` | tier `u8`, budget `u64`, evicted bytes `u64`, evicted `u32`, dropped `u32` |
 | 6 | `frame.presented` | generation `u32`, drawn width `u32`, drawn height `u32`, flags `u32` |
+| 7 | `cache.released` | series `u64`, frames `u32`, bytes `u64` |
 
 Offsets are little-endian and come from `CacheEvent::encode`,
 `TelemetryEvent::encode` and `push_presented`. Pressure and budget leave
 three bytes after the tier. A short payload or a tier outside 0, 1 and 2
-decodes as null. Kind 0 and any kind above 6 do too.
+decodes as null. Kind 0 and any kind above 7 do too.
 
-`cache.displaced`, `cache.refused` and `cache.budgetChanged` have no 5.8.2
-name. They are `UNMAPPED_EVENTS`. `viewport.resized` is the shell
-ResizeObserver and is unmapped for the same reason. Pairing one of them with
+`cache.displaced`, `cache.refused`, `cache.budgetChanged` and `cache.released`
+have no 5.8.2 name. They are `UNMAPPED_EVENTS`. `viewport.resized` is the
+shell ResizeObserver and is unmapped for the same reason. `cache.released`
+reports one release per series, where 5.8.2 reports a removed image per
+image. Pairing one of them with
 a different cornerstone event would name the wrong observation.
 
 `IMAGE_RENDERED` is `frame.presented`. `IMAGE_CACHE_IMAGE_REMOVED` is
 `cache.evicted`. `CACHE_SIZE_EXCEEDED` is `cache.pressure`. Volume-cache
 removal is not frame-cache eviction.
+
+## Producers
+
+Kind 6 is the session's draw, `push_presented`. Kinds 1 to 5 and 7 are the
+wasm session's frame cache, F-231, `crates/ocelli-wasm/src/session.rs`, and
+each is pushed through `EventRing::push_with_seq`, which assigns the next
+sequence number as `push_presented` does, so every kind shares one sequence
+space. The cache is off until the caller sets a budget, and with no budget
+a commit pushes only kind 6.
+
+- **A cached commit** pushes the insert's events in `ImageCache`'s order,
+  `cache.displaced`, then each `cache.evicted` least recently used first,
+  then `cache.refused`, and then one `cache.pressure` if the band crossed.
+- **A budget change** pushes each `cache.evicted`, then one
+  `cache.budgetChanged` whose count and bytes are those evictions and whose
+  `dropped` is the ring's own count, then one `cache.pressure` if the band
+  crossed. This is F-034's order.
+- **A series release** pushes one `cache.released` for the series, or none
+  when it held nothing, then one `cache.pressure` if the band crossed.
+- **A stale removal** at `show_resident` pushes no cache event, and then one
+  `cache.pressure` if the band crossed.
+- **`request_frame_pressure`** pushes one `cache.pressure` whatever the band.
+
+A pressure reading's `evicted` and `refused` are the counts since the
+previous reading. A burst larger than the free ring space is counted in the
+header's `dropped`, and the events already held are not overwritten.
 
 ## What stays state
 

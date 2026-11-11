@@ -2,7 +2,10 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
+    { "path": "./packages/core/tsconfig.test.json" },
     { "path": "./packages/react" },
-    { "path": "./examples/viewer-react" }
+    { "path": "./packages/react/tsconfig.test.json" },
+    { "path": "./examples/viewer-react" },
+    { "path": "./examples/folder-viewer" }
   ]
 }

@@ -1,7 +1,7 @@
 # The guard harness
 
-**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110
-**Last updated:** 2026-11-03
+**F-IDs that contributed:** F-037, F-X008, F-X009, F-X010, F-X014, F-X015, F-X018, F-X019, F-X020, F-X023, F-110, F-217, F-218, F-219, F-220, F-232
+**Last updated:** 2026-11-07
 
 A guard is any refusal this repository can produce: a script that exits 1, a
 hook that rejects a commit, a gate that fails.
@@ -433,6 +433,12 @@ probe inserts a hand-curated paragraph, runs the bare command and requires the
 overwrite refusal. The control runs `--force` and requires success, so a writer
 that refuses every mode cannot satisfy the probe.
 
+Each of the fourteen `--check` refusals has a probe of its own, keyed by a
+fragment only that refusal prints. The census counts per entry, not per
+refusal, so it cannot tell a refusal that a probe drives from one that only
+sits in a watched file. A refusal added later needs its own probe by review,
+not by the census.
+
 ### Sprint-close evidence names one tree
 
 `scripts/sprint_workflow.py` records each whole-sprint review and each new
@@ -577,6 +583,69 @@ markers is hand-written and is not generated. A green census also verifies the
 table has not drifted, so a guard added without re-rendering fails the gate. A
 table of probes drifts the moment a guard is added, which is the defect this
 harness exists to fix.
+
+## The licence allowlist
+
+`bin/ocelli.sh gate licences` is in the floor. `deny.toml` holds the one
+allowlist. cargo-deny 0.19.0 reads it for Rust. `scripts/licence_check.py`
+reads the same list for npm and Python, and it checks `THIRD_PARTY_NOTICES`
+and the copyright holder. Exceptions live in `ci/licences.toml` with a reason,
+a scope, a date and who decided. A stale exception is refused. An exception on
+a package in a published runtime closure is refused.
+
+`bin/ocelli.sh gate licences-wheels` is outside the floor. It scans installed
+wheels for copyleft markers, empty licence files and bundled libraries. The
+corpus-tooling job runs it after `uv sync --locked`.
+
+The catalogue entry `licences` claims `scripts/licence_check.py`. Floor probes
+cover the npm lockfiles, the Python table, notices and the holder. The Rust
+probes need cargo and sit in the deep profile. Three level-1 probes call the
+wheel checks on a synthetic tree.
+
+Recorded constants added with this gate are the `deny.toml` allow list,
+`COPYLEFT_MARKERS`, `EXCEPTION_FIELDS`, `PLACEHOLDER_LICENCE`, the provenance
+`MANIFESTS` set and `OPENJPH_LICENCE_SHA256`.
+
+`pins.openjph-notice` deletes `vendor/openjph-core-0.1.0/LICENSE` and must
+refuse with the missing-notice text. The unmodified tree accepts.
+`pins.openjph-notice-hash` appends a newline and must refuse on the hash.
+
+The `binaries` section of `scripts/licence_check.py` regenerates
+`THIRD_PARTY_LICENSES` from the lockfile and compares bytes.
+`licences.binaries-no-text` is a level-1 probe.
+`licences.binaries-pin`, `licences.binaries-toolchain` and
+`licences.binaries-drift` need cargo and sit in the deep profile.
+`licences.binaries-pin` appends one byte to the MIT template and runs
+`licence_check.py binaries`, so the digest check has to live in that entry
+point. Level-1 probes also cover an expression with no allowlisted licence,
+a licence path that leaves the crate root, an absent licence file, a crate
+with no file and no expression, a `--write` section other than binaries, a
+template that names another holder, an unfilled placeholder, and a no-file
+crate with no pin and no recorded fallback. `packages.wasm-without-notices`
+is a level-1 probe
+on `scripts/package_check.py`. It refuses a tarball name list that carries a
+`.wasm` file and lacks `THIRD_PARTY_LICENSES` or `THIRD_PARTY_NOTICES`. The
+CI guards job runs `cargo fetch --locked` before `gate licences`, because the
+binaries section reads the registry cache offline.
+
+## The advisory gate
+
+`bin/ocelli.sh gate advisories` is in the floor. It audits the published npm
+runtime closure for high and critical advisories. `scripts/advisory_check.py`
+reads `ci/advisories.toml`, the root lock and every tracked `overrides`
+object. moderate, low and info print a warning and do not fail. A severity
+outside the five npm uses fails closed.
+
+This is the one floor gate whose verdict follows an external database. A new
+high advisory turns the gate red without a tree change. A missing or
+unreadable audit report is a failure and never a skip.
+
+The one recorded exception is adm-zip 0.5.17, scope unreachable, checked by
+`gate packages` on a real consumer install, on the paths that gate runs. An
+override of a closure package is refused, because a root override never
+reaches a consumer of the published package.
+
+Recorded constants are `REFUSED`, `KNOWN`, `FIELDS`, `SCOPES` and `PROOFS`.
 
 ## The two gates
 
@@ -981,7 +1050,10 @@ the repair.
    `ci_floor_check.gate_commands`, which is comment-stripped and span-aware by
    construction, and the guard is its third caller now. That is the
    propagation failure again, the answer present in the repository and not
-   reaching the caller.
+   reaching the caller. F-232 made both mechanisms required, so the same
+   plant refuses today with the script-dropped message instead of printing
+   the old sentence, and `lint-policy.unsafe-gate-named-only-in-a-comment`
+   watches the new fragment.
 
 4. **`continue-on-error` was in the parsed tree and nothing read it.** The
    string occurred nowhere in `scripts/`, in this file or in the runbook.
@@ -1032,11 +1104,59 @@ transcribed in `lint_policy_check.py`, and there is a second copy in
 `Cargo.toml`'s `[workspace.lints.clippy]` carrying the same five rows at the
 same levels. That is not an oversight, it is the point: comparing the two
 copies is the whole job of the check, and a rule with one copy has nothing to
-be compared against. `unsafe_code = "deny"` is the declared exception: R5 is enforced
-by `scripts/unsafe_allowlist_check.py` over the whole tree instead, which is
-stronger for what R5 asks, because a per-file `#![allow(unsafe_code)]` would
-silence the lint and would not silence the script. The check requires one of
-the two and names which it found.
+be compared against.
+
+**`unsafe_code` stopped being a declared exception in F-232, and both
+mechanisms are required now.** `Cargo.toml` carries
+`[workspace.lints.rust] unsafe_code = "forbid"`, one level above the
+section's literal `deny` because an inner `allow` silences a deny and cannot
+silence a forbid, and F-232 measured the whole workspace clean under it, the
+lib, bin, test and example roots included, with no exception for the two
+allowed files because neither exists yet. The lint covers every lib, bin,
+test, bench, example and build script target of every member. It does not
+reach doctests, which rustdoc compiles without the table. Doctests are
+enforced by rustc through a third piece: every member library root
+carries `#![doc(test(attr(forbid(unsafe_code))))]`, which rustdoc injects
+into each doctest of that crate, and this check refuses a member library
+root, found from `cargo metadata`, that does not carry that exact line as
+the first line after its leading `//!`, `//` and blank lines. The root is
+read as bytes decoded as UTF-8 and split at LF only, one trailing CR
+removed, which is where rustc ends a `//` comment. A root holding anything
+but printable ASCII and tab on those lines or the attribute line is refused
+naming the line, because a CR, NEL, U+2028 or another separator Python
+splits at would hide the attribute text inside a comment rustc reads as
+one line.
+F-232 measured the attribute under the pinned 1.97.1 toolchain against
+every doctest shape the third review found the scanner missing, the
+`rust2015` to `rust2024` fence tags, `no_run`, indented, block-quoted and
+list-marker code, a fence on the `/*!` line, `unsafe` before a newline or
+a comment, `#[unsafe(export_name)]`, `cfg_attr` doc, escaped doc strings,
+`concat!`, `include_str!` and macro doc, and every compiled one failed,
+with error E0453 for an inner `allow`, `warn` or `expect` of
+`unsafe_code` in the doctest. An `ignore` doctest is not compiled at all,
+and a `compile_fail` one passes because the forbid makes it fail to
+compile, so neither produces a binary. The workspace has no doctests
+today, so what the floor checks is that the attribute is present, and
+`lint-policy.doctest-forbid-removed` removes it from one root and goes
+red. It acts on the first doctest anyone writes, which
+`cargo test --workspace` in the floor then compiles under it.
+`scripts/unsafe_allowlist_check.py` stays in the `unsafe` gate beside the
+table because the lint does not reach the vendored packages or the
+trybuild files, which the script audits, and because the script was
+one string regex away from the blindness F-229 measured. The check
+refuses a table below `forbid` naming `forbid`, and refuses the
+script dropped from the `unsafe` gate even with the table present. Its
+scanner is a left-to-right tokenizer since F-232, not a strip-and-search:
+it reports `unsafe` only as a keyword token, inside an attribute as well,
+reads doc comments and doc strings as comment and string text and leaves
+doctests to the attribute, refuses an unterminated literal, comment or
+attribute naming the file and line, and refuses an allow, an expect or a
+warn of `unsafe_code` in every tracked Rust file outside `vendor/`, where
+the recorded counts are the audit. The sequence for the first story
+that writes one of the two allowed files, recorded in the scanner's
+docstring, is to move the table to `deny`, add `#![forbid(unsafe_code)]` to
+every other crate root, put `#[allow(unsafe_code)]` on that one `mod`
+declaration, and teach this check the one exception.
 
 **Where that check gets its file list from, and the honest name for it is a
 RECONSTRUCTION.** The member set comes from `cargo metadata --no-deps`, because

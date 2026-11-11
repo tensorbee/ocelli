@@ -63,7 +63,8 @@ fn samples_for(photometric: PhotometricInterpretation) -> u8 {
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => 3,
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => 3,
     }
 }
 
@@ -493,6 +494,36 @@ fn the_two_jpeg_2000_transform_spaces_are_the_codec_s_to_invert() {
     }
 }
 
+/// PS3.3 C.7.6.3.1.2 names `XYB` and gives no conversion matrix. The JPEG XL
+/// decoder owns the conversion. A preserved report must not invent one.
+#[test]
+fn xyb_is_codec_owned() {
+    assert_eq!(
+        native_interleaved(PhotometricInterpretation::Xyb),
+        Err(PixelError::CodecOwnedColorTransform)
+    );
+    let resolved = require_ok!(ColorTransform::resolve(
+        require_ok!(layout(
+            PhotometricInterpretation::Xyb,
+            Some(PlanarConfiguration::Interleaved)
+        )),
+        PixelDataEncoding::Encapsulated,
+        DecodedPhotometric::Rgb,
+        DecodedLayout::Interleaved,
+        None,
+    ));
+    // Stored 10, 20, 30 stay 10, 20, 30. There is no matrix to apply.
+    let mut out = [Rgb::BLACK; 1];
+    assert_eq!(
+        resolved.map_into(&stored(&[10.0, 20.0, 30.0]), &mut out, 1),
+        Ok(())
+    );
+    let Some(pixel) = out.first().copied() else {
+        return;
+    };
+    assert_rgb_close(pixel, (10.0, 20.0, 30.0));
+}
+
 /// Stage 3 and stage 4 partition the photometric interpretations exactly.
 ///
 /// `PresentationTransform::new` refuses every colour space with
@@ -580,4 +611,396 @@ fn an_odd_pixel_count_is_refused_for_subsampled_chroma() {
         ),
         Err(PixelError::SubsampledChromaAlignment)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Display scaling of colour samples, F-239 item 11 and AC11
+// ---------------------------------------------------------------------------
+
+use ocelli_pixel::{ColourWindow, DisplayScale};
+
+/// PS3.3 C.7.6.3.1 gives Bits Stored as the range of each sample, so a
+/// sample of `n` bits is shifted right by `n - 8` for `9 <= n <= 16` before
+/// stage 4, and taken as it is at 8. The operator's answer to F-239's
+/// question 8.
+///
+/// ```text
+/// Bits Stored 12, shift 4:  4095 >> 4 = 255   2048 >> 4 = 128   15 >> 4 = 0
+/// Bits Stored 16, shift 8:  4095 >> 8 = 15    2048 >> 8 = 8     15 >> 8 = 0
+/// ```
+///
+/// Shifting by Bits Allocated 16 instead of Bits Stored 12 gives the second
+/// row for the first frame, which is the mutation this fixture rejects.
+/// cornerstone3D's saturation gives `255 255 15`.
+#[test]
+fn colour_above_8_bits_is_shifted_by_bits_stored() {
+    let twelve = require_ok!(DisplayScale::from_bits(12));
+    let sixteen = require_ok!(DisplayScale::from_bits(16));
+    let rgb = require_ok!(native_interleaved(PhotometricInterpretation::Rgb));
+
+    let at_twelve = require_ok!(rgb.clone().with_sample_scale(twelve));
+    let mut destination = [Rgb::BLACK];
+    assert_eq!(
+        at_twelve.map_into(&stored(&[4095.0, 2048.0, 15.0]), &mut destination, 1),
+        Ok(())
+    );
+    assert_eq!(
+        [destination[0].r, destination[0].g, destination[0].b].map(f32::to_bits),
+        [255.0_f32, 128.0, 0.0].map(f32::to_bits)
+    );
+
+    let at_sixteen = require_ok!(rgb.with_sample_scale(sixteen));
+    assert_eq!(
+        at_sixteen.map_into(&stored(&[4095.0, 2048.0, 15.0]), &mut destination, 1),
+        Ok(())
+    );
+    assert_eq!(
+        [destination[0].r, destination[0].g, destination[0].b].map(f32::to_bits),
+        [15.0_f32, 8.0, 0.0].map(f32::to_bits)
+    );
+}
+
+/// The shift happens before stage 4, so the 8-bit YCbCr matrix and its
+/// `+ 128` chroma offset meet an 8-bit value.
+///
+/// ```text
+/// 1600 >> 4 = 100   2400 >> 4 = 150   1440 >> 4 = 90
+/// ```
+///
+/// and `100 150 90` is the AC3 triple, `Cb' = 22`, `Cr' = -38`:
+///
+/// ```text
+/// R = 100 - 0.00003682 * 22 + 1.4019876 * -38 = 46.72366
+/// G = 100 - 0.3441133 * 22 - 0.7141038 * -38  = 119.56544
+/// B = 100 + 1.7719781 * 22 - 0.000134583 * -38 = 138.98863
+/// ```
+///
+/// Shifting after the matrix would subtract 128 from a 12-bit chroma and give
+/// a different colour entirely.
+#[test]
+fn a_ybr_sample_is_shifted_before_the_matrix() {
+    let transform = require_ok!(
+        require_ok!(native_interleaved(PhotometricInterpretation::YbrFull))
+            .with_sample_scale(require_ok!(DisplayScale::from_bits(12)))
+    );
+    let mut destination = [Rgb::BLACK];
+    assert_eq!(
+        transform.map_into(&stored(&[1600.0, 2400.0, 1440.0]), &mut destination, 1),
+        Ok(())
+    );
+    assert_rgb_close(destination[0], (46.723_66, 119.565_44, 138.988_63));
+}
+
+/// Eight bits is the identity, nine to sixteen shift, and everything else is
+/// refused by name rather than clamped into range.
+#[test]
+fn a_display_scale_outside_8_to_16_bits_is_refused() {
+    for bits in [0_u16, 1, 7, 17, 32] {
+        assert_eq!(
+            DisplayScale::from_bits(bits),
+            Err(PixelError::UnsupportedColourDepth),
+            "{bits}"
+        );
+    }
+    for (bits, shift) in [(8_u16, 0_u8), (9, 1), (10, 2), (12, 4), (15, 7), (16, 8)] {
+        assert_eq!(require_ok!(DisplayScale::from_bits(bits)).shift(), shift);
+    }
+    // A truncating shift, not a rounding one. 255 >> 8 is 0, where rounding
+    // 255 / 256 would give 1. 65535 >> 8 is 255, 32768 >> 8 is 128.
+    let sixteen = require_ok!(DisplayScale::from_bits(16));
+    for (value, expected) in [
+        (255.0_f32, 0.0_f32),
+        (256.0, 1.0),
+        (32_768.0, 128.0),
+        (65_535.0, 255.0),
+    ] {
+        assert_eq!(
+            sixteen.apply(value).to_bits(),
+            expected.to_bits(),
+            "{value}"
+        );
+    }
+    let eight = require_ok!(DisplayScale::from_bits(8));
+    assert_eq!(eight.apply(200.0).to_bits(), 200.0_f32.to_bits());
+}
+
+/// A palette frame's stored value is an index, PS3.3 C.7.6.3.1.5, so it is
+/// never scaled. Its entries are scaled by `PaletteColorLut` instead.
+#[test]
+fn a_sample_scale_is_refused_on_a_palette_frame() {
+    let red = require_ok!(ocelli_pixel::LutDescriptor::new(1, 0, 8, vec![1.0]));
+    let green = require_ok!(ocelli_pixel::LutDescriptor::new(1, 0, 8, vec![2.0]));
+    let blue = require_ok!(ocelli_pixel::LutDescriptor::new(1, 0, 8, vec![3.0]));
+    let palette = require_ok!(ocelli_pixel::PaletteColorLut::new(red, green, blue));
+    let transform = require_ok!(ColorTransform::resolve(
+        require_ok!(layout(PhotometricInterpretation::PaletteColor, None)),
+        PixelDataEncoding::Native,
+        DecodedPhotometric::Preserved,
+        DecodedLayout::Preserved,
+        Some(palette),
+    ));
+    assert_eq!(
+        transform.with_sample_scale(require_ok!(DisplayScale::from_bits(16))),
+        Err(PixelError::SampleScaleNotApplicable)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Colour window and invert, deviation D-29 and AC19
+// ---------------------------------------------------------------------------
+
+/// cornerstone3D 5.8.2's colour window, `getVOILut.js:3`:
+///
+/// ```text
+/// ((x - (c - 0.5)) / (w - 1) + 0.5) * 255, clamped to [0, 255]
+/// ```
+///
+/// which is PS3.3 C.11.2.1.2's LINEAR with output range `0 ..= 255`, applied
+/// to each channel. `generateColorLUT.js:13` to `:21` inverts after it as
+/// `255 - y`. Every row is computed in `f32`:
+///
+/// ```text
+/// w 100, c 128: lower = 127.5 - 49.5 = 78, upper = 177
+///   100 -> ((100 - 127.5) / 99 + 0.5) * 255 = 56.666664
+///   30  -> at or below 78, 0
+///   200 -> above 177, 255
+///   128 -> (0.5 / 99 + 0.5) * 255 = 128.78787
+/// w 10, c 128: lower = 123, upper = 132
+///   125 -> (-2.5 / 9 + 0.5) * 255 = 56.666664
+///   128 -> ( 0.5 / 9 + 0.5) * 255 = 141.66667
+///   130 -> ( 2.5 / 9 + 0.5) * 255 = 198.33334
+/// w 2, c 128: lower = 127, upper = 128
+///   127 -> 0, 128 -> (0.5 / 1 + 0.5) * 255 = 255, 0 -> 0
+/// ```
+///
+/// **The width 10 rows exist to reject `w` in place of `w - 1`**, which gives
+/// `63.75 140.25 191.25` there, while the width 100 rows alone would move by
+/// less than a byte on two of their three channels. LINEAR_EXACT's `c` and `w`
+/// give `51 127.5 178.5`.
+#[test]
+fn colour_window_is_linear_per_channel_and_inverted_after() {
+    let rows: [(f32, f32, [f32; 3], [f32; 3]); 4] = [
+        (128.0, 100.0, [100.0, 30.0, 200.0], [56.666_664, 0.0, 255.0]),
+        (128.0, 100.0, [128.0, 128.0, 128.0], [128.787_87; 3]),
+        (
+            128.0,
+            10.0,
+            [125.0, 128.0, 130.0],
+            [56.666_664, 141.666_67, 198.333_34],
+        ),
+        (128.0, 2.0, [127.0, 128.0, 0.0], [0.0, 255.0, 0.0]),
+    ];
+    for (center, width, input, expected) in rows {
+        let window = require_ok!(ColourWindow::new(center, width, false));
+        let source = [Rgb {
+            r: input[0],
+            g: input[1],
+            b: input[2],
+        }];
+        let mut destination = [Rgb::BLACK];
+        assert_eq!(window.map_into(&source, &mut destination), Ok(()));
+        assert_rgb_close(destination[0], (expected[0], expected[1], expected[2]));
+
+        // Inverted after the window, `0 + 255 - y`, so the same rows reflect.
+        let inverted = require_ok!(ColourWindow::new(center, width, true));
+        assert_eq!(inverted.map_into(&source, &mut destination), Ok(()));
+        assert_rgb_close(
+            destination[0],
+            (
+                255.0 - expected[0],
+                255.0 - expected[1],
+                255.0 - expected[2],
+            ),
+        );
+    }
+}
+
+/// Inverting BEFORE the window is a different image, but only off centre.
+///
+/// The invert reflects about 127.5 and a window at centre 128 is symmetric
+/// about 127.5 too, so at that centre the two orders give the same value and
+/// every row above would pass either way. At centre 100 and width 100 the
+/// window spans `lower = 99.5 - 49.5 = 50` to `upper = 149`:
+///
+/// ```text
+/// window then invert: ((60 - 99.5) / 99 + 0.5) * 255 = 25.75758, 255 - that = 229.24242
+/// invert then window: 255 - 60 = 195, above 149, so 255
+/// ```
+#[test]
+fn the_colour_invert_follows_the_window_and_does_not_precede_it() {
+    let inverted = require_ok!(ColourWindow::new(100.0, 100.0, true));
+    let mut destination = [Rgb::BLACK];
+    assert_eq!(
+        inverted.map_into(
+            &[Rgb {
+                r: 60.0,
+                g: 60.0,
+                b: 60.0
+            }],
+            &mut destination
+        ),
+        Ok(())
+    );
+    assert_rgb_close(destination[0], (229.242_42, 229.242_42, 229.242_42));
+}
+
+/// `renderColorImage.js:30` to `:36` returns the unwindowed canvas when the
+/// width is 255 or 256, the centre is 127 or 128 and invert is off. At width
+/// 255 and centre 127 the formula would give
+/// `((100 - 126.5) / 254 + 0.5) * 255 = 100.89567`, so applying it there is a
+/// one-byte difference from the reference. The initial window is width 256
+/// and centre 128, `createImage.js:321` to `:324`, which is the identity.
+#[test]
+fn the_identity_colour_window_is_skipped_as_the_reference_skips_it() {
+    let source = [Rgb {
+        r: 100.0,
+        g: 10.0,
+        b: 200.0,
+    }];
+    for (center, width) in [
+        (127.0_f32, 255.0_f32),
+        (128.0, 255.0),
+        (127.0, 256.0),
+        (128.0, 256.0),
+    ] {
+        let window = require_ok!(ColourWindow::new(center, width, false));
+        assert!(window.is_identity(), "{center} {width}");
+        let mut destination = [Rgb::BLACK];
+        assert_eq!(window.map_into(&source, &mut destination), Ok(()));
+        assert_eq!(destination[0].r.to_bits(), 100.0_f32.to_bits());
+        assert_eq!(destination[0].g.to_bits(), 10.0_f32.to_bits());
+        assert_eq!(destination[0].b.to_bits(), 200.0_f32.to_bits());
+    }
+    assert!(ColourWindow::initial().is_identity());
+    // Invert on, or any other window, is not skipped.
+    assert!(!require_ok!(ColourWindow::new(128.0, 256.0, true)).is_identity());
+    assert!(!require_ok!(ColourWindow::new(129.0, 256.0, false)).is_identity());
+    let applied = require_ok!(ColourWindow::new(127.0, 254.0, false));
+    let mut destination = [Rgb::BLACK];
+    assert_eq!(applied.map_into(&source, &mut destination), Ok(()));
+    assert!(destination[0].r.to_bits() != 100.0_f32.to_bits());
+}
+
+/// AC21's case, an exact tie in `f32`.
+///
+/// ```text
+/// w 511, c 128.5: ((130 - 128) / 510 + 0.5) * 255 = 1 + 127.5 = 128.5
+/// inverted: 255 - 128.5 = 126.5
+/// ```
+///
+/// Both are exactly representable and both are reached exactly in `f32`, so
+/// the byte the render boundary stores for them is decided by its tie rule
+/// alone. `crates/ocelli-render` asserts that byte.
+#[test]
+fn a_colour_window_can_land_exactly_on_a_tie() {
+    let gray = [Rgb {
+        r: 130.0,
+        g: 130.0,
+        b: 130.0,
+    }];
+    let mut destination = [Rgb::BLACK];
+    let window = require_ok!(ColourWindow::new(128.5, 511.0, false));
+    assert_eq!(window.map_into(&gray, &mut destination), Ok(()));
+    assert_eq!(destination[0].r.to_bits(), 128.5_f32.to_bits());
+    let inverted = require_ok!(ColourWindow::new(128.5, 511.0, true));
+    assert_eq!(inverted.map_into(&gray, &mut destination), Ok(()));
+    assert_eq!(destination[0].b.to_bits(), 126.5_f32.to_bits());
+}
+
+/// The existing LINEAR refusal, PS3.3 C.11.2.1.2's `width >= 1`, and the
+/// length check before the first write.
+#[test]
+fn a_colour_window_refuses_what_the_linear_window_refuses() {
+    assert_eq!(
+        ColourWindow::new(128.0, 0.5, false),
+        Err(PixelError::InvalidWindow)
+    );
+    assert_eq!(
+        ColourWindow::new(f32::NAN, 100.0, false),
+        Err(PixelError::InvalidWindow)
+    );
+    let window = require_ok!(ColourWindow::new(128.0, 100.0, false));
+    let mut destination = [Rgb {
+        r: 7.0,
+        g: 7.0,
+        b: 7.0,
+    }];
+    assert_eq!(
+        window.map_into(&[Rgb::BLACK, Rgb::BLACK], &mut destination),
+        Err(PixelError::DestinationLength)
+    );
+    assert_eq!(destination[0].r.to_bits(), 7.0_f32.to_bits());
+}
+
+/// Exact inverse basis values, PS3.3 2026d C.7.6.3.1.2 for FULL and
+/// PS3.3 2017b C.7.6.3.1.2 for the retired PARTIAL_422 equations.
+/// Exact rational inversion gives -870/23628469, -3180/23628469 and
+/// -310000/3261922071. Nearest binary32 bits were independently selected
+/// by exact distances, without reading product outputs. Zeroing the other
+/// shifted components isolates each coefficient without accumulation error.
+#[test]
+fn ybr_inverse_basis_uses_one_rounding_from_exact_rationals() {
+    let mut actual_bits = Vec::new();
+    let mut expected_bits = Vec::new();
+    for (space, samples, pixels, component, expected) in [
+        (
+            PhotometricInterpretation::YbrFull,
+            &[0.0, 129.0, 128.0][..],
+            1,
+            0,
+            0xb81a_6f2a,
+        ),
+        (
+            PhotometricInterpretation::YbrFull,
+            &[0.0, 128.0, 129.0][..],
+            1,
+            2,
+            0xb90d_1ef6,
+        ),
+        (
+            PhotometricInterpretation::YbrPartial422,
+            &[16.0, 16.0, 129.0, 128.0][..],
+            2,
+            0,
+            0xb8c7_4e0f,
+        ),
+    ] {
+        let transform = require_ok!(native_interleaved(space));
+        let mut output = vec![Rgb::BLACK; pixels];
+        assert_eq!(
+            transform.map_into(&stored(samples), &mut output, pixels),
+            Ok(())
+        );
+        let rgb = require_ok!(output.first().ok_or("the basis fixture has no output"));
+        let actual = require_ok!(
+            [rgb.r, rgb.g, rgb.b]
+                .get(component)
+                .copied()
+                .ok_or("the basis fixture names no channel")
+        );
+        actual_bits.push(actual.to_bits());
+        expected_bits.push(expected);
+    }
+    assert_eq!(actual_bits, expected_bits);
+}
+
+/// Independent binary32 calculation: for YBR [0,128,0], blue is
+/// 4624251/268435456 after the nearest inverse coefficient is multiplied
+/// by -128. The stated centre minus one half lies below that value, so the
+/// approved width-one LINEAR rule maps it to 255. The old rounded-summary
+/// literal instead gives 9248473/536870912, below the threshold.
+#[test]
+fn ybr_exact_inverse_keeps_a_narrow_window_on_the_correct_side() {
+    let transform = require_ok!(native_interleaved(PhotometricInterpretation::YbrFull));
+    let mut output = [Rgb::BLACK];
+    assert_eq!(
+        transform.map_into(&stored(&[0.0, 128.0, 0.0]), &mut output, 1),
+        Ok(())
+    );
+    let window = require_ok!(ocelli_pixel::ColourWindow::new(
+        f32::from_bits(0x3f04_68f7),
+        1.0,
+        false
+    ));
+    assert_eq!(window.apply(output[0]).b.to_bits(), 255.0_f32.to_bits());
 }

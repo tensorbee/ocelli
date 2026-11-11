@@ -22,30 +22,38 @@ import {
   acceptTransferredFrame,
   COLORMAP_BYTE,
   COMMAND_ID,
+  contentId,
+  decodeNamedEvent,
   drainRing,
   EVENT_HEADER_BYTES,
   EVENT_STRIDE,
   FLAG_INVERT,
+  FLAG_LOADING,
+  frameResident,
   INVERT_BYTE,
+  OcelliError,
+  releaseSeries,
+  RING_EVENT_KIND,
+  sessionBulkSink,
+  sessionCommandSink,
+  setFrameBudget,
+  showResident,
+  restoreSessionSnapshot,
+  sessionSnapshot,
+  sessionSnapshotError,
   SNAPSHOT_ERROR,
   SNAPSHOT_MAGIC,
   packCommands,
   parseSnapshot,
   PRESET_BYTE,
   readViewportState,
-  RING_EVENT_KIND,
-  sessionBulkSink,
-  sessionCommandSink,
-  restoreSessionSnapshot,
-  sessionSnapshot,
-  sessionSnapshotError,
   submitCommands,
   VOI_FUNCTION_BYTE,
   writeFrame,
   writeCommands,
   writeStack,
 } from "./index.js";
-import type { PackedCommand } from "./index.js";
+import type { CacheReleasedPayload, PackedCommand } from "./index.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const MODULE = env.OCELLI_BOUNDARY_MODULE ?? "crates/ocelli-wasm/target/boundary-wasm";
@@ -82,6 +90,34 @@ interface BuiltExports {
     rows: number,
     generation: number,
   ): number;
+  set_frame_budget(bytes: number): number;
+  commit_cached_frame(
+    ticket: number,
+    len: number,
+    viewport: number,
+    columns: number,
+    rows: number,
+    index: number,
+    epoch: number,
+    content: bigint,
+  ): number;
+  frame_resident(
+    index: number,
+    epoch: number,
+    content: bigint,
+    columns: number,
+    rows: number,
+  ): number;
+  show_resident(
+    index: number,
+    epoch: number,
+    content: bigint,
+    columns: number,
+    rows: number,
+  ): number;
+  release_series(series: bigint): number;
+  request_frame_pressure(): number;
+  content_id(ticket: number, len: number, uidLen: number, tsLen: number): bigint | undefined;
   [name: string]: unknown;
 }
 
@@ -92,10 +128,11 @@ const META = { viewport: 1, columns: 1, rows: 1, generation: 1 };
  * Node has no `OffscreenCanvas` or `ImageData`. `publishCpuCanvas` needs both
  * to retain and blit a frame, so this test supplies the smallest objects the
  * wasm side reads: a canvas with width, height and a 2d context, and an
- * `ImageData` with a clamped array. `putImageData` is a no-op because the
- * observation is the event, not the pixels. The globals are installed once
- * for the file and do not affect the other tests, which never call the CPU
- * canvas exports.
+ * `ImageData` with a clamped array. `putImageData` records the blitted image
+ * and counts the blits, which is how the transferred-frame test observes the
+ * kept frame's pixels across its refusals. The globals are installed by the
+ * tests that call the CPU canvas exports, and the recording changes nothing
+ * they observe: those tests read the drained ring, never the recording.
  */
 class StubImageData {
   readonly data: Uint8ClampedArray;
@@ -106,8 +143,15 @@ class StubImageData {
 }
 
 class StubContext {
-  putImageData(...args: unknown[]): void {
-    void args;
+  /** The image of the latest blit, null before the first. */
+  lastImage: StubImageData | null = null;
+  /** How many times the wasm side blitted. */
+  blits = 0;
+
+  putImageData(image: unknown, ...rest: unknown[]): void {
+    void rest;
+    this.blits += 1;
+    this.lastImage = image instanceof StubImageData ? image : null;
   }
 }
 
@@ -119,6 +163,20 @@ class StubCanvas {
   getContext(kind: string): StubContext | null {
     return kind === "2d" ? this.context : null;
   }
+
+  /** The blit recording, for the kept-frame comparison in the transferred-frame test. */
+  get recording(): StubContext {
+    return this.context;
+  }
+}
+
+/** The blitted pixels of a stub canvas, failing the test if nothing blitted. */
+function blittedPixels(canvas: StubCanvas): number[] {
+  const image = canvas.recording.lastImage;
+  if (image === null) {
+    throw new Error("the publish did not blit");
+  }
+  return Array.from(image.data);
 }
 
 function installCanvasStubs(): void {
@@ -140,6 +198,16 @@ async function loadModule(): Promise<BuiltExports> {
     snapshot: glue.snapshot,
     snapshot_error: glue.snapshot_error,
     restore_snapshot: glue.restore_snapshot,
+    // The F-231 exports are re-taken from the glue like the ones above:
+    // the raw export of an Option<u64> is a flag and value pair, and the
+    // wrapped name is the one the public surface answers with.
+    set_frame_budget: glue.set_frame_budget,
+    commit_cached_frame: glue.commit_cached_frame,
+    frame_resident: glue.frame_resident,
+    show_resident: glue.show_resident,
+    release_series: glue.release_series,
+    request_frame_pressure: glue.request_frame_pressure,
+    content_id: glue.content_id,
   } as BuiltExports;
 }
 
@@ -177,6 +245,19 @@ function f64(value: number): number[] {
   const buffer = new ArrayBuffer(8);
   new DataView(buffer).setFloat64(0, value, true);
   return [...new Uint8Array(buffer)];
+}
+
+/** The refusal code of one drive, or a marker when nothing was refused. */
+function codeOf(drive: () => unknown): string {
+  try {
+    drive();
+  } catch (error) {
+    if (error instanceof OcelliError) {
+      return error.code;
+    }
+    throw error;
+  }
+  return "no refusal";
 }
 
 const EVERY_KIND: readonly PackedCommand[] = [
@@ -223,6 +304,107 @@ describe("wasm session boundary", () => {
     expect(() => writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: epoch })).toThrow(/commit refused/);
     expect(() => writeFrame(wasm, sink, frame, META)).toThrow(/commit refused/);
     writeFrame(wasm, sink, frame, { ...META, stackIndex: 0, stackEpoch: next });
+  });
+  it("commits a transferred frame at the current selection and refuses a stale one", async () => {
+    // AC5, the built module over the public helpers. The transferred-frame
+    // copy of the writeStack test above. With the epoch writeStack
+    // returned and the current index the frame commits, and a stale epoch
+    // or a different index is the coded refusal. The slot is released by
+    // the session inside the refused export, so bulk_ticket() answers 0.
+    // The committed frame is kept: an interaction publish before the
+    // refusals and one after hand the stub canvas the same image, each
+    // observation counting its blit, so a refusal that cleared the
+    // retained frame fails the blit count and one that replaced it fails
+    // the pixel comparison. That comparison can only fail if the blit
+    // answers the committed value. A 1 by 1 Float32 frame under the Fit
+    // alone does not answer it: without a window 40, 41, 42 and 43 blit
+    // byte-identical images. So the case submits a Fit to the canvas
+    // size and a narrow window after binding the canvas, and the final
+    // transfer is the control: its publish asserts a different value
+    // changes the blit.
+    installCanvasStubs();
+    const wasm = await loadModule();
+    const keys = [0, 1].map((instance) => ({ series: 5n, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    const sink = sessionBulkSink(wasm);
+    const meta = { series: 5, instance: 0, frame: 0, bytes: 4 };
+    const target = { viewport: 1, columns: 1, rows: 1, generation: 1 };
+    const sliceIndex = () => readViewportState(wasm.copy_state())?.sliceIndex;
+    const canvas = new StubCanvas();
+    wasm.bindCpuCanvas(canvas, 80, 40, 1);
+    // The window is what makes the blit answer the committed value, so
+    // the kept-frame comparison below compares two images that can
+    // differ, not two constants.
+    expect(
+      submit(
+        wasm,
+        packCommands(1, [
+          { kind: "Fit", width: 80, height: 40, columns: 1, rows: 1 },
+          { kind: "SetWindow", centre: 41, width: 10, function: "linear" },
+        ]),
+      ),
+    ).toBe(2);
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([40]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(1);
+    const kept = blittedPixels(canvas);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([41]).buffer,
+          meta,
+          { ...target, stackIndex: 0, stackEpoch: epoch - 1 },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+
+    expect(
+      codeOf(() =>
+        acceptTransferredFrame(
+          { memory: wasm.memory },
+          sink,
+          new Float32Array([42]).buffer,
+          meta,
+          { ...target, stackIndex: 1, stackEpoch: epoch },
+        ),
+      ),
+    ).toBe("CommitRefused");
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(sliceIndex()).toBe(0);
+
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(2);
+    expect(blittedPixels(canvas)).toEqual(kept);
+
+    // The refusals leave the slot free, so the next current transfer
+    // commits through the same caller.
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Float32Array([43]).buffer,
+      meta,
+      { ...target, stackIndex: 0, stackEpoch: epoch },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    // Control for the kept-frame comparison: a different value at the
+    // current selection changes the blit, so that comparison can fail.
+    wasm.publishCpuInteraction();
+    expect(canvas.recording.blits).toBe(3);
+    expect(blittedPixels(canvas)).not.toEqual(kept);
   });
   it("refuses address 0, reuses an address only with a new ticket, and commits through writeFrame", async () => {
     const wasm = await loadModule();
@@ -665,5 +847,239 @@ describe("wasm session boundary", () => {
     await glue.default({ module_or_path: bytes });
     const tier = await glue.resolvedTier();
     expect(["A", "B", "C"]).toContain(tier);
+  });
+
+  it("hashes a content id in the core, drops the slot, and answers the pinned FNV value", async () => {
+    // F-231 AC12. The value is F-224 AC2's, recomputed by hand from the
+    // FNV-1a definition with the length prefixes over "1.2.3",
+    // "1.2.840.10008.1.2.1" and [0, 1, 2, 3]. A TypeScript re-implementation
+    // of the hash, or a slot the export left outstanding, goes red here.
+    const wasm = await loadModule();
+    const id = contentId(wasm, "1.2.3", "1.2.840.10008.1.2.1", new Uint8Array([0, 1, 2, 3]));
+    expect(id).toBe(0x49e8_b650_ff1c_d3f1n);
+    expect(wasm.bulk_ticket()).toBe(0);
+    // The slot is gone, so the next allocation is accepted.
+    expect(wasm.alloc(4)).not.toBe(0);
+    wasm.release_bulk(wasm.bulk_ticket());
+    expect(wasm.bulk_ticket()).toBe(0);
+  });
+
+  it("caches, shows, reports and releases committed frames with bigint identities", async () => {
+    // F-231 AC13, the built module over the public helpers. The series and
+    // the contents carry bits above the 32-bit half, so a u64 argument
+    // truncated to u32 at any export collides these with their low halves
+    // and fails a step below.
+    const wasm = await loadModule();
+    const series = 0x1_0000_0005n;
+    const first = 0x1_0000_0001n;
+    const second = 0x1_0000_0002n;
+    const third = 0x1_0000_0003n;
+    const fourth = 0x1_0000_0004n;
+    const contents = [first, second, third, fourth];
+    const keys = [0, 1, 2, 3].map((instance) => ({ series, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 3_145_728);
+    // The budget change is setup, not the observation.
+    drainRing(wasm.drain_events());
+
+    const sink = sessionBulkSink(wasm);
+    const frame = new Uint8Array(1_048_576);
+    for (let index = 0; index < 4; index += 1) {
+      if (index > 0) {
+        expect(
+          writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+        ).toBe(1);
+      }
+      writeFrame(wasm, sink, frame, {
+        viewport: 1,
+        columns: 512,
+        rows: 512,
+        generation: 0,
+        stackIndex: index,
+        stackEpoch: epoch,
+        content: contents[index],
+      });
+    }
+
+    // AC2's order on the built module: pressure, pressure, evicted, with
+    // the evicted payload naming the full-width series, index 0's key and
+    // 1,048,576 bytes. The fourth commit is what evicted that entry.
+    const drained = drainRing(wasm.drain_events());
+    expect(drained.dropped).toBe(0);
+    const named = drained.events.map((raw) => decodeNamedEvent(raw));
+    expect(named.map((row) => row?.name)).toEqual([
+      "cache.pressure",
+      "cache.pressure",
+      "cache.evicted",
+    ]);
+    const evicted = named[2]?.payload;
+    if (evicted === undefined || !("instance" in evicted)) {
+      throw new Error("the evicted payload was missing");
+    }
+    expect(evicted.series).toBe(series);
+    expect(evicted.instance).toBe(0);
+    expect(evicted.bytes).toBe(1_048_576n);
+
+    // AC4: residency of a surviving entry's matching triple, and not of a
+    // content that differs only above the 32-bit half, nor of another
+    // extent. The queries keep the entry.
+    const request = { index: 3, epoch, content: fourth, columns: 512, rows: 512 };
+    expect(frameResident(wasm, request)).toBe(true);
+    expect(frameResident(wasm, { ...request, content: 0x2_0000_0004n })).toBe(false);
+    expect(frameResident(wasm, { ...request, columns: 511 })).toBe(false);
+    expect(frameResident(wasm, { ...request, rows: 513 })).toBe(false);
+    expect(frameResident(wasm, request)).toBe(true);
+
+    // D1's reproduction on the built module. Index 1 is cached and the
+    // selection is index 3. Scrolled back to slice 0, a show of index 1 is
+    // the coded CommitRefused refusal and leaves the state the scroll
+    // left, loading flag included. Before the fix it returned true,
+    // adopted index 1's samples and cleared the loading flag while
+    // copy_state still reported slice 0, and before the ruling it answered
+    // false instead of throwing.
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: -3 }])),
+    ).toBe(1);
+    let unselected: unknown;
+    try {
+      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 });
+    } catch (error) {
+      unselected = error;
+    }
+    if (!(unselected instanceof OcelliError)) {
+      throw new Error("the unselected show did not refuse");
+    }
+    expect(unselected.code).toBe("CommitRefused");
+    const refused = readViewportState(wasm.copy_state());
+    expect(refused?.sliceIndex).toBe(0);
+    expect(refused !== null && (refused.flags & FLAG_LOADING) !== 0).toBe(true);
+    // The refusal is not a stale removal, so the entry is kept.
+    expect(
+      frameResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(true);
+
+    // AC5: the selection is index 1 now. A matching show answers, a
+    // mismatch is refused and removes.
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+    ).toBe(1);
+    expect(
+      showResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(true);
+    expect(
+      showResident(wasm, { index: 1, epoch, content: 0x3_0000_0002n, columns: 512, rows: 512 }),
+    ).toBe(false);
+    expect(
+      frameResident(wasm, { index: 1, epoch, content: second, columns: 512, rows: 512 }),
+    ).toBe(false);
+
+    // Put the removed entry back so the release below has three frames of
+    // the series again, and drain the crossings along the way. The
+    // selection is already index 1.
+    writeFrame(wasm, sink, frame, {
+      viewport: 1,
+      columns: 512,
+      rows: 512,
+      generation: 0,
+      stackIndex: 1,
+      stackEpoch: epoch,
+      content: second,
+    });
+    drainRing(wasm.drain_events());
+
+    // AC7: the release returns the series' three frames and emits one
+    // released event naming the full-width series, then a pressure reading.
+    expect(releaseSeries(wasm, series)).toBe(3);
+    const released = drainRing(wasm.drain_events());
+    const releasedNamed = released.events.map((raw) => decodeNamedEvent(raw));
+    expect(releasedNamed.map((row) => row?.name)).toEqual(["cache.released", "cache.pressure"]);
+    const payload = releasedNamed[0]?.payload as CacheReleasedPayload | undefined;
+    expect(payload?.series).toBe(series);
+    expect(payload?.frames).toBe(3);
+    expect(payload?.bytes).toBe(3_145_728n);
+  });
+
+  it("a transferred frame with content is committed and cached", async () => {
+    // AC7's built-module half, beside F-231's cache test. A transfer
+    // carrying both stack keys and a content id commits through
+    // `commit_cached_frame`, so the frame is resident for its identity
+    // and extent once the budget is set and the committed length is a
+    // multiple of four, which a four-byte frame is.
+    const wasm = await loadModule();
+    const keys = [{ series: 7n, instance: 0, frame: 0 }];
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 1_048_576);
+    // The budget change is setup, not the observation.
+    drainRing(wasm.drain_events());
+    const sink = sessionBulkSink(wasm);
+
+    acceptTransferredFrame(
+      { memory: wasm.memory },
+      sink,
+      new Uint8Array([1, 2, 3, 4]).buffer,
+      { series: 7, instance: 0, frame: 0, bytes: 4 },
+      {
+        viewport: 1,
+        columns: 1,
+        rows: 1,
+        generation: 1,
+        stackIndex: 0,
+        stackEpoch: epoch,
+        content: 0x1_0000_0001n,
+      },
+    );
+    expect(wasm.bulk_ticket()).toBe(0);
+    expect(
+      frameResident(wasm, { index: 0, epoch, content: 0x1_0000_0001n, columns: 1, rows: 1 }),
+    ).toBe(true);
+  });
+
+  it("showResident throws the coded CommitRefused for an unselected index and answers false only for a miss", async () => {
+    // The lead ruling after review pass 2. Index 0 is cached and the
+    // selection moves to slice 1, so a show of index 0 is the Selection
+    // refusal and throws, while a miss at the selected index answers false.
+    // Against the module before the ruling the unselected show answered
+    // false and this went red.
+    const wasm = await loadModule();
+    const series = 0x1_0000_0006n;
+    const keys = [0, 1].map((instance) => ({ series, instance, frame: 0 }));
+    const epoch = writeStack(wasm, keys);
+    expect(epoch).toBeGreaterThan(0);
+    setFrameBudget(wasm, 1_048_576);
+    drainRing(wasm.drain_events());
+
+    const sink = sessionBulkSink(wasm);
+    const frame = new Uint8Array(1_048_576);
+    writeFrame(wasm, sink, frame, {
+      viewport: 1,
+      columns: 512,
+      rows: 512,
+      generation: 0,
+      stackIndex: 0,
+      stackEpoch: epoch,
+      content: 0x1_0000_0007n,
+    });
+    drainRing(wasm.drain_events());
+    expect(
+      writeCommands(wasm, sessionCommandSink(wasm), packCommands(1, [{ kind: "Scroll", step: 1 }])),
+    ).toBe(1);
+
+    let caught: unknown;
+    try {
+      showResident(wasm, { index: 0, epoch, content: 0x1_0000_0007n, columns: 512, rows: 512 });
+    } catch (error) {
+      caught = error;
+    }
+    if (!(caught instanceof OcelliError)) {
+      throw new Error("the unselected show did not refuse");
+    }
+    expect(caught.code).toBe("CommitRefused");
+
+    // A miss at the selected index answers false and throws nothing.
+    expect(
+      showResident(wasm, { index: 1, epoch, content: 0x2_0000_0007n, columns: 512, rows: 512 }),
+    ).toBe(false);
   });
 });

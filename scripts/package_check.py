@@ -17,9 +17,9 @@ So the tarballs are built, installed OUTSIDE the workspace, and imported.
 
 ## Why there is no bundler
 
-`@ocelli/core` has no runtime dependency and emits ESM with declarations
-through `tsc --build`. A bundler over a dependency-free ESM package produces
-the same modules with an extra tool in the path. `AGENTS.md` asks whether a
+`@ocelli/core` emits ESM with declarations through `tsc --build`. Its one
+runtime dependency is `dcmjs`, which a consumer resolves. A bundler would add
+a tool in the path and change what the tarball is. `AGENTS.md` asks whether a
 construct reduces the cases a reader must consider or increases the places
 they must look, and it increases them.
 
@@ -35,27 +35,64 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import tomllib
 from pathlib import Path
 
+import advisory_check
+
 ROOT = Path(__file__).resolve().parent.parent
-PACKAGES = ["core", "react"]
+PACKAGES = ["core", "react", "wasm"]
 
 # Present in the tarball or the package is not publishable. The two licence
 # files matter as much as the code: the manifest says "MIT OR Apache-2.0" and a
 # tarball that carries neither text makes that a claim rather than a grant.
-REQUIRED = ["package.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+REQUIRED = ["package.json", "README.md", "LICENSE-MIT", "LICENSE-APACHE",
+            "NOTICE"]
 
 # Never in the tarball. `src` and the build info are noise a consumer pays to
 # download, and `.tsbuildinfo` additionally leaks absolute paths from the
 # machine that built it.
 FORBIDDEN_PREFIXES = ["src/", "node_modules/"]
 FORBIDDEN_SUFFIXES = [".tsbuildinfo"]
+
+# The module package, F-237. Its tarball carries both wasm-pack outputs, and
+# the identity that says which HEAD they were built from. docs/RELEASE.md
+# item 6 refuses a module that is not the one its HEAD builds, so the tarball
+# is refused when a module or its glue is missing and when the build id is
+# absent, stale, or disagrees with the bytes beside it.
+MODULE_PACKAGE = "wasm"
+MODULE_REQUIRED = (
+    "dist/ocelli_wasm.js",
+    "dist/ocelli_wasm_bg.wasm",
+    "dist/decode/ocelli_wasm.js",
+    "dist/decode/ocelli_wasm_bg.wasm",
+)
+BUILD_ID_PATH = "dist/build-id.json"
+BUILD_ID_MODULES = ("dist/ocelli_wasm_bg.wasm",
+                    "dist/decode/ocelli_wasm_bg.wasm")
+
+
+def _is_test_artifact(path: str) -> bool:
+    """True when a packed path is a compiled test.
+
+    The marker sits in the basename as `.test.` or `.spec.`, so `.js`,
+    `.js.map`, `.d.ts` and `.d.ts.map` match alike. A `__tests__` path
+    segment matches too. The substring `test` does not, so `latest.js`
+    and `contest.d.ts` are library names.
+    """
+    segments = path.split("/")
+    if "__tests__" in segments:
+        return True
+    base = segments[-1]
+    return ".test." in base or ".spec." in base
 
 
 def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -104,6 +141,18 @@ def check_manifest(name: str, manifest: dict, version: str) -> list[str]:
                 f"@ocelli/react depends on @ocelli/core {dependency!r}, which "
                 f"is not the version @ocelli/core publishes, {version!r}. "
                 f"That resolves to whatever the registry has.")
+
+    # F-237. The shell does not import the module itself, loadCore leaves the
+    # initialiser to the caller, so the module is a peer dependency and not a
+    # runtime one. The exact version is the same rule the react dependency
+    # carries: a range resolves to whatever the registry has.
+    peer = manifest.get("peerDependencies", {}).get("@ocelli/wasm")
+    if name == "core" and peer != version:
+        problems.append(
+            f"@ocelli/core peer-depends on @ocelli/wasm {peer!r}, which is "
+            f"not the version @ocelli/wasm publishes, {version!r}. A "
+            f"released shell and its module are one version or the pairing "
+            f"is not a supported configuration.")
     return problems
 
 
@@ -114,6 +163,11 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
     for required in REQUIRED:
         if required not in present:
             problems.append(f"@ocelli/{name} tarball has no {required}")
+
+    if name == MODULE_PACKAGE:
+        for required in MODULE_REQUIRED:
+            if required not in present:
+                problems.append(f"@ocelli/{name} tarball has no {required}")
 
     for path in names:
         for prefix in FORBIDDEN_PREFIXES:
@@ -127,6 +181,10 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                     f"@ocelli/{name} tarball carries {path}. It is build "
                     f"state, and it embeds absolute paths from the machine "
                     f"that produced it")
+        if _is_test_artifact(path):
+            problems.append(
+                f"@ocelli/{name} tarball carries {path}, which is a "
+                f"test file")
 
     # THE CHECK THIS FILE EXISTS FOR. Every path the manifest advertises has to
     # be in the tarball. npm does not verify this and a consumer finds out at
@@ -152,7 +210,462 @@ def check_tarball(name: str, manifest: dict, names: list[str]) -> list[str]:
                 f"@ocelli/{name} advertises {field} = {target!r} and the "
                 f"tarball has no {relative}. This installs cleanly and fails "
                 f"at the consumer's first import.")
+
+    # A wasm file is the shipped module, so the notices travel with it.
+    # A tarball that carries no wasm file is not asked for them.
+    wasm = [path for path in names if path.endswith(".wasm")]
+    if wasm:
+        for required in ("THIRD_PARTY_LICENSES", "THIRD_PARTY_NOTICES"):
+            if required not in present:
+                problems.append(
+                    f"@ocelli/{name} tarball carries {wasm[0]} and has no "
+                    f"{required}")
     return problems
+
+
+def wasm_identity_problems(build_id_bytes: bytes | None,
+                           files: dict[str, bytes],
+                           head: str, tree: str, version: str) -> list[str]:
+    """The build identity of the shipped modules, against this HEAD and index.
+
+    dist/build-id.json records the package version, whether the working tree
+    had unstaged tracked changes when the two modules were built, the git SHA
+    of that HEAD, the git write-tree of the staged index, and each module's
+    SHA-256 digest. docs/RELEASE.md item 6 refuses a module that is not the
+    one its HEAD builds: a SHA from another tree is a stale artefact, a build
+    over uncommitted changes names a SHA its bytes do not come from, a tree
+    that is not the index this pack staged from is an identity written
+    elsewhere, and a digest that disagrees with the tarball's own bytes is an
+    identity written without a rebuild. `files` maps tarball paths to their
+    bytes for the build id and both modules, `head` is the git SHA this check
+    runs at, `tree` is the git write-tree of the index it runs at, and
+    `build_id_bytes` is the raw build id file, or None when the tarball
+    carries none.
+    """
+    if build_id_bytes is None:
+        return [f"@ocelli/wasm tarball carries no {BUILD_ID_PATH}, so nothing "
+                f"says which HEAD its modules were built from. docs/"
+                f"RELEASE.md item 6 refuses a module without its build "
+                f"identity."]
+    try:
+        build_id = json.loads(build_id_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        return [f"@ocelli/wasm {BUILD_ID_PATH} does not parse to a build id "
+                f"object: {error}"]
+    if not isinstance(build_id, dict):
+        return [f"@ocelli/wasm {BUILD_ID_PATH} does not parse to a build id "
+                f"object"]
+    problems = []
+    recorded_version = build_id.get("version")
+    if recorded_version != version:
+        problems.append(
+            f"@ocelli/wasm build id records version {recorded_version!r}, "
+            f"not the workspace version {version!r}")
+    if build_id.get("dirty") is not False:
+        problems.append(
+            f"@ocelli/wasm build id does not record a tree without unstaged "
+            f"tracked changes: dirty is {build_id.get('dirty')!r}. The "
+            f"modules are built from the working tree, so unstaged changes "
+            f"are in the bytes and in neither recorded name. Rebuild from a "
+            f"clean tree, then pack again.")
+    recorded_sha = build_id.get("git_sha")
+    if recorded_sha != head:
+        problems.append(
+            f"@ocelli/wasm build id records git SHA {recorded_sha!r} and "
+            f"this HEAD is {head!r}. The module is a stale artefact from "
+            f"another tree. Rebuild with bin/ocelli.sh wasm and "
+            f"bin/ocelli.sh wasm-decode, then pack again.")
+    recorded_tree = build_id.get("tree")
+    if recorded_tree != tree:
+        problems.append(
+            f"@ocelli/wasm build id records tree {recorded_tree!r} and this "
+            f"index's git write-tree is {tree!r}. The build id must name the "
+            f"index the pack staged from. Rebuild with bin/ocelli.sh wasm "
+            f"and bin/ocelli.sh wasm-decode, then pack again.")
+    modules = build_id.get("modules")
+    if not isinstance(modules, dict):
+        problems.append(
+            "@ocelli/wasm build id records no modules object with digests")
+        modules = {}
+    for name in BUILD_ID_MODULES:
+        data = files.get(name)
+        if data is None:
+            problems.append(
+                f"@ocelli/wasm tarball has no {name}, which its build id and "
+                f"exports name")
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        if modules.get(name) != digest:
+            problems.append(
+                f"@ocelli/wasm build id records digest "
+                f"{modules.get(name)!r} for {name} and the tarball's bytes "
+                f"hash to {digest}. The identity was written without a "
+                f"rebuild.")
+    return problems
+
+
+def wasm_identity_from_tarball(tarball: Path, version: str) -> list[str]:
+    """Read the build id and the module bytes out of the packed tarball."""
+    wanted = {BUILD_ID_PATH, *BUILD_ID_MODULES}
+    files: dict[str, bytes] = {}
+    build_id_bytes = None
+    with tarfile.open(tarball) as archive:
+        for member in archive.getmembers():
+            name = member.name.removeprefix("package/")
+            if name in wanted:
+                extracted = archive.extractfile(member)
+                if extracted is not None:
+                    files[name] = extracted.read()
+    if BUILD_ID_PATH in files:
+        build_id_bytes = files.pop(BUILD_ID_PATH)
+    head = run(["git", "rev-parse", "HEAD"], ROOT)
+    if head.returncode != 0:
+        return ["cannot read the git HEAD to check the module's build id "
+                f"against: {head.stderr.strip()}"]
+    tree = run(["git", "write-tree"], ROOT)
+    if tree.returncode != 0:
+        return ["cannot read the git write-tree of the index to check the "
+                f"module's build id against: {tree.stderr.strip()}"]
+    return wasm_identity_problems(build_id_bytes, files, head.stdout.strip(),
+                                  tree.stdout.strip(), version)
+
+
+def _inside_package(path: str, name: str) -> bool:
+    """True when `path` is a file of the named installed package."""
+    normalised = path.replace("\\", "/")
+    marker = f"node_modules/{name}/"
+    return marker in normalised or normalised.endswith(f"node_modules/{name}")
+
+
+def _unreachable_rows() -> list[dict]:
+    path = ROOT / "ci" / "advisories.toml"
+    if not path.is_file():
+        return []
+    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    rows = data.get("exception", [])
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)
+            and advisory_check.scope_is_unreachable(row.get("scope"))]
+
+
+def consumer_version_problems(rows: list[dict], consumer_lock: dict) -> list[str]:
+    """The consumer lock must resolve each unreachable row's version."""
+    problems: list[str] = []
+    packages = consumer_lock.get("packages", {})
+    if not isinstance(packages, dict):
+        packages = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if not advisory_check.scope_is_unreachable(row.get("scope")):
+            continue
+        name = str(row.get("package", "")).strip()
+        wanted = str(row.get("version", "")).strip()
+        if not name or not wanted:
+            continue
+        found: set[str] = set()
+        for key, entry in packages.items():
+            if not isinstance(entry, dict):
+                continue
+            path_name = ""
+            if isinstance(key, str) and "node_modules/" in key:
+                path_name = key.rsplit("node_modules/", 1)[1]
+            if path_name == name or entry.get("name") == name:
+                version = entry.get("version")
+                if isinstance(version, str) and version:
+                    found.add(version)
+        if found != {wanted}:
+            got = ", ".join(sorted(found)) if found else "nothing"
+            problems.append(f"the consumer resolves {name} at {got} and the exception records {wanted}")
+    return problems
+
+
+def resolved_package_problems(resolved: list[str], names: set[str]) -> list[str]:
+    """A resolved URL under an unreachable package means the import loaded it."""
+    problems: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    for url in resolved:
+        for name in sorted(names):
+            marker = f"/node_modules/{name}/"
+            if marker in url or url.endswith(f"/node_modules/{name}"):
+                key = (url, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                problems.append(f"{url} loads an unreachable package {name}")
+    return problems
+
+
+def _specifier_pattern(name: str) -> re.Pattern[str]:
+    """A module specifier for `name`, in any quote, with or without a subpath.
+
+    The three quote styles are `"`, `'` and backticks. The body is the bare
+    package name, that name plus a subpath, a relative path into
+    `node_modules/<name>`, or one or more `../` segments followed by the
+    package name (`../<name>` and `../../<name>`). A mention that is not a
+    specifier does not match.
+    """
+    escaped = re.escape(name)
+    return re.compile(
+        r"""(?P<q>["'`])"""
+        r"""(?:(?:\./|\.\./)+node_modules/|(?:\.\./)+)?"""
+        rf"""{escaped}(?:/[^"'`]*)?"""
+        r"""(?P=q)"""
+    )
+
+
+def specifier_problems(files: dict[str, str], names: set[str]) -> list[str]:
+    """A module specifier for an unreachable package in another package's script.
+
+    The package's own files are skipped. A bundler reaches a dependency by
+    naming it as a specifier, which is the check a resolve hook cannot make
+    because the bundler never runs the module.
+    """
+    problems: list[str] = []
+    patterns = {name: _specifier_pattern(name) for name in sorted(names)}
+    for path, text in files.items():
+        for name, pattern in patterns.items():
+            if _inside_package(path, name):
+                continue
+            if pattern.search(text):
+                problems.append(f"{path} names an unreachable package {name}")
+    return problems
+
+
+def _script_texts(consumer: Path, names: set[str]) -> dict[str, str]:
+    root = consumer / "node_modules"
+    files: dict[str, str] = {}
+    if not root.is_dir():
+        return files
+    for path in root.rglob("*"):
+        if not path.is_file() or path.suffix not in {".js", ".mjs", ".cjs"}:
+            continue
+        relative = path.relative_to(consumer).as_posix()
+        if any(_inside_package(relative, name) for name in names):
+            continue
+        files[relative] = path.read_text(encoding="utf-8", errors="replace")
+    return files
+
+
+# The smoke import of @ocelli/core resolves dcmjs through its `import`
+# condition. createRequire resolves the `require` condition. A trace that
+# misses either URL did not see that load.
+DCMJS_ES_ENTRY = "node_modules/dcmjs/build/dcmjs.es.js"
+DCMJS_CJS_ENTRY = "node_modules/dcmjs/build/dcmjs.js"
+DCMJS_TRACE_ENTRIES = (DCMJS_ES_ENTRY, DCMJS_CJS_ENTRY)
+
+# Node 24's `module.registerHooks` records both ESM and CommonJS resolution.
+# `module.register` installs an asynchronous ESM loader hook and does not see
+# a `require` made through `createRequire`. The root package.json has no
+# `engines` field. CI pins node 24.
+TRACE_REGISTER = """\
+import { registerHooks } from "node:module";
+import { appendFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const trace = fileURLToPath(new URL("./trace-urls.txt", import.meta.url));
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const resolved = nextResolve(specifier, context);
+    appendFileSync(trace, resolved.url + "\\n");
+    return resolved;
+  },
+});
+"""
+
+
+def trace_entry_problems(resolved: list[str]) -> list[str]:
+    """The smoke run must resolve both dcmjs builds.
+
+    An empty or absent trace used to pass, which made the unreachability
+    check green when the hook recorded nothing. The CommonJS URL is the
+    one `createRequire` loads. A hook that only records the ESM import
+    leaves it absent.
+    """
+    problems: list[str] = []
+    for entry in DCMJS_TRACE_ENTRIES:
+        if any(entry in url for url in resolved):
+            continue
+        shown = entry.removeprefix("node_modules/")
+        problems.append(f"the resolve trace does not record {shown}")
+    return problems
+
+
+def smoke_wiring_problems(smoke: str, hook: str) -> list[str]:
+    """The smoke text must require dcmjs and the hook must call registerHooks.
+
+    A trace a test writes can name both dcmjs builds without either line
+    being present. `module.register` does not record a `require` from
+    `createRequire`, and a smoke script that never calls `createRequire`
+    never loads the CommonJS build.
+    """
+    problems: list[str] = []
+    if 'createRequire(import.meta.url)("dcmjs")' not in smoke:
+        problems.append("the smoke script does not require dcmjs")
+    if "registerHooks(" not in hook:
+        problems.append("the resolve hook does not use registerHooks")
+    return problems
+
+
+# F-237, review S3. The gate cannot tell the render module from the decode
+# module by the exports both share. Both carry init, ocelli_version and the
+# panic surface, and the build id hashes whatever was staged, so a staging
+# edit that swaps the two copies passed every check until the consumer proof
+# pinned a render-only export. apply_commands is compiled only with the
+# render-worker feature, in crates/ocelli-wasm/src/session.rs's bind module,
+# which the decode-worker build does not compile.
+RENDER_ONLY_EXPORT = "apply_commands"
+
+# createRequire loads the CommonJS build before the package import. A
+# static import is hoisted, so a throw while the ESM build evaluates would
+# skip the require and the trace would miss dcmjs.js. The dynamic import
+# runs after that require. registerHooks records both. A string built
+# inside either file is on this trace only when that file runs. The static
+# imports of the module package are its generated glue, which loads no
+# dependency of its own, so they do not reach dcmjs either way.
+#
+# F-237. The consumer then installs the module at the same version as the
+# shell and loads it through loadCore, the public path a real consumer
+# takes. The bytes come from the installed tarball through
+# import.meta.resolve, never from a repository path, because node cannot
+# fetch a file URL and the installed module is the thing under test. The
+# decode module is the second artefact in the same package and is
+# initialised directly: loadCore latches once per realm, and the decode
+# pool builds its own instances. Both modules report ocelli_version() and
+# it must equal the VERSION string the shell exports, which is the one
+# version a released pairing ships. The namespace imports are there so the
+# proof can tell the two modules apart: the root entry must export
+# apply_commands, the render-only export, and ./decode must not carry it.
+SMOKE_SCRIPT = (
+    'import { readFileSync } from "node:fs";\n'
+    'import { createRequire } from "node:module";\n'
+    'import init, * as wasm from "@ocelli/wasm";\n'
+    'import initDecode, * as decode from "@ocelli/wasm/decode";\n'
+    'createRequire(import.meta.url)("dcmjs");\n'
+    'const { VERSION, coreAvailable, writeFrame, readEvent, loadCore } = '
+    'await import("@ocelli/core");\n'
+    'if (typeof VERSION !== "string") { throw new Error("VERSION"); }\n'
+    'if (coreAvailable() !== false) { throw new Error("coreAvailable"); }\n'
+    'if (typeof writeFrame !== "function") { throw new Error("writeFrame"); }\n'
+    'if (typeof readEvent !== "function") { throw new Error("readEvent"); }\n'
+    'const glue = import.meta.resolve("@ocelli/wasm");\n'
+    'const decodeGlue = import.meta.resolve("@ocelli/wasm/decode");\n'
+    'await loadCore(() => init({ module_or_path: '
+    'readFileSync(new URL("ocelli_wasm_bg.wasm", glue)) }));\n'
+    'if (coreAvailable() !== true) { throw new Error("coreAvailable after '
+    'loadCore"); }\n'
+    'if (typeof wasm.apply_commands !== "function") '
+    '{ throw new Error("render module: apply_commands"); }\n'
+    'if (wasm.ocelli_version() !== VERSION) { throw new Error("ocelli_version"); }\n'
+    'await initDecode({ module_or_path: '
+    'readFileSync(new URL("ocelli_wasm_bg.wasm", decodeGlue)) });\n'
+    'if (typeof decode.apply_commands !== "undefined") '
+    '{ throw new Error("decode module carries the render surface"); }\n'
+    'if (decode.ocelli_version() !== VERSION) { throw new Error("decode '
+    'ocelli_version"); }\n'
+    'console.log("ok", VERSION);\n'
+)
+
+
+# The type half of the same proof, under both resolutions. The root entry
+# must carry the render-only export as a real member and ./decode must not,
+# so a swapped staging fails tsc under bundler and node16 alike. The
+# ts-expect-error is load-bearing in both directions: a decode module that
+# grew the export leaves the directive unused, which is its own error.
+CHECK_TS = (
+    'import { VERSION, coreAvailable, writeFrame, readEvent } '
+    'from "@ocelli/core";\n'
+    'import type { BulkSink, OcelliEvent, WasmMemory } '
+    'from "@ocelli/core";\n'
+    'import { OcelliViewport } from "@ocelli/react";\n'
+    'import init from "@ocelli/wasm";\n'
+    'import { ocelli_version } from "@ocelli/wasm";\n'
+    'import initDecode from "@ocelli/wasm/decode";\n'
+    'import * as wasmSurface from "@ocelli/wasm";\n'
+    'import * as decodeSurface from "@ocelli/wasm/decode";\n'
+    'export const version: string = VERSION;\n'
+    'export const available: boolean = coreAvailable();\n'
+    'export const component = OcelliViewport;\n'
+    'export const boot = init;\n'
+    'export const bootDecode = initDecode;\n'
+    'export const moduleVersion: () => string = ocelli_version;\n'
+    'export const renderSurface: unknown = wasmSurface.apply_commands;\n'
+    '// @ts-expect-error the decode module is built with no renderer and '
+    'carries no render surface\n'
+    'export const decodeRenderSurface: unknown = '
+    'decodeSurface.apply_commands;\n'
+    'export const write: (w: WasmMemory, s: BulkSink, b: Uint8Array, '
+    'm: unknown) => void = writeFrame;\n'
+    'export const read: (v: DataView, o: number) => OcelliEvent '
+    '= readEvent;\n'
+)
+
+
+def module_surface_problems(smoke: str, check: str) -> list[str]:
+    """The consumer proof must tell the render module from the decode module.
+
+    Both modules export init and ocelli_version, so a proof written against
+    those alone accepts a tarball whose root entry is the decode module, and
+    that is exactly what a staging edit that swaps the two copies ships.
+    `smoke` is the runtime proof's text and `check` the type check's. Each
+    must read apply_commands on the root entry, and the smoke must also
+    assert its absence on ./decode while the type check holds that absence
+    with an unused-directive error.
+    """
+    problems: list[str] = []
+    if f'typeof wasm.{RENDER_ONLY_EXPORT} !== "function"' not in smoke:
+        problems.append(
+            "the consumer smoke does not assert that the root entry exports "
+            f"{RENDER_ONLY_EXPORT}, so it cannot tell the render module from "
+            "the decode module")
+    if f'typeof decode.{RENDER_ONLY_EXPORT} !== "undefined"' not in smoke:
+        problems.append(
+            "the consumer smoke does not assert that ./decode carries no "
+            f"{RENDER_ONLY_EXPORT}, so a staging edit that swaps the two "
+            "modules would pass the runtime half of the proof")
+    if f"wasmSurface.{RENDER_ONLY_EXPORT}" not in check:
+        problems.append(
+            "the consumer type check does not read "
+            f"{RENDER_ONLY_EXPORT} from the root entry, so a staging edit "
+            "that swaps the two modules still type-checks under bundler and "
+            "node16")
+    if f"decodeSurface.{RENDER_ONLY_EXPORT}" not in check:
+        problems.append(
+            "the consumer type check does not pin the decode module's lack "
+            f"of {RENDER_ONLY_EXPORT}, so a decode module that grew the "
+            "render surface would not turn the type check red")
+    return problems
+
+
+def unreachable_problems(consumer: Path, rows: list[dict]) -> list[str]:
+    """Lock version, resolve trace and static specifiers for one consumer.
+
+    `check_consumer` calls this once. The three checks and the trace's own
+    presence are one function, so a synthetic consumer directory exercises
+    the read of the lock, the trace and the installed scripts together.
+    """
+    lock_path = consumer / "package-lock.json"
+    try:
+        consumer_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        consumer_lock = {}
+    trace_path = consumer / "trace-urls.txt"
+    resolved: list[str] = []
+    if trace_path.is_file():
+        resolved = [line for line in
+                    trace_path.read_text(encoding="utf-8").splitlines()
+                    if line]
+    names = {str(row.get("package", "")).strip() for row in rows
+             if advisory_check.scope_is_unreachable(row.get("scope"))
+             and str(row.get("package", "")).strip()}
+    return [
+        *consumer_version_problems(rows, consumer_lock),
+        *trace_entry_problems(resolved),
+        *resolved_package_problems(resolved, names),
+        *specifier_problems(_script_texts(consumer, names), names),
+    ]
 
 
 def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
@@ -186,19 +699,24 @@ def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
     # asserted the published tarball does. Deleting either export left eslint,
     # tsc and vitest all at 0 and this consumer green, because it exercised
     # only `VERSION`, `coreAvailable` and the React component.
-    (consumer / "smoke.mjs").write_text(
-        'import { VERSION, coreAvailable, writeFrame, readEvent } '
-        'from "@ocelli/core";\n'
-        'if (typeof VERSION !== "string") { throw new Error("VERSION"); }\n'
-        'if (coreAvailable() !== false) { throw new Error("coreAvailable"); }\n'
-        'if (typeof writeFrame !== "function") { throw new Error("writeFrame"); }\n'
-        'if (typeof readEvent !== "function") { throw new Error("readEvent"); }\n'
-        'console.log("ok", VERSION);\n')
-    smoke = run(["node", "smoke.mjs"], consumer)
+    # SMOKE_SCRIPT requires the CommonJS build first, then dynamically
+    # imports @ocelli/core so the ESM build loads second. registerHooks
+    # records both. A string built inside either file is on this trace only
+    # when that file runs.
+    (consumer / "smoke.mjs").write_text(SMOKE_SCRIPT)
+    (consumer / "trace.mjs").write_text(TRACE_REGISTER)
+    smoke = run(
+        ["node", "--import", "./trace.mjs", "smoke.mjs"], consumer)
     if smoke.returncode != 0:
         problems.append(
             f"the published @ocelli/core does not import under node:\n"
             f"{smoke.stderr.strip()}")
+
+    # The unreachable-package check. The smoke run above is the traced run,
+    # so the resolve hook and both dcmjs entry points are one execution.
+    problems += smoke_wiring_problems(SMOKE_SCRIPT, TRACE_REGISTER)
+    problems += module_surface_problems(SMOKE_SCRIPT, CHECK_TS)
+    problems += unreachable_problems(consumer, _unreachable_rows())
 
     # 2. It type-checks under BOTH resolution modes. `bundler` is what a Vite
     #    or webpack consumer uses and `node16` is what a plain tsc consumer
@@ -207,19 +725,7 @@ def check_consumer(work: Path, tarballs: list[Path]) -> list[str]:
     #    The type-only imports are here for the same reason as the two runtime
     #    ones above: nothing proved a TYPE resolves through the published
     #    exports map, under either mode.
-    (consumer / "check.ts").write_text(
-        'import { VERSION, coreAvailable, writeFrame, readEvent } '
-        'from "@ocelli/core";\n'
-        'import type { BulkSink, OcelliEvent, WasmMemory } '
-        'from "@ocelli/core";\n'
-        'import { OcelliViewport } from "@ocelli/react";\n'
-        'export const version: string = VERSION;\n'
-        'export const available: boolean = coreAvailable();\n'
-        'export const component = OcelliViewport;\n'
-        'export const write: (w: WasmMemory, s: BulkSink, b: Uint8Array, '
-        'm: unknown) => void = writeFrame;\n'
-        'export const read: (v: DataView, o: number) => OcelliEvent '
-        '= readEvent;\n')
+    (consumer / "check.ts").write_text(CHECK_TS)
     typescript = ROOT / "node_modules" / "typescript" / "bin" / "tsc"
     if not typescript.exists():
         problems.append("typescript is not installed, run npm ci")
@@ -285,6 +791,8 @@ def main() -> int:
                 continue
             tarballs.append(tarball)
             problems += check_tarball(name, manifest, names)
+            if name == MODULE_PACKAGE:
+                problems += wasm_identity_from_tarball(tarball, version)
 
         if len(tarballs) == len(PACKAGES) and not problems:
             problems += check_consumer(work, tarballs)

@@ -15,7 +15,7 @@ use dicom_core::PrimitiveValue;
 use ocelli_codec::{
     DecodePhotometricInterpretation, FrameDesc, FrameDescInput, PixelDataVr, PixelRepresentation,
     Registry, register_htj2k_decoders, register_jpeg_decoders, register_jpeg2000_decoders,
-    register_jpegls_decoders, register_native_and_rle_decoders,
+    register_jpegls_decoders, register_jpegxl_decoders, register_native_and_rle_decoders,
 };
 use ocelli_core::{Canvas, Index, Pt, Stored, Transform};
 use ocelli_dicom::{DispatchPath, EncapsulatedFrameIndex, Tag, parse_part10};
@@ -693,14 +693,9 @@ fn encapsulated_bytes(
         .object()
         .element(PIXEL_DATA)
         .map_err(|_| RowStop::failed("pixel-data-absent"))?;
-    let offsets = match element.value().offset_table() {
-        Some(table) => table.to_vec(),
-        None => Vec::new(),
-    };
-    let fragments = element
-        .value()
-        .fragments()
-        .ok_or_else(|| RowStop::failed("pixel-data-absent"))?;
+    if element.value().fragments().is_none() {
+        return Err(RowStop::failed("pixel-data-absent"));
+    }
     let facts = pixel_facts(sidecar)?;
     let desc = frame_desc(sidecar, &facts)?;
     let registry = codecs().map_err(RowStop::failed)?;
@@ -710,8 +705,9 @@ fn encapsulated_bytes(
     if decoder_rgb && !allow_decoder_rgb {
         return Err(RowStop::failed("decoder-colour-output"));
     }
-    let borrowed: Vec<&[u8]> = fragments.iter().map(Vec::as_slice).collect();
-    let index = EncapsulatedFrameIndex::from_basic(facts.frames, &offsets, &borrowed)
+    // F-244. The Extended or Basic Offset Table and the syntax's frame
+    // delimiter are chosen once, in ocelli-dicom.
+    let index = EncapsulatedFrameIndex::from_parsed(parsed, facts.frames)
         .map_err(|_| RowStop::failed("frame-index-refused"))?;
     let parts = index
         .frame_fragments(0)
@@ -1616,6 +1612,7 @@ fn build_registry() -> Result<Registry, &'static str> {
     register_jpeg2000_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     register_jpegls_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     register_htj2k_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
+    register_jpegxl_decoders(&mut registry).map_err(|_| "registry-unavailable")?;
     Ok(registry)
 }
 
@@ -3188,7 +3185,9 @@ mod tests {
             super::jpeg_extended_12_level_residual().to_bits(),
             15.0_f32.to_bits()
         );
-        let (rgba, raw) = rendered_pair("syntax__jpeg_extended_12");
+        let Some((rgba, raw)) = rendered_pair("syntax__jpeg_extended_12") else {
+            return;
+        };
         assert_class_one_bounds("syntax__jpeg_extended_12", &rgba, &raw);
     }
 
@@ -3199,14 +3198,31 @@ mod tests {
     /// full-frame bound rejects that frame.
     #[test]
     fn dx_window_snap_matches_the_reference_bound() {
-        let (rgba, raw) = rendered_pair("real__dx_varepop__00000001");
+        let Some((rgba, raw)) = rendered_pair("real__dx_varepop__00000001") else {
+            return;
+        };
         assert_class_one_bounds("real__dx_varepop__00000001", &rgba, &raw);
     }
 
-    fn rendered_pair(id: &str) -> (Vec<u8>, Vec<u8>) {
+    /// The candidate and reference frames of one row, or `None` when the
+    /// reference run or the corpus is absent. Before returning `None` it
+    /// checks that the producer refuses a missing reference run, as the
+    /// neighbouring tests do, so the test returns instead of panicking.
+    fn rendered_pair(id: &str) -> Option<(Vec<u8>, Vec<u8>)> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
+        if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: root.join("tools/oracle/missing-run"),
+                corpus_root: corpus,
+                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
+                candidate_run: root.join("tools/oracle/compare-out/candidate"),
+                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+            });
+            assert_eq!(summary.resources, "reference-run-absent");
+            return None;
+        }
         let run = match crate::sidecar::Run::load(&reference) {
             Ok(run) => run,
             Err(error) => unreachable!("the reference run loads, {error}"),
@@ -3223,7 +3239,7 @@ mod tests {
             Ok(bytes) => bytes,
             Err(error) => unreachable!("{id} reference raw is present, {error}"),
         };
-        (rgba, raw)
+        Some((rgba, raw))
     }
 
     fn assert_class_one_bounds(id: &str, rgba: &[u8], raw: &[u8]) {

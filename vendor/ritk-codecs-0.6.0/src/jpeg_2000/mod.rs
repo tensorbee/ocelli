@@ -84,7 +84,7 @@ pub(crate) mod wavelet_9_7;
 use anyhow::{bail, Result};
 
 use crate::PixelLayout;
-use image::{decode_j2k_fragment, is_soc};
+use image::{decode_j2k_fragment, decode_j2k_fragment_colour, is_soc};
 
 /// J2K Start of Codestream marker (ISO 15444-1 §A.3): bytes `0xFF 0x4F`.
 #[allow(dead_code)] // Tested via soc_marker_constant_matches_iso_15444_1
@@ -120,6 +120,37 @@ pub fn decode_jpeg2000_fragment(fragment: &[u8], layout: PixelLayout) -> Result<
         );
     }
     decode_j2k_fragment(fragment, layout)
+}
+
+/// Decode a three-component (colour) DICOM-encapsulated JPEG 2000 J2K
+/// codestream fragment, returning interleaved rescaled `f32` pixel values.
+///
+/// # Arguments
+/// - `fragment`: raw bytes of the encapsulated pixel data item.
+/// - `layout`: pixel geometry and DICOM rescale parameters, whose
+///   `samples_per_pixel` must be three.
+///
+/// # Errors
+/// Returns an error if:
+/// - `fragment` does not begin with the SOC marker (0xFF4F).
+/// - `Csiz` is not three, the components do not share one depth, signedness
+///   and 1x1 sampling, or the geometry does not match `layout`.
+/// - the stream is not three-component LRCP without coding overrides, packed
+///   packet headers, multi-part tiles, or a multiple-component transform byte
+///   other than 0 and 1.
+/// - packet or coefficient decoding fails.
+/// - a marker segment or packet is truncated, EOC or a declared tile is
+///   missing, or decoded component metadata does not match `layout`.
+/// - component precision exceeds the decoder's 32-bit coefficient capacity.
+pub fn decode_jpeg2000_fragment_colour(fragment: &[u8], layout: PixelLayout) -> Result<Vec<f32>> {
+    if !is_jpeg2000_codestream(fragment) {
+        bail!(
+            "JPEG 2000 fragment does not begin with SOC marker 0xFF4F \
+             (first 2 bytes: {:02X?})",
+            &fragment[..fragment.len().min(2)]
+        );
+    }
+    decode_j2k_fragment_colour(fragment, layout)
 }
 
 /// Returns `true` if `fragment` begins with the J2K SOC marker (`0xFF 0x4F`).

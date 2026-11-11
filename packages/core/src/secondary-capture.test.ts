@@ -134,4 +134,19 @@ describe("Secondary Capture", () => {
     expect(first).not.toBeNull();
     expect(Array.from(first ?? [])).toEqual(Array.from(second ?? []));
   });
+
+  it("writes the Type 1 file meta of PS3.10 Table 7.1-1", () => {
+    // F-215 review pass 2. File Meta Information Version (0002,0001), OB
+    // 00H 01H, and Implementation Class UID (0002,0012).
+    const bytes = writeSecondaryCapture(request);
+    if (bytes === null) {
+      throw new Error("expected bytes");
+    }
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    const meta = dcmjs.data.DicomMessage.readFile(copy).meta as Record<string, { Value: unknown[] } | undefined>;
+    const version = meta["00020001"]?.Value[0];
+    expect(Array.from(new Uint8Array(version instanceof ArrayBuffer ? version : new ArrayBuffer(0)))).toEqual([0, 1]);
+    expect(typeof meta["00020012"]?.Value[0]).toBe("string");
+  });
 });

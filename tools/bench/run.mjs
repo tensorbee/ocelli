@@ -33,6 +33,7 @@ import {
   runnerBasename,
   runnerPath,
 } from "./src/paths.mjs";
+import { COLOUR_CASE_IDS } from "./src/comparison_colour.mjs";
 import { loadRegistry } from "./src/registry.mjs";
 import { INCOMPARABLE, MEASURED, subjectState } from "./src/state.mjs";
 import { conditions, hostClass, hostClassKey } from "./src/hostclass.mjs";
@@ -47,6 +48,11 @@ const require = createRequire(import.meta.url);
 
 export const USAGE = `bin/ocelli.sh bench [options]
 
+  --compare-cornerstone  compare both local viewers, requires --pseudo or OCELLI_PSEUDO_DIR
+  --pseudo <dir>         local comparison input root, never written to reports
+  --colour-case <id>     supplemental controlled colour case, never published
+  --publish              write the generated tracked comparison pair
+  --software             permit and name SwiftShader for comparison
   --list                 print each subject with its definition, the story that
                          gives it a subject and that story's backlog status,
                          then stop. It resolves no state and runs nothing
@@ -55,12 +61,20 @@ export const USAGE = `bin/ocelli.sh bench [options]
                          on a machine that did not record the baseline
   --accept               re-baseline from this run. Needs --story and --why
   --subject <id>         restrict --accept to one subject
+  <subject-id>...        run only these subjects. The default is every subject
+                         that has a runner
   --story <F-ID>         the story a re-baseline belongs to
   --why <text>           what moved, and why. Required, and not decoration
-  --tolerance <fraction> the tolerance to record with a new baseline entry
-  --tolerance-why <text> where that tolerance came from. Required with it, in
-                         the shape ci/tier-thresholds.json states per figure:
-                         measured, derived from something named, or absent
+  --tolerance <fraction> the tolerance to record with a new baseline entry, for
+                         every subject no per-subject form names. Once only
+  --tolerance <subject id>=<fraction>
+                         the tolerance for that one subject. Repeatable, once
+                         per subject. The subject must be in this run and,
+                         with --subject, be that subject
+  --tolerance-why <text> where those tolerances came from. Required with either
+                         form, in the shape ci/tier-thresholds.json states per
+                         figure: measured, derived from something named, or
+                         absent
   --out <dir>            where the run record goes (default tools/bench/out)
   --no-build             do not rebuild the wasm artefact first. The record is
                          then marked pre-existing and --accept refuses it
@@ -72,6 +86,11 @@ skip, and a skipped gate is not a pass here.
 
 export function parseArgs(argv) {
   const options = {
+    compareCornerstone: false,
+    colourCase: null,
+    pseudo: null,
+    publish: false,
+    software: false,
     list: false,
     compare: false,
     accept: false,
@@ -79,10 +98,12 @@ export function parseArgs(argv) {
     story: null,
     why: null,
     tolerance: null,
+    tolerances: {},
     toleranceWhy: null,
     out: DEFAULT_OUT,
     build: true,
     help: false,
+    only: [],
   };
   const value = (index, flag) => {
     if (index >= argv.length || argv[index] === "" ||
@@ -94,6 +115,11 @@ export function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
+      case "--compare-cornerstone": options.compareCornerstone = true; break;
+      case "--colour-case": options.colourCase = value(++index, arg); break;
+      case "--pseudo": options.pseudo = value(++index, arg); break;
+      case "--publish": options.publish = true; break;
+      case "--software": options.software = true; break;
       case "--list": options.list = true; break;
       case "--compare": options.compare = true; break;
       case "--accept": options.accept = true; break;
@@ -102,14 +128,42 @@ export function parseArgs(argv) {
       case "--why": options.why = value(++index, arg); break;
       case "--tolerance": {
         const raw = value(++index, arg);
-        const parsed = Number(raw);
+        // `<subject id>=<fraction>` names one subject. A bare fraction is for
+        // every subject no per-subject form names. Subject ids carry no `=`.
+        const equals = raw.indexOf("=");
+        const subjectId = equals === -1 ? null : raw.slice(0, equals);
+        const fraction = equals === -1 ? raw : raw.slice(equals + 1);
+        if (subjectId === "") {
+          throw new Error(
+            `--tolerance ${JSON.stringify(raw)} names no subject. The ` +
+              "per-subject form is <subject id>=<fraction>.",
+          );
+        }
+        const parsed = fraction === "" ? Number.NaN : Number(fraction);
         if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) {
           throw new Error(
             `--tolerance takes a fraction above 0 and at most 1, not ` +
               `${JSON.stringify(raw)}`,
           );
         }
-        options.tolerance = parsed;
+        if (subjectId === null) {
+          if (options.tolerance !== null) {
+            throw new Error(
+              "--tolerance takes one bare fraction. A second would silently " +
+                "replace the first. Name a subject with " +
+                "--tolerance <subject id>=<fraction> instead.",
+            );
+          }
+          options.tolerance = parsed;
+        } else {
+          if (Object.hasOwn(options.tolerances, subjectId)) {
+            throw new Error(
+              `--tolerance names ${subjectId} twice. A second would silently ` +
+                "replace the first.",
+            );
+          }
+          options.tolerances[subjectId] = parsed;
+        }
         break;
       }
       case "--tolerance-why": options.toleranceWhy = value(++index, arg); break;
@@ -117,8 +171,23 @@ export function parseArgs(argv) {
       case "--no-build": options.build = false; break;
       case "--help": case "-h": options.help = true; break;
       default:
-        throw new Error(`unknown argument ${arg}. Try --help.`);
+        if (arg.startsWith("-")) {
+          throw new Error(`unknown argument ${arg}. Try --help.`);
+        }
+        options.only.push(arg);
+        break;
     }
+  }
+  if (options.colourCase !== null && !COLOUR_CASE_IDS.includes(options.colourCase)) throw new Error("--colour-case needs a supported controlled case");
+  if (options.compareCornerstone) {
+    if (options.compare || options.accept || options.subject || options.story || options.why || options.list || options.only.length || options.tolerance !== null || Object.keys(options.tolerances).length || options.toleranceWhy) {
+      throw new Error("--compare-cornerstone refuses baseline and subject comparison options");
+    }
+    if (options.publish && options.colourCase) throw new Error("--publish refuses supplemental colour cases");
+    if (options.publish && !options.build) throw new Error("--publish refuses --no-build for a comparison");
+    if (!argv.includes("--out")) options.out = join(DEFAULT_OUT, "compare");
+  } else if (options.pseudo !== null || options.publish || options.software || options.colourCase !== null) {
+    throw new Error("--pseudo, --publish, --software and --colour-case require --compare-cornerstone");
   }
   if (options.accept && (!options.story || !options.why)) {
     throw new Error(
@@ -127,14 +196,16 @@ export function parseArgs(argv) {
         "number readable a year later.",
     );
   }
-  if (options.tolerance !== null && !options.toleranceWhy) {
+  const anyTolerance = options.tolerance !== null ||
+    Object.keys(options.tolerances).length > 0;
+  if (anyTolerance && !options.toleranceWhy) {
     throw new Error(
       "--tolerance needs --tolerance-why. A tolerance is a derived figure " +
         "and ci/tier-thresholds.json states the provenance of each figure " +
         "separately for exactly this reason.",
     );
   }
-  if (options.toleranceWhy && options.tolerance === null) {
+  if (options.toleranceWhy && !anyTolerance) {
     throw new Error("--tolerance-why only means something with --tolerance");
   }
   if (options.accept && !options.build) {
@@ -148,6 +219,42 @@ export function parseArgs(argv) {
     throw new Error("--subject only means something with --accept");
   }
   return options;
+}
+
+/**
+ * The registry rows this run will take, refused before anything runs.
+ *
+ * A per-subject tolerance must name a subject the run records. One naming a
+ * subject outside it, or outside `--subject`, would be accepted and silently
+ * applied to nothing.
+ */
+export function resolveRun(loaded, options) {
+  let resolved = loaded;
+  if (options.only.length > 0) {
+    const known = new Set(loaded.map((row) => row.subject.id));
+    const missing = options.only.filter((id) => !known.has(id));
+    if (missing.length > 0) {
+      throw new Error(`unknown subject ${missing.join(", ")}`);
+    }
+    const wanted = new Set(options.only);
+    resolved = loaded.filter((row) => wanted.has(row.subject.id));
+  }
+  const inRun = new Set(resolved.map((row) => row.subject.id));
+  for (const id of Object.keys(options.tolerances)) {
+    if (!inRun.has(id)) {
+      throw new Error(
+        `--tolerance names ${id}, which is not in this run, so the ` +
+          "tolerance would be recorded against nothing.",
+      );
+    }
+    if (options.subject !== null && id !== options.subject) {
+      throw new Error(
+        `--tolerance names ${id}, which is outside --subject ` +
+          `${options.subject}, so --accept would record it against nothing.`,
+      );
+    }
+  }
+  return resolved;
 }
 
 /** The tools the figures were taken with, compared alongside the host class. */
@@ -246,7 +353,28 @@ export async function main(argv) {
     return 0;
   }
 
-  const resolved = loadRegistry();
+  if (options.compareCornerstone) {
+    try {
+      const { runComparison } = await import("./src/comparison_run.mjs");
+      const result = await runComparison(options);
+      process.stdout.write(`comparison ${result.state}\n`);
+      return result.state === "measured" ? 0 : 1;
+    } catch (error) {
+      process.stderr.write(`${error?.safeMessage || "comparison refused before publication"}\n`);
+      return error?.exitCode || 2;
+    }
+  }
+
+  // Outside the try, so a registry the loader refuses still rejects main and
+  // exits 1 with its stack rather than reading as an argument refusal.
+  const loaded = loadRegistry();
+  let resolved;
+  try {
+    resolved = resolveRun(loaded, options);
+  } catch (error) {
+    process.stderr.write(`${String(error?.message ?? error)}\n`);
+    return 2;
+  }
 
   if (options.list) {
     for (const row of resolved) {
@@ -328,6 +456,7 @@ export async function main(argv) {
       story: options.story,
       why: options.why,
       tolerance: options.tolerance,
+      tolerances: options.tolerances,
       toleranceWhy: options.toleranceWhy,
       today: new Date().toISOString().slice(0, 10),
     });

@@ -17,7 +17,7 @@ declare module "dcmjs" {
     data: {
       DicomDict: new (meta: unknown) => DicomDict;
       DicomMessage: {
-        readFile(buffer: ArrayBuffer): DicomDict;
+        readFile(buffer: ArrayBuffer, options?: { ignoreErrors?: boolean }): DicomDict;
       };
       DicomMetaDictionary: {
         uid(): string;

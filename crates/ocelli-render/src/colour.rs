@@ -18,6 +18,22 @@ use ocelli_pixel::{
 };
 use ocelli_viewport::presentation::Colormap;
 
+/// Whether the frame carries an ICC profile, F-240.
+///
+/// The viewer part states it from the frame it opened and passes it beside
+/// the photometric interpretation. A profile the F-240 subset refused keeps
+/// the CPU route's own bytes on the GPU tiers too, deviation D-30, so
+/// refused and absent bake the same values an unprofiled frame would. A
+/// profile the subset accepted cannot be applied by a GPU route, which
+/// reports unavailable rather than drawing device RGB.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IccProfilePresence {
+    /// No profile, or one the F-240 subset refused.
+    Absent,
+    /// A profile the F-240 subset accepted.
+    Accepted,
+}
+
 /// `grey` or `stops`. No clinical name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresetId {
@@ -126,15 +142,26 @@ impl ColourLut {
     ///
     /// # Errors
     ///
-    /// [`ColourLutError::Unavailable`] when [`ColorTransform::resolve`]
-    /// refuses the photometric interpretation, which includes both monochrome
-    /// values, or when a channel is not an integer in `0..=255`. A 16-bit
-    /// entry above 255 is not scaled into the byte. That scale is not this
-    /// story's formula.
+    /// [`ColourLutError::Unavailable`] when the frame carries an accepted
+    /// ICC profile, `icc` being [`IccProfilePresence::Accepted`]: no GPU
+    /// route can apply a profile, and baking device RGB beside it would draw
+    /// a frame the profile does not describe. A profile the subset refused
+    /// is [`IccProfilePresence::Absent`] and bakes the CPU route's own
+    /// bytes, deviation D-30. Also [`ColourLutError::Unavailable`] when
+    /// [`ColorTransform::resolve`] refuses the photometric interpretation,
+    /// which includes both monochrome values, or when a channel is not an
+    /// integer in `0..=255`. The entries arrive through
+    /// [`PaletteColorLut`]'s display scale, F-239 item 11, the same lookup
+    /// tier C reads, so every texel is the value tier C draws and the
+    /// refusal is a guard rather than a route.
     pub fn palette(
         lut: PaletteColorLut,
         photometric: PhotometricInterpretation,
+        icc: IccProfilePresence,
     ) -> Result<Self, ColourLutError> {
+        if icc == IccProfilePresence::Accepted {
+            return Err(ColourLutError::Unavailable);
+        }
         let (origin, end) = address_span(&lut)?;
         let transform = resolve_palette(lut, photometric)?;
         let bytes = bake(&transform, origin, end)?;
@@ -143,7 +170,13 @@ impl ColourLut {
         })
     }
 
-    /// ICC is not implemented.
+    /// ICC is unavailable on the GPU routes, F-240.
+    ///
+    /// A profiled frame reports [`ColourLutError::Unavailable`] rather than
+    /// drawing device RGB, `docs/lld/feature-availability.md`'s declaration.
+    /// The CPU route applies the matrix and tone-curve subset through
+    /// `ColorTransform::with_icc` in `ocelli-pixel`, and a profile the
+    /// subset refused keeps the CPU route's own bytes, deviation D-30.
     ///
     /// # Errors
     ///
@@ -328,7 +361,8 @@ fn resolve_palette(
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => 3,
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => 3,
     };
     let planar = if samples == 1 {
         None
@@ -477,8 +511,10 @@ fn round_half_even(value: f32) -> f32 {
 /// signed-mean bound of `0.1` rejects. `table_index` in `graph.rs` adds `0.5`
 /// in f32 the same way and then truncates. The tier C channel store does not
 /// use this addition. It compares with the exact half, so the float just
-/// below a tie stays on the lower byte. Adding `0.5` in f32 can carry that
-/// float onto the next code.
+/// below a tie stays on the lower byte, and since F-239 it sends an exact tie
+/// to the even byte. Adding `0.5` in f32 can carry that float onto the next
+/// code. This address rule is unchanged by F-239, because the tier A and B
+/// shaders' `table_index` is the same addition.
 pub fn display_index(display: f32, last: u32) -> u32 {
     if !display.is_finite() || display <= 0.0 {
         return 0;

@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231, F-236, F-225, F-215
+**Last updated:** 2026-11-10
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -15,7 +15,7 @@ wire carries. The wire lives in `ocelli-viewport`, `ocelli-wasm` and
 command, state and ring numbers. It holds the eleven command ids and payload
 lengths, the VOI function, preset, colormap and invert bytes, the flag bits,
 the `ViewportState` and `RingHeader` layouts, the event stride and field
-offsets, and the six ring kinds. `snapshot.rs` is the one definition of the
+offsets, and the seven ring kinds. `snapshot.rs` is the one definition of the
 snapshot magic, version and error codes. `crates/ocelli-viewport/tests/typegen.rs`
 writes `packages/core/src/generated.ts` from both and compares the committed
 file byte for byte. A change to a Rust payload length or a struct field fails
@@ -31,6 +31,57 @@ rather than restating them. `VIEWPORT_STATE_BYTES` is
 that struct, so the 96-byte readback and its offsets are the layout rather
 than a second description of it. The ring's 48-byte stride and field offsets
 come from `RingEvent` the same way.
+
+## Conformance report reader
+
+The index exports `readConformanceReport(text: string)`, `CONFORMANCE_RULES`,
+`CONFORMANCE_SCOPE` and `SOP_CLASS_NOTES`, and the types
+`ConformanceFinding`, `ConformanceMeasure`, `ConformanceModules`,
+`ConformanceReport` and `ConformanceSopClassNote`. `ReadConformanceResult`
+and `ConformanceRefusal` are not re-exported from the index. The returned
+discriminated union is described inline. It is `{ ok: true, report }` on
+success and `{ ok: false, reason }` on refusal, with `reason` one of
+`json`, `scope`, `rule` and `shape`.
+
+`@ocelli/core` validates the report JSON, not file values. There is no
+TypeScript DICOM checker and no wasm memory access in this path. Invalid
+JSON is `json`. A scope string that is not the catalogue sentence is
+`scope`, and that check runs before findings, so a wrong sentence wins
+over an unknown rule. An unknown rule id is `rule`. Any other mismatch is
+`shape`. `edition` must be a string. It is not forced to `2026d`. No
+promise is made that all extra unknown keys are refused. Each finding's
+`section` is resolved from the catalogue, and the section on the wire is
+ignored. The returned report has `scope`, `edition`, `findings`,
+`modules` and `counts`. The wire `rules` array is not part of it.
+
+`ConformanceModules` is discriminated by `evaluated`. When true it names
+the IOD, table, module list and conditions not checked. When false the
+module presence rules were not evaluated, and value findings can still be
+present. The SOP class selector and its note have the privacy limits
+[described in DICOM ingest](dicom-ingest.md#conformance-report).
+`counts.elements` counts visited elements. `counts.notCheckedUn` counts
+UN elements whose values were not checked.
+
+`crates/ocelli-dicom/tests/conformance_typegen.rs` generates
+`packages/core/src/conformance.generated.ts`, distinct from the boundary
+`generated.ts`. `SOP_CLASS_NOTES` is the closed
+set `not a valid UID` and `not a DICOM UID`. The scope sentence, exactly
+as generated, is:
+
+> This report checks the rules it lists and nothing else. It is not a statement that the file conforms to DICOM.
+
+The rule ids, grouped by family, are:
+
+- Length: `VALUE-LENGTH`, `FIXED-LENGTH` and `BINARY-LENGTH`
+- VR and repertoire: `VR-MISMATCH`, `REPERTOIRE` and `CHARSET-UNDECLARED`
+- Multiplicity: `MULTIPLICITY`
+- Text formats: `AE-SPACES`, `AS-FORMAT`, `DA-FORMAT`, `TM-FORMAT`,
+  `DT-FORMAT`, `DS-FORMAT`, `DS-RANGE`, `IS-FORMAT`, `IS-RANGE`,
+  `UI-FORMAT`, `PN-FORMAT` and `UR-FORMAT`
+- Presence: `TYPE1-ABSENT`, `TYPE1-EMPTY`, `TYPE1C-ABSENT`,
+  `TYPE1C-EMPTY`, `TYPE2-ABSENT` and `TYPE2C-ABSENT`
+
+The generated file is the authoritative list, not this section.
 
 ## The boundary wire this file documents
 
@@ -59,6 +110,59 @@ _pad: [u32; 3]
 means refining. `readViewportState` reads a 96-byte copy into plain numbers.
 `drainRing` reads a copied event buffer. Neither function views wasm memory.
 `coreAvailable()` stays false until a built module is loaded.
+
+## Options and refusals
+
+An options object in `@ocelli/core` refuses a key it does not declare.
+`packages/core/src/options.ts` holds one key list per type and
+`refuseUnknownOptions`, and each entry point calls it before it reads a field.
+
+**The in-scope rule.** Every exported interface or type alias in
+`packages/core/src` whose name ends in `Options` or `Request`, plus
+`FrameCommitMeta`. `OPTION_KEY_LISTS` maps these eight names to their keys:
+
+| Type | Checked by |
+|------|------------|
+| `DicomwebClientOptions` | `new DicomwebClient` |
+| `QidoSearchOptions` | `searchStudies`, `searchSeries` and `searchInstances` |
+| `PointerDispatchOptions` | `createPointerDispatch` |
+| `CursorControllerOptions` | `createCursorController` |
+| `WadoInstanceRequest` | `postWadoInstance` |
+| `KeyObjectRequest` | `writeKeyObject` |
+| `SecondaryCaptureRequest` | `writeSecondaryCapture` |
+| `FrameCommitMeta` | `writeFrame` with a ticketed sink, and `acceptTransferredFrame` |
+
+Records such as `HandoffMeta`, `StackFrameKey` and `PackedCommand` are not
+checked.
+
+**What is refused.** An own key from `Reflect.ownKeys`, string or symbol, that
+the list does not name throws `OcelliError` code `UnknownOption`. The message
+is `` `${owner} has no option ${JSON.stringify(key)}` ``. The key is cut to 64
+UTF-16 units first, and a symbol is written as `String(symbol)`.
+`error.option` holds the same text. An inherited key is not checked. A
+declared key whose value is `undefined` is accepted. A value that is not a
+non-null, non-array object throws `InvalidOptions`, message
+`` `${owner} is not an options object` ``. `acceptTransferredFrame`, and
+`writeFrame` with a ticketed sink, throw `InvalidOptions` with `frame meta is
+not an object` for a meta that is not an object, which includes a function.
+An array gets the generic message. The keys of
+`CursorControllerOptions.cursors` are checked against `STACK_COMMANDS`, with
+that path as the owner.
+
+The refusal comes before any fetch, allocation or write. The three QIDO
+searches reject their promise rather than throw synchronously.
+`writeKeyObject` and `writeSecondaryCapture` return `null` for content they
+cannot write, and still throw `UnknownOption` for an unknown key.
+`docs/lld/errors.md`, "Shell errors are a second namespace", lists every
+shell code.
+
+**The census.** Each key list `satisfies` the type's keys, and
+`OPTION_LISTS_COMPLETE` is `true` only when every list names every field, so
+a new field fails `npm run typecheck` until its list names it.
+`options.test.ts`, "every options type has a key list", scans every non-test
+`.ts` file in `packages/core/src` for an exported `*Options` or `*Request`
+type, adds `FrameCommitMeta`, and expects exactly the names in
+`OPTION_KEY_LISTS`. A new such type with no key list fails that test.
 
 ## Scene and stack viewport
 
@@ -242,6 +346,8 @@ F-097 adds `writeTid1500` and `readTid1500` in `packages/core`. dcmjs 0.52.2 wri
 
 F-196 adds `writeKeyObject`, `readKeyObject`, `writeSecondaryCapture` and `readSecondaryCapture` in `packages/core`. The key object is TID 2010 with one description and one composite reference. The secondary capture is 8-bit MONOCHROME2. The detail is `docs/lld/key-object.md`. There is no Rust twin.
 
+F-215 adds `writeTid1500Groups`, `readTid1500Groups`, `writeKeyObjects` and `readKeyObjects` in `packages/core`, and exports the `ContentItem`, `Concept`, `GraphicType` and `Relationship` types of `sr.ts`. `GraphicType` gains `ELLIPSE`, which takes exactly four points, and an `IMAGE` item gains an optional `frame`, a Referenced Frame Number of at least 1. `writeTid1500Groups` writes one Comprehensive 3D SR whose TID 1500 row 6 container holds one TID 1410 group per root, each a `(125007, DCM)` container of any value type, with the relationship written with a space. A `ReportSource` carries the patient and study attributes, Content Date and Content Time, the evidence and the predecessors. An empty group list is written only when the source names a predecessor, as a report whose row 6 container is empty. `readTid1500Groups` returns the groups, the Predecessor Documents Sequence instances and a count of groups it could not read, and decodes every string of the content tree as the file's Specific Character Set says. The set is read from the file's own (0008,0005) bytes, because dcmjs rewrites the parsed value to ISO_IR 192. Each nested string is turned back into its bytes by inverting the windows-1252 or Latin-1 decode dcmjs used, which is exact for all 256 byte values, and decoded with the set's label. The sets read are those of PS3.3 C.12.1.1.2 without code extensions: the default repertoire, written as no value or as ISO_IR 6, ISO_IR 100, 101, 109, 110, 144, 127, 126, 138, 148, 203 and 166, ISO_IR 192, GB18030 and GBK. ISO_IR 13 is not. In a single-byte set a C1 byte, 0x80 to 0x9F, makes the string unreadable. Under ISO_IR 166 byte A0 is NO-BREAK SPACE, and a byte of DB to DE or FC to FF, the positions ISO-IR 166 says shall not be used, also makes it unreadable. The walk reads Implicit and Explicit VR Little Endian and Explicit VR Big Endian. A file it cannot walk, such as a deflated one, is read as the default repertoire when it has no Specific Character Set, and has every group counted unread when it has one. The parse is always retried past dcmjs's refusal of a set, so such a file is still read rather than skipped. A UT split on a backslash is joined back whole. A file whose set uses code extensions or is not one of those is read, and every group in it is counted unread rather than shown with guessed text. A NUM may carry `unitMeaning`, the UCUM meaning. `writeKeyObjects` writes one Key Object Selection whose references named in the evidence are IMAGE items for an image storage class, WAVEFORM items for a waveform class, and COMPOSITE items otherwise. `readKeyObjects` returns the references, Content Date, Content Time, Instance Number and Manufacturer. `writeKeyObject` follows the same rule, and `readKeyObject` reads all three. Every UID these writers make is a `2.25` value of 128 random bits, and every file carries the PS3.10 Table 7.1-1 file meta, File Meta Information Version and Implementation Class UID included. The detail is `docs/lld/key-object.md`. There is no Rust twin.
+
 F-105 adds `enableElement`, `disableElement` and `dispatchOnElement` in `packages/core`. One element has one registration. The event type is the Ocelli name. The detail is the caller object. A second enable returns nothing. Disable removes the registration and then sends `viewport.unmounted`. The React host div uses the same functions. Tiers A, B and C are n/a.
 
 F-108 adds `rewriteListenerNames` in `packages/core`. A listener string literal is rewritten when the event map has an Ocelli name. An unmapped name stays. `cornerstone.enable` stays. The guide is `docs/lld/migration.md`.
@@ -314,6 +420,40 @@ This is resident selection, not F-052 series loading, decoding or prefetch.
 `writeCommands` obtains its immediate memory view after allocation, because
 allocation may grow wasm memory. It delegates ticket authorization to the
 existing command sink. No command ID or 96-byte readback layout changed.
+
+## Session frame cache
+
+F-231. `packages/core/src/frame-cache.ts` calls the session cache's exports
+and `docs/lld/cache.md` says what the cache does. `setFrameBudget(wasm,
+bytes)` sets the budget in bytes, a `u32`, and 0 is off, the default.
+`frameResident(wasm, request)` and `showResident(wasm, request)` take a
+`ResidentFrameRequest` of `index`, `epoch`, `content`, `columns` and `rows`.
+`frameResident` answers whether the frame is held for that content id and
+extent and is not a use. `showResident` draws a held frame and returns
+true, returns false for a miss, a stale entry or a wrong epoch, and throws
+`OcelliError` code `CommitRefused` when, under the current epoch, the index
+is not the selected slice, as `writeFrame` does, so a caller can tell a refusal
+from a miss. `releaseSeries(wasm, series)` returns the frames released.
+`releaseStudy(wasm, series)` takes the caller's list of series, validates
+every entry before the first call, skips duplicates and sums the counts,
+one export call per series, because the cache holds no study.
+`requestFramePressure(wasm)` asks for one `cache.pressure` reading.
+
+`FrameCommitMeta` gains an optional `content`, a `bigint` `u64`. A meta with
+`stackIndex`, `stackEpoch` and `content` commits through
+`commit_cached_frame`, and one with the two stack keys alone through
+`commit_selected_frame` as before. A `content` without both stack keys is
+refused with `InvalidValue`, so a content id is never accepted and then
+ignored. `contentId(wasm, sopInstanceUid, transferSyntaxUid, encoded)` in
+`bulk.ts` writes the three back to back into the bulk slot and calls
+`content_id`, which hashes through `ContentId::of` in Rust and drops the
+slot, so FNV-1a exists once and no pixel crosses up. An `undefined` answer
+is a refusal and throws `CommitRefused`, because 0 is a legitimate id.
+
+A non-`u32` index, epoch, column, row or budget and a `bigint` outside `u64`
+are `InvalidValue`, and an unknown request key is `UnknownOption`, each
+before any export call. `ResidentFrameRequest` and `FrameCommitMeta`'s new
+key are in F-230's key lists in `options.ts`.
 
 ## Decode worker pool
 

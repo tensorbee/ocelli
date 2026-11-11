@@ -37,6 +37,13 @@ whole argument for building the oracle before the code it validates.
 6. /close-sprint SNN --next SMM    Merge, tag, next sprint
 ```
 
+**Steps 4 and 5 run once, after every story is completed or carried.** The
+operator set this on 2026-11-06. Before that point a story gets its own review
+loop and the feature profile at its integration tree, and nothing more. Do not
+run the sprint profile, `gate --sprint` or a whole-sprint review while any story
+is still open, because the next integration makes that evidence stale and the
+work is repeated.
+
 `/run-sprint` stops after a clean sprint review. It never merges to `main`,
 never creates a tag and never publishes. **It does not stop before that.**
 Ending a turn with sprint work outstanding and no blocking question is a defect
@@ -120,7 +127,7 @@ run-state reconciliation that keeps existing feature progress and history.
 ```text
 1. /design F-XXX             Write the design plan against docs/hld/
 2. /start-feature F-XXX      Mark in-progress, create test stubs
-3. /implement-feature F-XXX  Code + tests
+3. /implement-feature F-XXX  Code, tests and the user-facing documents
 4. /microscope F-XXX         REPEAT until zero defects and zero smells
 5. /verify                   The gate
 6. /complete-feature F-XXX   Ledgers, LLD, commit with the provenance trailer

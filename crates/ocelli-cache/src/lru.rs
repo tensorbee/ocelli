@@ -10,10 +10,15 @@
 //! `Vec`, which are only compatible if insertion happens on the decode and
 //! upload paths. The render loop's cache interaction is `get`.
 //!
-//! **`insert` and `set_budget` are the methods here that allocate.** A shrink
-//! pushes one eviction at a time onto the returned `Admission`, which is the
-//! same allocation `insert` already makes, and a grow or a no-op pushes
-//! nothing. `docs/lld/cache.md` carries the measurement for `insert`.
+//! **`insert`, `set_budget` and `remove_range` are the methods here that
+//! allocate.** A shrink pushes one eviction at a time onto the returned
+//! `Admission`, which is the same allocation `insert` already makes, and a
+//! grow or a no-op pushes nothing. A range release builds the key collection
+//! and the pairs it returns, which is why it is a release call and not a
+//! render-loop call. `docs/lld/cache.md` carries the measurement for
+//! `insert`.
+
+use core::ops::Bound;
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -123,6 +128,22 @@ pub(crate) fn admits(budget: usize, bytes: usize) -> bool {
     budget > 0 && bytes <= budget
 }
 
+/// Whether a range's bounds name nothing, inverted or equal and excluded.
+///
+/// `BTreeMap::range` panics on an inverted range and on an equal key excluded
+/// from both sides, and HLD section 23 leaves no exported path a panic can
+/// reach. `remove_range` compares the bounds first, so a range a caller
+/// computed wrong comes back as an empty release instead of a panic.
+fn bounds_are_empty<K: Ord>(start: Bound<&K>, end: Bound<&K>) -> bool {
+    match (start, end) {
+        (Bound::Included(lo), Bound::Included(hi)) => lo > hi,
+        (Bound::Included(lo), Bound::Excluded(hi)) => lo >= hi,
+        (Bound::Excluded(lo), Bound::Included(hi)) => lo >= hi,
+        (Bound::Excluded(lo), Bound::Excluded(hi)) => lo >= hi,
+        _ => false,
+    }
+}
+
 impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
     /// An empty cache over one tier, holding at most `budget` bytes.
     pub fn new(tier: CacheTier, budget: usize) -> Self {
@@ -207,11 +228,56 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
         Some(entry.value)
     }
 
+    /// Explicit release of every live key in `range`, ascending. Not an
+    /// eviction.
+    ///
+    /// This is `remove`'s rule applied to a range: the use tick does not
+    /// move, so the survivors' eviction order is the caller's to keep, and
+    /// `used` drops by exactly the admitted bytes of what left. The pairs
+    /// come back in ascending key order and not in recency order, which is
+    /// what makes a release distinguishable from a run of evictions.
+    ///
+    /// The keys are collected before anything is removed, because the range
+    /// borrows the map. This allocates the return and the collection, which
+    /// is why it is a release call and not a render-loop call.
+    ///
+    /// An empty or inverted range, including an equal key excluded on both
+    /// sides, releases nothing and returns an empty `Vec`.
+    pub fn remove_range<R: core::ops::RangeBounds<K>>(&mut self, range: R) -> Vec<(K, V)> {
+        if bounds_are_empty(range.start_bound(), range.end_bound()) {
+            return Vec::new();
+        }
+        let keys: Vec<K> = self
+            .entries
+            .range(range)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut released = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.release(entry.bytes);
+                released.push((key, entry.value));
+            }
+        }
+        released
+    }
+
     /// Whether the key is live. Telemetry, not a use, so it does not change
     /// what leaves next.
     #[must_use]
     pub fn contains_key(&self, key: &K) -> bool {
         self.entries.contains_key(key)
+    }
+
+    /// Read the value under `key` without marking it used.
+    ///
+    /// `get` ticks, so a caller that only wants to know what is held would
+    /// move the eviction order by asking. This is `contains_key` with the
+    /// value: it changes no tick and no byte, which is what makes a query
+    /// that is not a use expressible at all.
+    #[must_use]
+    pub fn peek(&self, key: &K) -> Option<&V> {
+        self.entries.get(key).map(|entry| &entry.value)
     }
 
     /// This tier's pressure signal. Telemetry, not a use.
@@ -344,7 +410,10 @@ impl<K: Ord + Clone, V: Budgeted> Lru<K, V> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec::Vec;
+
     use core::cell::Cell;
+    use core::ops::Bound;
 
     use super::{Admission, Budgeted, Lru};
     use crate::tier::CacheTier;
@@ -364,7 +433,7 @@ mod tests {
     /// A value that reports a different size after admission, which is the case
     /// `Entry::bytes` exists to survive. Nothing in this crate can stop a `V`
     /// doing this, so the cache reads `bytes` once and keeps the number, and
-    /// the three tests below check each site that gives bytes back.
+    /// the four tests below check each site that gives bytes back.
     struct Shifting(Cell<usize>);
 
     impl Budgeted for Shifting {
@@ -551,6 +620,30 @@ mod tests {
     }
 
     #[test]
+    fn remove_range_releases_the_bytes_admitted_and_not_the_bytes_reported_now() {
+        let mut cache: Lru<&str, Shifting> = Lru::new(CacheTier::Decoded, BUDGET);
+        let admission = cache.insert("a", Shifting::new(100));
+        assert!(admission.refused.is_none());
+        let admission = cache.insert("b", Shifting::new(100));
+        assert!(admission.refused.is_none());
+        assert_eq!(cache.pressure().used, 200);
+
+        // "a" now says 250 where it was admitted at 100. The budget is kept in
+        // what it was admitted at, so nothing moves until it leaves. The
+        // restatement is asserted, because a fixture that quietly failed to
+        // change anything would make this test pass against either behaviour.
+        assert!(restate(&mut cache, "a", 250));
+        assert_eq!(cache.get(&"a").map(Budgeted::bytes), Some(250));
+        assert_eq!(cache.pressure().used, 200);
+
+        // The range release gives back the admitted 100 and not the 250 the
+        // value reports now. Re-reading would saturate `used` to zero and
+        // leave the survivor unaccounted for.
+        assert_eq!(cache.remove_range("a"..="a").len(), 1);
+        assert_eq!(cache.pressure().used, 100);
+    }
+
+    #[test]
     fn contains_key_is_not_a_use() {
         let mut cache = filled();
 
@@ -591,6 +684,155 @@ mod tests {
         assert_eq!(cache.remove(&"b"), None);
         assert_eq!(cache.remove(&"z"), None);
         assert_eq!(cache.pressure().used, 200);
+    }
+
+    #[test]
+    fn remove_range_returns_the_keys_ascending_and_releases_their_bytes() {
+        // Hand-computed. Keys 1 to 9 hold 1, 2, 4, 8, 16, 32, 64, 128 and 256
+        // bytes, which is 2^9 - 1 = 511. The range 3..=6 holds 4 + 8 + 16 +
+        // 32 = 60 of those, so `used` goes 511 to 451.
+        let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 1000);
+        let sizes = [
+            (1_u8, 1_usize),
+            (2, 2),
+            (3, 4),
+            (4, 8),
+            (5, 16),
+            (6, 32),
+            (7, 64),
+            (8, 128),
+            (9, 256),
+        ];
+        for (key, bytes) in sizes {
+            let admission = cache.insert(key, Block(bytes));
+            assert!(admission.evicted.is_empty());
+        }
+        assert_eq!(cache.pressure().used, 511);
+
+        // Two reads. They lift keys 1 and 3 above the rest, so the recency
+        // order inside the range is 4, 5, 6, 3 and a release implemented as
+        // eviction would return the keys in that order instead of ascending.
+        assert_eq!(cache.get(&1), Some(&Block(1)));
+        assert_eq!(cache.get(&3), Some(&Block(4)));
+
+        assert_eq!(
+            cache.remove_range(3..=6),
+            [(3, Block(4)), (4, Block(8)), (5, Block(16)), (6, Block(32))],
+        );
+        assert_eq!(cache.pressure().used, 451);
+        assert_eq!(cache.len(), 5);
+        assert!(!cache.contains_key(&3));
+        assert!(!cache.contains_key(&4));
+        assert!(!cache.contains_key(&5));
+        assert!(!cache.contains_key(&6));
+        for key in [1_u8, 2, 7, 8, 9] {
+            assert!(cache.contains_key(&key));
+        }
+
+        // A read after the release changes no length beyond the removal. A
+        // release folded into `get` would.
+        assert_eq!(cache.get(&1), Some(&Block(1)));
+        assert_eq!(cache.len(), 5);
+
+        // The survivors' eviction order is the one the two reads left. 600
+        // bytes do not fit in the 549 that are free, so the insert evicts
+        // the least recently used survivor until they do. Key 2 leaves at
+        // 449 and key 7 at 385, where 1000 - 385 = 615 finally holds 600,
+        // and 385 + 600 = 985. A release that had moved the survivors'
+        // ticks would take key 1 first.
+        let admission = cache.insert(10, Block(600));
+        assert_eq!(admission.evicted, [(2, Block(2)), (7, Block(64))]);
+        assert_eq!(cache.pressure().used, 985);
+    }
+
+    #[test]
+    fn an_inverted_or_equal_excluded_range_releases_nothing_and_changes_nothing() {
+        // Keys 3 and 4 are live. Each of the four arms of
+        // `bounds_are_empty` is driven inverted, start 5 against end 3 as
+        // `Included..=Included`, `Included..Excluded`, `Excluded..Included`
+        // and `Excluded..Excluded`, and `(Excluded(4), Excluded(4))` names
+        // nothing. None may panic the map, and none may move a byte or a
+        // tick. The inverted bounds are runtime values, because a literal
+        // `5..=3` is clippy's `reversed_empty_ranges`, and the inversion is
+        // the case under test.
+        let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 300);
+        let admission = cache.insert(3, Block(100));
+        assert!(admission.evicted.is_empty());
+        let admission = cache.insert(4, Block(100));
+        assert!(admission.evicted.is_empty());
+        assert_eq!(cache.pressure().used, 200);
+
+        let (lo, hi) = (5_u8, 3);
+        assert_eq!(cache.remove_range(lo..=hi), []);
+        assert_eq!(
+            cache.remove_range((Bound::Included(lo), Bound::Excluded(hi))),
+            []
+        );
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(lo), Bound::Included(hi))),
+            []
+        );
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(lo), Bound::Excluded(hi))),
+            []
+        );
+        assert_eq!(
+            cache.remove_range((Bound::Excluded(4), Bound::Excluded(4))),
+            []
+        );
+        assert_eq!(cache.pressure().used, 200);
+        assert_eq!(cache.len(), 2);
+        assert!(cache.contains_key(&3));
+        assert!(cache.contains_key(&4));
+    }
+
+    #[test]
+    fn a_release_over_every_bound_shape_returns_exactly_the_keys_named() {
+        // Every `Bound` pair that can name keys, with the keys each range
+        // holds written out from the bounds alone against live keys 1 to 6.
+        // Each row runs on a fresh cache, so one release cannot colour the
+        // next. The adjacent excluded pair names nothing. The test above
+        // covers the empty cases, every one of the four bounded pairs
+        // inverted and the equal excluded pair.
+        let shapes: &[(Bound<u8>, Bound<u8>, &[u8])] = &[
+            (Bound::Included(3), Bound::Included(3), &[3]),
+            (Bound::Included(2), Bound::Excluded(4), &[2, 3]),
+            (Bound::Excluded(2), Bound::Included(4), &[3, 4]),
+            (Bound::Excluded(2), Bound::Excluded(4), &[3]),
+            (Bound::Included(3), Bound::Excluded(4), &[3]),
+            (Bound::Excluded(3), Bound::Included(4), &[4]),
+            (Bound::Excluded(3), Bound::Excluded(4), &[]),
+            (Bound::Unbounded, Bound::Unbounded, &[1, 2, 3, 4, 5, 6]),
+            (Bound::Unbounded, Bound::Included(4), &[1, 2, 3, 4]),
+            (Bound::Included(3), Bound::Unbounded, &[3, 4, 5, 6]),
+            (Bound::Unbounded, Bound::Excluded(4), &[1, 2, 3]),
+            (Bound::Excluded(3), Bound::Unbounded, &[4, 5, 6]),
+        ];
+        for &(start, end, expected) in shapes {
+            let mut cache: Lru<u8, Block> = Lru::new(CacheTier::Decoded, 1000);
+            for key in 1_u8..=6 {
+                let admission = cache.insert(key, Block(100));
+                assert!(admission.evicted.is_empty());
+            }
+            assert_eq!(cache.pressure().used, 600);
+
+            let released = cache.remove_range((start, end));
+            let keys: Vec<u8> = released.iter().map(|(key, _)| *key).collect();
+            assert_eq!(keys, expected, "bounds {start:?}..{end:?}");
+            assert_eq!(
+                cache.pressure().used,
+                100 * (6 - expected.len()),
+                "bounds {start:?}..{end:?}"
+            );
+            assert_eq!(cache.len(), 6 - expected.len());
+            for key in 1_u8..=6 {
+                assert_eq!(
+                    cache.contains_key(&key),
+                    !expected.contains(&key),
+                    "bounds {start:?}..{end:?} after the release"
+                );
+            }
+        }
     }
 
     #[test]

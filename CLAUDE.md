@@ -110,7 +110,11 @@ rendering.
   must not be depended on either, and
   `scripts/source_provenance_check.py` enforces all three.
 - **No `unsafe`** outside `ocelli-wasm/src/ring.rs` and
-  `ocelli-core/src/cast.rs`.
+  `ocelli-core/src/cast.rs`. rustc forbids it through `[workspace.lints.rust]`,
+  every library root forbids it in doctests, and
+  `scripts/unsafe_allowlist_check.py` audits what rustc does not reach. The
+  first story that writes one of the two files follows the sequence in that
+  script's docstring.
 - **wgpu is pinned exactly.** Treat GPU code that compiles first try with
   suspicion. Agents confidently emit APIs that have not existed for two years.
 - **Never re-type file content from tool output.** Tool output truncates and
@@ -173,34 +177,42 @@ What exists, in the order it matters:
   row through cornerstone3D 5.8.2 under headless Chromium on SwiftShader and
   writes reference pixels plus a metadata sidecar. F-011 added the comparator,
   so it now returns a per-view verdict against section 25.1's tolerances and
-  can attribute a divergence to a side. There is still no Ocelli renderer to
-  compare against, so detection is proved by a declared mutation catalogue
+  can attribute a divergence to a side. The oracle compares an Ocelli native
+  candidate against the cornerstone reference through compare produce and
+  compare gate, and the pixel arithmetic is also validated by hand-computed
+  fixtures. Detection is still proved by a declared mutation catalogue
   applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
   halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
-- **The corpus**, behind `corpus/manifest.tsv`, covering all sixteen transfer
+- **The corpus**, behind `corpus/manifest.tsv`, covering all nineteen transfer
   syntaxes the codec registry knows. **No row count is written here**, because
   this line said 91 while the file held 92 and a number in prose beside the file
   that holds it is stale the next time a row lands.
   `tail -n +2 corpus/manifest.tsv | grep -c .` prints it.
 - **`ocelli-core`**, the coordinate and value spaces, entries 1 and 2 of the
   first-ten-files list.
-- **The codec registry and five decoder families.** Raw, RLE, JPEG, JPEG 2000,
-  JPEG-LS and HTJ2K. **Six names, five families**, because Raw and RLE register
-  together through `register_native_and_rle_decoders` and
+- **The codec registry and six decoder families.** Raw, RLE, JPEG, JPEG 2000,
+  JPEG-LS, HTJ2K and JPEG XL. **Seven names, six families**, because Raw and
+  RLE register together through `register_native_and_rle_decoders` and
   `crates/ocelli-codec/tests/registry.rs` says so. S11's sprint review changed
-  this to six and its next pass changed it back, which is what counting names
-  instead of `register_*` functions costs. **Fifteen of the sixteen known transfer syntaxes are
-  available**, and the sixteenth, Deflated Explicit VR Little Endian, is
-  unavailable by design: PS3.5 A.5 deflates the whole data set rather than a
-  frame, so it is `ocelli-dicom`'s route under D-18.
-  `crates/ocelli-codec/tests/registry.rs` asserts both halves.
+  the then-current five families to six and its next pass changed that count
+  back, which is what counting names instead of `register_*` functions costs.
+  **Seventeen of the nineteen known transfer syntaxes are available**, and two
+  are known and unregistered. Deflated Explicit VR Little Endian is unavailable
+  by design: PS3.5 A.5 deflates the whole data set rather than a frame, so it
+  is `ocelli-dicom`'s route under D-18. JPEG XL JPEG Recompression is
+  unavailable until upstream fixes it: `jxl-jbr` 0.2.1 `src/reconstruct.rs:457`
+  panics in its DHT branch on a malformed codestream, which is jxl-oxide issue
+  512. `crates/ocelli-codec/tests/registry.rs` asserts the counts and both
+  names.
 - **The pixel pipeline**, all four stages of DICOM PS3.3 C.11 in `ocelli-pixel`,
   with the section 18.3 fixtures behind them, inversion resolved exactly once,
   and the colour transform applied exactly once against the decoder's own
-  reported output space. **ICC, the other half of stage 4's row, is not
-  implemented.** This line said "stages 1 to 3" and "palette and ICC are not
-  implemented" until F-030, which is the shape the paragraph below this list
-  keeps having to correct.
+  reported output space. F-240 applies the matrix and tone-curve ICC subset
+  in `ocelli-pixel` and the native folder viewer: RGB display or input profiles
+  with XYZ PCS and matrix colourants, using `curv` tone curves or `para`
+  function types 0 to 4, convert to sRGB. The folder viewer keeps device RGB
+  with a named notice for profiles outside the subset. GPU ICC remains
+  explicitly unavailable.
 - **Derived DICOM geometry**, per-frame plane, stack shear measured from the
   geometry rather than read from the gantry tilt tag, and calibrated against
   uncalibrated spacing kept distinct.
@@ -217,15 +229,15 @@ What exists, in the order it matters:
   F-037. `ocelli-render` is still the only crate that may create a device.
 - **A budgeted LRU**, HLD section 20's `Budgeted` and `Lru<K, V>` with the
   three tiers of section 8 as a discriminant and a pressure signal. S11's F-031.
-  The value types are `DecodedFrame` and `Brick` in `ocelli-cache`, and
-  `Volume` in `ocelli-volume`. An encoded byte run and a GPU texture are not
-  among them.
+  The public value types are `DecodedFrame`, `CommittedFrame` and `Brick` in
+  `ocelli-cache`, and `Volume` in `ocelli-volume`. An encoded byte run and a
+  GPU texture are not among them.
 - **The LUT chain's shader.** `crates/ocelli-render/shaders/voi.wgsl`, HLD
   section 18.4's uniform and the three window functions, agreeing with
   `LutChain::map_into` on a real adapter to two `f32` ULP at 255. S11's F-041.
   F-038 renders into a caller-supplied texture view and acquires no surface.
-  Decision D7 still holds. The oracle has no Ocelli renderer to compare
-  against.
+  Decision D7 still holds. The oracle compares an Ocelli native candidate
+  against the cornerstone reference through compare produce and compare gate.
 - **The npm packaging pipeline**, proven against a consumer outside the
   workspace.
 
@@ -243,7 +255,7 @@ it survived four clean per-story reviews because no story in either sprint
 touched this file and each review looked at its own diff.
 
 What is true is narrower and is what D7 actually asks: **the oracle existed
-before any of that code, and it still has no Ocelli renderer to compare
-against.** The pixel arithmetic is validated by hand-computed fixtures citing
-their PS3.3 section, which is the other half of section 27.2, and the oracle's
-verdict on rendered frames arrives when there is a renderer to render them.
+before any of that code, and it compares an Ocelli native candidate against
+the cornerstone reference through compare produce and compare gate.** The
+pixel arithmetic is validated by hand-computed fixtures citing their PS3.3
+section, which is the other half of section 27.2.

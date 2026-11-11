@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -44,9 +46,9 @@ HEADER = "\t".join(COLUMNS)
 # names the two open Appendix A gates, A1 for HTJ2K and A2 for JPEG-LS, but it
 # carries no list of syntaxes, so this list is not a transcription of it.
 #
-# Sixteen of them. Condition 4 of F-009 is therefore sixteen rows at minimum
-# rather than a gesture at the common ones, and neither open gate has anything
-# to be answered against until its syntaxes have cases.
+# Nineteen of them. Condition 4 of F-009 required sixteen rows at minimum.
+# F-229 added the three JPEG XL UIDs from PS3.5 A.4.12. Neither open gate has
+# anything to be answered against until its syntaxes have cases.
 REGISTRY_TRANSFER_SYNTAXES = (
     "1.2.840.10008.1.2",          # Implicit VR Little Endian
     "1.2.840.10008.1.2.1",        # Explicit VR Little Endian
@@ -64,7 +66,19 @@ REGISTRY_TRANSFER_SYNTAXES = (
     "1.2.840.10008.1.2.4.201",    # HTJ2K Lossless Only
     "1.2.840.10008.1.2.4.202",    # HTJ2K Lossless Only, RPCL
     "1.2.840.10008.1.2.4.203",    # HTJ2K
+    "1.2.840.10008.1.2.4.110",    # JPEG XL Lossless
+    "1.2.840.10008.1.2.4.111",    # JPEG XL JPEG Recompression
+    "1.2.840.10008.1.2.4.112",    # JPEG XL
 )
+
+# Known syntaxes with no frame decoder. A corpus row is still required.
+# `.111` stays unregistered because jxl-jbr 0.2.1 src/reconstruct.rs:457
+# panics with `is_last not found` on a malformed DHT. The refusal text is
+# CodecError::KnownUnavailable.
+UNAVAILABLE_REGISTRY_SYNTAXES = (
+    "1.2.840.10008.1.2.4.111",
+)
+UNAVAILABLE_REFUSAL = "known DICOM transfer syntax has no registered decoder"
 
 # The `category` column is a comma-separated token list. Two facts are read out
 # of it, and both are properties the manifest can be asked about with no corpus
@@ -87,7 +101,7 @@ CONTRADICTORY_TOKENS = (("colour", "chroma-untested"),)
 MONOCHROME_PHOTOMETRIC = {"MONOCHROME1", "MONOCHROME2"}
 COLOUR_PHOTOMETRIC = {
     "PALETTE COLOR", "RGB", "YBR_FULL", "YBR_FULL_422",
-    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT",
+    "YBR_PARTIAL_422", "YBR_ICT", "YBR_RCT", "XYB",
 }
 
 
@@ -129,6 +143,10 @@ def load() -> list[dict[str, str]]:
                          f"redistributed or cited, so it is not a fixture.")
         rows.append(row)
     return rows
+
+
+DECODE_DIGESTS = ROOT / "corpus" / "decode-digests.tsv"
+DECODE_HEADER = "path\tfile_sha256\tdecode_sha256"
 
 
 def digest(path: Path) -> str:
@@ -396,6 +414,143 @@ def verify(rows: list[dict[str, str]], fetch: bool) -> int:
     return 0
 
 
+def _route_module():
+    """The test module owns the read-back routes. Import it only here."""
+    path = ROOT / "scripts" / "tests" / "test_corpus_synth.py"
+    spec = importlib.util.spec_from_file_location(
+        "ocelli_decode_routes", path)
+    if spec is None or spec.loader is None:
+        sys.exit(f"FAIL: cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _reexec_for_decoders() -> int:
+    """Run this process again under the interpreter that has the decoders."""
+    import corpus_tests
+    interpreter, origin = corpus_tests.resolve()
+    if interpreter is None:
+        print("FAIL: no interpreter can import the corpus decoders")
+        print(origin)
+        return 1
+    if Path(sys.executable).resolve() == interpreter.resolve():
+        print("FAIL: the resolved interpreter cannot import numpy, pydicom "
+              "and imagecodecs")
+        return 1
+    os.execv(str(interpreter), [str(interpreter), *sys.argv])
+    return 1
+
+
+def verify_decode_digests(rows: list[dict[str, str]]) -> int:
+    """Compare recorded decode digests after each file matches the manifest.
+
+    A decode digest is not consulted for a file whose own sha256 disagrees
+    with the manifest. The route table lives in the test module so the gate
+    and the conformance tests cannot drift.
+    """
+    try:
+        import imagecodecs  # noqa: F401
+        import numpy  # noqa: F401
+        import pydicom  # noqa: F401
+    except ImportError:
+        return _reexec_for_decoders()
+
+    if not DECODE_DIGESTS.is_file():
+        print(f"FAIL: missing {DECODE_DIGESTS.relative_to(ROOT)}")
+        return 1
+    lines = DECODE_DIGESTS.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != DECODE_HEADER:
+        print(f"FAIL: decode digest header must be: {DECODE_HEADER}")
+        return 1
+
+    recorded: dict[str, tuple[str, str]] = {}
+    problems: list[str] = []
+    for number, line in enumerate(lines[1:], start=2):
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) != 3:
+            problems.append(f"decode digest line {number} has {len(fields)} "
+                            f"fields")
+            continue
+        path, file_sha, decode_sha = fields
+        if path in recorded:
+            problems.append(f"decode digest line {number}: duplicate {path}")
+            continue
+        recorded[path] = (file_sha, decode_sha)
+
+    manifest = {row["path"]: row["sha256"] for row in rows}
+    manifest_syntax = {row["path"]: row["transfer_syntax"] for row in rows}
+    routes = _route_module()
+    import pydicom
+    base = corpus_dir()
+    checked = 0
+    for name in routes.READ_BACK:
+        relative = f"syntax/{name}"
+        if relative not in manifest:
+            problems.append(f"{relative} is not in the manifest")
+            continue
+        target = base / relative
+        if not target.is_file():
+            problems.append(f"{relative} is absent, so its decode digest is "
+                            f"not checked")
+            continue
+        actual = digest(target)
+        if actual != manifest[relative]:
+            problems.append(
+                f"{relative} file digest does not match the manifest, so "
+                f"its decode digest is not checked")
+            continue
+        syntax = manifest_syntax.get(relative, "")
+        if syntax in UNAVAILABLE_REGISTRY_SYNTAXES:
+            # The row is present so the catalogue stays complete. Decode is
+            # the unavailable refusal, not a pixel digest.
+            if routes.READ_BACK.get(name) != "unavailable":
+                problems.append(
+                    f"{relative} must expect the unavailable refusal")
+                continue
+            if relative in recorded:
+                problems.append(
+                    f"{relative} is unavailable and has a decode digest")
+            continue
+        if routes.READ_BACK.get(name) == "unavailable":
+            problems.append(
+                f"{relative} expects the unavailable refusal and its syntax "
+                f"is not in UNAVAILABLE_REGISTRY_SYNTAXES")
+            continue
+        row = recorded.get(relative)
+        if row is None:
+            problems.append(f"{relative} has no decode digest row")
+            continue
+        if row[0] != manifest[relative]:
+            problems.append(
+                f"{relative} decode-digest file sha256 does not match the "
+                f"manifest, so the decode digest is not checked")
+            continue
+        dataset = pydicom.dcmread(str(target))
+        decoded = routes.decode_array_sha256(routes.read_back(dataset, name))
+        if decoded != row[1]:
+            problems.append(
+                f"{relative} decode digest is {decoded} and the table has "
+                f"{row[1]}")
+            continue
+        checked += 1
+
+    extra = sorted(set(recorded) - {f"syntax/{name}" for name in routes.READ_BACK})
+    for path in extra:
+        problems.append(f"{path} is in the decode digest table and is not a "
+                        f"syntax case")
+
+    if problems:
+        print("FAIL: decode digests")
+        for problem in problems:
+            print(f"  {problem}")
+        return 1
+    print(f"OK: {checked} syntax decode digests match")
+    return 0
+
+
 def add(args: argparse.Namespace) -> int:
     source = Path(args.add).expanduser().resolve()
     if not source.is_file():
@@ -429,6 +584,7 @@ def main() -> int:
     parser.add_argument("--coverage", action="store_true")
     parser.add_argument("--metadata", action="store_true")
     parser.add_argument("--fetch", action="store_true")
+    parser.add_argument("--decode-digests", action="store_true")
     parser.add_argument("--add", metavar="FILE")
     parser.add_argument("--modality", default="")
     parser.add_argument("--transfer-syntax", dest="transfer_syntax", default="")
@@ -450,6 +606,8 @@ def main() -> int:
     if args.manifest_only:
         print(f"OK: manifest shape valid, {len(rows)} rows")
         return 0
+    if args.decode_digests:
+        return verify_decode_digests(rows)
     return verify(rows, args.fetch)
 
 

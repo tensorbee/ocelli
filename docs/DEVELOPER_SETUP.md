@@ -14,11 +14,13 @@ gives it neither.
 | Node | 24+ | The TypeScript workspaces |
 | Python | 3.12+ | The guard scripts, and corpus and fixture work |
 | uv | 0.11+ | Creates the locked repository-local Python environment |
+| cargo-deny | 0.19.0 | The Rust half of the licence gate |
 | A WebGPU-capable browser | | Chrome or Edge. Required for the oracle |
 
 ```bash
 rustup toolchain install 1.97.1
 cargo install wasm-pack
+cargo install cargo-deny --version 0.19.0 --locked
 uv sync --locked
 brew install dcmtk                  # macOS
 npm ci
@@ -60,6 +62,38 @@ uv run scripts/populate_corpus.py
 Until it exists, `/verify` records `corpus=absent` honestly. That is permitted
 during early development and refused at `/release`.
 
+## Shipped binary notices
+
+`THIRD_PARTY_LICENSES` is generated from `Cargo.lock` and the pinned texts in
+`ci/notices/`. After a lockfile change, or after the channel in
+`rust-toolchain.toml` changes, install the matching docs and regenerate.
+
+```bash
+rustup component add rust-docs
+python3 scripts/licence_check.py --write binaries
+```
+
+A crate whose package ships no licence file takes a pin. Copy the upstream
+file into `ci/notices/crates/<name>-<version>/` and record its path, URL and
+sha256 in `ci/notices/sources.toml`. The URL names the package's published
+commit. An earlier notice is a separate row, and its `commit` field is the
+commit the shipped sentence names. Gate time reads those files and checks
+each sha256. It does not fetch. A crate pin's commit is checked offline
+against `.cargo_vcs_info.json` in the registry cache.
+
+When a pin is added, re-fetch it and compare the bytes before relying on
+the copy.
+
+```bash
+python3 scripts/licence_check.py verify-upstream
+```
+
+That command reads every crate pin and every earlier pin from its recorded
+URL at its recorded commit and compares the bytes with the pinned file. It
+refuses a difference. It refuses a missing file, including an earlier row
+pointed at a commit that has no `LICENSE.txt`. It is not part of
+`gate licences` or any other floor gate.
+
 ## The gates
 
 ```bash
@@ -76,8 +110,14 @@ npm run dev                   # http://localhost:5173
 ```
 
 A clean clone has no built core, so the viewer starts in its "core not built"
-state rather than failing. That is deliberate. `npm run dev` also starts the
-loopback frame-open helper on `127.0.0.1`. The Frame open section uses it.
+state rather than failing. That is deliberate. The same holds for
+`npm run build`, and its output depends on whether `crates/ocelli-wasm/pkg`
+exists when it runs. With the pkg it bundles the wasm as its own files.
+Without it the worker keeps a runtime import and reports the core as not
+built. Run `bin/ocelli.sh wasm` before the build, not after, for the bundled
+form. `docs/lld/typescript-packaging.md` has the detail. `npm run dev` also
+starts the loopback frame-open helper on `127.0.0.1`. The Frame open section
+uses it.
 
 ## Why some things are the way they are
 

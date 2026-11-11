@@ -169,9 +169,13 @@ fn a_declared_entry_count_of_zero_means_sixty_five_thousand_five_hundred_and_thi
         ),
         Ok(())
     );
+    // The entries are 16-bit and some exceed 255, so ruling R1 does not read
+    // the palette as 8-bit and the display scale shifts each one right by 8
+    // on the way out of the table: 40000 >> 8 = 156, 65535 >> 8 = 255.
+    // Entry 40000 is read at all only if the table really has 65,536 rows.
     assert_rgb_close(destination[0], (0.0, 0.0, 0.0));
-    assert_rgb_close(destination[1], (40_000.0, 40_000.0, 40_000.0));
-    assert_rgb_close(destination[2], (65_535.0, 65_535.0, 65_535.0));
+    assert_rgb_close(destination[1], (156.0, 156.0, 156.0));
+    assert_rgb_close(destination[2], (255.0, 255.0, 255.0));
 
     // The same 65,536 values declared as a count of 1 is a length
     // disagreement and is refused. That refusal is what stops a declared 0
@@ -216,7 +220,14 @@ fn bits_per_entry_comes_from_the_descriptor_and_not_from_the_data() {
         transform.map_into(&[Stored(255.0)], &mut destination, 1),
         Ok(())
     );
-    assert_rgb_close(destination[0], (65_535.0, 65_535.0, 65_535.0));
+    // Stored 255 reads entry 255, which is `255 * 257 = 65535`. Every
+    // channel holds entries above 255, so ruling R1 does not read the
+    // palette as 8-bit and the 16-bit descriptor shifts it right by 8 to 255.
+    assert_rgb_close(destination[0], (255.0, 255.0, 255.0));
+    let mut low = [Rgb::BLACK];
+    assert_eq!(transform.map_into(&[Stored(1.0)], &mut low, 1), Ok(()));
+    // Entry 1 is 257, and 257 >> 8 = 1.
+    assert_rgb_close(low[0], (1.0, 1.0, 1.0));
 }
 
 /// Three descriptors that map different input ranges would shift hue against
@@ -286,4 +297,229 @@ fn mapping_refuses_a_length_mismatch_before_writing() {
         Err(PixelError::SourceLength)
     );
     assert_eq!(destination[0].r.to_bits(), 77.0_f32.to_bits());
+}
+
+// ---------------------------------------------------------------------------
+// Display scaling of palette entries, F-239 item 11 and AC22
+// ---------------------------------------------------------------------------
+
+/// PS3.3 C.7.6.3.1.5 makes the descriptor's third value the bit depth of
+/// every entry. Every channel here is declared 16-bit and holds an entry above
+/// 255, so the palette is not read as 8-bit and each channel is shifted right
+/// by its own declared depth minus 8.
+///
+/// ```text
+/// descriptors 5\0\16, so every channel shifts by 8
+/// red   0 255 256 32768 65535  ->  0 0 1 128 255
+/// green 65535 32768 256 255 0  ->  255 128 1 0 0
+/// blue  65535 32768 256 255 0  ->  255 128 1 0 0
+/// stored 0 1 2 3 4 -> (0 255 255) (0 128 128) (1 1 1) (128 0 0) (255 0 0)
+/// ```
+///
+/// Rounding instead of truncating gives 128 for 32768 too, but 1 for 255.
+/// cornerstone3D 5.8.2 shifts all three by 8 only when a RED entry exceeds
+/// 255 (`convertPALETTECOLOR.js:24`), which agrees on this table and is
+/// rejected by the next fixture.
+#[test]
+fn palette_entries_are_shifted_by_their_descriptor() {
+    let red = require_ok!(LutDescriptor::new(
+        5,
+        0,
+        16,
+        vec![0.0, 255.0, 256.0, 32_768.0, 65_535.0]
+    ));
+    let falling = vec![65_535.0, 32_768.0, 256.0, 255.0, 0.0];
+    let green = require_ok!(LutDescriptor::new(5, 0, 16, falling.clone()));
+    let blue = require_ok!(LutDescriptor::new(5, 0, 16, falling));
+    let palette = require_ok!(PaletteColorLut::new(red, green, blue));
+    // Every channel holds an entry above 255, so none falls back.
+    assert!(!palette.entries_read_as_8_bit());
+    let transform = require_ok!(transform(palette));
+    let mut destination = [Rgb::BLACK; 5];
+    assert_eq!(
+        transform.map_into(
+            &[
+                Stored(0.0),
+                Stored(1.0),
+                Stored(2.0),
+                Stored(3.0),
+                Stored(4.0)
+            ],
+            &mut destination,
+            5,
+        ),
+        Ok(())
+    );
+    let expected = [
+        (0.0, 255.0, 255.0),
+        (0.0, 128.0, 128.0),
+        (1.0, 1.0, 1.0),
+        (128.0, 0.0, 0.0),
+        (255.0, 0.0, 0.0),
+    ];
+    for (actual, wanted) in destination.into_iter().zip(expected) {
+        assert_rgb_close(actual, wanted);
+    }
+}
+
+/// Ruling R1, decided once for the whole palette. A palette is read as 8-bit
+/// only when at least one channel is declared above 8 bits and every entry of
+/// every such channel fits in 8 bits, as cornerstone3D 5.8.2 reads it, and the
+/// palette says so. Otherwise each channel is shifted by its own declared
+/// depth minus 8.
+///
+/// ```text
+/// three 16-bit channels, each 0 100 255 -> read as 8-bit -> 0 100 255, flag set
+/// strictly by C.7.6.3.1.5 it would be 0 >> 8, 100 >> 8, 255 >> 8 = 0 0 0
+/// ```
+///
+/// One entry of 256 in any channel declared above 8 bits means the palette is
+/// not read as 8-bit, so every channel is shifted and the flag is clear. A
+/// conforming palette is therefore unaffected.
+#[test]
+fn a_palette_is_read_as_8_bit_only_when_every_wide_channel_fits_in_8_bits() {
+    let small = vec![0.0, 100.0, 255.0];
+    let palette = require_ok!(PaletteColorLut::new(
+        require_ok!(LutDescriptor::new(3, 0, 16, small.clone())),
+        require_ok!(LutDescriptor::new(3, 0, 16, small.clone())),
+        require_ok!(LutDescriptor::new(3, 0, 16, small)),
+    ));
+    assert!(palette.entries_read_as_8_bit());
+    let entries: Vec<f32> = palette.channel_entries().collect();
+    assert_eq!(
+        entries,
+        vec![0.0, 100.0, 255.0, 0.0, 100.0, 255.0, 0.0, 100.0, 255.0]
+    );
+
+    // The lead's ruling on R1: the fallback is decided once for the whole
+    // palette. A conforming 16-bit palette may hold a channel whose entries
+    // are all small, a red that is near zero throughout. Read per channel,
+    // that channel would be taken as 8-bit, about 256 times too bright, while
+    // the others are shifted. All three are declared 16-bit here, and blue
+    // holds 256, so the palette is 16-bit and EVERY channel is shifted:
+    //
+    //   red   0 100 255 -> >> 8 -> 0 0 0
+    //   green 0 100 255 -> >> 8 -> 0 0 0
+    //   blue  0 100 256 -> >> 8 -> 0 0 1
+    let mixed = require_ok!(PaletteColorLut::new(
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 255.0])),
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 255.0])),
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 256.0])),
+    ));
+    assert!(!mixed.entries_read_as_8_bit());
+    let entries: Vec<f32> = mixed.channel_entries().collect();
+    assert_eq!(entries, vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+
+    // A channel declared 8-bit takes no part in the decision. Red and green
+    // are 16-bit and all small, blue is 8-bit, so the palette falls back.
+    let with_narrow = require_ok!(PaletteColorLut::new(
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 255.0])),
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 255.0])),
+        require_ok!(LutDescriptor::new(3, 0, 8, vec![0.0, 100.0, 255.0])),
+    ));
+    assert!(with_narrow.entries_read_as_8_bit());
+    let entries: Vec<f32> = with_narrow.channel_entries().collect();
+    assert_eq!(
+        entries,
+        vec![0.0, 100.0, 255.0, 0.0, 100.0, 255.0, 0.0, 100.0, 255.0]
+    );
+
+    let conforming = require_ok!(PaletteColorLut::new(
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 256.0])),
+        require_ok!(LutDescriptor::new(3, 0, 16, vec![0.0, 100.0, 256.0])),
+        require_ok!(LutDescriptor::new(3, 0, 8, vec![0.0, 100.0, 255.0])),
+    ));
+    assert!(!conforming.entries_read_as_8_bit());
+}
+
+/// Green and blue are declared above 8 bits and each holds an entry above 255,
+/// so the palette is not read as 8-bit and each channel is shifted by its own
+/// declared depth minus 8. Red is declared 8-bit, which is a shift of 0.
+///
+/// ```text
+/// red 8-bit 200 -> 200, green 16-bit 51200 -> 200, blue 12-bit 3200 -> 200
+/// ```
+///
+/// Twelve is outside C.7.6.3.1.5's "8 or 16" but inside the operator's
+/// `9 ..= 16`, so it is accepted with entries carried in a 16-bit container
+/// and, in this palette, shifted by `12 - 8 = 4`. A 12-bit entry above 4095 is not a 12-bit value and is
+/// refused, as is a depth above 16 or above the entry's own container.
+#[test]
+fn each_palette_channel_is_scaled_by_its_own_depth() {
+    let palette = require_ok!(PaletteColorLut::with_entry_bits(
+        require_ok!(LutDescriptor::new(1, 0, 8, vec![200.0])),
+        require_ok!(LutDescriptor::new(1, 0, 16, vec![51_200.0])),
+        require_ok!(LutDescriptor::new(1, 0, 16, vec![3_200.0])),
+        [8, 16, 12],
+    ));
+    let transform = require_ok!(transform(palette));
+    let mut destination = [Rgb::BLACK];
+    assert_eq!(
+        transform.map_into(&[Stored(0.0)], &mut destination, 1),
+        Ok(())
+    );
+    assert_rgb_close(destination[0], (200.0, 200.0, 200.0));
+
+    let entry = |bits: u8, value: f32| LutDescriptor::new(1, 0, bits, vec![value]);
+    assert_eq!(
+        PaletteColorLut::with_entry_bits(
+            require_ok!(entry(16, 4_096.0)),
+            require_ok!(entry(16, 0.0)),
+            require_ok!(entry(16, 0.0)),
+            [12, 12, 12],
+        ),
+        Err(PixelError::LutValueOutOfRange)
+    );
+    assert_eq!(
+        PaletteColorLut::with_entry_bits(
+            require_ok!(entry(16, 0.0)),
+            require_ok!(entry(16, 0.0)),
+            require_ok!(entry(16, 0.0)),
+            [17, 16, 16],
+        ),
+        Err(PixelError::UnsupportedColourDepth)
+    );
+    assert_eq!(
+        PaletteColorLut::with_entry_bits(
+            require_ok!(entry(8, 0.0)),
+            require_ok!(entry(8, 0.0)),
+            require_ok!(entry(8, 0.0)),
+            [12, 8, 8],
+        ),
+        Err(PixelError::InvalidLutBits)
+    );
+}
+
+/// Review pass 2, S1. An all-8-bit palette took no fallback, so its flag is
+/// clear. The page states the flag, and a set flag here would put the
+/// departure notice on every conforming 8-bit palette.
+#[test]
+fn an_all_8_bit_palette_does_not_report_the_fallback() {
+    let palette = require_ok!(palette(FIRST_MAPPED));
+    assert!(!palette.entries_read_as_8_bit());
+}
+
+/// Review pass 3, S1. The rule's "declared above 8 bits" is every depth from 9
+/// to 16, not only 16. Three 12-bit channels whose entries all fit in 8 bits
+/// are read as 8-bit and flagged.
+///
+/// ```text
+/// 12-bit, entries 0 100 255 -> read as 8-bit -> 0 100 255, flag set
+/// shifted by 12 - 8 = 4 instead, 255 >> 4 = 15, nearly black
+/// ```
+#[test]
+fn a_twelve_bit_palette_of_8_bit_entries_is_read_as_8_bit() {
+    let small = vec![0.0, 100.0, 255.0];
+    let palette = require_ok!(PaletteColorLut::with_entry_bits(
+        require_ok!(LutDescriptor::new(3, 0, 16, small.clone())),
+        require_ok!(LutDescriptor::new(3, 0, 16, small.clone())),
+        require_ok!(LutDescriptor::new(3, 0, 16, small)),
+        [12, 12, 12],
+    ));
+    assert!(palette.entries_read_as_8_bit());
+    let entries: Vec<f32> = palette.channel_entries().collect();
+    assert_eq!(
+        entries,
+        vec![0.0, 100.0, 255.0, 0.0, 100.0, 255.0, 0.0, 100.0, 255.0]
+    );
 }

@@ -14,9 +14,9 @@ use std::{
 
 /// Transfer Syntax UIDs covered by the repository's codec surface.
 ///
-/// These sixteen UIDs are defined by DICOM PS3.6 Annex A and enumerated by the
-/// corpus manifest. Membership means the syntax is known. It does not mean a
-/// decoder is registered or that this build can decode it.
+/// These nineteen UIDs are the PS3.5 Annex A membership this catalogue carries,
+/// together with the corpus manifest. Membership means the syntax is known. It
+/// does not mean a decoder is registered or that this build can decode it.
 pub const KNOWN_TRANSFER_SYNTAXES: &[&str] = &[
     "1.2.840.10008.1.2",
     "1.2.840.10008.1.2.1",
@@ -34,6 +34,9 @@ pub const KNOWN_TRANSFER_SYNTAXES: &[&str] = &[
     "1.2.840.10008.1.2.4.201",
     "1.2.840.10008.1.2.4.202",
     "1.2.840.10008.1.2.4.203",
+    "1.2.840.10008.1.2.4.110",
+    "1.2.840.10008.1.2.4.111",
+    "1.2.840.10008.1.2.4.112",
 ];
 
 /// Whether a transfer syntax is usable by this registry.
@@ -318,6 +321,33 @@ where
     T::try_from(length).ok()
 }
 
+/// A JPEG-LS preset coding parameter, ISO/IEC 14495-1 C.2.4.1.1, that this
+/// build does not apply.
+///
+/// Each value names a failure class and never the value the stream carried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JpegLsPreset {
+    /// MAXVAL other than 0 or `2^P - 1`.
+    MaxVal,
+    /// RESET other than 0 or 64.
+    Reset,
+    /// One or two of T1, T2 and T3 zero beside a non-zero one.
+    PartialDefaultThresholds,
+    /// Non-zero thresholds outside `NEAR + 1 <= T1 <= T2 <= T3 <= MAXVAL`.
+    ThresholdOrder,
+}
+
+impl JpegLsPreset {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::MaxVal => "MAXVAL",
+            Self::Reset => "RESET",
+            Self::PartialDefaultThresholds => "partial default thresholds",
+            Self::ThresholdOrder => "threshold order",
+        }
+    }
+}
+
 /// A decode dispatch or decoder failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodecError {
@@ -337,6 +367,8 @@ pub enum CodecError {
     UnsupportedPixelFormat,
     /// A concrete decoder failed.
     DecoderFailure,
+    /// A JPEG-LS preset parameter this decoder does not apply.
+    UnsupportedPreset(JpegLsPreset),
 }
 
 impl fmt::Display for CodecError {
@@ -350,6 +382,13 @@ impl fmt::Display for CodecError {
             Self::FrameMismatch => "encoded frame does not match its DICOM description",
             Self::UnsupportedPixelFormat => "decoder output pixel format is unsupported",
             Self::DecoderFailure => "registered DICOM decoder failed",
+            Self::UnsupportedPreset(preset) => {
+                return write!(
+                    formatter,
+                    "JPEG-LS preset parameter is not applied by this decoder: {}",
+                    preset.name()
+                );
+            }
         })
     }
 }
@@ -377,11 +416,25 @@ pub trait Decoder: Send + Sync {
         DecodeSampleLayout::Preserved
     }
 
+    /// The byte length a decode of `desc` writes into the caller's output.
+    ///
+    /// Defaults to [`FrameDesc::output_len`], the DICOM container's own
+    /// `Rows * Columns * Samples per Pixel * Bits Allocated / 8`. A decoder
+    /// whose output does not follow that multiplication overrides this: the
+    /// output length is the decoder's fact, decided for F-239 by the
+    /// operator's answer to question 1 on 2026-11-07. Native `YBR_FULL_422`
+    /// stores two samples per pixel where Samples per Pixel says three, so
+    /// the raw decoder answers from the stored count and not from the
+    /// container.
+    fn decoded_output_len(&self, desc: &FrameDesc) -> usize {
+        desc.output_len()
+    }
+
     /// Decode one frame atomically into `out`.
     ///
     /// Registry lookup and dispatch add no allocation of their own. Raw plus
     /// RLE implementations remain allocation-free per call. Under deviation
-    /// D-21, concrete JPEG and JPEG 2000 adapters may allocate bounded
+    /// D-21, concrete JPEG, JPEG 2000 and JPEG XL adapters may allocate bounded
     /// dependency-owned decoded storage and may copy encoded input when a safe
     /// packet API requires owned bytes.
     ///
@@ -563,13 +616,31 @@ impl Registry {
         Ok(self.decoder(transfer_syntax)?.decode_sample_layout(desc))
     }
 
+    /// Report the decoded output length produced for one frame.
+    ///
+    /// A caller sizes its buffer from this rather than from
+    /// [`FrameDesc::output_len`], because the two differ for a decoder whose
+    /// output is not the DICOM container's own multiplication.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same exact-UID capability errors as [`Self::decoder`].
+    pub fn decoded_output_len(
+        &self,
+        transfer_syntax: &str,
+        desc: &FrameDesc,
+    ) -> Result<usize, CodecError> {
+        Ok(self.decoder(transfer_syntax)?.decoded_output_len(desc))
+    }
+
     /// Decode one frame through the decoder registered for the exact UID.
     ///
     /// # Errors
     ///
     /// Returns distinct capability failures, rejects a caller buffer whose
-    /// length differs from [`FrameDesc::output_len`], and otherwise propagates
-    /// the selected decoder's error unchanged.
+    /// length differs from the selected decoder's [`Decoder::decoded_output_len`]
+    /// answer, and otherwise propagates the selected decoder's error
+    /// unchanged.
     pub fn decode(
         &self,
         transfer_syntax: &str,
@@ -578,9 +649,10 @@ impl Registry {
         out: &mut [u8],
     ) -> Result<(), CodecError> {
         let decoder = self.decoder(transfer_syntax)?;
-        if out.len() != desc.output_len() {
+        let expected = decoder.decoded_output_len(desc);
+        if out.len() != expected {
             return Err(CodecError::OutputLength {
-                expected: desc.output_len(),
+                expected,
                 actual: out.len(),
             });
         }

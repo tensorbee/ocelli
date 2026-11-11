@@ -16,16 +16,20 @@
     "dist",
     "LICENSE-MIT",
     "LICENSE-APACHE",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist"
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc --build",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
     "dcmjs": "0.52.2"
+  },
+  "peerDependencies": {
+    "@ocelli/wasm": "0.1.0"
   }
 }

@@ -102,6 +102,8 @@ conflict-free. Exclusive resources:
 - the same shader or pipeline
 - `CURRENT_SPRINT.md`, `BACKLOG.md`, `SPRINT_TRACKER.md`, `AS_BUILT.md`,
   `CHANGELOG.md`
+- `README.md`, which `/implement-feature` section 7 edits for any story a
+  reader of it could see
 - the same LLD section, when the edits are semantic
 - **the GPU**, for any story running the oracle or a browser tier test
 
@@ -149,6 +151,8 @@ A worker failure blocks only that story and its dependants. Continue other
 waves.
 
 ## 5. Consolidated verification
+
+Run this and step 6 once, after every story is completed or carried, never while a story is open. `.claude/WORKFLOW.md` records the operator's rule.
 
 After every branch is integrated, stage the final owned content and invalidate
 any earlier receipt before the new attempt:

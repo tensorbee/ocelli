@@ -2,11 +2,14 @@
 
 use std::sync::Arc;
 
-use ritk_codecs::{PixelLayout, PixelSignedness, decode_jpeg2000_fragment};
+use ritk_codecs::{
+    PixelLayout, PixelSignedness, decode_jpeg2000_fragment, decode_jpeg2000_fragment_colour,
+};
 
 use crate::{
-    Capability, CodecError, DecodeSampleLayout, Decoder, FrameDesc, PixelDataVr,
-    PixelRepresentation, Registry, RegistryError, sample_convert::convert_samples,
+    Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
+    FrameDesc, PixelDataVr, PixelRepresentation, Registry, RegistryError,
+    sample_convert::convert_samples,
 };
 
 const JPEG2000_LOSSLESS_UID: &str = "1.2.840.10008.1.2.4.90";
@@ -69,6 +72,13 @@ impl Decoder for Jpeg2000Decoder {
         }
     }
 
+    fn decode_photometric_interpretation(
+        &self,
+        desc: &FrameDesc,
+    ) -> DecodePhotometricInterpretation {
+        decoded_photometric(desc)
+    }
+
     fn decode_sample_layout(&self, _desc: &FrameDesc) -> DecodeSampleLayout {
         DecodeSampleLayout::Interleaved
     }
@@ -80,7 +90,7 @@ impl Decoder for Jpeg2000Decoder {
                 actual: out.len(),
             });
         }
-        validate_descriptor(desc)?;
+        validate_pixel_descriptor(desc)?;
         let codestream = logical_codestream(src)?;
         let (header, tile_at) = inspect_main_header(codestream)?;
         if self.mode == Mode::LosslessOnly {
@@ -92,42 +102,41 @@ impl Decoder for Jpeg2000Decoder {
             PixelRepresentation::Unsigned => PixelSignedness::Unsigned,
             PixelRepresentation::Signed => PixelSignedness::Signed,
         };
-        let layout = PixelLayout {
-            rows: usize::from(desc.rows()),
-            cols: usize::from(desc.columns()),
-            samples_per_pixel: 1,
-            bits_allocated: desc.bits_allocated(),
-            pixel_representation: signedness,
-            rescale_slope: 1.0,
-            rescale_intercept: 0.0,
+        let decoded = if desc.samples_per_pixel() == 3 {
+            // Three-component output is interleaved RGB or, with the
+            // transform off, the codestream's own three components.
+            let layout = PixelLayout {
+                rows: usize::from(desc.rows()),
+                cols: usize::from(desc.columns()),
+                samples_per_pixel: 3,
+                bits_allocated: desc.bits_allocated(),
+                pixel_representation: signedness,
+                rescale_slope: 1.0,
+                rescale_intercept: 0.0,
+            };
+            decode_jpeg2000_fragment_colour(codestream, layout)
+                .map_err(|_| CodecError::DecoderFailure)?
+        } else {
+            let layout = PixelLayout {
+                rows: usize::from(desc.rows()),
+                cols: usize::from(desc.columns()),
+                samples_per_pixel: 1,
+                bits_allocated: desc.bits_allocated(),
+                pixel_representation: signedness,
+                rescale_slope: 1.0,
+                rescale_intercept: 0.0,
+            };
+            decode_jpeg2000_fragment(codestream, layout).map_err(|_| CodecError::DecoderFailure)?
         };
-        let decoded =
-            decode_jpeg2000_fragment(codestream, layout).map_err(|_| CodecError::DecoderFailure)?;
         convert_samples(&decoded, desc, out)
     }
 }
 
-fn validate_descriptor(desc: &FrameDesc) -> Result<(), CodecError> {
-    if desc.pixel_data_vr() != PixelDataVr::Ob
-        || desc.samples_per_pixel() != 1
-        || !matches!(desc.bits_allocated(), 8 | 16)
-        || !matches!(
-            desc.photometric_interpretation(),
-            "MONOCHROME1" | "MONOCHROME2"
-        )
-    {
-        return Err(CodecError::UnsupportedPixelFormat);
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MainHeader {
     width: u32,
     height: u32,
-    components: u16,
-    precision: u8,
-    signed: bool,
+    components: Vec<ComponentParams>,
     mct: u8,
     transform: u8,
     quantization_style: u8,
@@ -208,8 +217,7 @@ fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
         }
         offset = end;
     }
-    let (width, height, components, precision, signed) =
-        siz.ok_or(CodecError::InvalidCodestream)?;
+    let (width, height, components) = siz.ok_or(CodecError::InvalidCodestream)?;
     let (mct, decomposition_levels, transform) = cod.ok_or(CodecError::InvalidCodestream)?;
     let (quantization_style, quantization_entries) = qcd.ok_or(CodecError::InvalidCodestream)?;
     validate_qcd(
@@ -222,8 +230,6 @@ fn inspect_main_header(src: &[u8]) -> Result<(MainHeader, usize), CodecError> {
             width,
             height,
             components,
-            precision,
-            signed,
             mct,
             transform,
             quantization_style,
@@ -342,7 +348,20 @@ fn validate_qcd(style: u8, entries: usize, decomposition_levels: u8) -> Result<(
     Ok(())
 }
 
-pub(crate) fn parse_siz(payload: &[u8]) -> Result<(u32, u32, u16, u8, bool), CodecError> {
+/// One component's parameters from SIZ, ISO/IEC 15444-1 A.5.1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ComponentParams {
+    /// `(Ssiz & 0x7f) + 1`, the component's bit depth.
+    pub(crate) precision: u8,
+    /// Whether Ssiz's sign bit is set.
+    pub(crate) signed: bool,
+    /// XRsiz, the horizontal sub-sampling factor.
+    pub(crate) x_sampling: u8,
+    /// YRsiz, the vertical sub-sampling factor.
+    pub(crate) y_sampling: u8,
+}
+
+pub(crate) fn parse_siz(payload: &[u8]) -> Result<(u32, u32, Vec<ComponentParams>), CodecError> {
     if payload.len() < 39 {
         return Err(CodecError::InvalidCodestream);
     }
@@ -361,25 +380,38 @@ pub(crate) fn parse_siz(payload: &[u8]) -> Result<(u32, u32, u16, u8, bool), Cod
     if payload.len() != expected || components == 0 || xsiz <= xosiz || ysiz <= yosiz {
         return Err(CodecError::InvalidCodestream);
     }
-    let ssiz = *payload.get(36).ok_or(CodecError::InvalidCodestream)?;
-    Ok((
-        xsiz - xosiz,
-        ysiz - yosiz,
-        components,
-        (ssiz & 0x7f) + 1,
-        ssiz & 0x80 != 0,
-    ))
+    let mut component_params = Vec::with_capacity(usize::from(components));
+    for index in 0..usize::from(components) {
+        let ssiz = *payload
+            .get(36 + index * 3)
+            .ok_or(CodecError::InvalidCodestream)?;
+        let x_sampling = *payload
+            .get(37 + index * 3)
+            .ok_or(CodecError::InvalidCodestream)?;
+        let y_sampling = *payload
+            .get(38 + index * 3)
+            .ok_or(CodecError::InvalidCodestream)?;
+        component_params.push(ComponentParams {
+            precision: (ssiz & 0x7f) + 1,
+            signed: ssiz & 0x80 != 0,
+            x_sampling,
+            y_sampling,
+        });
+    }
+    Ok((xsiz - xosiz, ysiz - yosiz, component_params))
 }
 
 fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(), CodecError> {
-    if header.components != 1 || header.mct != 0 {
-        return Err(CodecError::UnsupportedPixelFormat);
+    validate_colour_shape(&header.components, header.mct, desc)?;
+    if header.components.len() == 3 {
+        validate_colour_components(&header.components)?;
     }
+    let first = first_component(&header.components)?;
     let signed = desc.pixel_representation() == PixelRepresentation::Signed;
     if header.width != u32::from(desc.columns())
         || header.height != u32::from(desc.rows())
-        || u16::from(header.precision) != desc.bits_stored()
-        || header.signed != signed
+        || u16::from(first.precision) != desc.bits_stored()
+        || first.signed != signed
     {
         return Err(CodecError::FrameMismatch);
     }
@@ -391,6 +423,115 @@ fn validate_header(mode: Mode, header: MainHeader, desc: &FrameDesc) -> Result<(
     }
     if mode == Mode::LosslessOnly && header.quantization_style != 0 {
         return Err(CodecError::FrameMismatch);
+    }
+    Ok(())
+}
+
+/// The photometric and component-count matrix both JPEG 2000 adapters apply,
+/// PS3.5 8.2.4 Table 8.2.4-1 and its notes.
+pub(crate) fn validate_colour_shape(
+    components: &[ComponentParams],
+    multiple_component_transform: u8,
+    desc: &FrameDesc,
+) -> Result<(), CodecError> {
+    if multiple_component_transform > 1 {
+        // ISO/IEC 15444-1 A.6.1 Table A.17 defines the values 0 and 1.
+        return Err(CodecError::InvalidCodestream);
+    }
+    let samples = desc.samples_per_pixel();
+    match components.len() {
+        1 => {
+            if samples != 1 {
+                return Err(CodecError::FrameMismatch);
+            }
+            if multiple_component_transform != 0 {
+                // The colour transform is defined over three components.
+                return Err(CodecError::UnsupportedPixelFormat);
+            }
+            Ok(())
+        }
+        3 => {
+            if samples != 3 {
+                return Err(CodecError::FrameMismatch);
+            }
+            match multiple_component_transform {
+                0 => {
+                    if matches!(desc.photometric_interpretation(), "YBR_RCT" | "YBR_ICT") {
+                        // PS3.5 8.2.4 note 2: those two codes name the
+                        // codestream's own transform, which this codestream
+                        // says it did not apply.
+                        return Err(CodecError::FrameMismatch);
+                    }
+                }
+                // PS3.5 8.2.4: a codestream that applied the transform hands
+                // back RGB samples, so the photometric must name it. `RGB`
+                // or `YBR_FULL` over a transformed codestream would draw
+                // already-RGB samples through a YBR matrix.
+                1 if !matches!(desc.photometric_interpretation(), "YBR_RCT" | "YBR_ICT") => {
+                    return Err(CodecError::FrameMismatch);
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        _ => Err(CodecError::UnsupportedPixelFormat),
+    }
+}
+
+/// The three components of a colour codestream must be sub-sample free and
+/// share depth and signedness, as openjph-core's own validity check requires
+/// of the transform, because one DICOM descriptor describes all of them.
+pub(crate) fn validate_colour_components(components: &[ComponentParams]) -> Result<(), CodecError> {
+    let first = first_component(components)?;
+    if components.iter().any(|component| {
+        component.x_sampling != 1
+            || component.y_sampling != 1
+            || component.precision != first.precision
+            || component.signed != first.signed
+    }) {
+        return Err(CodecError::UnsupportedPixelFormat);
+    }
+    Ok(())
+}
+
+pub(crate) fn first_component(
+    components: &[ComponentParams],
+) -> Result<ComponentParams, CodecError> {
+    components
+        .first()
+        .copied()
+        .ok_or(CodecError::InvalidCodestream)
+}
+
+/// What a decode of `desc` hands back, PS3.5 8.2.4. `YBR_RCT` and `YBR_ICT`
+/// name the codestream's own component transform, so a decode of either is
+/// packed RGB, and everything else is preserved.
+pub(crate) fn decoded_photometric(desc: &FrameDesc) -> DecodePhotometricInterpretation {
+    if desc.samples_per_pixel() == 3
+        && matches!(desc.photometric_interpretation(), "YBR_RCT" | "YBR_ICT")
+    {
+        DecodePhotometricInterpretation::Rgb
+    } else {
+        DecodePhotometricInterpretation::Preserved
+    }
+}
+
+/// The photometric and sample-count descriptor matrix shared by the two JPEG
+/// 2000 adapters, PS3.5 8.2.4 Table 8.2.4-1. A colour frame is three samples
+/// in an eight or sixteen bit container. The two 4:2:2 photometric values are
+/// not valid for these syntaxes and a palette stays an index stream the
+/// colour stage owns.
+pub(crate) fn validate_pixel_descriptor(desc: &FrameDesc) -> Result<(), CodecError> {
+    if desc.pixel_data_vr() != PixelDataVr::Ob {
+        return Err(CodecError::UnsupportedPixelFormat);
+    }
+    match (desc.samples_per_pixel(), desc.photometric_interpretation()) {
+        (1, "MONOCHROME1" | "MONOCHROME2") => {}
+        (3, "RGB" | "YBR_FULL" | "YBR_RCT" | "YBR_ICT") => {}
+        _ => return Err(CodecError::UnsupportedPixelFormat),
+    }
+    if !matches!(desc.bits_allocated(), 8 | 16) {
+        return Err(CodecError::UnsupportedPixelFormat);
     }
     Ok(())
 }

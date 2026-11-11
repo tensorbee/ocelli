@@ -2,25 +2,31 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 
+#![doc(test(attr(forbid(unsafe_code))))]
+
 mod htj2k;
 mod jpeg;
 mod jpeg2000;
 mod jpegls;
+mod jpegxl;
+mod jpegxl_icc;
 mod native;
 mod registry;
 mod rle;
 mod sample_convert;
+pub mod video;
 
 pub use htj2k::{Htj2kDecoder, register_htj2k_decoders};
 pub use jpeg::{JpegDecoder, register_jpeg_decoders};
 pub use jpeg2000::{Jpeg2000Decoder, register_jpeg2000_decoders};
 pub use jpegls::{JpegLsDecoder, register_jpegls_decoders};
+pub use jpegxl::{JpegXlDecoder, quantise_lossy_sample, register_jpegxl_decoders};
 pub use native::{NativeFrameIndex, RawDecoder, register_native_and_rle_decoders};
 pub use rle::RleDecoder;
 
 pub use registry::{
     Capability, CodecError, DecodePhotometricInterpretation, DecodeSampleLayout, Decoder,
-    FrameDesc, FrameDescError, FrameDescInput, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
+    FrameDesc, FrameDescError, FrameDescInput, JpegLsPreset, KNOWN_TRANSFER_SYNTAXES, PixelDataVr,
     PixelRepresentation, Registry, RegistryError,
 };
 

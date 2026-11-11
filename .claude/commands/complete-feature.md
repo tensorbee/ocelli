@@ -41,7 +41,8 @@ feature-local changes to the worker branch, and does not touch sprint totals.
    refactor with no external effect does not get a line.
 5. **Sprint state**, `python3 scripts/sprint_workflow.py mark-feature F-XXX
    --state completed`.
-6. **LLD update**, step 9 below.
+6. **LLD update**, step 9 below, and the **user-facing documentation
+   check**, step 10 below.
 7. **Final-state verification.** After all completion and LLD edits, stage
    only owned changes with `git add`. Run the affected metadata checks and
    the required `/verify` profile on that final staged state, then record.
@@ -78,6 +79,25 @@ Read the plan's `## LLD impact` list and update exactly those files:
 
 If `## LLD impact` is missing or wrong, that is a defect the review should have
 caught. Fix the plan too.
+
+## Step 10, the user-facing documentation check
+
+`README.md`, `examples/folder-viewer/src/use.html` (the Use book) and
+`examples/folder-viewer/src/more.html` (the More page) are read by people who
+never open the code. `/implement-feature` section 7 updates them before review,
+so the clearing `/microscope` pass has already seen those edits. This step
+edits none of them. It confirms the work happened:
+
+1. Every place the plan's `## User-facing documentation impact` section lists
+   is in the reviewed diff, or the section says `no change` with a reason.
+2. Fill the AS_BUILT entry's `**User-facing documentation.**` field with the
+   places changed, or `no change` and the reason. An empty field is not an
+   answer.
+
+If a document still needs an edit here, stop. Make it through
+`/implement-feature` section 7 and review it with a fresh `/microscope` pass
+before completing, because step 7's final-state verification and the commit
+must not carry unreviewed prose.
 
 ## Under `--prepare`
 

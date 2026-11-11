@@ -11,8 +11,8 @@ use dicom_object::{
 };
 use ocelli_core::Display;
 use ocelli_pixel::{
-    LutChain, LutDescriptor, ModalityTransform, PhotometricInterpretation, PixelError,
-    PresentationLutEvidence, PresentationLutShape, VoiFunction, VoiTransform,
+    LutChain, LutDescriptor, ModalityTransform, PaletteColorLut, PhotometricInterpretation,
+    PixelError, PresentationLutEvidence, PresentationLutShape, VoiFunction, VoiTransform,
 };
 
 use crate::{
@@ -42,6 +42,26 @@ const FRAME_VOI_LUT: Tag = Tag(0x0028, 0x9132);
 const PIXEL_DATA: Tag = Tag(0x7FE0, 0x0010);
 const FLOAT_PIXEL_DATA: Tag = Tag(0x7FE0, 0x0008);
 const DOUBLE_FLOAT_PIXEL_DATA: Tag = Tag(0x7FE0, 0x0009);
+
+/// Red, green and blue Palette Color Lookup Table Descriptor, PS3.3 C.7.6.3.1.5.
+const PALETTE_DESCRIPTORS: [Tag; 3] = [
+    Tag(0x0028, 0x1101),
+    Tag(0x0028, 0x1102),
+    Tag(0x0028, 0x1103),
+];
+/// Red, green and blue Palette Color Lookup Table Data, PS3.3 C.7.6.3.1.6.
+const PALETTE_DATA: [Tag; 3] = [
+    Tag(0x0028, 0x1201),
+    Tag(0x0028, 0x1202),
+    Tag(0x0028, 0x1203),
+];
+/// Red, green and blue Segmented Palette Color Lookup Table Data, PS3.3 C.7.9.2.
+const SEGMENTED_PALETTE_DATA: [Tag; 3] = [
+    Tag(0x0028, 0x1221),
+    Tag(0x0028, 0x1222),
+    Tag(0x0028, 0x1223),
+];
+const ICC_PROFILE: Tag = Tag(0x0028, 0x2000);
 
 const DISPLAY_MIN: f32 = 0.0;
 const DISPLAY_MAX: f32 = 255.0;
@@ -91,6 +111,15 @@ pub enum FrameOpenError {
     /// The mask and the display buffer disagree in length.
     #[error("the padding mask and the display buffer disagree in length")]
     MaskLength,
+    /// A Palette Color Lookup Table Descriptor's bits per entry is outside 8 to 16.
+    #[error("a palette colour lookup table entry depth is outside 8 to 16 bits")]
+    PaletteDepth,
+    /// Segmented Palette Color Lookup Table Data is present, which this build does not expand.
+    #[error("the palette colour lookup table is segmented")]
+    SegmentedPalette,
+    /// A `PALETTE COLOR` frame lacks one of its three descriptors or tables.
+    #[error("a palette colour lookup table descriptor or table is missing")]
+    MissingPalette,
 }
 
 /// Window inputs for the existing VOI stage.
@@ -363,6 +392,174 @@ pub fn open_frame(parsed: &ParsedDicom, frame: u32) -> Result<OpenedFrame, Frame
     })
 }
 
+/// The three Palette Color Lookup Tables of a `PALETTE COLOR` frame.
+///
+/// F-239. PS3.3 C.7.9 and C.7.6.3.1.5, read from the top level:
+/// `(0028,1101)` to `(0028,1103)` give each channel's entry count (0 means
+/// 65,536), first stored value mapped and bits per entry, and `(0028,1201)` to
+/// `(0028,1203)` hold the entries. The first stored value mapped is signed
+/// when Pixel Representation is 1, as the descriptor's VR follows it.
+///
+/// An 8-bit table is "stored in a format equivalent to 8 bits allocated", one
+/// byte per entry with OW's pad byte after an odd count. C.7.6.3.1.5's note
+/// says some writers store 8-bit entries in 16 bits allocated instead and that
+/// the value length tells the two apart, so a value of two bytes per entry is
+/// read as words. Every other depth is one word per entry.
+///
+/// The scaling to the display's 8 bits is [`PaletteColorLut::with_entry_bits`]'s,
+/// given each channel's declared depth.
+///
+/// # Errors
+///
+/// `Ok(None)` for any photometric interpretation other than `PALETTE COLOR`.
+/// [`FrameOpenError::Photometric`] when it is missing or unknown.
+/// [`FrameOpenError::SegmentedPalette`] when any of `(0028,1221)` to
+/// `(0028,1223)` is present. [`FrameOpenError::MissingPalette`] when a
+/// descriptor or a table is absent or empty. [`FrameOpenError::PaletteDepth`]
+/// for bits per entry outside `8 ..= 16`. [`FrameOpenError::Attribute`] naming
+/// the descriptor or table that cannot be read, including a table whose value
+/// length matches neither container and an entry beyond its declared depth.
+pub fn palette_color_lut(
+    metadata: &MetadataSet,
+) -> Result<Option<PaletteColorLut>, FrameOpenError> {
+    if photometric_of(metadata)? != PhotometricInterpretation::PaletteColor {
+        return Ok(None);
+    }
+    if SEGMENTED_PALETTE_DATA
+        .iter()
+        .any(|tag| metadata.get(*tag).is_some())
+    {
+        return Err(FrameOpenError::SegmentedPalette);
+    }
+    let signed = pixel_representation(metadata)?;
+    let (red, red_bits) =
+        palette_channel(metadata, PALETTE_DESCRIPTORS[0], PALETTE_DATA[0], signed)?;
+    let (green, green_bits) =
+        palette_channel(metadata, PALETTE_DESCRIPTORS[1], PALETTE_DATA[1], signed)?;
+    let (blue, blue_bits) =
+        palette_channel(metadata, PALETTE_DESCRIPTORS[2], PALETTE_DATA[2], signed)?;
+    // Every per-channel refusal happened in `palette_channel`, where the
+    // channel's own tags are known. What is left is the three channels
+    // disagreeing, which names the first descriptor that differs from red's.
+    let disagrees = |lut: &LutDescriptor| {
+        lut.entry_count() != red.entry_count()
+            || lut.first_mapped_input() != red.first_mapped_input()
+    };
+    let culprit = if disagrees(&green) {
+        PALETTE_DESCRIPTORS[1]
+    } else {
+        PALETTE_DESCRIPTORS[2]
+    };
+    PaletteColorLut::with_entry_bits(red, green, blue, [red_bits, green_bits, blue_bits])
+        .map(Some)
+        .map_err(|_| attribute(culprit))
+}
+
+/// Whether ICC Profile `(0028,2000)` is present at the top level.
+///
+/// Deviation D-30. The presence test is the element alone, whatever its
+/// length, because the claim it supports is "this file asked for colour
+/// management and did not get it". An ICC Profile inside the Optical Path
+/// Sequence is a whole-slide concern and is not this test's.
+#[must_use]
+pub fn has_icc_profile(metadata: &MetadataSet) -> bool {
+    metadata.get(ICC_PROFILE).is_some()
+}
+
+/// The bytes of ICC Profile `(0028,2000)`, present at the top level.
+///
+/// F-240. Beside [`has_icc_profile`], which answers D-30's presence question
+/// for a frame that has no profile route yet. This returns the element's
+/// bytes for the caller that parses them, and `None` when the element is
+/// absent, empty, or not a byte payload: the standard's VR for the attribute
+/// is OB, so anything projected as words is not a profile and reads `None`
+/// rather than being re-encoded. A profile only inside the Optical Path
+/// Sequence is a whole-slide concern and reads `None` here too.
+#[must_use]
+pub fn icc_profile(metadata: &MetadataSet) -> Option<&[u8]> {
+    match metadata.get(ICC_PROFILE)?.value() {
+        MetadataValue::Bytes(bytes) => Some(bytes),
+        _ => None,
+    }
+}
+
+/// One palette channel and its declared bits per entry.
+fn palette_channel(
+    metadata: &MetadataSet,
+    descriptor_tag: Tag,
+    data_tag: Tag,
+    signed: bool,
+) -> Result<(LutDescriptor, u16), FrameOpenError> {
+    let descriptor = metadata
+        .get(descriptor_tag)
+        .ok_or(FrameOpenError::MissingPalette)?;
+    let data = metadata
+        .get(data_tag)
+        .ok_or(FrameOpenError::MissingPalette)?;
+    let [entry_count, first_raw, bits] =
+        descriptor_words(descriptor).map_err(|_| attribute(descriptor_tag))?;
+    if !(8..=16).contains(&bits) {
+        return Err(FrameOpenError::PaletteDepth);
+    }
+    let entries = if entry_count == 0 {
+        65_536
+    } else {
+        usize::from(entry_count)
+    };
+    let bytes = palette_bytes(data, data_tag)?;
+    let (values, container) = palette_entries(&bytes, entries, bits).ok_or(attribute(data_tag))?;
+    // An entry beyond the declared depth is refused here, naming this table.
+    // `bits` is in `8 ..= 16`, so `2^bits - 1` is a `u16` and exact in `f32`.
+    let largest = f32::from(u16::MAX >> (16 - bits));
+    if values.iter().any(|value| *value > largest) {
+        return Err(attribute(data_tag));
+    }
+    let first = stored_from_u16(first_raw, signed);
+    let lut = LutDescriptor::new(entry_count, first, container, values)
+        .map_err(|_| attribute(data_tag))?;
+    Ok((lut, bits))
+}
+
+/// The table's value as the little-endian byte stream PS3.5 encodes OW in.
+///
+/// A parser that projected OW as words gave each word its value, so writing
+/// each back little-endian recovers the bytes an 8-bit table packs.
+fn palette_bytes(data: &MetadataElement, tag: Tag) -> Result<Vec<u8>, FrameOpenError> {
+    match data.value() {
+        MetadataValue::Empty => Err(FrameOpenError::MissingPalette),
+        MetadataValue::Bytes(bytes) => Ok(bytes.clone()),
+        MetadataValue::Unsigned16(words) => {
+            Ok(words.iter().flat_map(|word| word.to_le_bytes()).collect())
+        }
+        _ => Err(attribute(tag)),
+    }
+}
+
+/// Entries and the container [`LutDescriptor`] holds them in, or `None` when
+/// the value length matches neither PS3.3 C.7.6.3.1.5 form.
+fn palette_entries(bytes: &[u8], entries: usize, bits: u16) -> Option<(Vec<f32>, u8)> {
+    let words = entries.checked_mul(2)?;
+    let one_byte_each = bytes.len() == entries || (entries % 2 == 1 && bytes.len() == entries + 1);
+    if bits == 8 && one_byte_each && bytes.len() != words {
+        let values = bytes.iter().take(entries).copied().map(f32::from).collect();
+        return Some((values, 8));
+    }
+    if bytes.len() != words {
+        return None;
+    }
+    let values = bytes
+        .chunks_exact(2)
+        .map(|pair| match pair {
+            [low, high] => f32::from(u16::from_le_bytes([*low, *high])),
+            _ => 0.0,
+        })
+        .collect();
+    // A word is held in a 16-bit container whatever the declared depth. An
+    // entry beyond that depth, a word above 255 in an 8-bit table among them,
+    // is refused by `palette_channel` naming this table, the one check.
+    Some((values, 16))
+}
+
 /// Replace padding samples with the black display end of `chain`.
 ///
 /// [`LutChain::inverts`] is the only inversion decision. `MONOCHROME1` black
@@ -465,6 +662,7 @@ fn photometric_of(metadata: &MetadataSet) -> Result<PhotometricInterpretation, F
         "YBR_PARTIAL_422" => Ok(PhotometricInterpretation::YbrPartial422),
         "YBR_ICT" => Ok(PhotometricInterpretation::YbrIct),
         "YBR_RCT" => Ok(PhotometricInterpretation::YbrRct),
+        "XYB" => Ok(PhotometricInterpretation::Xyb),
         _ => Err(FrameOpenError::Photometric),
     }
 }
@@ -480,7 +678,8 @@ fn colour_of(photometric: PhotometricInterpretation) -> ColourSelection {
         | PhotometricInterpretation::YbrFull422
         | PhotometricInterpretation::YbrPartial422
         | PhotometricInterpretation::YbrIct
-        | PhotometricInterpretation::YbrRct => ColourSelection::Colour {
+        | PhotometricInterpretation::YbrRct
+        | PhotometricInterpretation::Xyb => ColourSelection::Colour {
             codec_already_rgb: false,
         },
     }
@@ -641,6 +840,27 @@ fn presentation_of(metadata: &MetadataSet) -> Result<PresentationLutEvidence, Fr
     }
 }
 
+/// Read Pixel Padding Value and Pixel Padding Range Limit, and nothing else.
+///
+/// PS3.3 C.7.5.1.1.2. This is the reader [`open_frame`] uses, for a caller
+/// that needs the stored padding range without the window, presentation,
+/// lossy, burned-in and private creator attributes that `open_frame` also
+/// reads and can refuse. `signed` is Pixel Representation 1.
+///
+/// # Errors
+///
+/// [`FrameOpenError::PaddingLimitWithoutValue`] for a limit with no value,
+/// [`FrameOpenError::PaddingOrder`] for a range in the wrong order for the
+/// photometric interpretation, and an attribute error for a value that is
+/// not one US or SS.
+pub fn read_padding(
+    metadata: &MetadataSet,
+    photometric: PhotometricInterpretation,
+    signed: bool,
+) -> Result<Option<PaddingRange>, FrameOpenError> {
+    padding_of(metadata, photometric, signed)
+}
+
 fn padding_of(
     metadata: &MetadataSet,
     photometric: PhotometricInterpretation,
@@ -670,7 +890,8 @@ fn padding_of(
             | PhotometricInterpretation::YbrFull422
             | PhotometricInterpretation::YbrPartial422
             | PhotometricInterpretation::YbrIct
-            | PhotometricInterpretation::YbrRct => value <= limit,
+            | PhotometricInterpretation::YbrRct
+            | PhotometricInterpretation::Xyb => value <= limit,
         };
         if !ordered {
             return Err(FrameOpenError::PaddingOrder);

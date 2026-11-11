@@ -1,6 +1,6 @@
 //! Bit-level reader for JPEG-LS compressed scan data.
 //!
-//! # JPEG-LS Bit Stuffing (ISO 14495-1 §C.2.1)
+//! # JPEG-LS Bit Stuffing (ISO 14495-1 §A.1)
 //! In a JPEG-LS scan, an encoded `0xFF` data byte is followed by one stuffed
 //! zero bit. The decoder preserves all eight `0xFF` data bits, discards that
 //! single zero bit, and then consumes the remaining seven bits of the following
@@ -18,6 +18,21 @@ pub(super) struct BitReader<'a> {
     buf: u32,
     /// Number of valid bits in `buf`.
     bits: u32,
+    /// Set once a read asked for more bits than the segment holds (Ocelli
+    /// F-243). `read_bits` still returns 0 then, so the caller must check.
+    exhausted: bool,
+    /// Offset of the marker that ended the segment, once `refill` meets it.
+    marker: Option<usize>,
+}
+
+/// Where the entropy-coded segment ended, ISO 14495-1 §A.1 (Ocelli F-243).
+pub(super) struct SegmentEnd {
+    /// The marker ending the segment is EOI.
+    pub(super) eoi: bool,
+    /// Entropy-coded bits after the last bit read and before the marker.
+    pub(super) unread_bits: usize,
+    /// Every one of those bits is zero.
+    pub(super) unread_zero: bool,
 }
 
 impl<'a> BitReader<'a> {
@@ -28,6 +43,8 @@ impl<'a> BitReader<'a> {
             pos: 0,
             buf: 0,
             bits: 0,
+            exhausted: false,
+            marker: None,
         };
         r.refill();
         r
@@ -45,6 +62,7 @@ impl<'a> BitReader<'a> {
             let b = self.data[self.pos];
             if b == 0xFF && self.pos + 1 < self.data.len() && (self.data[self.pos + 1] & 0x80) != 0
             {
+                self.marker = Some(self.pos);
                 self.pos = self.data.len();
                 break;
             }
@@ -72,6 +90,7 @@ impl<'a> BitReader<'a> {
             self.refill();
         }
         if self.bits < n {
+            self.exhausted = true;
             return 0; // underflow: stream is exhausted
         }
         self.bits -= n;
@@ -84,11 +103,13 @@ impl<'a> BitReader<'a> {
         self.read_bits(1)
     }
 
-    /// Decode a Golomb-Rice code with ISO 14495-1 LIMIT guard (§A.3).
+    /// Decode a Golomb-Rice code with ISO 14495-1 LIMIT guard (§A.5.3, LIMIT from §A.2.1).
     ///
     /// # Arguments
     /// * `k`    — Golomb-Rice order (0 ≤ k ≤ qbpp)
-    /// * `limit` — Maximum total code length; value = `2*(qbpp + max(2, bpp))`
+    /// * `limit` - the code length limit. LIMIT, `2*(bpp + max(8, bpp))`
+    ///   (T.87 A.2.1), for a regular sample, or glimit, `LIMIT - J[RUNindex] - 1`
+    ///   (T.87 A.7.2 item 8), for a run-interruption sample
     /// * `qbpp`  — Bits required to represent RANGE; equals `bpp` for lossless
     ///
     /// # Returns
@@ -103,7 +124,14 @@ impl<'a> BitReader<'a> {
             }
             q += 1;
             if q == max_zeros {
-                let _ = self.read_bit();
+                // Ocelli F-243: the limited-length code's unary prefix ends
+                // with a 1 after LIMIT - qbpp - 1 zeros, and no encoder
+                // writes more zeros, so a 0 here is a damaged scan and is
+                // refused. CharLS 2.4.4 was measured to open such a scan
+                // instead.
+                if self.read_bit() != 1 {
+                    self.exhausted = true;
+                }
                 break;
             }
         }
@@ -118,6 +146,45 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Whether any read asked for more bits than the segment holds.
+    pub(super) fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+
+    /// The end of the entropy-coded segment and the bits left unread in it.
+    ///
+    /// Walks the bytes not yet buffered until a marker prefix or the end of
+    /// the data. Each counts as 8 bits. An 0xFF data byte among them is not
+    /// zero, so its stuffing byte's size never changes the verdict.
+    pub(super) fn segment_end(&self) -> SegmentEnd {
+        let mut unread = self.bits as usize;
+        let buffered_mask = (1u64 << self.bits) - 1;
+        let mut unread_zero = u64::from(self.buf) & buffered_mask == 0;
+        let mut end = self.marker;
+        let mut p = self.pos;
+        while end.is_none() && p < self.data.len() {
+            let b = self.data[p];
+            if b == 0xFF && p + 1 < self.data.len() && (self.data[p + 1] & 0x80) != 0 {
+                end = Some(p);
+                break;
+            }
+            p += 1;
+            unread += 8;
+            unread_zero &= b == 0;
+        }
+        SegmentEnd {
+            // T.87 D.2: optional 0xFF fill bytes may precede a marker.
+            eoi: end.is_some_and(|offset| {
+                self.data[offset + 1..]
+                    .iter()
+                    .find(|byte| **byte != 0xFF)
+                    .is_some_and(|code| *code == 0xD9)
+            }),
+            unread_bits: unread,
+            unread_zero,
+        }
+    }
+
     /// Return remaining byte count (approximate; does not account for buffered bits).
     #[allow(dead_code)]
     pub(super) fn remaining_bytes(&self) -> usize {
@@ -128,7 +195,7 @@ impl<'a> BitReader<'a> {
 // ── Bit writer (encoder side) ─────────────────────────────────────────────────
 
 /// Bit-level writer for JPEG-LS compressed scan data — exact mirror of
-/// [`BitReader`]'s stuffing rule (ISO 14495-1 §C.2.1): after an emitted `0xFF`
+/// [`BitReader`]'s stuffing rule (ISO 14495-1 §A.1): after an emitted `0xFF`
 /// byte, the following byte carries only 7 entropy bits with its MSB held 0.
 pub(super) struct BitWriter {
     out: Vec<u8>,
@@ -202,7 +269,7 @@ impl BitWriter {
     /// but the stream may legitimately END on an 0xFF data byte. A decoder
     /// then sees `0xFF` followed by the next marker's high-bit byte and must
     /// treat the 0xFF as a marker prefix — losing the final 8 entropy bits.
-    /// Per ISO 14495-1 §C.2.1 the stuffed 7-bit follow byte is therefore
+    /// Per ISO 14495-1 §A.1 the stuffed 7-bit follow byte is therefore
     /// emitted even when it carries only padding.
     pub(super) fn finish(mut self) -> Vec<u8> {
         if self.used > 0 {

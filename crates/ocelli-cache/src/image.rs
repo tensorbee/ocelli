@@ -1,10 +1,12 @@
-//! The decoded tier's value type, its cache, and the events an insert emits.
+//! The decoded tier's value type, its cache, and the events an insert or a
+//! release emits.
 //!
 //! HLD section 8: "Decoded frames sit in an LRU sized by the caller." F-031
 //! built the `Lru` and deviation D-24 widened its return to `Admission`, so the
 //! three outcomes stay distinguishable. This module is the caller section 20
-//! means: it converts an `Admission` into one `CacheEvent` per outcome, and it
-//! encodes an event into section 17.3's 48-byte envelope.
+//! means: it converts an `Admission` into one `CacheEvent` per outcome, a
+//! release into `Released`, and it encodes an event into section 17.3's
+//! 48-byte envelope.
 //!
 //! **No ring is built here and nothing reaches JavaScript.** Section 17.3's
 //! ring is F-101 in S16. This story stops at the tested encoding, which the
@@ -12,10 +14,22 @@
 //!
 //! F-035 adds [`HandoffMeta`] beside [`FrameKey`]. It carries the frame
 //! identity and the sample length of a section 24 transfer, and no samples.
+//!
+//! F-224 adds the decoded tier's validity check. Each held frame carries the
+//! [`ContentId`] of the bytes it was decoded from, and a lookup answers only
+//! when that identity, the description and the plane match what the caller
+//! presents.
+//!
+//! F-231 adds the committed tier beside it. [`CommittedFrame`] is what the
+//! wasm session caches: columns, rows and stored samples, with no
+//! description and no plane, because the session never receives them.
+//! [`ImageCache`] is generic over the value and the two tiers share the
+//! `Lru`, the events and the stale rule.
 
 use alloc::vec::Vec;
 
 use bytemuck::{Pod, Zeroable};
+use ocelli_core::Stored;
 use ocelli_pixel::{ImagePlane, StoredPixelDescription};
 
 use crate::lru::{Budgeted, Lru};
@@ -53,6 +67,52 @@ impl FrameKey {
             frame,
         }
     }
+}
+
+/// The identity of the bytes one frame was decoded from.
+///
+/// FNV-1a 64 over the length-prefixed SOP Instance UID, the transfer syntax
+/// UID and the encoded bytes, in that order, each length a little-endian
+/// `u64`. The UID is in the input because WADO-RS frame retrieval returns
+/// pixel bytes with no UID in them, and the transfer syntax because the same
+/// bytes decode differently under two syntaxes. The length prefixes make the
+/// field boundaries unambiguous. The prime is odd, so every fold step is a
+/// bijection of `u64` and a change confined to one byte position always
+/// changes the value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ContentId(pub u64);
+
+impl ContentId {
+    /// The FNV-1a 64 offset basis, the state before the first byte.
+    pub const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    /// The FNV-1a 64 prime.
+    pub const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    /// Hash the three fields with their lengths prefixed.
+    ///
+    /// A length that does not fit `u64` cannot occur on any target this
+    /// crate builds, and the saturating fallback keeps that impossible case
+    /// a value rather than a panic.
+    #[must_use]
+    pub fn of(sop_instance_uid: &[u8], transfer_syntax_uid: &[u8], encoded: &[u8]) -> Self {
+        let mut hash = Self::FNV_OFFSET_BASIS;
+        for field in [sop_instance_uid, transfer_syntax_uid, encoded] {
+            let len = u64::try_from(field.len()).unwrap_or(u64::MAX);
+            hash = fold(hash, &len.to_le_bytes());
+            hash = fold(hash, field);
+        }
+        Self(hash)
+    }
+}
+
+/// Fold `bytes` into `hash` one byte at a time, FNV-1a: `(hash XOR byte) *
+/// prime`, wrapping. This is the primitive [`ContentId::of`] composes and
+/// what the reference vectors in the tests below are written against.
+fn fold(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(ContentId::FNV_PRIME);
+    }
+    hash
 }
 
 /// Identity and sample length for one section 24 transfer.
@@ -223,11 +283,80 @@ impl Budgeted for DecodedFrame {
     }
 }
 
-/// One thing an insert did to the decoded tier.
+/// One committed frame, the tier the wasm session caches.
 ///
-/// Three variants because `Admission` has three fields, which is the whole
-/// reason deviation D-24 exists. Collapsing them throws away what F-031 was
-/// built to preserve.
+/// The session receives stored samples and the extent the commit named, and
+/// no `StoredPixelDescription` and no `ImagePlane`. Building a
+/// [`DecodedFrame`] would mean fabricating a geometry, so this value carries
+/// what the commit itself carried and nothing more. There is no `PartialEq`,
+/// because the samples are `Stored` and that type compares by nothing.
+#[derive(Clone, Debug)]
+pub struct CommittedFrame {
+    columns: u32,
+    rows: u32,
+    samples: Vec<Stored>,
+}
+
+impl CommittedFrame {
+    /// Assemble one committed frame from its extent and its samples.
+    pub fn new(columns: u32, rows: u32, samples: Vec<Stored>) -> Self {
+        Self {
+            columns,
+            rows,
+            samples,
+        }
+    }
+
+    /// The columns the commit named.
+    #[must_use]
+    pub const fn columns(&self) -> u32 {
+        self.columns
+    }
+
+    /// The rows the commit named.
+    #[must_use]
+    pub const fn rows(&self) -> u32 {
+        self.rows
+    }
+
+    /// The stored samples.
+    pub fn samples(&self) -> &[Stored] {
+        &self.samples
+    }
+}
+
+impl Budgeted for CommittedFrame {
+    /// The size of the sample vector, `size_of::<Stored>()` per sample.
+    ///
+    /// The product saturates at `usize::MAX`, so a sample count no buffer
+    /// could hold is a value rather than a panic.
+    fn bytes(&self) -> usize {
+        self.samples
+            .len()
+            .saturating_mul(core::mem::size_of::<Stored>())
+    }
+}
+
+/// What a committed lookup presents: the identity of the bytes and the
+/// extent the commit named.
+///
+/// There is no description and no plane here, because a committed frame has
+/// neither. The extent is compared exactly, like the decoded tier's metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CommittedSource {
+    /// The content id of the committed bytes.
+    pub content: ContentId,
+    /// The columns the commit named.
+    pub columns: u32,
+    /// The rows the commit named.
+    pub rows: u32,
+}
+
+/// One thing an insert or a release did to the decoded tier.
+///
+/// One per `Admission` field, which is the whole reason deviation D-24
+/// exists, and `Released` from `release_series`. Collapsing them throws
+/// away what F-031 was built to preserve.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CacheEvent {
     /// A live entry removed to make room for another.
@@ -251,11 +380,23 @@ pub enum CacheEvent {
         /// The bytes it would have cost.
         bytes: usize,
     },
+    /// Every frame of one series, released by the caller. One event per
+    /// series and not one per frame, so a 1,693-frame series cannot fill a
+    /// ring drained once per frame. Nothing is emitted when the series held
+    /// nothing.
+    Released {
+        /// The series that was released.
+        series: SeriesId,
+        /// How many frames left. Saturates at `u32::MAX`.
+        frames: u32,
+        /// The bytes they were admitted at, summed.
+        bytes: usize,
+    },
 }
 
-/// Event kind for [`CacheEvent::Evicted`]. One range for this crate's kinds,
-/// with F-034's telemetry kinds beside these. No registry this sprint, which
-/// the S12 design round decided for F-032 and F-034 together.
+/// Event kind for [`CacheEvent::Evicted`]. This crate's kinds are 1 to 5 and
+/// 7, with the viewport's presented kind 6 between. No registry this sprint,
+/// which the S12 design round decided for F-032 and F-034 together.
 pub const KIND_EVICTED: u32 = 1;
 /// Event kind for [`CacheEvent::Displaced`].
 pub const KIND_DISPLACED: u32 = 2;
@@ -268,6 +409,9 @@ pub const KIND_REFUSED: u32 = 3;
 pub const KIND_PRESSURE: u32 = 4;
 /// Event kind for a budget change. F-034, pinned the same way.
 pub const KIND_BUDGET_CHANGED: u32 = 5;
+/// Event kind for [`CacheEvent::Released`]. F-226. One series release, not
+/// one per frame, pinned the same way as the five above it.
+pub const KIND_RELEASED: u32 = 7;
 
 /// Section 17.3's `Event`, field for field. 48 bytes.
 ///
@@ -276,35 +420,55 @@ pub const KIND_BUDGET_CHANGED: u32 = 5;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
 pub struct RingEvent {
-    /// Which event this is. One of this crate's `KIND_` constants.
+    /// Which event this is. A cache event carries one of this crate's
+    /// `KIND_` constants. Kind 6, a presented frame, is
+    /// `ocelli_viewport::boundary::KIND_PRESENTED`.
     pub kind: u32,
     /// The viewport the event belongs to, or `u32::MAX` for a cache event.
     pub viewport: u32,
     /// The ring-wide sequence number the caller assigned.
     pub seq: u64,
-    /// The event payload. For a cache event, the key and byte count.
+    /// The event payload. For a keyed cache event, the key and byte count,
+    /// and for `Released`, the series, frames and bytes.
     pub payload: [u8; 32],
 }
 
 impl CacheEvent {
-    /// The key and byte count every variant carries.
-    fn parts(&self) -> (u32, FrameKey, usize) {
-        match *self {
+    /// Encode into section 17.3's envelope with the caller's sequence number.
+    ///
+    /// The keyed events carry `series` as `u64`, `instance` and `frame` as
+    /// `u32`, and `bytes` as `u64`, little-endian, in that order, with the
+    /// last eight bytes reserved and zeroed. `Released` carries `series` as
+    /// `u64`, `frames` as `u32`, a zero `u32` where `frame` sits, and
+    /// `bytes` as `u64`, so every kind `encode` writes keeps `bytes` at
+    /// offset 16.
+    /// Little-endian is not a choice: wasm32 is little-endian and section
+    /// 17.1 says the wire format is.
+    pub fn encode(&self, seq: u64) -> RingEvent {
+        let mut payload = [0_u8; 32];
+        let (kind, key, bytes) = match *self {
+            Self::Released {
+                series,
+                frames,
+                bytes,
+            } => {
+                payload[0..8].copy_from_slice(&series.0.to_le_bytes());
+                payload[8..12].copy_from_slice(&frames.to_le_bytes());
+                // The zero u32 at 12 is what keeps `bytes` at 16 for every
+                // kind. The last eight bytes stay reserved zeros.
+                payload[16..24]
+                    .copy_from_slice(&u64::try_from(bytes).unwrap_or(u64::MAX).to_le_bytes());
+                return RingEvent {
+                    kind: KIND_RELEASED,
+                    viewport: u32::MAX,
+                    seq,
+                    payload,
+                };
+            }
             Self::Evicted { key, bytes } => (KIND_EVICTED, key, bytes),
             Self::Displaced { key, bytes } => (KIND_DISPLACED, key, bytes),
             Self::Refused { key, bytes } => (KIND_REFUSED, key, bytes),
-        }
-    }
-
-    /// Encode into section 17.3's envelope with the caller's sequence number.
-    ///
-    /// The payload is `series` as `u64`, `instance` and `frame` as `u32`, and
-    /// `bytes` as `u64`, little-endian, in that order, with the last eight
-    /// bytes reserved and zeroed. Little-endian is not a choice: wasm32 is
-    /// little-endian and section 17.1 says the wire format is.
-    pub fn encode(&self, seq: u64) -> RingEvent {
-        let (kind, key, bytes) = self.parts();
-        let mut payload = [0_u8; 32];
+        };
         payload[0..8].copy_from_slice(&key.series.0.to_le_bytes());
         payload[8..12].copy_from_slice(&key.instance.to_le_bytes());
         payload[12..16].copy_from_slice(&key.frame.to_le_bytes());
@@ -318,10 +482,11 @@ impl CacheEvent {
     }
 }
 
-/// The events one `ImageCache::insert` produced, in the order they happened.
+/// The events one `ImageCache::insert` or `ImageCache::release_series`
+/// produced, in the order they happened.
 ///
-/// Built on the insert path, which is a decode-path call and not a render-loop
-/// call, so building this value allocates as `Lru::insert` already does.
+/// Built on the insert and release paths, which are not render-loop calls, so
+/// building this value allocates as `Lru::insert` already does.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CacheEvents {
     events: Vec<CacheEvent>,
@@ -334,36 +499,88 @@ impl CacheEvents {
         &self.events
     }
 
-    /// Whether the insert displaced, evicted and refused nothing.
+    /// Whether nothing was displaced, evicted, refused or released.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
 
-    /// How many events the insert produced.
+    /// How many events the insert or release produced.
     pub fn len(&self) -> usize {
         self.events.len()
     }
 }
 
-/// The decoded tier: decoded frames in an `Lru` sized by the caller.
-pub struct ImageCache {
-    decoded: Lru<FrameKey, DecodedFrame>,
+/// What a lookup presents: the identity of the bytes, the description and
+/// the plane the caller now holds.
+///
+/// The description and the plane are compared exactly, not hashed, because a
+/// re-process can correct Pixel Spacing or Image Position and keep both the
+/// UID and the pixel bytes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameSource {
+    /// The content id of the encoded bytes.
+    pub content: ContentId,
+    /// The stored pixel description the caller holds.
+    pub description: StoredPixelDescription,
+    /// The image plane the caller holds.
+    pub plane: ImagePlane,
 }
 
-impl ImageCache {
-    /// An empty decoded tier holding at most `budget` bytes.
+/// The three answers a lookup can give.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FrameLookup<'a, V = DecodedFrame> {
+    /// The frame under the key answers for the presented source.
+    Hit(&'a V),
+    /// No frame is held under the key.
+    Miss,
+    /// A frame from other bytes or metadata was held and has been removed.
+    /// `bytes` is the sample length it was admitted at, so a caller can
+    /// count what left. A second identical stale lookup is a miss.
+    Stale { bytes: usize },
+}
+
+/// One held value and the identity of the bytes it came from.
+///
+/// This is the `Lru`'s value type, so [`Budgeted::bytes`] is the value's own
+/// byte count and every admitted size and event payload is what it was
+/// before the identity moved into the lookup.
+struct HeldValue<V> {
+    content: ContentId,
+    value: V,
+}
+
+impl<V: Budgeted> Budgeted for HeldValue<V> {
+    /// The allocated size of the held value.
+    fn bytes(&self) -> usize {
+        self.value.bytes()
+    }
+}
+
+/// The decoded and committed tiers: frames in an `Lru` sized by the caller.
+///
+/// Each held value carries the [`ContentId`] of the bytes it came from, and
+/// a lookup answers only when that identity and the value's own metadata
+/// match what the caller presents. The decoded tier's metadata is the
+/// description and the plane. The committed tier's is the extent.
+pub struct ImageCache<V: Budgeted = DecodedFrame> {
+    decoded: Lru<FrameKey, HeldValue<V>>,
+}
+
+impl<V: Budgeted> ImageCache<V> {
+    /// An empty tier holding at most `budget` bytes.
     pub fn new(budget: usize) -> Self {
         Self {
             decoded: Lru::new(CacheTier::Decoded, budget),
         }
     }
 
-    /// Insert a frame and return the events the caller must emit.
+    /// Insert a value from bytes whose identity is `content`, and return the
+    /// events the caller must emit.
     ///
     /// The evicted entries are converted in the order `Admission` returned
     /// them, least recently used first.
-    pub fn insert(&mut self, key: FrameKey, frame: DecodedFrame) -> CacheEvents {
-        let admission = self.decoded.insert(key, frame);
+    pub fn insert(&mut self, key: FrameKey, content: ContentId, value: V) -> CacheEvents {
+        let admission = self.decoded.insert(key, HeldValue { content, value });
         let mut events = CacheEvents::default();
         if let Some(displaced) = admission.displaced {
             events.events.push(CacheEvent::Displaced {
@@ -386,9 +603,44 @@ impl ImageCache {
         events
     }
 
-    /// Read a frame. Reading is a use, so it becomes the most recently used.
-    pub fn get(&mut self, key: &FrameKey) -> Option<&DecodedFrame> {
-        self.decoded.get(key)
+    /// Move the budget and return the evictions only, in F-034's order: the
+    /// caller emits these first and a budget-changed event after them.
+    ///
+    /// A control does not displace and nothing is refused by a shrink, so
+    /// the `Admission` carries evictions and nothing else.
+    pub fn set_budget(&mut self, budget: usize) -> CacheEvents {
+        let admission = self.decoded.set_budget(budget);
+        let mut events = CacheEvents::default();
+        for (evicted_key, evicted) in admission.evicted {
+            events.events.push(CacheEvent::Evicted {
+                key: evicted_key,
+                bytes: evicted.bytes(),
+            });
+        }
+        events
+    }
+
+    /// Release every frame of `series`. One `Released` event, or none when
+    /// nothing was held.
+    ///
+    /// The range ends at the series' own last key and not at the next
+    /// series' first, so nothing of a neighbour series leaves. A repeat
+    /// call finds nothing held and emits nothing.
+    pub fn release_series(&mut self, series: SeriesId) -> CacheEvents {
+        let released = self
+            .decoded
+            .remove_range(FrameKey::new(series, 0, 0)..=FrameKey::new(series, u32::MAX, u32::MAX));
+        let mut events = CacheEvents::default();
+        if !released.is_empty() {
+            let frames = u32::try_from(released.len()).unwrap_or(u32::MAX);
+            let bytes = released.iter().map(|(_, frame)| frame.bytes()).sum();
+            events.events.push(CacheEvent::Released {
+                series,
+                frames,
+                bytes,
+            });
+        }
+        events
     }
 
     /// Whether the key is live. This is not a use, so it does not change
@@ -399,13 +651,117 @@ impl ImageCache {
     }
 
     /// Explicitly release a frame. Not an eviction, and emits no event.
-    pub fn remove(&mut self, key: &FrameKey) -> Option<DecodedFrame> {
-        self.decoded.remove(key)
+    pub fn remove(&mut self, key: &FrameKey) -> Option<V> {
+        self.decoded.remove(key).map(|held| held.value)
     }
 
-    /// The decoded tier's pressure signal. Telemetry, not a use.
+    /// The tier's pressure signal. Telemetry, not a use.
     pub fn pressure(&self) -> Pressure {
         self.decoded.pressure()
+    }
+
+    /// The number of live entries.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.decoded.len()
+    }
+
+    /// Whether the tier holds nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.decoded.is_empty()
+    }
+
+    /// The lookup under `key` for a `matches` predicate, shared by the two
+    /// tiers.
+    ///
+    /// Reading is a use, so a hit becomes the most recently used. A value
+    /// held under the key that does not match is removed and reported as
+    /// [`FrameLookup::Stale`] with the byte count it was admitted at. The
+    /// removal is explicit and emits no event. Validation precedes the
+    /// return, so a lookup never serves a value that does not answer for
+    /// the source it was given.
+    fn lookup(
+        &mut self,
+        key: &FrameKey,
+        matches: impl FnOnce(&HeldValue<V>) -> bool,
+    ) -> FrameLookup<'_, V> {
+        let entry = self.decoded.get(key);
+        let Some(held) = entry else {
+            return FrameLookup::Miss;
+        };
+        let stale = !matches(held);
+        // The reference is not used past this line, so on the stale path the
+        // map is free to take back. The bytes reported are those of the
+        // entry the removal actually returned. The reference that escapes on
+        // the hit path is taken by a second read, because a loan that may
+        // escape into the return cannot be the one the removal ended.
+        if stale {
+            let bytes = self.decoded.remove(key).map_or(0, |h| h.bytes());
+            return FrameLookup::Stale { bytes };
+        }
+        match self.decoded.get(key) {
+            Some(held) => FrameLookup::Hit(&held.value),
+            None => FrameLookup::Miss,
+        }
+    }
+}
+
+impl ImageCache<DecodedFrame> {
+    /// Read the frame under `key` that answers for `source`.
+    pub fn get(&mut self, key: &FrameKey, source: &FrameSource) -> FrameLookup<'_, DecodedFrame> {
+        self.lookup(key, |held| {
+            held.content == source.content
+                && held.value.description() == source.description
+                && held.value.plane() == source.plane
+        })
+    }
+}
+
+impl ImageCache<CommittedFrame> {
+    /// Read the committed frame under `key` that answers for `source`.
+    pub fn get(
+        &mut self,
+        key: &FrameKey,
+        source: &CommittedSource,
+    ) -> FrameLookup<'_, CommittedFrame> {
+        self.lookup(key, |held| {
+            held.content == source.content
+                && held.value.columns() == source.columns
+                && held.value.rows() == source.rows
+        })
+    }
+
+    /// Whether the key holds a frame that answers for `source`.
+    ///
+    /// A query is not a use: it moves no recency and removes no mismatch,
+    /// because a query is telemetry. The answer is exact in all three
+    /// fields, so a frame from other bytes or another extent is not
+    /// resident even though its key is held.
+    #[must_use]
+    pub fn is_resident(&self, key: &FrameKey, source: &CommittedSource) -> bool {
+        match self.decoded.peek(key) {
+            Some(held) => {
+                held.content == source.content
+                    && held.value.columns() == source.columns
+                    && held.value.rows() == source.rows
+            }
+            None => false,
+        }
+    }
+}
+
+impl<V: Budgeted> core::fmt::Debug for ImageCache<V> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Written out because the `Lru` this wraps has no `Debug`, and a
+        // derived one would demand one of the value too.
+        let pressure = self.pressure();
+        f.debug_struct("ImageCache")
+            .field("tier", &pressure.tier)
+            .field("used", &pressure.used)
+            .field("budget", &pressure.budget)
+            .field("entries", &self.len())
+            .finish()
     }
 }
 
@@ -485,5 +841,69 @@ mod handoff_tests {
                 actual: 1,
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod content_id_tests {
+    use super::{ContentId, fold};
+
+    #[test]
+    fn fixture_fnv1a_reference_vectors() {
+        // The IETF FNV draft's test vectors for the 64-bit FNV-1a variant,
+        // over the private fold because `ContentId::of` always adds the
+        // length prefixes. Each expected value is from the draft and not
+        // from this implementation.
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b""),
+            0xcbf2_9ce4_8422_2325
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"a"),
+            0xaf63_dc4c_8601_ec8c
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"foobar"),
+            0x8594_4171_f739_67e8
+        );
+        assert_eq!(
+            fold(ContentId::FNV_OFFSET_BASIS, b"abc"),
+            0xe71f_a219_0541_574b
+        );
+    }
+}
+
+#[cfg(test)]
+mod released_tests {
+    use super::{CacheEvent, KIND_RELEASED, SeriesId};
+
+    /// The same hand-written byte style as `handoff_tests`' `WIRE`. series
+    /// `0x0102_0304_0506_0708` little-endian is `08 07 06 05 04 03 02 01`.
+    /// `frames` `0xA0B0_C0D0` little-endian is `D0 C0 B0 A0`. A zero `u32`
+    /// sits at 12. `524_288 = 0x0008_0000`, eight bytes little-endian, is
+    /// `00 00 08 00 00 00 00 00`. The last eight bytes are reserved zeros.
+    #[test]
+    fn a_released_event_encodes_the_series_release_payload() {
+        let event = CacheEvent::Released {
+            series: SeriesId(0x0102_0304_0506_0708),
+            frames: 0xA0B0_C0D0,
+            bytes: 524_288,
+        }
+        .encode(9);
+        assert_eq!(event.kind, KIND_RELEASED);
+        assert_eq!(KIND_RELEASED, 7);
+        assert_eq!(event.viewport, u32::MAX);
+        assert_eq!(event.seq, 9);
+        assert_eq!(
+            event.payload[0..8],
+            [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        );
+        assert_eq!(event.payload[8..12], [0xD0, 0xC0, 0xB0, 0xA0]);
+        assert_eq!(event.payload[12..16], [0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(
+            event.payload[16..24],
+            [0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00]
+        );
+        assert!(event.payload[24..].iter().all(|byte| *byte == 0));
     }
 }

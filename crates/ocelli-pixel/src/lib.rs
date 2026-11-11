@@ -7,27 +7,38 @@
 //! F-029 added the presentation stage and F-030 added the colour stage, so all
 //! four of PS3.3 C.11's stages now live in this crate and nowhere else.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
+pub mod auto_window;
 pub mod color;
 pub mod error;
+pub mod icc;
 pub mod image_plane;
 pub mod lut;
 pub mod stored_pixel;
 
+pub use auto_window::{
+    AUTO_WINDOW_SAMPLE_CAP, AUTO_WINDOW_SERIES_FRAMES, AutoWindow, AutoWindowBasis,
+    AutoWindowError, AutoWindowPool, StoredRange, auto_window, series_sample,
+};
+
 pub use color::{
-    ColorTransform, DecodedLayout, DecodedPhotometric, PaletteColorLut, PixelDataEncoding, Rgb,
+    ColorTransform, ColourWindow, DecodedLayout, DecodedPhotometric, DisplayScale, PaletteColorLut,
+    PixelDataEncoding, Rgb,
 };
 pub use error::PixelError;
+pub use icc::{IccError, IccProfile, IccTransform, RenderingIntent};
 pub use image_plane::{
     DIRECTION_COSINE_TOLERANCE, ImageDimensions, ImageOrientationPatient, ImagePlane,
     ImagePositionPatient, PixelSpacing,
 };
 pub use lut::{
     LutChain, LutDescriptor, ModalityTransform, PresentationLutEvidence, PresentationLutShape,
-    PresentationTransform, VoiFunction, VoiTransform, lut_descriptor_clones, modality,
+    PresentationTransform, StoredSampleTable, VoiFunction, VoiTransform, lut_descriptor_clones,
+    modality,
 };
 pub use stored_pixel::{
     ByteOrder, PhotometricInterpretation, PixelRepresentation, PlanarConfiguration, SampleLayout,

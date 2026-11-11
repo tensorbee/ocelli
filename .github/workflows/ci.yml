@@ -59,6 +59,25 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Successful tests otherwise hide their stdout. Retain these synthetic
+      # per-channel observations without treating them as a quality threshold.
+      - name: JPEG class-two observations, unmeasured
+        run: cargo test -p ocelli-codec --test jpeg -- --show-output
+
+      # F-239, D-31. The two vendored decoders are excluded from the
+      # workspace, so the step above never reaches their unit tests, and
+      # AC25's coefficient contract was held by tests no gate ran (review
+      # pass 4, S1). The gate supplies the two crates' dev-dependencies
+      # itself, because the workspace lock does not carry them all, and
+      # runs their library tests offline and locked.
+      - name: Vendored decoders' library tests, offline and locked
+        run: bin/ocelli.sh gate vendor-tests
+
+      # F-238 resolves both Apple graphs offline, including on Linux.
+      # Host tests do not populate those target dependencies. Fetch the
+      # locked workspace dependencies for all targets before that proof.
+      - name: Dependencies for offline cross-target resolution
+        run: cargo fetch --locked
 
       # Story E1.7, the cross-target build proof. This is what keeps decision
       # D2 honest over time: if the core stopped being WebAssembly-agnostic,
@@ -131,9 +150,18 @@ jobs:
       # `bin/ocelli.sh bench --compare` on the machine that owns the baseline,
       # deliberately not here, because a duration on a shared runner is noise
       # and a skipped gate is not a pass.
+      # Comparison controls import the pinned oracle parser and page builder.
+      # Install their locked dependencies even when browser controls opt out.
+      - run: npm ci --prefix tools/oracle
       - run: bin/ocelli.sh gate bench
+      - name: cargo-deny 0.19.0
+        run: cargo install cargo-deny --version 0.19.0 --locked
+      # F-220. The binaries section reads the registry cache offline. A
+      # missing cache is a failure, so populate it before the licence gate.
+      - run: cargo fetch --locked
+      - run: bin/ocelli.sh gate licences
       # docs/SOURCE-POLICY.md and HLD gate A6. No allowlist.
-      - run: python3 scripts/source_provenance_check.py
+      - run: bin/ocelli.sh gate provenance
       - run: python3 scripts/staged_content_check.py --tracked
       # F-014. A field-quirk record is complete only when its synthetic
       # recipe, independent expectation, manifest row and mutation boundary
@@ -234,6 +262,7 @@ jobs:
         run: |
           python3 -m pip install "uv==0.11.19"
           uv sync --locked
+      - run: bin/ocelli.sh gate licences-wheels
 
       # DCMTK comes from the distribution and is therefore NOT pinned. On
       # ubuntu-latest (24.04) that is 3.6.7, against the 3.7.0 that
@@ -254,6 +283,19 @@ jobs:
       # If a DCMTK-version-sensitive defect ever appears, that is the fix.
       - name: DCMTK, for the four JPEG syntaxes pydicom cannot encode
         run: sudo apt-get update && sudo apt-get install -y dcmtk
+
+      # The two JPEG 2000 colour syntaxes are encoded by the OpenJPEG CLI
+      # that `corpus_synth.py` shells out to, from the distribution for the
+      # same reason DCMTK is unpinned above: this job checks determinism
+      # within one toolchain and never compares a digest against the
+      # manifest, so the version on the runner is enough. TIFF support is
+      # not a concern here, because the generator feeds opj_compress a P6
+      # PPM and the package's tools read no TIFF in that flow.
+      - name: OpenJPEG CLI, for the two JPEG 2000 colour syntaxes
+        run: sudo apt-get install -y libopenjp2-tools
+      # The suite refuses to run when a required tool is absent, so prove
+      # the install landed under the name the refusal reports.
+      - run: command -v opj_compress
 
       # TIFF support is explicitly off: OJPH_ENABLE_TIFF_SUPPORT defaults ON
       # in this tag and would need a libtiff development package that nothing
@@ -302,7 +344,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # F-237 review D1. `gate packages` packs @ocelli/wasm, and its prepack
+      # script runs `bin/ocelli.sh wasm` and `bin/ocelli.sh wasm-decode`, so
+      # this job also needs what the `wasm` job below installs: the pinned
+      # toolchain, the wasm32 target and wasm-pack. Without them the gate
+      # fails closed: bin/ocelli.sh prints "wasm-pack is not installed. See
+      # docs/DEVELOPER_SETUP.md" and exits 1 rather than skipping the gate.
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/wasm-pack-action@v0.4.0
       - run: npm ci
+      # F-218. High and critical advisories in the published npm runtime.
+      # The audit asks the registry, so a new advisory can turn this red
+      # without a tree change. A missing report fails closed.
+      - run: bin/ocelli.sh gate advisories
       # Includes the cached-wasm-view ban of HLD 17.2, which is a silent
       # failure mode and therefore a lint rather than a convention.
       - run: bin/ocelli.sh gate lint
@@ -347,6 +404,26 @@ jobs:
       # this needs no browser and no new dependency, and it sits in this job
       # because it is the one with wasm-pack.
       - run: bin/ocelli.sh gate panic
+
+  viewer-browser:
+    name: Viewer browser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # F-208 AC14. The folder viewer's displayed aspect is measured in
+      # headless Chromium through the benchmark harness's pinned Playwright,
+      # so that install is the one made here. The gate builds the viewer in
+      # release and starts it with OCELLI_PORT=0.
+      - run: npm ci
+        working-directory: tools/bench
+      - run: npx playwright install --with-deps chromium
+        working-directory: tools/bench
+      - run: bin/ocelli.sh gate viewer-browser
 
 # The `guards-deep` JOB used to sit here, gated to push-to-main and
 # workflow_dispatch. The S03 review's ninth pass moved its one step into the

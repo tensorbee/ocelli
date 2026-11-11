@@ -25,8 +25,29 @@ workspace = true
 # reached it on. The cost is that `bin/ocelli.sh native` step 1 starts linking
 # wgpu, which is a real build-time change to a gate in the floor, and it is
 # accepted because the alternative is shipping an override nobody can observe.
-[dependencies]
+#
+# The dependency is target-gated, and not for a wasm32 build that can never
+# happen: the crate is `wasm: no` and its lib turns that cell into a
+# compile_error. The gate keeps ocelli-render OUT of this crate's wasm32
+# resolve, which is what leaves the `metal` forwarding feature below inert
+# there. With the dependency present on wasm32, this crate's default feature
+# would forward `wgpu/metal` onto the workspace's wasm32 resolve and fail the
+# decode-graph guard, for a crate that is never compiled for that target.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ocelli-render = { path = "../ocelli-render" }
+
+# D-33, F-238. The shipped native archive is this crate built with
+# `--no-default-features`, which is the configuration `bin/ocelli.sh native`
+# checks and the one whose resolved Apple graph must hold no objc2 crate. The
+# default keeps Metal for development, so `cargo build -p ocelli-native` on
+# the macOS host still resolves tier A the way `gate gpu` does. `gles` needs
+# no forwarding: it stays a hard feature of ocelli-render's native table,
+# because the F-238 measurement found that on Apple the `gles` chain never
+# reaches wgpu-hal's own `gles`, which is the only feature there that names
+# `dep:objc2`. See docs/lld/build-targets.md.
+[features]
+default = ["metal"]
+metal = ["ocelli-render/metal"]
 
 # Dev only. `AdapterFacts` states two of its fields in wgpu's own types, so a
 # test that builds a synthetic adapter has to name them. Nothing outside

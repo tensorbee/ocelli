@@ -17,6 +17,7 @@
 //! patient z is within half the slice spacing. The presenter does not
 //! import wgpu.
 
+#![doc(test(attr(forbid(unsafe_code))))]
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
