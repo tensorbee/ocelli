@@ -2241,22 +2241,16 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::ExitStatus;
-    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Creates a unique scratch directory for a single produce invocation.
+    /// Creates a unique scratch directory under the system temporary
+    /// directory. Producer invocations write their outputs into it, and the
+    /// checkout-write guard builds its temporary mirror root in one.
     ///
     /// The name only implies ownership once exclusive creation succeeds. A
     /// pre-existing path is never deleted, the caller retries with a fresh
     /// name instead.
     fn produce_test_scratch_dir() -> ProduceScratchDirGuard {
-        // The guard's BEFORE snapshot rides on this call. Every
-        // producer-writing test creates its scratch before it produces, so
-        // the first scratch creation in a process is captured before that
-        // process's own copies of the producer tests can write into the
-        // checkout. A snapshot taken later, inside the guard itself, would
-        // bake those writes into the baseline and go blind to them.
-        f272_ensure_before_snapshot();
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let pid = std::process::id();
         for attempt in 0..1024u32 {
@@ -2287,6 +2281,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    /// Environment variable through which the checkout-write guard points a
+    /// child producer run at its temporary mirror root. It is set only on
+    /// the guard's child process and read only by `producer_repo_root`.
+    const F272_REPO_ROOT_OVERRIDE: &str = "F272_PRODUCER_REPO_ROOT";
+
+    /// The repository root the producer tests read reference and corpus data
+    /// from. Producer tests obtain the root only through this helper, so the
+    /// guard can point a child run at a mirror root through the override.
+    fn producer_repo_root() -> PathBuf {
+        match std::env::var_os(F272_REPO_ROOT_OVERRIDE) {
+            Some(root) => PathBuf::from(root),
+            None => f272_real_repo_root(),
+        }
+    }
+
+    /// The real repository root beside this manifest, independent of the
+    /// override. The guard digests it and copies the mirror from it.
+    fn f272_real_repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
     }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
@@ -2356,7 +2371,7 @@ mod tests {
 
     #[test]
     fn applicable_monochrome_rows_reach_the_comparator() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         let scratch = produce_test_scratch_dir();
@@ -3182,7 +3197,7 @@ mod tests {
     /// 409.625. Without that snap the row stays at two samples.
     #[test]
     fn uniform_slice_edge_matches_the_reference_within_one_lsb() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
@@ -3261,7 +3276,7 @@ mod tests {
     /// checks that the producer refuses a missing reference run, as the
     /// neighbouring tests do, so the test returns instead of panicking.
     fn rendered_pair(id: &str) -> Option<(Vec<u8>, Vec<u8>)> {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
@@ -3641,33 +3656,85 @@ mod tests {
 
     /// Actual protected oracle tree beside this manifest, no surrogate.
     fn f272_protected_tree() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
+        f272_real_repo_root()
             .join("tools/oracle")
             .components()
             .collect::<PathBuf>()
     }
 
-    /// Process wide BEFORE snapshot of the protected tree, captured once per
-    /// process by the first producer scratch creation. Every producer-writing
-    /// site creates its scratch before it produces, so that capture precedes
-    /// the producer writes of the run. The guard reuses it as its baseline,
-    /// which keeps the writes of this process's own producer-test copies
-    /// inside the comparison instead of baking them into the baseline.
-    /// Capturing inside the guard instead would start the baseline after
-    /// those writes and miss them.
-    ///
-    /// The boundary stays the plan's: a producer-writing test that wrote
-    /// before any scratch creation would escape this capture, and a final
-    /// digest says nothing about writes restored before it is compared.
-    static F272_BEFORE_SNAPSHOT: OnceLock<([u8; 32], BTreeSet<String>)> = OnceLock::new();
-
-    fn f272_ensure_before_snapshot() -> ([u8; 32], BTreeSet<String>) {
-        let captured =
-            F272_BEFORE_SNAPSHOT.get_or_init(|| f272_tree_digest(&f272_protected_tree()));
-        captured.clone()
+    /// Populates the guard's temporary mirror root with only what the
+    /// producer tests read from the real tree, and with none of the
+    /// protected paths. The protected oracle directory is created even when
+    /// there is nothing to copy, so its digest is always defined.
+    fn f272_populate_mirror_root(mirror_root: &Path) {
+        match fs::create_dir_all(mirror_root.join("tools/oracle")) {
+            Ok(()) => {}
+            Err(_) => unreachable!("the mirror root's protected oracle directory must create"),
+        }
+        let out = f272_real_repo_root().join("tools/oracle/out");
+        if out.is_dir() {
+            f272_mirror_copy(&out, &mirror_root.join("tools/oracle/out"));
+        }
+        let corpus = f272_real_repo_root().join("corpus/data");
+        if corpus.is_dir() {
+            f272_mirror_copy(&corpus, &mirror_root.join("corpus/data"));
+        }
     }
 
+    /// Recursive copy used to build the mirror. A symlinked source entry is
+    /// copied as the content it points at, so the mirror never contains a
+    /// symlink and its digest stays clean.
+    fn f272_mirror_copy(source: &Path, destination: &Path) {
+        match fs::create_dir_all(destination) {
+            Ok(()) => {}
+            Err(_) => unreachable!("mirror directory {} must create", destination.display()),
+        }
+        let entries = match fs::read_dir(source) {
+            Ok(entries) => entries,
+            Err(_) => unreachable!("mirror source {} must be readable", source.display()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => unreachable!("mirror source entry must be readable"),
+            };
+            let from = entry.path();
+            let to = destination.join(entry.file_name());
+            let metadata = match fs::metadata(&from) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("mirror source entry {} must be statable", from.display()),
+            };
+            if metadata.is_dir() {
+                f272_mirror_copy(&from, &to);
+            } else {
+                match fs::copy(&from, &to) {
+                    Ok(_) => {}
+                    Err(_) => unreachable!("mirror copy of {} must succeed", from.display()),
+                }
+            }
+        }
+    }
+
+    /// Re-runs the producer selection as a child against a temporary mirror
+    /// root and proves the run wrote nothing protected.
+    ///
+    /// What the guard covers and what it does not, stated once here and
+    /// matched by docs/lld/oracle.md. The mirror check catches any selected
+    /// producer test that writes a protected `tools/oracle` path during the
+    /// child run, whatever the parent process did before the guard and
+    /// however deterministic the written bytes are, because the mirror
+    /// holds only the read side copies, so a protected write lands in it
+    /// as a new entry or a changed copy. The digest of the real protected
+    /// tree across the child run is a backstop for a root computed without
+    /// `producer_repo_root` when the child's bytes differ from the state the
+    /// parent's own run left behind. A deterministic write that bypasses the
+    /// helper is caught by neither digest and is prevented by the rule that
+    /// producer tests obtain the root only through the helper. Neither
+    /// check observes the parent process's own writes before the guard, and
+    /// neither observes an identical rewrite of an existing file, so the
+    /// guarantee is new protected entries and changed content during the
+    /// child run. It is never a claim about transient writes restored
+    /// before a digest, and never about the parent's own state.
     #[test]
     fn guard_no_checkout_write() {
         let (tests, filtered_out, list_status) = f272_list_selected_tests();
@@ -3683,14 +3750,19 @@ mod tests {
         f272_validate_selection(&tests);
 
         let tree = f272_protected_tree();
-        // Reuse the process wide capture when an earlier producer test
-        // already made it, and capture here otherwise. Either way the
-        // baseline is in place before any producer write in this process,
-        // because every producer-writing site creates its scratch first.
-        let (before_digest, before_notes) = f272_ensure_before_snapshot();
+        let (before_digest, before_notes) = f272_tree_digest(&tree);
         assert!(
             before_notes.is_empty(),
             "the protected oracle tree snapshot failed closed on unsupported or unreadable entries before the run"
+        );
+
+        let mirror = produce_test_scratch_dir();
+        f272_populate_mirror_root(&mirror.path);
+        let mirror_tree = mirror.path.join("tools/oracle");
+        let (mirror_before, mirror_before_notes) = f272_tree_digest(&mirror_tree);
+        assert!(
+            mirror_before_notes.is_empty(),
+            "the mirror root snapshot failed closed on unsupported or unreadable entries before the run"
         );
 
         let child_status = match std::process::Command::new(match std::env::current_exe() {
@@ -3699,6 +3771,7 @@ mod tests {
         })
         .args(["produce::tests::"])
         .args(["--skip", "produce::tests::guard_no_checkout_write"])
+        .env(F272_REPO_ROOT_OVERRIDE, &mirror.path)
         .status()
         {
             Ok(child_status) => child_status,
@@ -3707,6 +3780,16 @@ mod tests {
         assert!(
             child_status.success(),
             "the producer suite child exited unsuccessfully, {child_status}"
+        );
+
+        let (mirror_after, mirror_after_notes) = f272_tree_digest(&mirror_tree);
+        assert!(
+            mirror_after_notes.is_empty(),
+            "the mirror root snapshot failed closed on unsupported or unreadable entries after the run"
+        );
+        assert_eq!(
+            mirror_before, mirror_after,
+            "the temporary mirror root gained or changed protected entries during the producer child run, checkout writes are exposed"
         );
 
         let (after_digest, after_notes) = f272_tree_digest(&tree);
