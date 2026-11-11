@@ -262,8 +262,14 @@ describe("F-103 event catalogue", () => {
         }
       }
     }
-    // F-069 is the shell listener. events.ts stays the only catalogue.
-    expect(listeners).toEqual(["pointer.ts"]);
+    // F-069 is the shell listener. F-245's client and provider listen on the
+    // caller's own AbortSignal, which is cancellation and not a second
+    // catalogue. events.ts stays the only catalogue.
+    expect([...listeners].sort()).toEqual([
+      "dicomweb-viewer.ts",
+      "dicomweb.ts",
+      "pointer.ts",
+    ]);
     expect(declarations).toEqual(["events.ts"]);
   });
 });

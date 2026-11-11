@@ -7389,6 +7389,132 @@ def _example_dev_reaches_a_url(
     return box.run(["bin/example-dev.sh"])
 
 
+# F-245. The launcher's refusals are probed through its own extracted
+# functions rather than a full launcher run, because the deadlines are real
+# seconds and the failure states are process states a sandbox CLI cannot
+# reach from outside. Each driver carries the tracked launcher's own
+# stopOwnedGroup and startOwnedPhase text, sliced from the sandbox copy, so a
+# reword of either function changes the slice and the probe follows the
+# product. The dead-group control spawns a detached child that has already
+# exited, so the pid it names leads no process group and no real signal is
+# sent to anyone.
+
+_LAUNCHER_PROBE_IMPORTS = """\
+import { spawn } from 'node:child_process'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
+import process from 'node:process'
+"""
+
+# A detached child that has already exited. Its pid leads no group, so the
+# group probe answers ESRCH, no signal is sent, and stopOwnedGroup settles.
+_LAUNCHER_DEAD_GROUP_BODY = """\
+const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+  detached: true
+})
+await new Promise((resolve) => child.on('exit', resolve))
+await stopOwnedGroup(child.pid, 'SIGTERM', Promise.resolve())
+console.log('settled')
+"""
+
+
+def _launcher_probe(name: str, body: str) -> Invoke:
+    """A driver that calls the launcher's own extracted functions."""
+    def run(box: Sandbox) -> subprocess.CompletedProcess[str]:
+        source = box.read("bin/folder-viewer-dev.mjs")
+        start = source.index("async function stopOwnedGroup")
+        end = source.index("async function runPhase")
+        box.write(
+            f"target/f245-launcher-probe/{name}.mjs",
+            _LAUNCHER_PROBE_IMPORTS + source[start:end] + "\n" + body)
+        return box.run(["node", f"target/f245-launcher-probe/{name}.mjs"],
+                       timeout=120)
+    return Invoke(key=f"launcher-probe {name}", run=run)
+
+
+_LAUNCHER_SETTLE_INVOKE = _launcher_probe(
+    "settle", _LAUNCHER_DEAD_GROUP_BODY)
+_LAUNCHER_PHASE_SETTLE_INVOKE = _launcher_probe(
+    "phase-settle", """\
+const phase = startOwnedPhase(process.execPath, ['-e', 'process.exit(0)'], {})
+await phase.done
+console.log('settled')
+""")
+_LAUNCHER_INVALID_PID_BODY = """\
+try {
+  await stopOwnedGroup(process.pid, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_INVALID_SIGNAL_BODY = """\
+try {
+  await stopOwnedGroup(1, 'SIGKILL', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_PROBE_FAILED_BODY = """\
+const realKill = process.kill.bind(process)
+process.kill = (pid, signal) => {
+  if (signal === 0) {
+    const error = new Error('operation not permitted')
+    error.code = 'EPERM'
+    throw error
+  }
+  return realKill(pid, signal)
+}
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_SIGNAL_FAILED_BODY = """\
+process.kill = (pid, signal) => {
+  if (signal === 0) return true
+  const error = new Error('operation not permitted')
+  error.code = 'EPERM'
+  throw error
+}
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_NEVER_SETTLES_BODY = """\
+process.kill = () => true
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', new Promise(() => {}))
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_PHASE_FAILED_BODY = """\
+process.kill = () => true
+const phase = startOwnedPhase(process.execPath, ['-e', 'process.exit(0)'], {})
+phase.stop('SIGTERM')
+try {
+  await phase.done
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+
+
 # F-218. The snippets call the pure functions on synthetic reports. The GHSA
 # ids are fixtures, not the live advisory list, so a moving database cannot
 # move a probe. `left-pad` stands in for a closure package that has no row.
@@ -13496,6 +13622,94 @@ GUARDS: tuple[Guard, ...] = (
                      "can reach the wait, and shortens that wait. The control "
                      "stubs the build, writes one URL and stubs Vite, and "
                      "must not print this refusal."),
+        ),
+    ),
+
+    # -- the folder viewer dev launcher -----------------------------------
+    Guard(
+        id="folder-viewer-dev",
+        file="bin/folder-viewer-dev.mjs",
+        gate="-",
+        spec="`.claude/commands/implement-feature.md` section 3, a new "
+             "refusal arrives with its probe, and the F-245 plan's launcher "
+             "section, owned INT and TERM cleanup controlled by the launcher",
+        refuses="Stopping an owned process group named by a pid that is not "
+                "a positive integer other than the launcher's own, or with a "
+                "signal that is neither SIGINT nor SIGTERM; a group "
+                "liveness probe or a group signal that fails with something "
+                "other than ESRCH; an owned group still alive after the "
+                "SIGKILL confirmation deadline; and an owned phase whose "
+                "stop rejected, rather than reporting the failure and "
+                "exiting non-zero.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/folder_viewer_dev_test.mjs",),
+        probes=(
+            Probe(
+                "folder-viewer-dev.invalid-owned-pid",
+                None,
+                _launcher_probe("invalid-owned-pid",
+                                _LAUNCHER_INVALID_PID_BODY),
+                "invalid owned pid",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="The pid check runs before anything else, so the "
+                     "driver names the launcher's own pid and no real group "
+                     "is signalled. The control stops an already exited "
+                     "detached child's pid, which leads no group, and "
+                     "settles."),
+            Probe(
+                "folder-viewer-dev.invalid-stop-signal",
+                None,
+                _launcher_probe("invalid-stop-signal",
+                                _LAUNCHER_INVALID_SIGNAL_BODY),
+                "invalid stop signal",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="The signal check runs before the first kill, so pid 1 "
+                     "is never contacted. The control is the same dead "
+                     "group settle."),
+            Probe(
+                "folder-viewer-dev.group-probe-failed",
+                None,
+                _launcher_probe("group-probe-failed",
+                                _LAUNCHER_PROBE_FAILED_BODY),
+                "group probe failed",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="process.kill is replaced for the liveness signal 0 "
+                     "only, so the probe throws EPERM where the launcher "
+                     "expects ESRCH or success, and no real group 12345 is "
+                     "contacted. The control leaves kill alone."),
+            Probe(
+                "folder-viewer-dev.group-signal-failed",
+                None,
+                _launcher_probe("group-signal-failed",
+                                _LAUNCHER_SIGNAL_FAILED_BODY),
+                "group signal failed",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="process.kill answers the liveness probe true and "
+                     "throws on the real signal, so the refusal is the send "
+                     "and not the probe. The control leaves kill alone."),
+            Probe(
+                "folder-viewer-dev.stop-did-not-settle",
+                None,
+                _launcher_probe("never-settles",
+                                _LAUNCHER_NEVER_SETTLES_BODY),
+                "owned group stop did not settle",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="kill always answers true and the child-closed promise "
+                     "never resolves, so both deadlines pass at about four "
+                     "seconds and the refusal is the hard deadline. The "
+                     "control settles at once on a dead group."),
+            Probe(
+                "folder-viewer-dev.phase-stop-failed",
+                None,
+                _launcher_probe("phase-failed",
+                                _LAUNCHER_PHASE_FAILED_BODY),
+                "owned phase stop failed",
+                control=_LAUNCHER_PHASE_SETTLE_INVOKE,
+                note="The phase's own child exits at once, but the replaced "
+                     "kill keeps the group probe alive past the hard "
+                     "deadline, so stopOwnedGroup rejects and done() "
+                     "converts that into the phase refusal. The control is "
+                     "the same phase against a real dead group."),
         ),
     ),
 

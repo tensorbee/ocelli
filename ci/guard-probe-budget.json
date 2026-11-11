@@ -297,6 +297,7 @@
     "discover": 0,
     "errors": 19,
     "example-dev": 1,
+    "folder-viewer-dev": 6,
     "hooks.commit-msg": 3,
     "hooks.pre-commit": 1,
     "hooks.pre-push": 1,
