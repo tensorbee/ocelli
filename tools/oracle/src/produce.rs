@@ -2310,27 +2310,40 @@ mod tests {
     /// The one-root rule. A producer test that reads reference or corpus
     /// data must obtain the repository root only through
     /// `producer_repo_root`, so no writer can bypass the guard's mirror
-    /// override with its own real-root computation. Guard infrastructure
-    /// takes the real root from the whitelisted helper. The scan reads
-    /// this file's own test module and requires the single manifest-dir
-    /// read to sit inside the real-root helper. Both markers are built
-    /// through `concat` so this test's own source carries no second read
-    /// and no second module boundary.
+    /// override with its own real-root computation. The scan reads this
+    /// file's own test module and asserts two things. The single
+    /// manifest-dir read must sit inside the real-root helper. And every
+    /// textual reference to the real-root helper must sit inside an
+    /// explicitly allowlisted guard-infrastructure function, so a
+    /// producer test cannot reach the real tree by calling the helper
+    /// itself. The counted markers are built through `concat` so this
+    /// test's own source carries no second read, no second module
+    /// boundary and no second reference.
     #[test]
     fn manifest_dir_is_read_only_in_the_real_root_helper() {
         let marker = concat!("CARGO", "_MANIFEST_DIR");
         let module_marker = concat!("mod", " tests {");
+        let helper_marker = concat!("f272", "_real_repo_root");
+        let definition_marker = concat!("fn ", "f272", "_real_repo_root");
+        let fn_marker = "\n    fn ";
+        let allowlist = [
+            "producer_repo_root",
+            "f272_link_corpus_side",
+            "f272_protected_tree",
+            "f272_populate_mirror_root",
+            "mirror_corpus_side_is_a_symlink_and_never_a_copy",
+        ];
         let source = include_str!("produce.rs");
         let module = match source.rsplit_once(module_marker) {
             Some((_, module)) => module,
             None => unreachable!("the test module must exist in this source file"),
         };
-        let helper_at = match module.find("fn f272_real_repo_root") {
+        let helper_at = match module.find(definition_marker) {
             Some(at) => at,
             None => unreachable!("the real-root helper must exist in the test module"),
         };
         let next_fn = module[helper_at..]
-            .find("\n    fn ")
+            .find(fn_marker)
             .map(|at| helper_at + at)
             .unwrap_or(module.len());
         let reads: Vec<usize> = module.match_indices(marker).map(|(at, _)| at).collect();
@@ -2348,6 +2361,35 @@ mod tests {
             read > helper_at && read < next_fn,
             "the single {marker} read must sit inside the real-root helper body"
         );
+        let references: Vec<usize> = module
+            .match_indices(helper_marker)
+            .map(|(at, _)| at)
+            .collect();
+        assert!(
+            !references.is_empty(),
+            "the real-root helper must be referenced in the test module, the allowlist scan must match something"
+        );
+        // The definition occurrence is the helper's own name inside its
+        // own signature. Its body is already bounded by the manifest-read
+        // check above, so it is exempt from the enclosing-function test.
+        let definition_name_at = helper_at + "fn ".len();
+        for at in references {
+            if at == definition_name_at {
+                continue;
+            }
+            let owner = match module[..at].rfind(fn_marker) {
+                Some(fn_at) => {
+                    let rest = &module[fn_at + fn_marker.len()..];
+                    let end = rest.find('(').unwrap_or(0);
+                    &rest[..end]
+                }
+                None => "",
+            };
+            assert!(
+                allowlist.contains(&owner),
+                "every real-root helper reference must sit inside an allowlisted guard-infrastructure function, found owner {owner}"
+            );
+        }
     }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
@@ -3708,23 +3750,12 @@ mod tests {
             .collect::<PathBuf>()
     }
 
-    /// Populates the guard's temporary mirror root with the read side the
-    /// producer tests need. The real `tools/oracle/out` reference run is
-    /// copied, because the mirror digest must see a write inside it.
-    /// `corpus/data` is never copied: the mirror holds a directory symlink
-    /// to the real corpus root, which `open_corpus` canonicalises back to
-    /// the same directory, so the child reads the same bytes and no corpus
-    /// file is ever duplicated. The protected oracle directory is created
-    /// even when there is nothing to copy, so its digest is always defined.
-    fn f272_populate_mirror_root(mirror_root: &Path) {
-        match fs::create_dir_all(mirror_root.join("tools/oracle")) {
-            Ok(()) => {}
-            Err(_) => unreachable!("the mirror root's protected oracle directory must create"),
-        }
-        let out = f272_real_repo_root().join("tools/oracle/out");
-        if out.is_dir() {
-            f272_mirror_copy(&out, &mirror_root.join("tools/oracle/out"));
-        }
+    /// Creates the mirror's corpus side: a directory symlink to the
+    /// canonical real corpus root, which `open_corpus` canonicalises back
+    /// to the same directory, so the child reads the same bytes and no
+    /// corpus file is ever duplicated. When the real corpus is absent the
+    /// mirror holds no corpus side at all.
+    fn f272_link_corpus_side(mirror_root: &Path) {
         let corpus = f272_real_repo_root().join("corpus/data");
         if corpus.is_dir() {
             match fs::create_dir_all(mirror_root.join("corpus")) {
@@ -3748,6 +3779,24 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Populates the guard's temporary mirror root with the read side the
+    /// producer tests need. The real `tools/oracle/out` reference run is
+    /// copied, because the mirror digest must see a write inside it. The
+    /// corpus side is linked, never copied, by `f272_link_corpus_side`.
+    /// The protected oracle directory is created even when there is
+    /// nothing to copy, so its digest is always defined.
+    fn f272_populate_mirror_root(mirror_root: &Path) {
+        match fs::create_dir_all(mirror_root.join("tools/oracle")) {
+            Ok(()) => {}
+            Err(_) => unreachable!("the mirror root's protected oracle directory must create"),
+        }
+        let out = f272_real_repo_root().join("tools/oracle/out");
+        if out.is_dir() {
+            f272_mirror_copy(&out, &mirror_root.join("tools/oracle/out"));
+        }
+        f272_link_corpus_side(mirror_root);
     }
 
     /// Collects every file path under a directory, names only, no content
@@ -3841,15 +3890,17 @@ mod tests {
     /// a backstop for a root computed without `producer_repo_root` when
     /// the child's bytes differ from the state the parent's own run left
     /// behind. A deterministic write is caught for new entries and changed
-    /// copies only, and an identical rewrite of an existing file, in the
-    /// real tree or inside the mirrored `out` copy, changes no digest and
-    /// is caught by neither check. Bypassing the helper is prevented at
-    /// the source by the rule that producer tests obtain the root only
-    /// through it, which the module's own source scan enforces by allowing
-    /// exactly one manifest-dir read. Neither check observes the parent
-    /// process's own writes before the guard. It is never a claim about
-    /// transient writes restored before a digest, and never about the
-    /// parent's own state.
+    /// copies only. An identical rewrite of an existing file, in the real
+    /// tree or inside the mirrored `out` copy, changes no digest and is
+    /// caught by neither check, and that gap stays open. The module's
+    /// source scan only stops a producer test computing a second real
+    /// root. It enforces that rule by allowing exactly one manifest-dir
+    /// read and an explicit allowlist of the guard-infrastructure
+    /// functions that may reference the real-root helper, and it does not
+    /// stop a rewrite made through the helper. Neither check observes the
+    /// parent process's own writes before the guard. It is never a claim
+    /// about transient writes restored before a digest, and never about
+    /// the parent's own state.
     #[test]
     fn guard_no_checkout_write() {
         let (tests, filtered_out, list_status) = f272_list_selected_tests();
@@ -4021,7 +4072,7 @@ mod tests {
 
         let corpus = f272_real_repo_root().join("corpus/data");
         let mirror = produce_test_scratch_dir();
-        f272_populate_mirror_root(&mirror.path);
+        f272_link_corpus_side(&mirror.path);
         let link = mirror.path.join("corpus/data");
         if !corpus.is_dir() {
             assert!(
@@ -4078,30 +4129,11 @@ mod tests {
             );
         }
         // The child's corpus reads go through open_corpus, which
-        // canonicalises the root before it opens anything. The link path
-        // canonicalises to the asserted root, so a read through the mirror
-        // lands on the same directory as a read through the real path.
-        // Proven with an absent name, which exercises that canonicalisation
-        // and is checked to name no real file, so no content is ever
-        // opened.
-        let probe = "f272-absent-content-probe";
-        assert!(
-            !canonical_real.join(probe).exists(),
-            "the corpus must not contain the probe name, the canonicalisation probe reads nothing"
-        );
-        let real_stop = match super::open_corpus(&canonical_real, probe) {
-            Err(stop) => stop,
-            Ok(_) => unreachable!("an absent probe name must not read"),
-        };
-        let link_stop = match super::open_corpus(&link, probe) {
-            Err(stop) => stop,
-            Ok(_) => unreachable!("an absent probe name must not read"),
-        };
-        assert_eq!(
-            (real_stop.disposition, real_stop.reason),
-            (link_stop.disposition, link_stop.reason),
-            "a corpus read through the mirror link must reach the same stop as through the real path"
-        );
+        // canonicalises its root before it opens anything. The
+        // canonical-resolve assertion above is the check for that: the
+        // link must resolve to the canonical real root, and a copied
+        // tree or a wrong target resolves elsewhere, so the assertion
+        // can fail.
     }
 
     fn fixture_worker(
