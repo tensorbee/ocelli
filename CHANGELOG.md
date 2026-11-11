@@ -10,8 +10,6 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
-- Corrected nine public Rust documentation reference lines across seven files and added a workspace gate denying rustdoc::private_intra_doc_links and rustdoc::broken_intra_doc_links for default and native public docs.
-
 - The embedding Content Security Policy is documented and browser-proven, and the local folder viewer serves strict page-specific script and style hashes.
 - Release tooling packages the wasm module and its notice files separately as `@ocelli/wasm`, alongside the matching `@ocelli/core` version.
 - Folder viewer colour frames draw through the library colour stage with per-channel window and invert and named refusals.
@@ -684,6 +682,7 @@ Repository bootstrap. Nothing is published.
   `@ocelli/core` under `/lib/` from an allowlist, so the region window needs
   `npm run build -w @ocelli/core` and reads unavailable without it. The
   bottom right corner names the window shown.
+- Corrected nine public Rust documentation reference lines across seven files and added a workspace gate denying `rustdoc::private_intra_doc_links` and `rustdoc::broken_intra_doc_links` for default and native public docs.
 
 ### Changed
 

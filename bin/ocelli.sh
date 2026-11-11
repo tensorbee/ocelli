@@ -108,6 +108,7 @@ run_gate() {
     fmt)         cargo fmt --all --check ;;
     clippy)      cargo clippy --workspace --all-targets -- -D warnings ;;
     test)        cargo test --workspace ;;
+    # F-268. Encoded inherited allow flags are unset for this child only.
     docs)
         env -u CARGO_ENCODED_RUSTDOCFLAGS RUSTDOCFLAGS='-D rustdoc::private_intra_doc_links -D rustdoc::broken_intra_doc_links' cargo doc --workspace --no-deps --locked --keep-going ;;
     # F-239, D-31, the lead ruling after the codec part's review pass 4 (S1).

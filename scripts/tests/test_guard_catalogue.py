@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -30,7 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from guards import census, discover, sandbox  # noqa: E402
+from guards import catalogue, census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
                               GUARDS, _close_preflight, _run_docs_gate,
                               _write_docs_fixture,
@@ -333,7 +334,6 @@ class DocProbeHarnessPreconditions(unittest.TestCase):
         self.assertEqual(str(caught.exception), "unknown fault: 'unsupported-arm'")
 
     def test_run_docs_gate_rejects_noop_transport(self) -> None:
-        import subprocess
         with tempfile.TemporaryDirectory() as tempdirectory:
             box = sandbox.Sandbox(path=Path(tempdirectory))
             with mock.patch.object(box, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as fake_run:
@@ -341,9 +341,6 @@ class DocProbeHarnessPreconditions(unittest.TestCase):
                     _run_docs_gate(box, 'healthy')
             fake_run.assert_called_once()
         self.assertEqual(str(caught.exception), 'docs gate passed without real rendered docs')
-
-
-from guards import catalogue
 
 
 class UnextractableGateProbeSelection(unittest.TestCase):

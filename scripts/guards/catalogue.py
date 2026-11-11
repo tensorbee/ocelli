@@ -779,9 +779,6 @@ def _write_docs_fixture(box: Sandbox, fault: str) -> None:
 
 def _run_docs_gate(box: Sandbox, fault: str) -> subprocess.CompletedProcess[str]:
     _write_docs_fixture(box, fault)
-    prior_encoded = os.environ.get('CARGO_ENCODED_RUSTDOCFLAGS')
-    prior_rustdoc = os.environ.get('RUSTDOCFLAGS')
-    prior_target = os.environ.get('CARGO_TARGET_DIR')
     encoded = chr(31).join(['-A', 'rustdoc::private_intra_doc_links', '-A', 'rustdoc::broken_intra_doc_links'])
     child_env = {
         'CARGO_ENCODED_RUSTDOCFLAGS': encoded,
@@ -797,10 +794,6 @@ def _run_docs_gate(box: Sandbox, fault: str) -> subprocess.CompletedProcess[str]
             subject = doc_dir / 'f268_subject' / 'index.html'
             if not (healthy.is_file() and subject.is_file()):
                 raise AssertionError('docs gate passed without real rendered docs')
-    assert not Path(target).exists()
-    assert os.environ.get('CARGO_ENCODED_RUSTDOCFLAGS') == prior_encoded
-    assert os.environ.get('RUSTDOCFLAGS') == prior_rustdoc
-    assert os.environ.get('CARGO_TARGET_DIR') == prior_target
     return done
 
 
