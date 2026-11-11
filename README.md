@@ -187,8 +187,9 @@ bin/ocelli.sh wasm
 ```
 
 Open <http://localhost:5173>. Vite prints that address when the server is ready.
-It also starts `ocelli-example-server` on `127.0.0.1` through
-`bin/example-dev.sh`. The helper prints only its base URL. The Frame open
+The script is `bin/example-dev.sh`, which also starts
+`ocelli-example-server` on `127.0.0.1`. The helper
+prints only its base URL. The Frame open
 section posts to it through Vite.
 The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
 centre 100 and width 200, then shows the display value and the padding count.
