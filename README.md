@@ -184,15 +184,21 @@ and whether the working tree had unstaged tracked changes. The packages gate
 refuses a build id recorded with unstaged tracked changes, or one that does
 not name the index it was staged from.
 
-A built dist of the example serves from any static host.
-`npm run build -w @ocelli/example-viewer` emits `examples/viewer-react/dist`,
-and a plain static server over that directory reads `core ready` like
-`npm run dev` does. The dist does not pick up a module built later.
-`vite build` reads `crates/ocelli-wasm/pkg` once, when the build starts, so
-the package must exist before that build. A dist built without it keeps the
-external `/@fs` import of the pkg-absent build, and its header stays
-`core not built` on every host until the dist is rebuilt with the package
-present.
+A built dist of the example serves from a static host's document root, and
+not from a subpath. `vite.config.ts` leaves Vite's default `base` of `/`, so
+the emitted `index.html` references its assets at absolute `/assets/` URLs
+and a host serving the dist below its root cannot resolve them.
+`npm run build -w @ocelli/example-viewer` emits `examples/viewer-react/dist`
+and resolves `@ocelli/core` and `@ocelli/react` from their built
+`packages/*/dist`. The viewer's own build script is `vite build` alone, so
+those dists come from `npm run build`, which must run first. A plain static
+server over that directory at its root reads
+`core ready` like `npm run dev` does. The dist does not pick up a module
+built later. `vite build` reads `crates/ocelli-wasm/pkg` once, when the
+build starts, so the package must exist before that build. A dist built
+without it keeps the external `/@fs` import of the pkg-absent build, and
+its header stays `core not built` on every host until the dist is rebuilt
+with the package present.
 
 ### The Content Security Policy an embedding page needs
 
@@ -231,6 +237,7 @@ directive's minimality:
 
 ```bash
 bin/ocelli.sh wasm
+npm run build
 npm run build -w @ocelli/example-viewer
 node examples/viewer-react/csp-probe.mjs
 ```
@@ -239,7 +246,9 @@ The probe first exercises the unmodified built dist as a genuine positive on
 a real plain static HTTP server bound to localhost, then serves the built
 example and the built wasm package for the remaining policy cases through
 Playwright routes on invented origins, so those cases bind no port and start
-no server. The policy exists once in
+no server. The workspace build needs the built `@ocelli/core` and
+`@ocelli/react`, which `npm run build` creates, and the dist serves at the
+host's document root, as above. The policy exists once in
 `examples/viewer-react/src/csp-policy.ts`. Its test checks marked policy
 blocks in this document, `docs/lld/typescript-packaging.md` and the Use page.
 Each block contains exactly one expected header, inside a Markdown text fence

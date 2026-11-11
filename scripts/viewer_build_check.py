@@ -285,23 +285,43 @@ def _known_roots(base: Path) -> list[tuple[bytes, str]]:
     return patterns
 
 
+def _spells_root(blob: bytes, root: bytes) -> bool:
+    """Whether the content spells the root as a path prefix.
+
+    The root counts when the byte after it is the path separator or the
+    root runs to the end of the content. A root glued into a longer name
+    is not a root spelling: a checkout at `/ocelli` must not match a
+    healthy worker's `import("./ocelli_wasm-a1.js")`.
+    """
+    start = blob.find(root)
+    while start != -1:
+        end = start + len(root)
+        if end == len(blob) or blob[end:end + 1] == b"/":
+            return True
+        start = blob.find(root, start + 1)
+    return False
+
+
 def _absolute_reach(raw: dict[str, bytes], base: Path) -> str | None:
     """The first file reaching a known root or the /@fs prefix, named.
 
     Scans every emitted file's raw bytes, binaries included. The known
     roots are the build `base` and the real checkout `ROOT`, each as raw
-    UTF-8 bytes and as its once-URL-encoded form, per `_known_roots`, and
-    the standalone `/@fs` loader prefix is its own pattern. A valid WASM
-    binary is never decoded, and the actual WASM carries a `/Users/`
-    registry marker that matches none of these patterns.
+    UTF-8 bytes and as its once-URL-encoded form, per `_known_roots`,
+    matched only as a path prefix with a boundary by `_spells_root`, and
+    the standalone `/@fs` loader prefix is its own bare pattern. A valid
+    WASM binary is never decoded. The gate builds only with the stand-in
+    stub, so the real wasm is never scanned here, and no other absolute
+    path is banned.
     """
-    known = _known_roots(base)
-    known.append((b"/@fs", "/@fs"))
+    roots = _known_roots(base)
     for name in sorted(raw):
         blob = raw[name]
-        for pattern, label in known:
-            if pattern in blob:
+        for pattern, label in roots:
+            if _spells_root(blob, pattern):
                 return f"{name} ({label})"
+        if b"/@fs" in blob:
+            return f"{name} (/@fs)"
     return None
 
 

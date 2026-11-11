@@ -187,6 +187,53 @@ class PresentEmissionCheck(unittest.TestCase):
             Path("/a b/c"))
         self.assertEqual(problems, [])
 
+    def test_a_short_root_glued_into_a_longer_name_is_not_a_reach(self) -> None:
+        # A checkout at /ocelli must not refuse a healthy build whose
+        # worker and glue spell ./ocelli_wasm names: the root is matched
+        # only as a path prefix with a boundary, so a root glued into a
+        # longer name is not a root spelling. The base is the same short
+        # path, so both roots' raw and encoded patterns are the glued
+        # form, and under a bare substring match this healthy emission
+        # set is refused.
+        saved = v.ROOT
+        v.ROOT = Path("/ocelli")
+        try:
+            problems = v.present_problems(
+                ["assets/core-worker-a1.js", "assets/index-a1.js",
+                 "assets/ocelli_wasm-Bcd23.js",
+                 "assets/ocelli_wasm_bg-Efg45.wasm"],
+                self._raw('import"./ocelli_wasm-Bcd23.js";'
+                          'import("./ocelli_wasm-Bcd23.js")', {
+                              "assets/index-a1.js": b"entry",
+                              "assets/ocelli_wasm-Bcd23.js":
+                                  b'import "./ocelli_wasm_bg-Efg45.wasm"',
+                              "assets/ocelli_wasm_bg-Efg45.wasm":
+                                  b"\x00asm\x01",
+                          }),
+                "/@fs/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js",
+                Path("/ocelli"))
+        finally:
+            v.ROOT = saved
+        self.assertEqual(problems, [])
+
+    def test_a_reach_after_a_glued_name_is_still_refused(self) -> None:
+        # The scan walks every occurrence of the root: the glued
+        # ./ocelli_wasm import first in the worker must not stop the real
+        # reach later in it from being found. A scan that read only the
+        # first occurrence would keep this green.
+        saved = v.ROOT
+        v.ROOT = Path("/ocelli")
+        try:
+            problems = v.present_problems(
+                self._names(),
+                self._raw('import"./ocelli_wasm-Bcd23.js";'
+                          'import("/ocelli/pkg/ocelli_wasm.js")'),
+                "/@fs/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js",
+                Path("/ocelli"))
+        finally:
+            v.ROOT = saved
+        self.assertTrue(any("raw root" in p for p in problems))
+
     def test_missing_chunks_are_still_refused(self) -> None:
         problems = v.present_problems(
             ["assets/core-worker-a1.js"],
@@ -421,23 +468,34 @@ class EmittedMap(unittest.TestCase):
     def test_a_resolved_checkout_path_is_refused(self) -> None:
         # make_tree links node_modules and packages into the real checkout,
         # so a build that resolves those links spells the checkout path,
-        # not the temporary base. The checkout root is a known root of its
-        # own, refused with no /@fs spelling anywhere.
+        # not the temporary base. ROOT is pointed at a space-named tree, as
+        # the encoded test beside this one does, so the raw and encoded
+        # forms differ, and the planted spelling is the raw form. The
+        # refusal must name the raw checkout root: on a checkout whose
+        # path has nothing to percent-encode the raw and encoded bytes are
+        # identical, so an encoded-only match would keep this green.
         with tempfile.TemporaryDirectory() as temp:
             base = self._tree(temp, {
                 "assets/core-worker-a1.js": 'import("./ocelli_wasm-B.js")',
                 "assets/ocelli_wasm-B.js": "glue",
                 "assets/ocelli_wasm_bg-C.wasm": b"\x00asm\x01",
             })
-            (base / "dist" / "chunks").mkdir(parents=True, exist_ok=True)
-            (base / "dist" / "chunks" / "resolved-D.js").write_text(
-                f'const lib = "{v.ROOT.as_posix()}/packages/core/dist/'
-                f'index.js"', encoding="utf-8")
-            names, raw = v.emitted(base)
-            problems = v.present_problems(
-                names, raw, "/@fs/unused/pkg/ocelli_wasm.js", base)
-            self.assertTrue(any("checkout root" in p and "resolved-D.js" in p
-                                for p in problems))
+            fake_root = Path(temp) / "check out"
+            fake_root.mkdir()
+            saved = v.ROOT
+            v.ROOT = fake_root
+            try:
+                (base / "dist" / "chunks").mkdir(parents=True, exist_ok=True)
+                (base / "dist" / "chunks" / "resolved-D.js").write_text(
+                    f'const lib = "{fake_root.as_posix()}/packages/core/dist/'
+                    f'index.js"', encoding="utf-8")
+                names, raw = v.emitted(base)
+                problems = v.present_problems(
+                    names, raw, "/@fs/unused/pkg/ocelli_wasm.js", base)
+            finally:
+                v.ROOT = saved
+            self.assertTrue(any("raw checkout root" in p
+                                and "resolved-D.js" in p for p in problems))
 
     def test_an_encoded_checkout_root_is_refused(self) -> None:
         # The checkout root's encoded spelling, for a checkout whose own

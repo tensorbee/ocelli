@@ -13494,7 +13494,10 @@ GUARDS: tuple[Guard, ...] = (
                 "that then emits no wasm glue chunk or no `.wasm` asset, or "
                 "whose worker does not import the emitted wasm glue chunk, or "
                 "where any emitted file reaches the build machine's absolute "
-                "`/@fs` path, in a fetch, an import or any other position.",
+                "path: the temporary build base or the real checkout root, "
+                "raw or URL-encoded as a path prefix with a boundary, or the "
+                "standalone `/@fs` marker, in a fetch, an import or any "
+                "other position.",
         claims=("*",),
         probes=(
             Probe(
