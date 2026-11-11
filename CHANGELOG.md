@@ -706,6 +706,18 @@ Repository bootstrap. Nothing is published.
   `writeKeyObjects` and `readKeyObjects`, `GraphicType` gains `ELLIPSE`, and
   an `IMAGE` item gains an optional `frame`. Save marks and Load marks need
   `npm run build` first.
+- The local folder viewer draws a series whose images store no window at
+  one automatic window for the whole series, and the corner says `Auto
+  window`. The window runs from the 1st to the 99th nearest-rank percentile
+  of modality values over up to 16 images spread through the series, each
+  through its own rescale, with stored zero and the Pixel Padding Value left
+  out, and the function is LINEAR_EXACT. `POST /series-window` computes it
+  once per series and the page sends it back unchanged with each preview. A
+  thumbnail, and a series whose window the local process refuses, use each
+  image's own automatic window and say `Auto window, this image`. A window in
+  the file is always used as it is. `ocelli-pixel` gains `series_sample`,
+  `AutoWindowPool`, `auto_window` and `AutoWindow`. cornerstone3D 5.8.2 takes
+  each image's own minimum and maximum instead, so this is not a parity row.
 
 ### Changed
 

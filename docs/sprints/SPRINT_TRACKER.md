@@ -225,6 +225,7 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-238 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | S46 | 2w | not measured | 2026-11-09 |
 | F-214 | Folder viewer mouse profiles and preferences | S46 | 2w | not measured | 2026-11-10 |
 | F-215 | Folder viewer marks saved as TID 1500 and key images as a Key Object Selection | S46 | 4w | not measured | 2026-11-10 |
+| F-227 | Automatic window per series when the file has none | S46 | 3w | not measured | 2026-11-11 |
 
 ## S46 acceptance status correction, 2026-11-09
 
