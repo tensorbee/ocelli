@@ -377,3 +377,13 @@ Independent bookkeeping review by `/root/glm_codec_merge` found 0 defects and 0 
 ## Lead flate2 test-only write-map amendment, 2026-11-10
 
 The route approved in principle adds the existing workspace flate2 only as a DEV dependency of `ocelli-folder-viewer` so tests can stream a real Deflate decoded 128MiB cap case generated from small independent Part10 gold plus a standard DataSetTrailingPadding element. The fixed production 128MiB limit is preserved unchanged. flate2 stays the workspace-resolved 1.1.10 with rust_backend. This authorizes exactly a THIRD existing viewer Cargo.lock consumer edge for flate2, dev-only, solely for this concrete runtime-generated test. It is not a new policy, tolerance or acceptance waiver. The required positive and negative observations and final verification remain owed. No new package, version, checksum, shipped dependency or feature change is introduced.
+
+## Lead amendments after S47 review pass 1, 2026-11-11
+
+**AC6 evidence.** The discovery and fetch path takes no tier input, and remote display is unavailable on every tier until F-202. AC6 is satisfied by the existing local render staying green in the registered `viewer-browser` gate plus the stated tier row in Boundary and tier. No tier matrix suite is required, and none may be claimed.
+
+**Write map.** Accepted as written by the implementer: `docs/DEVELOPER_SETUP.md`, `packages/core/src/events.test.ts` (the listener set gains the two DICOMweb modules, which use AbortSignal listeners and are not a second catalogue), `packages/core/src/index.test.ts`, `examples/folder-viewer/tests/preview.rs`, and the regenerated `docs/runbooks/guard-verification.md`. The planned `examples/folder-viewer/tests/dicomweb.rs` is replaced by the inline tests in `examples/folder-viewer/src/dicomweb.rs`.
+
+**Registration.** The new browser module is registered in `bin/ocelli.sh` under `viewer-browser` by this story, as the approved write map already said. It never depended on F-268.
+
+**AC8.** The plan's procedure requires an otherwise idle host. The run on a host that was not idle is a disclosed observation, not AC8 evidence, and AC8 stays owed until an idle run is taken.
