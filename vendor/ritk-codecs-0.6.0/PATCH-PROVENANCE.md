@@ -12,7 +12,7 @@ package. No published file was removed. Ocelli changes the `jpeg-decoder`
 dependency in `Cargo.toml` and `Cargo.toml.orig` to disable its default Rayon
 feature, and patches four source files of the `jpeg_2000` module under F-239,
 five source files and one published test of the `jpeg_ls` module under F-243,
-and three `jpeg_ls` files' comments under F-269, recorded below. Every other
+and four `jpeg_ls` files' comments under F-269, recorded below. Every other
 file is unchanged.
 
 ## The manifest patch
@@ -81,8 +81,8 @@ what it follows. The clauses of ITU-T T.87, which is ISO/IEC 14495-1, cited
 here were checked against T.87 (06/1998) from itu.int, recorded in
 `.claude/reviews/F-243-ac14-standard-check.md`, and the upstream clause
 citations in the patched files were corrected against that text.
-`scripts/pin_and_size_check.py` records each digest in `RITK_PATCHED_HASHES`
-and refuses any other byte.
+`scripts/pin_and_size_check.py` records each patched file's digest in
+`RITK_PATCHED_HASHES` and refuses any other byte.
 
 - `src/jpeg_ls/scan.rs`. The run-mode loop, T.87 F.1 step 18: a run hit
   adds `min(2^J[RUNindex], samples left on the line)`, and RUNindex rises only
@@ -138,6 +138,12 @@ and refuses any other byte.
   the patched decoder, so the byte is now `0xF0`, the same four hit bits with
   zero padding. The test's assertion is unchanged.
   SHA-256 `aee89d4a0a49b21d8f6ebc4229e4458cc4c037300dad36babcb17f08f4acc512`.
+
+Three of the digests above are historical. The F-269 audit below edited
+comments in `scan.rs`, `context/mod.rs` and `encoder.rs`, so the F-269
+section's digests for those three files supersede the ones above. The
+`bitstream.rs`, `decoder.rs` and `tests/conformance.rs` digests above
+remain current, since F-269 did not touch those files.
 
 The patch adds no `unsafe` and no dependency. F-243's patch changes no test
 count: `cargo test --lib` over this package passes the same 320 published
@@ -222,7 +228,7 @@ by hand.
 
 - `bitstream.rs:1` to `:8`, A.1 bit stuffing. Correct: an encoded `0xFF`
   data byte is followed by one stuffed zero bit and marker prefixes
-  terminate the scan, matching A.1's note.
+  terminate the scan, as A.1's normative body prescribes.
 - `bitstream.rs:10` to `:24`, reader fields. Correct, implementation
   description, no clause.
 - `bitstream.rs:28` to `:34`, `SegmentEnd` fields. Correct, F-243 record.
@@ -237,8 +243,8 @@ by hand.
 - `bitstream.rs:188`, `:197` to `:206`, `:225`. Correct, implementation.
 - `bitstream.rs:241` to `:245`, writer mirror. Correct: normal and escape
   forms match A.5.3's LG(k, LIMIT).
-- `bitstream.rs:266` to `:273`, flush. Correct: A.1's note is the stuffed
-  follow-byte rule cited.
+- `bitstream.rs:266` to `:273`, flush. Correct: the stuffed follow-byte
+  rule cited is A.1's normative body text.
 - `bitstream.rs:292` to `:410`, the test block. Correct, test-local
   arithmetic re-derived (0b10110000 cases, 0xFF 0x00 stuffing, MErrval
   encodings, and the k=1 code at `:409` to `:410`).
@@ -284,9 +290,13 @@ by hand.
 - `encoder.rs:184` to `:187`, `:191` to `:192`, `:200`. Correct: the
   A.7.1/A.16 RUNindex rule is F-243's, verified against A.8 step 17 and
   code segments A.15 and A.16.
-- `encoder.rs:205`, `:217`, `:222` to `:223`, `:246`, `:257`, `:259`.
-  Correct: the run interruption section is A.7.2, the parity-pick is the
-  inverse of `compute_error_value`, and the canonical-error notes match
+- `encoder.rs:205`, `:217`, `:222` to `:223`. Correct: the run
+  interruption section is A.7.2 and the parity-pick is the inverse of
+  `compute_error_value`.
+- `encoder.rs:246`, the Regular mode banner. Correct: the section under
+  the banner is the regular-mode path, whose steps are A.3 to A.6's,
+  from the A.3 context determination through the A.6 variable update.
+- `encoder.rs:257`, `:259`. Correct: the canonical-error notes match
   A.5.2's k=0 XOR step.
 - `encoder/validation.rs:9` to `:65`, the error enum. Correct:
   implementation-only field labels. One nit kept: `:56` says "precision and
@@ -307,7 +317,7 @@ by hand.
   F.1 steps 2 to 17 and A.7 run per F.1 step 18.
 - `scan.rs:150` to `:152`, `:160`. Correct.
 - `scan.rs:163` to `:167`. Edited, listed above.
-- `scan.rs:169`, `:175` to `:186`, `:199`, `:206` to `:207`, `:215`,
+- `scan.rs:169`, `:175` to `:185`, `:199`, `:206` to `:207`, `:215`,
   `:220`, `:242`, `:253`, `:259`, `:262`, `:267`, `:278`, `:282`. Correct:
   the run-mode comments cite F.1 step 18 and the F-243 refusals, and
   `:206` to `:207`'s "not a stream any encoder writes" matches A.16's
@@ -337,11 +347,13 @@ by hand.
   `Default` kept qualified as test-only.
 - `context/mod.rs:145` to `:147`. Correct: the sign-mapping condition is
   A.7.2's and matches both callers.
-- `context/mod.rs:179` to `:182`, `update_context`. Correct: A.6.1 code
-  segment A.12. The published comment named A.6.1 only. The F-243 patch
-  text already cites A.12's content, and the comment body names the shift
-  floor explicitly. Classified correct after the F-243 edit, no F-269
-  change. The F-243 arithmetic-shift record inside the body is at
+- `context/mod.rs:179` to `:182`, `update_context`. Correct: the code
+  updates A, B and N per A.6.1 code segment A.12 and adjusts C per
+  A.6.2 code segment A.13, so the comment's §A.6 names the clause the
+  function implements. The published text named §A.5, prediction error
+  encoding, which contains no variable update, and the F-243 edit
+  corrected it to §A.6. Classified correct after the F-243 edit, no
+  F-269 change. The F-243 arithmetic-shift record inside the body is at
   `:189` to `:192`.
 - `context/mod.rs:189` to `:192`, the F-243 arithmetic-shift record.
   Correct: `>>=` on `i32` floors, A.6.1 Code segment A.12 halves at RESET,
@@ -385,7 +397,7 @@ by hand.
   4095 cap gives 18, 67, 276, and the parenthetical records what the
   published assertions were replaced with.
 - `context/tests.rs:119`, `:126`. Correct, re-derived.
-- `context/tests.rs:138` to `:167`, `inverse_map` cases. Correct against
+- `context/tests.rs:138` to `:156`, `inverse_map` cases. Correct against
   A.5.2.
 - `context/tests.rs:174` to `:186`, `compute_k` cases. Correct, the shift
   comparisons re-derived.

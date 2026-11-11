@@ -112,7 +112,7 @@ RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f7
 # three-component colour decode to the published decoder, F-243 the
 # JPEG-LS run-mode, end-of-scan and default-threshold patch, and F-269 a
 # comment-only audit whose corrections landed in four jpeg_ls files.
-RITK_PROVENANCE_SHA256 = "073cddf7486560e5e8ef049ffaf5caeeebf97f48d00d639ac8836bcfcf57e958"
+RITK_PROVENANCE_SHA256 = "9b67630ae9ebd39f7617bbd613a53ccdf911f7c66c0162b11e32b8a45e579b8c"
 # Every published source file this repository has patched, with the exact
 # bytes of the reviewed patch. Anything else must stay byte-identical to the
 # archive.
