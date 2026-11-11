@@ -112,7 +112,7 @@ RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f7
 # three-component colour decode to the published decoder, F-243 the
 # JPEG-LS run-mode, end-of-scan and default-threshold patch, and F-269 a
 # comment-only audit of three jpeg_ls files.
-RITK_PROVENANCE_SHA256 = "f18b6fc2c01ec0a2cae93195d7dc40adbebb5bbee70a854d93b7dcfce7873bbf"
+RITK_PROVENANCE_SHA256 = "b3d28e58a27ecb4e528f305148b3badbcc29028fbf305a5fef14a8dfcadecf3a"
 # Every published source file this repository has patched, with the exact
 # bytes of the reviewed patch. Anything else must stay byte-identical to the
 # archive.
@@ -128,11 +128,13 @@ RITK_PATCHED_HASHES = {
     # encoder's code segment A.16 mirror and one published test edited by the
     # lead's ruling.
     "src/jpeg_ls/bitstream.rs": "49367ccb7467dd91b267a2dfe5a1f70f70d872bf28243fdbbf817e9a34a68cbb",
-    "src/jpeg_ls/context/mod.rs": "9b9bd622bdcb56472ac0df37aca951eccbd1818aa98548e5d979cd3026e65b0b",
-    "src/jpeg_ls/context/tests.rs": "ebddb6af603ff88822636f2e43cb6923b21084b49f0236a52160e588aa8b14e5",
+    "src/jpeg_ls/context/mod.rs": "24af96f8abb4e5aae0b94428426c949f41ad85438daae0ff1cfa7a3289986421",
+    # F-269. The comment-only audit against ITU-T T.87. First patched under
+    # F-269, which edited only this file's test annotations.
+    "src/jpeg_ls/context/tests.rs": "b62259de352e6353fc4decc2e9a2e05700246a7d8b87dcfa46935bde66f57f95",
     "src/jpeg_ls/decoder.rs": "d898917107a8d2575a04cc47ba53748785f04c1b661235f283ede6744f8a4b11",
     "src/jpeg_ls/encoder.rs": "be209fabf20a8b54b53c6156eb4de9922464c5192e600f3a6b88da6d5aa4b988",
-    "src/jpeg_ls/scan.rs": "3b6760bbb2bfac24ac843c738cec7824d7befb9e6b35196c4216468bb691036a",
+    "src/jpeg_ls/scan.rs": "cfc702ef7a27678a0c0af851f2e609f2bc6fca77ffd57bf454e10852b16a23ad",
     "src/jpeg_ls/tests/conformance.rs": "aee89d4a0a49b21d8f6ebc4229e4458cc4c037300dad36babcb17f08f4acc512",
 }
 # The manifest-only patch D-20 records, checked as TOML as well as by hash.

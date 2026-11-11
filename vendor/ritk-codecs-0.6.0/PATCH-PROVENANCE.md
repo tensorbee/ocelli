@@ -150,20 +150,23 @@ T.87 (06/1998) only, from the official PDF with SHA-256
 CharLS or bundled implementation source was opened. The audit changes
 comments only: no Rust logic, constant, signature, fixture or test body was
 touched, and no new vendor file was added. Three files carry comment edits,
-listed after the inventory with their new digests.
+listed after the inventory with their new digests. An independent review of
+the audit corrected the clause citations in three comment blocks and one
+rating, and every line locator in this section was re-measured from the
+final patched bytes.
 
 ### The four F-243 pass 8 comments
 
-- `src/jpeg_ls/context/mod.rs:1` to `:8`, the module header. "Lossless
+- `src/jpeg_ls/context/mod.rs:1` to `:2`, the module header sentence. "Lossless
   decoding" was too narrow for a module whose `CodingParams::new` takes NEAR
   and whose encoder shares it. Now names lossless and near-lossless coding,
   the decoder and the encoder. T.87 A.2.1, and the module's own consumers.
-- `src/jpeg_ls/context/mod.rs:28` to `:29` and `:22`, the `n` field. The
-  "to avoid division by zero" reason did not match the code it described:
+- `src/jpeg_ls/context/mod.rs:28` to `:29` and `:16` to `:17`, the `n` field.
+  The "to avoid division by zero" reason did not match the code it described:
   A.2.1 step 2 prescribes `N = 1`, and A.5.1's k selection is a shift
   comparison with no division. Now cites A.2.1 step 2. The field's doc and
   the header bullet were changed to the same claim.
-- `src/jpeg_ls/context/mod.rs:305` to `:317`, the `default_thresholds` doc.
+- `src/jpeg_ls/context/mod.rs:321` to `:339`, the `default_thresholds` doc.
   The claim "DICOM data is >= 8-bit so the high branch is the production
   path" was false: `decoder.rs` accepts precision from 2, and PS3.5 8.2.3
   permits Bits Stored 2 to 16 in an 8 or 16-bit container, so `MAXVAL < 128`
@@ -171,22 +174,24 @@ listed after the inventory with their new digests.
   Figures C.4 and C.5, with the floored FACTORs and the two-argument CLAMP
   of Figure C.3, plus the inspection control that MAXVAL 127, NEAR 0 gives
   (2, 3, 10) on the low arm and the wrong (2, 3, 4) if the high arm is
-  generalised down. The earlier design paragraph had abbreviated T2 and T3;
-  the published vendor doc carried their full formulas, and the audit's
-  comment also wrote CLAMP with an invented third argument, corrected
-  separately from that abbreviation.
-- `src/jpeg_ls/scan.rs:163` to `:166`, the local gradients. A.3.1 names D1,
-  D2 and D3 only the local gradients, so the orientation adjectives
-  "vertical", "horizontal" and "diagonal" are dropped without claiming the
-  standard proves them false. The arithmetic `D1 = d - b`, `D2 = b - cc`,
-  `D3 = cc - a` is unchanged.
+  generalised down. The earlier design paragraph had abbreviated T2 and T3,
+  while the published vendor doc carried their full formulas and already
+  wrote the clamp against MAXVAL, `[NEAR + 1 / T1 / T2, MAXVAL]`, which the
+  F-243 patch comment restyled as the three-argument
+  `CLAMP(i, NEAR + 1 / T1 / T2, MAXVAL)` and the audit corrected to
+  Figure C.3's two-argument form with MAXVAL ambient.
+- `src/jpeg_ls/scan.rs:163` to `:167`, the local gradients and the three
+  gradient lines they annotate. A.3.1 names D1, D2 and D3 only the local
+  gradients, so the orientation adjectives "vertical", "horizontal" and
+  "diagonal" are dropped without claiming the standard proves them false.
+  The arithmetic `D1 = d - b`, `D2 = b - cc`, `D3 = cc - a` is unchanged.
 
 ### The k cap record, AC3
 
-- `src/jpeg_ls/context/mod.rs:213` to `:231`, the free `compute_k` doc,
-  `src/jpeg_ls/context/mod.rs:117` to `:135`, the
+- `src/jpeg_ls/context/mod.rs:229` to `:247`, the free `compute_k` doc,
+  `src/jpeg_ls/context/mod.rs:117` to `:132`, the
   `RunInterruptionContext::compute_k` doc, and
-  `src/jpeg_ls/scan.rs:298` to `:313`, the `in_coded_range` doc, now state
+  `src/jpeg_ls/scan.rs:298` to `:311`, the `in_coded_range` doc, now state
   the caller-specific premises F-243 pass 8 recorded as unwritten: the
   decoder's `k < qbpp` cap rests on `in_coded_range` refusing before both
   state updates, including before the run-interruption update, and the
@@ -204,10 +209,10 @@ listed after the inventory with their new digests.
 
 Every factual comment block under `src/jpeg_ls/`, grouped by contiguous
 same-claim block. Classification: `correct` (the comment matches the code
-and the clause it names), `doubtful` (kept, with its qualification), or
-`edited` (changed, listed above). Non-factual and decorative comments,
-section banners and error-variant field labels are recorded as excluded.
-The tests' arithmetic annotations were each re-derived by hand.
+and the clause it names) or `edited` (changed, listed above). Non-factual
+and decorative comments, section banners and error-variant field labels are
+recorded as excluded. The tests' arithmetic annotations were each re-derived
+by hand.
 
 - `bitstream.rs:1` to `:8`, A.1 bit stuffing. Correct: an encoded `0xFF`
   data byte is followed by one stuffed zero bit and marker prefixes
@@ -223,7 +228,7 @@ The tests' arithmetic annotations were each re-derived by hand.
 - `bitstream.rs:118`, `:127` to `:143`. Correct, F-243 measured records.
 - `bitstream.rs:149`, `:154` to `:158`, `:176`. Correct: D.2 names optional
   `0xFF` fill bytes before markers.
-- `bitstream.rs:188`, `:195` to `:206`, `:225`. Correct, implementation.
+- `bitstream.rs:188`, `:197` to `:206`, `:225`. Correct, implementation.
 - `bitstream.rs:241` to `:245`, writer mirror. Correct: normal and escape
   forms match A.5.3's LG(k, LIMIT).
 - `bitstream.rs:266` to `:273`, flush. Correct: A.1's note is the stuffed
@@ -232,7 +237,7 @@ The tests' arithmetic annotations were each re-derived by hand.
   arithmetic re-derived (0b10110000 cases, 0xFF 0x00 stuffing, MErrval
   encodings).
 - `marker.rs:1` to `:15`. Correct: the eight constants match the marker
-  codes; SOF55 0xFFF7, LSE 0xFFF8 and the rest are implementation facts.
+  codes. SOF55 0xFFF7, LSE 0xFFF8 and the rest are implementation facts.
 - `parser.rs:1`, `:6`. Correct, implementation-only.
 - `reconstruction.rs:1` to `:5`. Correct: two rows suffice for causal
   prediction.
@@ -260,13 +265,14 @@ The tests' arithmetic annotations were each re-derived by hand.
   names the byte written.
 - `encoder.rs:110` to `:111`, `:121` to `:122`. Correct, implementation.
 - `encoder.rs:134` to `:136`, `:152`, `:162`. Correct.
-- `encoder.rs:168` to `:172`. Doubtful, kept and qualified: "decoder
-  clamps" describes the decoder's behaviour at a filled line, but the
-  comment sits in the encoder and the decoder neither clamps the run
-  counter nor the sample there. The code is the A.15 hit that fills the
-  line and raises RUNindex, which matches A.7.1 step b and F.1 step 17b.
-  Left as an implementation note; the run-index rule itself is recorded
-  correctly at `:182` to `:185`.
+- `encoder.rs:168` to `:172`. Correct: "decoder clamps" describes what the
+  decoder does at a filled line, and it does clamp there. The hit count is
+  clamped to the samples left on the line with
+  `full.min(remaining - run_len)` and the run index is capped at 31
+  (`scan.rs:187` and `:190`, with the rise held to a full segment at
+  `:192`). The code is the A.15 hit that fills the line and raises
+  RUNindex, which matches A.7.1 step b and F.1 step 17b, and the run-index
+  rule itself is recorded at `:182` to `:185`.
 - `encoder.rs:182` to `:185`, `:189` to `:190`, `:198`. Correct: the
   A.7.1/A.16 RUNindex rule is F-243's, verified against F.1 step 17 and
   code segments A.15 and A.16.
@@ -284,7 +290,7 @@ The tests' arithmetic annotations were each re-derived by hand.
   `J[0..31]` and a hit extends the run by `2^J[i]`, matching F.1 17b.
 - `scan.rs:26` to `:30`, `:34` to `:49`, the predictor enum. Correct:
   ISO defines the edge-detecting predictor of A.4.1 and the SOS header
-  selects none; the per-arm notes match `predict`'s arms.
+  selects none. The per-arm notes match `predict`'s arms.
 - `scan.rs:53` to `:58`, the A.4.1 proof. Correct against code segment A.5.
 - `scan.rs:72` to `:77`, boundary conditions. Correct against A.2.1.
 - `scan.rs:91`, `:93`. Correct.
@@ -292,7 +298,7 @@ The tests' arithmetic annotations were each re-derived by hand.
 - `scan.rs:120` to `:128`, `decode_scan`. Correct: A.3 to A.6 regular per
   F.1 steps 2 to 17 and A.7 run per F.1 step 18.
 - `scan.rs:150` to `:152`, `:160`. Correct.
-- `scan.rs:163` to `:166`. Edited, listed above.
+- `scan.rs:163` to `:167`. Edited, listed above.
 - `scan.rs:169`, `:175` to `:186`, `:199`, `:206` to `:207`, `:215`,
   `:220`, `:242`, `:253`, `:259`, `:262`, `:267`, `:278`, `:282`. Correct:
   the run-mode comments cite F.1 step 18 and the F-243 refusals, and
@@ -300,40 +306,40 @@ The tests' arithmetic annotations were each re-derived by hand.
   `AppendToBitStream(RUNcnt, J[RUNindex])` with a remainder that cannot
   exceed `2^J - 1` on a conformant stream.
 - `scan.rs:288` to `:289`. Correct, F-243 record.
-- `scan.rs:298` to `:313`. Edited, listed above under the k cap.
+- `scan.rs:298` to `:311`. Edited, listed above under the k cap.
 - `context/mod.rs:19` to `:34`, `:45` to `:55`, `:58` to `:66`, `:71` to
   `:76`, `:93`. Correct: 365 contexts from A.3.4, RESET 64 from Table C.2,
   MIN_C/MAX_C from section 3.3, the initial state from A.2.1 step 2, and
   `Default` kept qualified as test-only.
-- `context/mod.rs:129` to `:131`. Correct: the sign-mapping condition is
+- `context/mod.rs:145` to `:147`. Correct: the sign-mapping condition is
   A.7.2's and matches both callers.
-- `context/mod.rs:163` to `:180`, `update_context`. Correct: A.6.1 code
+- `context/mod.rs:179` to `:182`, `update_context`. Correct: A.6.1 code
   segment A.12, with the F-243 arithmetic-shift record. The published
-  comment named A.6.1 only; the F-243 patch text already cites A.12's
+  comment named A.6.1 only. The F-243 patch text already cites A.12's
   content, and the comment body now names the shift floor explicitly.
   Classified correct after the F-243 edit, no F-269 change.
-- `context/mod.rs:213` to `:231`. Edited, listed above under the k cap.
-- `context/mod.rs:235`, `:242` to `:246`, `:270` to `:273`, `:283` to
-  `:290`, `:294` to `:300`. Correct: `quant` is A.3.3 code segment A.4
+- `context/mod.rs:229` to `:247`. Edited, listed above under the k cap.
+- `context/mod.rs:258` to `:262`, `:286` to `:289`, `:299` to `:306`.
+  Correct: `quant` is A.3.3 code segment A.4
   with the NEAR dead-zone, `sign_normalize` and the index mapping are
   A.3.4's one-to-one requirement, and the partition arithmetic re-derived
   (5 + 36 + 324 = 365).
-- `context/mod.rs:305` to `:317` and `:336` to `:338`. Edited, listed
+- `context/mod.rs:321` to `:339` and `:358` to `:361`. Edited, listed
   above.
-- `context/mod.rs:347` to `:361`, `CodingParams`. Correct: RANGE
+- `context/mod.rs:370` to `:385`, `CodingParams`. Correct: RANGE
   `MAXVAL + 1` for lossless is A.2.1 step 1, `qbpp` and `limit` match, and
   `a_init` is A.2.1 step 2's formula.
-- `context/mod.rs:383` to `:384`, `modulo_reduce`. Correct: A.4.5 code
+- `context/mod.rs:406` to `:407`, `modulo_reduce`. Correct: A.4.5 code
   segment A.9, and the interval `[-RANGE/2, (RANGE+1)/2)` matches A.4.5's
   `(−RANGE/2 .. ceil(RANGE/2) − 1)`.
-- `context/mod.rs:396` to `:397`, `quantize_error`. Correct: A.4.4's
+- `context/mod.rs:419` to `:420`, `quantize_error`. Correct: A.4.4's
   quantization, identity at NEAR 0.
-- `context/mod.rs:407` to `:410`, `reconstruct`. Correct: the wrap and
+- `context/mod.rs:430` to `:433`, `reconstruct`. Correct: the wrap and
   clamp match A.4.4's reconstructed-value computation with F.1's modulo
   step, and NEAR 0 reduces to the modulo-RANGE form.
-- `context/mod.rs:422` to `:426`, `inverse_map`. Correct: A.5.2 code
+- `context/mod.rs:445` to `:449`, `inverse_map`. Correct: A.5.2 code
   segment A.11's regular mapping, even forward and odd backward.
-- `context/tests.rs:5` to `:21`, the quant boundaries. Correct, each
+- `context/tests.rs:5` to `:22`, the quant boundaries. Correct, each
   annotation re-derived against A.3.3's T1/T2/T3 arms.
 - `context/tests.rs:54` to `:84`, `context_index` cases. Correct, the
   index arithmetic re-derived (5, 40, 41, 364).
@@ -347,13 +353,14 @@ The tests' arithmetic annotations were each re-derived by hand.
   A.5.2.
 - `context/tests.rs:174` to `:186`, `compute_k` cases. Correct, the shift
   comparisons re-derived.
-- `context/tests.rs:193` to `:195`, `:201` to `:213`, `update_context`
+- `context/tests.rs:193` to `:195`, `:201` to `:214`, `update_context`
   cases. Edited: the `update_context_bias_positive_decrements_b` block
   contained five lines of self-questioning scratch ("in the code?", "Wait
   let me re-check", "Hmm") that resolved to the value the assertions
-  already pin. Rewritten as the resolved derivation, errval 0 adds 0, N
-  rises 4 then 5, `b > 0` subtracts the new N giving 0. Assertion bodies
-  unchanged.
+  already pin. Rewritten as the resolved derivation, which cites A.6.1
+  Code segment A.12 for the A, B and N update and A.6.2 Code segment A.13
+  for the `b > 0` bias branch: errval 0 adds 0, N rises from 4 to 5,
+  `b > 0` subtracts the new N giving 0. Assertion bodies unchanged.
 - `tests/conformance.rs:15`, `:31` to `:33`, `:42` to `:43`, `:52`.
   Correct: the F-243 scan-byte record and the derivation notes re-derived.
 - `tests/decoder.rs:25` to `:26`. Correct: A.4.4's bound is exact.
@@ -365,16 +372,16 @@ The tests' arithmetic annotations were each re-derived by hand.
   Correct, each names the field it annotates.
 
 Excluded as non-factual or decorative: the `// ──` section banners in
-`scan.rs:175`, `:253` and `encoder.rs:152`, `:203`, `:244`; the
-`bitstream.rs:195` writer banner; error-variant field labels that restate
-their field names; and `#[allow(dead_code)]` attributes. No factual claim
+`scan.rs:175`, `:253` and `encoder.rs:152`, `:203`, `:244`, the
+`bitstream.rs:195` writer banner, error-variant field labels that restate
+their field names, and `#[allow(dead_code)]` attributes. No factual claim
 in any of them.
 
 Files edited by this audit, comments only:
 
-- `src/jpeg_ls/context/mod.rs`: SHA-256 `9b9bd622bdcb56472ac0df37aca951eccbd1818aa98548e5d979cd3026e65b0b`
-- `src/jpeg_ls/scan.rs`: SHA-256 `3b6760bbb2bfac24ac843c738cec7824d7befb9e6b35196c4216468bb691036a`
-- `src/jpeg_ls/context/tests.rs`: SHA-256 `ebddb6af603ff88822636f2e43cb6923b21084b49f0236a52160e588aa8b14e5`
+- `src/jpeg_ls/context/mod.rs`: SHA-256 `24af96f8abb4e5aae0b94428426c949f41ad85438daae0ff1cfa7a3289986421`
+- `src/jpeg_ls/scan.rs`: SHA-256 `cfc702ef7a27678a0c0af851f2e609f2bc6fca77ffd57bf454e10852b16a23ad`
+- `src/jpeg_ls/context/tests.rs`: SHA-256 `b62259de352e6353fc4decc2e9a2e05700246a7d8b87dcfa46935bde66f57f95`
 
 `context/tests.rs` enters the patched-file map for the first time: it was
 unpatched before this audit and now carries a comment edit. The other two
@@ -382,7 +389,8 @@ were already patched under F-243 and take new digests. The other
 fourteen `jpeg_ls` files are unchanged and remain at their recorded or
 published bytes.
 
-Source concerns for Root, no code changed: none new. The one doubtful
-encoder comment at `encoder.rs:172` is recorded above and left in place
-because its subject is the decoder's documented behaviour and the
-enclosing code is conformant.
+Source concerns for Root, no code changed: none new. No factual comment is
+left doubtful under this audit. The `encoder.rs:172` comment is rated
+correct above: its subject is the decoder's documented behaviour, which
+clamps the hit count and caps the run index, and the enclosing code is
+conformant.

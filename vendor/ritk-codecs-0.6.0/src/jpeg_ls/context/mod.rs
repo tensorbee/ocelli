@@ -114,16 +114,18 @@ impl RunInterruptionContext {
         self.run_interruption_type
     }
 
-    /// Golomb parameter k for a run-interruption context (T.87 A.7.2 item 2),
-    /// the smallest k with `n_test >= TEMP` where the compared value is
+    /// Golomb parameter k for a run-interruption context (T.87 A.7.2 item 5,
+    /// with TEMP from item 4, Code segment A.20), the smallest k with
+    /// `n_test >= TEMP` where the compared value is
     /// `TEMP = A + (N >> 1) * run_interruption_type`, with the type supplied
     /// by `new`: 0 for the different-neighbours context (`run_int_diff`) and
     /// 1 for the same-neighbours context (`run_int_same`). Bounded by `qbpp`.
     ///
     /// Caller premise, decoder: the decoded error is held to the coded-error
     /// range by `in_coded_range` (`scan.rs`) **before** the run-interruption
-    /// `update`, so the state stays within the A.7.2 initialization and reset
-    /// bounds. Caller premise, encoder: no refusal; `modulo_reduce` is applied
+    /// `update`, so the state stays within the A.2.1 steps 2 and 4
+    /// initialization bounds and the A.7.2 Code segment A.23 reset bound.
+    /// Caller premise, encoder: no refusal. `modulo_reduce` is applied
     /// before the update instead (T.87 A.4.5). Shared premises with the
     /// regular contexts: initial `A = max(2, floor((RANGE + 32)/64))` and
     /// `N = 1` from A.2.1 step 2 via `CodingParams::new`, `RANGE` and

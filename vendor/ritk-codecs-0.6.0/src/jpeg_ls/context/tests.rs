@@ -203,9 +203,10 @@ fn update_context_bias_positive_decrements_b() {
         c: 0,
         n: 4,
     };
-    // Bias correction branch, A.6.1 Code segment A.12: with errval 0 the B
-    // update adds 0, so b stays 5, N rises 4 then 5, and the `b > 0` branch
-    // subtracts the new N, giving 5 - 5 = 0, which is not above 0 and stays.
+    // A.6.1 Code segment A.12 updates A, B and N: with errval 0 the B
+    // update adds 0, so b stays 5, and N rises from 4 to 5. The `b > 0`
+    // bias branch is A.6.2 Code segment A.13: it subtracts the new N,
+    // giving 5 - 5 = 0, which is not above 0 and stays.
     update_context(&mut ctx, 0, 0);
     assert_eq!(ctx.n, 5);
     // b = 5, N becomes 5: b -= 5 → 0 → the `b > 0` re-check is false, so b = 0

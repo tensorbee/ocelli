@@ -302,13 +302,13 @@ pub(super) fn decode_scan(
 /// CharLS 2.4.4 was measured to open some such scans.
 ///
 /// Decoder-only premise for the `k < qbpp` cap: this refusal runs before both
-/// state updates (`scan.rs` regular mode before the update, run interruption
-/// before its update), so the A and N state stays within the initialization
-/// and reset bounds of T.87 A.2.1 and A.6.1. The encoder instead relies on
-/// its own `modulo_reduce` before its updates and does not call this
-/// function. Pass 8 measured at its tip that with this refusal disabled the
-/// cap binds about two million times on damaged streams, a decoder-only
-/// measurement not re-proven here.
+/// state updates, the regular update and the run-interruption update, so the
+/// A and N state stays within the T.87 A.2.1 initialization bound and the
+/// reset bounds of A.6.1 and A.7.2 Code segment A.23, the run-interruption
+/// reset. The encoder instead relies on its own `modulo_reduce` before its
+/// updates and does not call this function. Pass 8 measured at its tip that
+/// with this refusal disabled the cap binds about two million times on
+/// damaged streams, a decoder-only measurement not re-proven here.
 fn in_coded_range(errval: i32, range: i32) -> bool {
     -(range / 2) <= errval && errval < (range + 1) / 2
 }
