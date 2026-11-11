@@ -2312,19 +2312,22 @@ mod tests {
     /// `producer_repo_root`. What the scan stops is exactly two literal
     /// patterns, no more. The text CARGO_MANIFEST_DIR must appear once in
     /// the test module's code and only inside the real-root helper. And
-    /// every code occurrence of the text f272_real_repo_root outside the
+    /// every occurrence the line scan treats as code of the text
+    /// f272_real_repo_root outside the
     /// helper's own definition must sit inside an explicitly allowlisted
     /// guard-infrastructure function whose enclosing item is a plain
     /// four-space fn, so a producer test cannot launder the reference
     /// through a use, a const, a nested mod or any other item that is
     /// not a plain fn after an allowlisted function. A mention on a
     /// comment-only line is prose about the scan and is not counted,
-    /// which is what lets this comment name both patterns. The scan does
-    /// not stop a macro-built
-    /// environment name such as env!(concat!(...)) or
-    /// std::env::var(concat!(...)), a root found by walking current_exe
-    /// or file!(), or a call to an allowlisted function that returns a
-    /// real path, and those forms stay open. The counted markers are
+    /// which is what lets this comment name both patterns.
+    /// The scan is textual and line-based, so it does not stop a rewrite made
+    /// through the helper, a macro-built environment name such as
+    /// env!(concat!(...)) or std::env::var(concat!(...)), a root found by
+    /// walking current_exe or file!(), a call to an allowlisted function that
+    /// reads the real root, or a string literal that hides a code occurrence
+    /// behind a comment-looking line or plants a fake four-space fn line to
+    /// borrow an allowlisted owner, and those forms stay open. The counted markers are
     /// built through `concat` so this test's own source carries no
     /// second read, no second module boundary and no second reference.
     #[test]
@@ -4070,15 +4073,19 @@ mod tests {
     /// caught by neither check, and that gap stays open. The module's
     /// source scan stops exactly two literal patterns. The text
     /// CARGO_MANIFEST_DIR must appear once in the test module's code and
-    /// only inside the real-root helper, and every code occurrence of the
-    /// text f272_real_repo_root outside the helper's own definition must
+    /// only inside the real-root helper, and every occurrence the line scan
+    /// treats as code of the text f272_real_repo_root outside the helper's own definition must
     /// sit inside an explicitly allowlisted guard-infrastructure function
-    /// whose enclosing item is a plain four-space fn. The scan does not
-    /// stop a rewrite made through the helper, a macro-built environment
-    /// name such as env!(concat!(...)) or std::env::var(concat!(...)), a
-    /// root found by walking current_exe or file!(), or a call to an
-    /// allowlisted function that returns a real path, and those forms
-    /// stay open. Neither check observes the
+    /// whose enclosing item is a plain four-space fn. A mention on a
+    /// comment-only line is not counted.
+    /// The scan is textual and line-based, so it does not stop a rewrite made
+    /// through the helper, a macro-built environment name such as
+    /// env!(concat!(...)) or std::env::var(concat!(...)), a root found by
+    /// walking current_exe or file!(), a call to an allowlisted function that
+    /// reads the real root, or a string literal that hides a code occurrence
+    /// behind a comment-looking line or plants a fake four-space fn line to
+    /// borrow an allowlisted owner, and those forms stay open.
+    /// Neither check observes the
     /// parent process's own writes before the guard. It is never a claim
     /// about transient writes restored before a digest, and never about
     /// the parent's own state.
