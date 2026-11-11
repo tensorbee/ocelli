@@ -377,9 +377,9 @@ pub fn handle_connection_with(stream: TcpStream, viewer: &Viewer) -> std::io::Re
     handle_connection_view(stream, viewer, None, None)
 }
 
-/// Connection handling body keyed on the viewer. The optional dicomweb config enables only the GET
-/// /dicweb/config reply and changes no page. The main policy is the only setting that changes the
-/// Image page header.
+/// Connection handling body keyed on the viewer. The optional dicomweb config enables the GET
+/// /dicweb/config reply and the two native POST routes, and changes no page. The main policy is
+/// the only setting that changes the Image page header.
 ///
 /// # Errors
 ///
@@ -473,8 +473,24 @@ fn connection_session(
                     retire_request_body(&charge, request.body);
                     (reply, None)
                 }
-                None => route(viewer, request, Some(&stream), &mut charge),
+                None => {
+                    // An unconfigured viewer still answers the page's silent
+                    // probe, with a JSON null body instead of a missing route,
+                    // so a page load never logs a 404 for it.
+                    let reply = dicweb_json_reply(&serde_json::Value::Null);
+                    retire_request_body(&charge, request.body);
+                    (reply, None)
+                }
             }
+        } else if request.method == "POST"
+            && (request.path == "/dicweb/qido" || request.path == "/dicweb/instance")
+            && dicomweb.is_none()
+        {
+            // A local-only viewer has no DICOMweb routes. The page never shows
+            // the remote source without a configured service, so the native
+            // parser is not reachable through them.
+            retire_request_body(&charge, request.body);
+            (text_reply(404, None, "not found"), None)
         } else {
             route(viewer, request, Some(&stream), &mut charge)
         };
@@ -4947,19 +4963,7 @@ mod tests {
 
     type ParsedReply = (String, Vec<(String, String)>, Vec<u8>);
 
-    fn get_once(addr: std::net::SocketAddr, path: &str) -> Result<ParsedReply, String> {
-        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
-        let request = format!(
-            "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            path
-        );
-        stream
-            .write_all(request.as_bytes())
-            .map_err(|error| error.to_string())?;
-        let mut reply = Vec::new();
-        stream
-            .read_to_end(&mut reply)
-            .map_err(|error| error.to_string())?;
+    fn parse_reply(reply: Vec<u8>) -> Result<ParsedReply, String> {
         let separator = b"\r\n\r\n";
         let split = reply
             .windows(separator.len())
@@ -4980,6 +4984,46 @@ mod tests {
             .map(|(name, value)| (name.to_owned(), value.to_owned()))
             .collect();
         Ok((status, headers, body))
+    }
+
+    fn get_once(addr: std::net::SocketAddr, path: &str) -> Result<ParsedReply, String> {
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let request = format!(
+            "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            path
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        parse_reply(reply)
+    }
+
+    fn post_once(
+        addr: std::net::SocketAddr,
+        path: &str,
+        headers: &str,
+        body: &[u8],
+    ) -> Result<ParsedReply, String> {
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let request = format!(
+            "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            path,
+            headers,
+            body.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| error.to_string())?;
+        stream.write_all(body).map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        parse_reply(reply)
     }
 
     fn context_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
@@ -5053,7 +5097,7 @@ mod tests {
     }
 
     #[test]
-    fn local_serve_on_has_no_config_route_and_the_cached_main_policy() -> Result<(), String> {
+    fn local_serve_on_has_no_remote_routes_and_the_cached_main_policy() -> Result<(), String> {
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
         let addr = listener.local_addr().map_err(|error| error.to_string())?;
         let viewer = Arc::new(Viewer::server(ViewerConfig {
@@ -5063,9 +5107,37 @@ mod tests {
         std::thread::spawn(move || {
             let _ = serve_on(listener, served);
         });
-        let (status, _, _) = get_once(addr, "/dicweb/config")?;
-        if !status.starts_with("HTTP/1.1 404") {
-            return Err("the config route existed without configuration".to_owned());
+        // The unconfigured config probe answers with a JSON null body, so a
+        // page load never logs a missing route for it.
+        let (status, headers, body) = get_once(addr, "/dicweb/config")?;
+        if !status.starts_with("HTTP/1.1 200") {
+            return Err("the config probe was not answered".to_owned());
+        }
+        let content_type = context_header(&headers, "Content-Type")
+            .ok_or_else(|| "the config probe had no content type".to_owned())?;
+        if content_type != "application/json" {
+            return Err("the config probe was not json".to_owned());
+        }
+        if body != b"null" {
+            return Err("the unconfigured config probe was not a JSON null body".to_owned());
+        }
+        // The native DICOMweb POST routes do not exist without a configured
+        // service, so the native parser is not reachable in local-only mode.
+        // The headers are the valid forms, so the refusal is the missing
+        // configuration and not a malformed request.
+        let qido_headers = "Content-Type: application/dicom+json\r\nX-Qido-Level: study\r\nX-Qido-Source-Nonce: 00000000000000000000000000000000\r\nX-Qido-Generation: 1\r\n";
+        let instance_headers = "Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\nX-Wado-Study-Instance-UID: 2.25.1\r\nX-Wado-Series-Instance-UID: 2.25.2\r\nX-Wado-SOP-Instance-UID: 2.25.3\r\nX-Wado-Source-Nonce: 00000000000000000000000000000000\r\nX-Wado-Generation: 1\r\n";
+        for (path, headers) in [
+            ("/dicweb/qido", qido_headers),
+            ("/dicweb/instance", instance_headers),
+        ] {
+            let (status, _, body) = post_once(addr, path, headers, b"[]")?;
+            if !status.starts_with("HTTP/1.1 404") {
+                return Err(format!("{path} existed without configuration"));
+            }
+            if body != b"not found" {
+                return Err(format!("{path} was not the missing route reply"));
+            }
         }
         let (_, headers, _) = get_once(addr, "/")?;
         let policy = context_header(&headers, "Content-Security-Policy")

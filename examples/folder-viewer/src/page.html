@@ -1404,6 +1404,7 @@ folderInput.addEventListener("change", () => {
   if (!files.length) return;
   sourceMode = "folder";
   markSource();
+  remoteRelease();
   readFolder(files);
 });
 document.getElementById("source-synthetic").addEventListener("click", openSynthetic);
@@ -1419,10 +1420,18 @@ window.addEventListener("focus", probeActive);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") probeActive();
 });
-document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
+// Choosing the folder source is an intent even before a folder is picked, so
+// a pending remote fetch cannot outlive it. The change event releases again,
+// because a folder can also be chosen from the empty-state button, which does
+// not pass here.
+document.getElementById("source-folder").addEventListener("click", () => {
+  remoteRelease();
+  folderInput.click();
+});
 // A configured remote service only adds a source choice. Discovery or valid
 // staging never resets local state, marks, cache or reports. Any other
-// outcome, including a 404 or malformed JSON, stays silent.
+// outcome, including the unconfigured null probe or malformed JSON, stays
+// silent.
 async function probeRemoteSource() {
   let config = null;
   try {
@@ -1446,6 +1455,16 @@ probeRemoteSource();
 
 let remoteProvider = null;
 let remoteProviderPromise = null;
+// Opening a local source is a new intent for the remote panel too. A pending
+// remote fetch is cancelled and a staged body is released, so a late reply
+// can never claim the local image is unchanged and no body is held.
+function remoteRelease() {
+  const provider = remoteProvider;
+  if (provider) {
+    provider.cancelPending();
+    provider.releaseStaged();
+  }
+}
 async function remoteProviderFor() {
   if (remoteProvider) return remoteProvider;
   if (!remoteProviderPromise) {
@@ -2118,6 +2137,7 @@ function markSource() {
 }
 
 async function openSynthetic() {
+  remoteRelease();
   const ticket = ++currentGeneration;
   sourceMode = "synthetic";
   markSource();

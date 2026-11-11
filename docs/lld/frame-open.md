@@ -180,5 +180,5 @@ and a padding count of 1 when a range is declared and 0 when it is not. It
 does not return a sample array. The body cap is 1 GiB. A larger declared
 length is refused before the body is read.
 
-`npm run dev` starts this helper and Vite. The example page section Frame
+`npm run dev:boundary-demo` starts this helper and Vite. The example page section Frame
 open is the control.

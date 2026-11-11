@@ -559,10 +559,13 @@ const config = tseslint.config(
         keyImages: "readonly",
         // F-245 dicomweb.mjs hashes the canvas with crypto.subtle and reads the
         // page documents and cache generation to prove remote steps keep them.
+        // The staged-release steps read the page's provider through
+        // remoteProvider.
         crypto: "readonly",
         sessionDocuments: "readonly",
         cacheGeneration: "readonly",
         fetch: "readonly",
+        remoteProvider: "readonly",
         // F-225's conformance.mjs times the page's paints and its report
         // requests from an init script, and reads the page's checks state
         // and its two busy counts when each request is sent. It raises and

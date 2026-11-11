@@ -210,9 +210,13 @@ display, and no decode or render runs on this path.
 
 The native viewer serves `GET /dicweb/config` with the two full URLs when the
 pair of `OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL`
-startup values is present, and answers `POST /dicweb/qido` and
-`POST /dicweb/instance` with the `X-Qido-` and `X-Wado-` prefixed metadata
-headers. The reply serialization cap belongs to the viewer layer, at a fixed
+startup values is present, and answers the probe with a JSON null body when
+the pair is absent, so an unconfigured page load logs no missing route. A URL
+pair on port 0 is refused at startup, because a browser cannot fetch it. The
+native `POST /dicweb/qido` and `POST /dicweb/instance` routes exist only when
+the pair is present, and answer with the `X-Qido-` and `X-Wado-` prefixed
+metadata headers then. The reply serialization cap belongs to the viewer
+layer, at a fixed
 16 MiB reply with a 2 MiB query body cap, a 32 MiB encoded instance cap and a
 128 MiB decoded cap. The parser limits live in `crates/ocelli-dicom`, and
 `docs/lld/dicom-ingest.md` records their signatures.

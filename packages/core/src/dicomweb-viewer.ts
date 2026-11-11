@@ -715,7 +715,7 @@ export class DicomwebProvider {
     return next;
   }
 
-async #run(
+  async #run(
     level: QidoLevel,
     scope: ReadonlyMap<string, string>,
     options?: QidoSearchOptions,
@@ -764,32 +764,32 @@ async #run(
     });
   }
 
-#drainQueued(): void {
-  const job = this.#queued;
-  if (job === null) {
-    return;
-  }
-  const stale =
-    this.#disposed ||
-    this.#generation !== job.context.generation ||
-    job.context.controller.signal.aborted;
-  if (stale) {
-    this.#queued = null;
-    if (job.operation === "qido") {
-      this.#removeExternalListener(job.externalSignal, job.externalListener);
-    } else {
-      this.#removeExternalListener(null, null);
+  #drainQueued(): void {
+    const job = this.#queued;
+    if (job === null) {
+      return;
     }
-    job.context.controller.abort();
-    job.reject(new OcelliError("Aborted", "operation was replaced"));
-    return;
+    const stale =
+      this.#disposed ||
+      this.#generation !== job.context.generation ||
+      job.context.controller.signal.aborted;
+    if (stale) {
+      this.#queued = null;
+      if (job.operation === "qido") {
+        this.#removeExternalListener(job.externalSignal, job.externalListener);
+      } else {
+        this.#removeExternalListener(null, null);
+      }
+      job.context.controller.abort();
+      job.reject(new OcelliError("Aborted", "operation was replaced"));
+      return;
+    }
+    if (this.#live.size >= MAX_LIVE_OPERATIONS) {
+      return;
+    }
+    this.#queued = null;
+    this.#startOrQueue(job);
   }
-  if (this.#live.size >= MAX_LIVE_OPERATIONS) {
-    return;
-  }
-  this.#queued = null;
-  this.#startOrQueue(job);
-}
 
   async #execute(
     context: PendingContext,
@@ -1017,43 +1017,43 @@ async #run(
     }
   }
 
-async fetchSelectedInstance(identity: InstanceIdentity): Promise<StagedMetadata> {
-  if (!isRecord(identity)) {
-    throw new OcelliError("InvalidRequest", "identity must be an object");
-  }
-  const { studyUid, seriesUid, instanceUid } = identity;
-  if (
-    !validUid(studyUid) ||
-    !validUid(seriesUid) ||
-    !validUid(instanceUid)
-  ) {
-    throw new OcelliError("InvalidRequest", "identity UIDs are invalid");
-  }
-  const ownedIdentity: InstanceIdentity = Object.freeze({
-    studyUid,
-    seriesUid,
-    instanceUid,
-  });
-  const intent = this.#beginIntent();
-  const context: WadoPendingContext = {
-    identity: ownedIdentity,
-    sourceNonce: intent.sourceNonce,
-    generation: intent.generation,
-    controller: intent.controller,
-    signal: intent.controller.signal,
-  };
-  return await new Promise<StagedMetadata>((resolve, reject) => {
-    const job: WadoQueuedJob = {
-      operation: "wado",
-      context,
-      resolve,
-      reject,
-      externalSignal: null,
-      externalListener: null,
+  async fetchSelectedInstance(identity: InstanceIdentity): Promise<StagedMetadata> {
+    if (!isRecord(identity)) {
+      throw new OcelliError("InvalidRequest", "identity must be an object");
+    }
+    const { studyUid, seriesUid, instanceUid } = identity;
+    if (
+      !validUid(studyUid) ||
+      !validUid(seriesUid) ||
+      !validUid(instanceUid)
+    ) {
+      throw new OcelliError("InvalidRequest", "identity UIDs are invalid");
+    }
+    const ownedIdentity: InstanceIdentity = Object.freeze({
+      studyUid,
+      seriesUid,
+      instanceUid,
+    });
+    const intent = this.#beginIntent();
+    const context: WadoPendingContext = {
+      identity: ownedIdentity,
+      sourceNonce: intent.sourceNonce,
+      generation: intent.generation,
+      controller: intent.controller,
+      signal: intent.controller.signal,
     };
-    this.#startOrQueue(job);
-  });
-}
+    return await new Promise<StagedMetadata>((resolve, reject) => {
+      const job: WadoQueuedJob = {
+        operation: "wado",
+        context,
+        resolve,
+        reject,
+        externalSignal: null,
+        externalListener: null,
+      };
+      this.#startOrQueue(job);
+    });
+  }
 
   async #collectInstance(
     context: WadoPendingContext,
@@ -1164,7 +1164,7 @@ async fetchSelectedInstance(identity: InstanceIdentity): Promise<StagedMetadata>
     throw new DicomwebError("HttpStatus", response.status);
   }
 
-async #executeInstance(
+  async #executeInstance(
     context: WadoPendingContext,
     resolve: (metadata: StagedMetadata) => void,
     reject: (error: OcelliError) => void,
@@ -1312,13 +1312,13 @@ async #executeInstance(
     return { body: transferredBody, metadata: snapshot.metadata };
   }
 
-readStagedInfo(): StagedMetadata | null {
-  return this.#staged !== null && !this.#disposed && this.#staged.metadata.generation === this.#generation
-    ? this.#staged.metadata
-    : null;
-}
+  readStagedInfo(): StagedMetadata | null {
+    return this.#staged !== null && !this.#disposed && this.#staged.metadata.generation === this.#generation
+      ? this.#staged.metadata
+      : null;
+  }
 
-releaseStaged(): void {
-  this.#staged = null;
-}
+  releaseStaged(): void {
+    this.#staged = null;
+  }
 }

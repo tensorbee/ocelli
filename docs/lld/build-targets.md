@@ -925,17 +925,24 @@ the tracked launcher byte for byte and refuse a missing one with
 
 `examples/folder-viewer/tests/browser/dicomweb.mjs` is the new browser
 workflow suite. It builds its wholly synthetic DICOMweb upstream in the
-script, starts the release viewer with `OCELLI_PORT` and stops it by its PID,
-and runs directly with
-`OCELLI_PORT=0 node examples/folder-viewer/tests/browser/dicomweb.mjs`.
-Registration under the `viewer-browser` gate in `bin/ocelli.sh` is owned by
-the F-268 shared slice and has not happened yet, so the suite is not in that
-gate's list and the ten existing modules are unchanged. Until registration
-lands, the suite is run directly and no gate claims it.
+script, starts the release viewer with `OCELLI_PORT` and stops it by its PID.
+The suite picks its own port, so the gate command is plain
+`node examples/folder-viewer/tests/browser/dicomweb.mjs` with no port in the
+environment. It is registered in the `viewer-browser` gate's module list in
+`bin/ocelli.sh`, last after `auto.mjs`, and the ten modules before it are
+unchanged.
 
 `eslint.config.js` gains one comment-conditional globals entry for that
 suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
-`fetch`, added where the browser context requires them, with no rule
-disabled and no allowlist widened. `scripts/guards/catalogue.py` and
-`ci/guard-probe-budget.json` are unchanged by this story: the launcher and
-the suite add no new repository refusal and no permanent watcher.
+`remoteProvider`, added where the browser context requires them, with no rule
+disabled and no allowlist widened. `fetch` was already a browser global there.
+`scripts/guards/catalogue.py` gains the `folder-viewer-dev` guard for
+`bin/folder-viewer-dev.mjs`, and `ci/guard-probe-budget.json` budgets that
+guard at six probes. Each probe drives the launcher's own refusal through a
+driver copy of the launcher file: a stop on a pid that is not a positive
+integer or is the launcher's own, a stop signal that is neither `SIGINT` nor
+`SIGTERM`, a group liveness probe that fails with something other than
+`ESRCH`, a group signal that fails the same way, an owned group still alive
+after the `SIGKILL` confirmation deadline, and an owned phase whose stop
+rejected. Each probe has a control invocation against a dead group that must
+settle quietly.

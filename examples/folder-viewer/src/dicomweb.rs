@@ -408,11 +408,11 @@ pub(crate) struct ViewerDicomwebConfig {
 /// Restricts the host so the derived connect origin is safe for a single CSP
 /// connect-src directive. Only IPv4 literals and registered names composed
 /// solely of ASCII letters, ASCII digits, hyphens, and dots with no empty
-/// label and a non-numeric last label are permitted. Everything else
-/// (wildcards, sub-delims,
+/// label are permitted. Everything else (wildcards, sub-delims,
 /// percent-encoding, and other RFC 3986 reg-name characters) is rejected so
 /// wildcard sources, directive terminators, and header splitters can never
-/// reach the policy.
+/// reach the policy. The refusal of a numeric last label lives in
+/// `validate_full_http_url`.
 fn is_allowed_host(host: &uriparse::Host<'_>) -> bool {
     match host {
         uriparse::Host::IPv4Address(_) => true,
@@ -493,6 +493,13 @@ fn validate_full_http_url(value: &str) -> Result<String, ()> {
         {
             return Err(());
         }
+    }
+
+    // Port 0 is refused for the same reason as a numeric last label: the OS
+    // hands it to a listener that asked to bind ephemeral, so a browser
+    // connection to a configured service on it always fails.
+    if reference.port() == Some(0) {
+        return Err(());
     }
 
     if reference.query().is_some() || reference.fragment().is_some() {
@@ -1346,7 +1353,9 @@ mod tests {
         // parts as octal and would reach a different address than the canonical
         // dotted-decimal text written in the input bytes after "//" and before
         // the next "/" with any ":port" suffix removed, for example the bytes
-        // "012.0.0.1" versus the canonical "12.0.0.1".
+        // "012.0.0.1" versus the canonical "12.0.0.1". Port 0 is refused because
+        // the OS hands it to a listener that asked to bind ephemeral, so a
+        // browser connection to it always fails.
         let faulty_urls = [
             "/relative/path",
             "example.com/studies",
@@ -1370,6 +1379,8 @@ mod tests {
             "http://1.2.3.4.5/studies",
             "http://0127.0.0.1/studies",
             "http://012.0.0.1/studies",
+            "http://example.com:0/studies",
+            "http://127.0.0.1:0/s",
             "https://[2001:db8::1]:8042/studies",
             "http://[2001:db8::2]/wado",
             "http://0X7F000001:8042/s",

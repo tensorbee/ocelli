@@ -828,6 +828,32 @@ fn the_page_offers_a_hidden_dicomweb_source() -> Result<(), String> {
 }
 
 #[test]
+fn the_page_releases_the_remote_state_when_a_local_source_is_chosen() -> Result<(), String> {
+    // F-245. A local open is a new intent for the remote panel: the page
+    // cancels a pending fetch and releases a staged body at the synthetic
+    // open, at the folder picker and at the folder change, so a late reply
+    // can never label a changed local image. dicomweb.mjs drives the
+    // synthetic open and a held pending fetch in Chromium.
+    let page = served_page("/")?;
+    let synthetic = block_from(&page, "async function openSynthetic() {")?;
+    if !synthetic.contains("remoteRelease();") {
+        return Err("the synthetic open does not release the remote state".to_owned());
+    }
+    let picker = block_from(
+        &page,
+        "document.getElementById(\"source-folder\").addEventListener(\"click\", () => {",
+    )?;
+    if !picker.contains("remoteRelease();") {
+        return Err("the folder picker does not release the remote state".to_owned());
+    }
+    let change = block_from(&page, "folderInput.addEventListener(\"change\", () => {")?;
+    if !change.contains("remoteRelease();") {
+        return Err("the folder change does not release the remote state".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
 fn the_page_offers_mouse_profiles() -> Result<(), String> {
     let page = served_page("/")?;
     // AC1. The three profiles of the F-214 plan, by id and by name.

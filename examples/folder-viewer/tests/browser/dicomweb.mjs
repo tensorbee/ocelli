@@ -18,9 +18,7 @@
 // The buffers are wholly synthetic Part 10 files written by this script, carry
 // no patient attributes, and live only in memory. It starts the viewer with
 // OCELLI_PORT and stops it by its PID, through tools/bench's pinned Playwright.
-// bin/ocelli.sh does not yet register this suite under viewer-browser.
-// Registration there is pending in another story's shared slice, so this
-// script is run directly, after aspect.mjs.
+// bin/ocelli.sh registers this suite under viewer-browser, after auto.mjs.
 
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -455,6 +453,119 @@ async function main() {
     if (shownAfterFetch !== local.canvases) {
       problems.push(`the page held ${shownAfterFetch} canvases after the validated fetch, ${local.canvases} before, so a display appeared`);
     }
+
+    // A validated fetch stages a receipt the page does not take, so the
+    // staged body is present until a local source change releases it.
+    const stagedAfterFetch = await page.evaluate(() => remoteProvider.readStagedInfo() !== null);
+    if (!stagedAfterFetch) {
+      problems.push("the validated fetch left no staged receipt");
+    }
+
+    // Opening a local source is a new intent for the remote panel. The page
+    // cancels a pending remote fetch and releases a staged body there, so a
+    // late reply can never claim the local image is unchanged. First the
+    // release of the body the settled fetch left behind.
+    await page.click("#source-synthetic");
+    await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
+    const stagedAfterLocal = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
+    if (!stagedAfterLocal) {
+      problems.push("opening a local study kept the staged remote body");
+    }
+
+    // Then a fetch held pending across the local change. The stale status
+    // must never appear, and the aborted reply must stage nothing.
+    let heldPendingCount = 0;
+    let releaseHeldPending = () => {};
+    const heldPending = new Promise((resolve) => {
+      releaseHeldPending = resolve;
+    });
+    await page.route(heldUrl, async (route) => {
+      heldPendingCount += 1;
+      await heldPending;
+      try {
+        await route.continue();
+      } catch {
+        // The page cancelled the fetch while it was held, so the request is
+        // already gone and there is nothing to continue.
+      }
+    });
+    await page.locator("#remote-list button", { hasText: instanceA }).first().click();
+    await page.waitForFunction(
+      (expected) => (document.querySelector("#remote-state")?.textContent ?? "") === expected,
+      "Fetching the instance.",
+    );
+    if (heldPendingCount !== 1) {
+      problems.push(`the held route was not the pending request, count ${heldPendingCount}`);
+    }
+    await page.click("#source-synthetic");
+    await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
+    releaseHeldPending();
+    const staleStatus = "The remote instance is fetched and validated. Remote image display is not available yet. The local image is unchanged.";
+    for (let tick = 0; tick < 12; tick += 1) {
+      const text = await page.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text === staleStatus) {
+        problems.push("the stale remote status appeared after the local source changed");
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+    const stagedAfterCancel = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
+    if (!stagedAfterCancel) {
+      problems.push("the cancelled pending fetch staged a body");
+    }
+    await page.unroute(heldUrl);
+
+    // The reversed reply case with a non-cancellable fetch. The page's fetch
+    // drops the signal, so the native POST survives the cancel and completes
+    // on the real network through the real native parser, and the generation
+    // guard must refuse the stale result. A guard mutant would stage the old
+    // body and write the stale status here.
+    await page.evaluate(() => {
+      const real = window.fetch.bind(window);
+      window.fetch = (input, init) => real(input, init === undefined ? undefined : { ...init, signal: undefined });
+    });
+    let nativeArrived = () => {};
+    let nativeSeen = false;
+    const nativeArrivedPromise = new Promise((resolve) => {
+      nativeArrived = () => {
+        nativeSeen = true;
+        resolve();
+      };
+    });
+    let releaseNative = () => {};
+    const nativeHeld = new Promise((resolve) => {
+      releaseNative = resolve;
+    });
+    await page.route(`${viewerOrigin}/dicweb/instance`, async (route) => {
+      nativeArrived();
+      await nativeHeld;
+      await route.continue();
+    });
+    await page.locator("#remote-list button", { hasText: instanceA }).first().click();
+    await Promise.race([
+      nativeArrivedPromise,
+      page.waitForTimeout(30000).then(() => {
+        if (!nativeSeen) throw new Error("the native POST was never intercepted");
+      }),
+    ]);
+    // The native POST is held. A local source change now cancels the intent
+    // while its reply is still on the wire.
+    await page.click("#source-synthetic");
+    await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
+    releaseNative();
+    for (let tick = 0; tick < 12; tick += 1) {
+      const text = await page.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text === staleStatus) {
+        problems.push("the stale remote status appeared after a non-cancellable reply");
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+    const stagedAfterReversed = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
+    if (!stagedAfterReversed) {
+      problems.push("the reversed native reply staged a body");
+    }
+    await page.unroute(`${viewerOrigin}/dicweb/instance`);
 
     const got = (method, path) => upstream.requests.some((request) => request.method === method && request.path.split('?')[0] === path);
     if (!got("GET", "/dicom-web/studies")) problems.push("the upstream saw no studies request");

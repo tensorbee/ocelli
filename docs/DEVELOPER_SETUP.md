@@ -109,7 +109,8 @@ npm run dev                   # the folder viewer, the showcase, through bin/fol
 ```
 
 The launcher builds `@ocelli/core`, selects the native folder viewer binary
-from cargo's compiler-artifact output and serves the page it prints. The
+from cargo's compiler-artifact output and runs it. The backend prints its own
+address and serves the page. The
 earlier React Vite demo keeps its own entry:
 
 ```bash
@@ -146,7 +147,7 @@ surprise from below.
 and only meaningful when measuring size. Iterate with `check`.
 
 **Why the wasm module is not committed.** It is a build artefact, it is several
-megabytes, and a stale one in the tree is worse than none: the example viewer
+megabytes, and a stale one in the tree is worse than none: the boundary demo
 would show a core that is not the one the source builds.
 
 ## Troubleshooting
