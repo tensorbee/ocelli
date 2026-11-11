@@ -929,8 +929,18 @@ script, starts the release viewer with `OCELLI_PORT` and stops it by its PID.
 The suite picks its own port, so the gate command is plain
 `node examples/folder-viewer/tests/browser/dicomweb.mjs` with no port in the
 environment. It is registered in the `viewer-browser` gate's module list in
-`bin/ocelli.sh`, last after `auto.mjs`, and the ten modules before it are
-unchanged.
+`bin/ocelli.sh`, and the ten modules before it are unchanged.
+
+`examples/folder-viewer/tests/browser/launcher.mjs` is the launcher's browser
+control. It starts the viewer the way a user does, through `npm run dev`, with
+a private `CARGO_TARGET_DIR` it creates and removes, so the binary can only
+come from the compiler artifact cargo itself names. It waits for the one URL
+the backend prints, opens the page in headless Chromium, asserts the boot
+status and source chooser, fetches the same page from a plain native start of
+the release binary, and asserts the two bodies are identical. It signals the
+npm process group by the npm PID and asserts the port stops serving, so a
+backend orphaned by an unhandled signal fails the suite. It is registered in
+the `viewer-browser` gate's module list last, after `dicomweb.mjs`.
 
 `eslint.config.js` gains one comment-conditional globals entry for that
 suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and

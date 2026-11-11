@@ -1457,13 +1457,16 @@ let remoteProvider = null;
 let remoteProviderPromise = null;
 // Opening a local source is a new intent for the remote panel too. A pending
 // remote fetch is cancelled and a staged body is released, so a late reply
-// can never claim the local image is unchanged and no body is held.
+// can never claim the local image is unchanged and no body is held. The
+// panel also returns to its idle line, so no stale status outlives the
+// release.
 function remoteRelease() {
   const provider = remoteProvider;
   if (provider) {
     provider.cancelPending();
     provider.releaseStaged();
   }
+  remoteState("The DICOMweb panel is idle.");
 }
 async function remoteProviderFor() {
   if (remoteProvider) return remoteProvider;

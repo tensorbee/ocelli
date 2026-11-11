@@ -484,7 +484,7 @@ try {
   }
 }</code></pre>
     <p>That sink is the caller's, because the wasm session has no <code>commit_dicomweb_response</code> export yet. The Rust parser for these bodies exists as <code>ocelli_dicom::DicomwebSource</code>, shown in the Rust chapter, but no wasm export joins the two today.</p>
-    <p><code>DicomwebProvider</code> is the higher level wrapper the folder viewer uses. It wraps a <code>DicomwebClient</code> and is also exported from <code>@ocelli/core</code>. Its constructor takes <code>studiesServiceUrl</code>, <code>wadoUriUrl</code> and <code>fetch</code>, and it needs the viewer's native <code>/dicweb/qido</code> and <code>/dicweb/instance</code> routes to reach the native backend. The viewer page calls <code>cancelPending</code> and <code>releaseStaged</code> when a local source is chosen, so a late reply cannot claim that the local image is unchanged.</p>
+    <p><code>DicomwebProvider</code> is the higher level wrapper the folder viewer uses. It wraps a <code>DicomwebClient</code> and is also exported from <code>@ocelli/core</code>. Its constructor takes <code>studiesServiceUrl</code>, <code>wadoUriUrl</code> and <code>fetch</code>, and it needs the viewer's native <code>/dicweb/qido</code> and <code>/dicweb/instance</code> routes to reach the native backend. The viewer page calls <code>cancelPending</code> and <code>releaseStaged</code> when a local source is chosen, so a late reply cannot claim that the local image is unchanged, and the remote panel returns to its idle line.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Method</th><th>Behaviour</th></tr></thead>
       <tbody>
@@ -495,7 +495,7 @@ try {
         <tr><td><code>takeStagedInstance(expected)</code></td><td>returns the staged instance when it matches <code>expected</code></td></tr>
         <tr><td><code>readStagedInfo()</code></td><td>reads the metadata of the staged instance</td></tr>
         <tr><td><code>releaseStaged()</code></td><td>releases the staged instance</td></tr>
-        <tr><td><code>cancelPending()</code></td><td>cancels a pending request</td></tr>
+        <tr><td><code>cancelPending()</code></td><td>cancels a pending request and releases the staged body</td></tr>
         <tr><td><code>dispose()</code></td><td>releases everything the provider holds</td></tr>
       </tbody>
     </table></div>

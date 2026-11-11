@@ -6,6 +6,10 @@
 //   local    the local synthetic image, an SR document read back through the
 //            load path, marks, key images, checks and cache stay unchanged
 //            throughout
+//   release  a local source choice is a new intent for the remote panel, so
+//            the synthetic open, the folder change and the folder picker
+//            each cancel a pending fetch, release a staged body and return
+//            the panel to its idle line
 //
 // The remote path resolves no tier and adds no GPU path. The tier-independent
 // observable asserted here is that no canvas appears anywhere on the page
@@ -18,10 +22,10 @@
 // The buffers are wholly synthetic Part 10 files written by this script, carry
 // no patient attributes, and live only in memory. It starts the viewer with
 // OCELLI_PORT and stops it by its PID, through tools/bench's pinned Playwright.
-// bin/ocelli.sh registers this suite under viewer-browser, after auto.mjs.
+// bin/ocelli.sh registers this suite under viewer-browser, before launcher.mjs.
 
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -165,6 +169,17 @@ async function startSyntheticDicomweb({ origin, study, series, instances }) {
 }
 
 const BOUNDARY = "synthetic-dicomweb-boundary-f245";
+
+// The panel line a release leaves behind. Asserted by exact equality after
+// every release, so a status that outlives its request fails the suite.
+const REMOTE_IDLE = "The DICOMweb panel is idle.";
+
+function waitRemoteState(page, text) {
+  return page.waitForFunction(
+    (expected) => (document.querySelector("#remote-state")?.textContent ?? "") === expected,
+    text,
+  );
+}
 
 function u16(value) {
   const buffer = Buffer.alloc(2);
@@ -331,6 +346,13 @@ async function main() {
   });
   const browser = await chromium.launch();
   const downloads = mkdtempSync(join(tmpdir(), "f245-dicomweb-docs-"));
+  // A directory whose one file has no Part 10 magic, so the local open the
+  // change and picker steps drive is refused and opens no study, which the
+  // status line below asserts. The directory form is what the page's
+  // webkitdirectory input accepts. The release is what those steps exist to
+  // observe.
+  const junkDir = mkdtempSync(join(tmpdir(), "f245-junk-folder-"));
+  writeFileSync(join(junkDir, "not-part10.bin"), Buffer.from("plain bytes, not a DICOM Part 10 file\n"));
   const pageRequests = [];
   const problems = [];
   try {
@@ -466,6 +488,7 @@ async function main() {
     // late reply can never claim the local image is unchanged. First the
     // release of the body the settled fetch left behind.
     await page.click("#source-synthetic");
+    await waitRemoteState(page, REMOTE_IDLE);
     await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
     const stagedAfterLocal = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
     if (!stagedAfterLocal) {
@@ -482,12 +505,10 @@ async function main() {
     await page.route(heldUrl, async (route) => {
       heldPendingCount += 1;
       await heldPending;
-      try {
-        await route.continue();
-      } catch {
-        // The page cancelled the fetch while it was held, so the request is
-        // already gone and there is nothing to continue.
-      }
+      // The page's fetch was aborted by the release, so whatever the network
+      // does from here is discarded by the page. Continue so the held reply
+      // can arrive and prove it writes nothing.
+      await route.continue().catch(() => undefined);
     });
     await page.locator("#remote-list button", { hasText: instanceA }).first().click();
     await page.waitForFunction(
@@ -498,6 +519,7 @@ async function main() {
       problems.push(`the held route was not the pending request, count ${heldPendingCount}`);
     }
     await page.click("#source-synthetic");
+    await waitRemoteState(page, REMOTE_IDLE);
     await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
     releaseHeldPending();
     const staleStatus = "The remote instance is fetched and validated. Remote image display is not available yet. The local image is unchanged.";
@@ -551,6 +573,7 @@ async function main() {
     // The native POST is held. A local source change now cancels the intent
     // while its reply is still on the wire.
     await page.click("#source-synthetic");
+    await waitRemoteState(page, REMOTE_IDLE);
     await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
     releaseNative();
     for (let tick = 0; tick < 12; tick += 1) {
@@ -564,6 +587,129 @@ async function main() {
     const stagedAfterReversed = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
     if (!stagedAfterReversed) {
       problems.push("the reversed native reply staged a body");
+    }
+    await page.unroute(`${viewerOrigin}/dicweb/instance`);
+
+    // A search that a local source change cancels. The native QIDO POST is
+    // held at the route, so the series search is pending when the synthetic
+    // study opens. The panel must return to the idle line at once and the
+    // late reply must never write over it, because the page ignores the
+    // abort the release produces and discards whatever the reply carries.
+    await page.locator("#remote-list button", { hasText: "Back to studies" }).first().click();
+    await waitRemoteState(page, "Choose a study.");
+    let searchSeen = 0;
+    let releaseSearch = () => {};
+    const searchHeld = new Promise((resolve) => {
+      releaseSearch = resolve;
+    });
+    await page.route(`${viewerOrigin}/dicweb/qido`, async (route) => {
+      searchSeen += 1;
+      await searchHeld;
+      // The page's fetch was aborted by the release, so the reply the route
+      // lets through now is discarded by the page and may write nothing.
+      await route.continue().catch(() => undefined);
+    });
+    await page.locator("#remote-list button", { hasText: study }).first().click();
+    await waitRemoteState(page, "Searching series.");
+    for (let tick = 0; tick < 400 && searchSeen < 1; tick += 1) await page.waitForTimeout(25);
+    await page.click("#source-synthetic");
+    await waitRemoteState(page, REMOTE_IDLE);
+    await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
+    releaseSearch();
+    for (let tick = 0; tick < 12; tick += 1) {
+      const text = await page.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text !== REMOTE_IDLE) {
+        problems.push(`the cancelled search left "${text}" instead of the idle line`);
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+    if (searchSeen !== 1) {
+      problems.push(`the cancelled search route saw ${searchSeen} requests, 1 expected`);
+    }
+    await page.unroute(`${viewerOrigin}/dicweb/qido`);
+
+    // The folder change path. A pending instance fetch is held at the native
+    // route, then the hidden folder input is given a directory that holds no
+    // DICOM. The change event must cancel the pending fetch, release any
+    // staged body and leave the idle line, without opening a study.
+    await page.locator("#remote-list button", { hasText: study }).first().click();
+    await waitRemoteState(page, "Choose a series.");
+    await page.locator("#remote-list button", { hasText: series }).first().click();
+    await waitRemoteState(page, "Choose an instance.");
+    let changeSeen = 0;
+    let releaseChange = () => {};
+    const changeHeld = new Promise((resolve) => {
+      releaseChange = resolve;
+    });
+    await page.route(`${viewerOrigin}/dicweb/instance`, async (route) => {
+      changeSeen += 1;
+      await changeHeld;
+      await route.continue().catch(() => undefined);
+    });
+    await page.locator("#remote-list button", { hasText: instanceA }).first().click();
+    await waitRemoteState(page, "Fetching the instance.");
+    for (let tick = 0; tick < 400 && changeSeen < 1; tick += 1) await page.waitForTimeout(25);
+    await page.locator("#folder").setInputFiles([junkDir]);
+    await waitRemoteState(page, REMOTE_IDLE);
+    await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Reading"));
+    await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "").startsWith("No DICOM series in that folder."));
+    releaseChange();
+    for (let tick = 0; tick < 12; tick += 1) {
+      const text = await page.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text !== REMOTE_IDLE) {
+        problems.push(`the folder change left "${text}" instead of the idle line`);
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+    if (changeSeen !== 1) {
+      problems.push(`the folder change route saw ${changeSeen} requests, 1 expected`);
+    }
+    if (await page.evaluate(() => remoteProvider.readStagedInfo() !== null)) {
+      problems.push("the folder change kept a staged remote body");
+    }
+    await page.unroute(`${viewerOrigin}/dicweb/instance`);
+
+    // The folder picker path. The release happens when the picker opens,
+    // before any file is chosen, so the pending fetch is cancelled and the
+    // idle line is shown while the chooser is up. The chooser is then given
+    // the same not-DICOM directory, so the change it fires releases again
+    // and its open is refused rather than shown.
+    let pickerSeen = 0;
+    let releasePicker = () => {};
+    const pickerHeld = new Promise((resolve) => {
+      releasePicker = resolve;
+    });
+    await page.route(`${viewerOrigin}/dicweb/instance`, async (route) => {
+      pickerSeen += 1;
+      await pickerHeld;
+      await route.continue().catch(() => undefined);
+    });
+    await page.locator("#remote-list button", { hasText: instanceA }).first().click();
+    await waitRemoteState(page, "Fetching the instance.");
+    for (let tick = 0; tick < 400 && pickerSeen < 1; tick += 1) await page.waitForTimeout(25);
+    const [pickerChooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.click("#source-folder"),
+    ]);
+    await waitRemoteState(page, REMOTE_IDLE);
+    await pickerChooser.setFiles([junkDir]);
+    await page.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "").startsWith("No DICOM series in that folder."));
+    releasePicker();
+    for (let tick = 0; tick < 12; tick += 1) {
+      const text = await page.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text !== REMOTE_IDLE) {
+        problems.push(`the folder picker left "${text}" instead of the idle line`);
+        break;
+      }
+      await page.waitForTimeout(50);
+    }
+    if (pickerSeen !== 1) {
+      problems.push(`the folder picker route saw ${pickerSeen} requests, 1 expected`);
+    }
+    if (await page.evaluate(() => remoteProvider.readStagedInfo() !== null)) {
+      problems.push("the folder picker kept a staged remote body");
     }
     await page.unroute(`${viewerOrigin}/dicweb/instance`);
 
@@ -600,6 +746,7 @@ async function main() {
     await stopByPid(server.pid);
     await upstream.close();
     rmSync(downloads, { recursive: true, force: true });
+    rmSync(junkDir, { recursive: true, force: true });
   }
 }
 

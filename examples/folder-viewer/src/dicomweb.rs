@@ -495,9 +495,9 @@ fn validate_full_http_url(value: &str) -> Result<String, ()> {
         }
     }
 
-    // Port 0 is refused for the same reason as a numeric last label: the OS
-    // hands it to a listener that asked to bind ephemeral, so a browser
-    // connection to a configured service on it always fails.
+    // Port 0 is refused on its own ground: the OS hands it to a listener
+    // that asked to bind ephemeral, so a browser connection to a configured
+    // service on it always fails.
     if reference.port() == Some(0) {
         return Err(());
     }

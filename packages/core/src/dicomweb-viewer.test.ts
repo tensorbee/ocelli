@@ -1676,6 +1676,107 @@ it("refuses a staged transfer on structuredClone failure and recovers by refetch
 });
 });
 
+describe("DicomwebProvider cancelPending staged release", () => {
+it("releases the staged body, aborts the held request and stages a fresh body", async () => {
+  // The staged receipt is readable only while its generation is the current
+  // one, so the release here is proved on both sides of the cancel: the
+  // receipt is reported while the generation is unmoved, and after the
+  // cancel the same call reports nothing and the old receipt is refused.
+  // The held request's abort signal is the observation that does not depend
+  // on the generation at all: the cancel reached the wire.
+  const raw = new Uint8Array([10, 20, 30, 40]);
+  const boundary = "f245-cancel-staged-boundary";
+  const captured: CapturedCalls = { native: [], upstream: [] };
+  const signals: Array<AbortSignal | null | undefined> = [];
+  const heldOperations: HeldNative[] = [];
+  const nativeFetch: typeof fetch = async (input, init) => {
+    const call: NativeCall = {
+      url: observedUrl(input),
+      method: observedMethod(input, init),
+      headers: observedHeaders(input, init),
+      bodyBytes: await readBodyBytes(input, init),
+    };
+    captured.native.push(call);
+    signals.push(init?.signal);
+    if (captured.native.length === 2) {
+      const held = holdNative(call);
+      heldOperations.push(held);
+      return held.promise;
+    }
+    return new Response(JSON.stringify(await nativeInstanceEnvelope(call, boundary)), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  const upstreamFetch: typeof fetch = async (input, init) => {
+    captured.upstream.push({
+      url: observedUrl(input),
+      headers: observedHeaders(input, init),
+    });
+    return new Response(raw.slice(), {
+      status: 200,
+      headers: {
+        "Content-Type": `multipart/related; type="application/dicom"; boundary=${boundary}`,
+      },
+    });
+  };
+  vi.stubGlobal("fetch", nativeFetch);
+  const provider = new DicomwebProvider({
+    studiesServiceUrl: UPSTREAM_URL,
+    wadoUriUrl: WADO_URL,
+    fetch: upstreamFetch,
+  });
+  const identity: { studyUid: string; seriesUid: string; instanceUid: string } = {
+    studyUid: STUDY_UID,
+    seriesUid: SERIES_UID,
+    instanceUid: INSTANCE_UID,
+  };
+  try {
+    const staged = await provider.fetchSelectedInstance(identity);
+    expect(provider.readStagedInfo()).toEqual(staged);
+    const pending = provider.fetchSelectedInstance(identity);
+    const pendingObserved = pending.catch((error: unknown) => error);
+    await vi.waitFor(() => {
+      expect(captured.native.length).toBe(2);
+      expect(heldOperations.length).toBe(1);
+    });
+    const heldSignal = signals[1];
+    if (heldSignal === undefined || heldSignal === null) {
+      throw new Error("the held request carried no signal");
+    }
+    provider.cancelPending();
+    expect(heldSignal.aborted).toBe(true);
+    expect(provider.readStagedInfo()).toBeNull();
+    expect(provider.takeStagedInstance(staged)).toBeNull();
+    const held = heldOperations[0];
+    if (held === undefined) throw new Error("held operation missing");
+    held.resolve(new Response(JSON.stringify(await nativeInstanceEnvelope(held.call, boundary)), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const pendingError = await pendingObserved;
+    if (!(pendingError instanceof OcelliError)) throw new Error("not an OcelliError");
+    expect(pendingError.code).toBe("Aborted");
+    expect(captured.native.length).toBe(2);
+    const next = await provider.fetchSelectedInstance(identity);
+    expect(next.generation).toBe(staged.generation + 3);
+    expect(provider.readStagedInfo()).toEqual(next);
+    expect(provider.takeStagedInstance(staged)).toBeNull();
+    const owned = provider.takeStagedInstance(next);
+    if (owned === null) throw new Error("take of the fresh receipt failed");
+    expect(owned.body instanceof ArrayBuffer).toBe(true);
+    expect(new Uint8Array(owned.body)).toEqual(raw);
+    expect(owned.metadata).toEqual(next);
+    expect(provider.readStagedInfo()).toBeNull();
+  } finally {
+    provider.dispose();
+    for (const held of heldOperations) {
+      held.resolve(new Response('{"code":"HttpStatus"}', { status: 503, headers: { "Content-Type": "application/json" } }));
+    }
+  }
+});
+});
+
 describe("WADO native 422 bounded error body", () => {
 it.each(ERROR_CASES)("$name", async ({ totalBytes, expected }) => {
   const raw = new Uint8Array([1, 2, 3, 4]);

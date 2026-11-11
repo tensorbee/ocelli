@@ -832,8 +832,11 @@ fn the_page_releases_the_remote_state_when_a_local_source_is_chosen() -> Result<
     // F-245. A local open is a new intent for the remote panel: the page
     // cancels a pending fetch and releases a staged body at the synthetic
     // open, at the folder picker and at the folder change, so a late reply
-    // can never label a changed local image. dicomweb.mjs drives the
-    // synthetic open and a held pending fetch in Chromium.
+    // can never label a changed local image. This source pin is backed by
+    // dicomweb.mjs, which drives all three arms in Chromium with a held
+    // pending fetch: the synthetic open, the folder change through
+    // setInputFiles and the folder picker through its chooser, each
+    // asserting the idle line and that the released reply writes nothing.
     let page = served_page("/")?;
     let synthetic = block_from(&page, "async function openSynthetic() {")?;
     if !synthetic.contains("remoteRelease();") {
