@@ -407,6 +407,7 @@ None. The HLD does not specify a default window, and the operator chose this one
 
 - `docs/lld/pixel-pipeline.md`, "VOI stage": a new subsection "The automatic window" stating the series sample, the cap split, per-frame rescale and exclusion, nearest rank, LINEAR_EXACT, the three bases, the refusals and pool recovery, that `open_frame` still invents nothing, and that the oracle injects its own declared window.
 - `docs/lld/benchmarks.md`: the `pet_no_window` workload and its informational row.
+- `docs/lld/cache.md`: F-216's bound with the named `P * 4 MiB` term for the series-window pools and the 24 MiB fixed constant, as the lead rulings after review passes 19 and 20 direct. Added at completion because this list omitted it.
 
 ## User-facing documentation impact
 

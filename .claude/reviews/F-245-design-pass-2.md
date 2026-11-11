@@ -1,0 +1,19 @@
+# F-245 design microscope, pass 2
+
+Reviewer: Codex, independent of GLM semantic authorship and focused own microscope.
+
+Result: 0 defects, 0 smells, 2 editorial nitpicks. Design approved. The two recorded typos, 1D X and C argo, are corrected mechanically on adoption.
+
+Reviewed the corrected whole candidate SHA-256 `5a6029540259310feab3d5b8b417a21a12d0c7595fd3c419e0a80b3e7efe8abb` and its complete v4-to-v7 delta `bb3b351fe94c0ecf84a8b56a91ed2d6c86d1fb12d1d636bfce5a11f556d649dc`. The previously reviewed source/API choices remain, with the precise nested receipt amendment. This is design review, not code acceptance.
+
+D1 is resolved. The exact write map names use.html, more.html and the actual conditional eslint.config.js. Boundary questions and all three tier answers, tests, parity, deviations, LLD and user-facing documentation impacts now give the completion workflow its required delivery contract. README's canonical npm launch presentation changes with the new launcher. Existing guide locations are source-grounded. No Appendix B row is claimed complete by staged remote fetch alone.
+
+D2 is resolved. The procedure binds the available ARM Mac cohort, source identities, separate worktrees/targets, release binary selected by actual Cargo compiler-artifact output, synthetic input identities, five registered subjects, start/end events, clocks, units, sample validity, collectors and unchanged comparison bands. Root inspected subjects.json, the actual viewer_work.mjs collectors, runner wrappers, run.mjs output and baseline cohorts. The code supports the first-image queued microtask, requestGrey-to-drawGrey interval and requested RSS sampling cadence as described. Actual host/tool identity must be reconfirmed at measurement time. A load reading does not establish otherwise-idle conditions. The after identity and actual measurements remain future observations, not invented design results.
+
+S1 is resolved. Input identity is copied synchronously before awaiting. Nested readonly declarations are paired with runtime detached deep snapshots and freezing, never freezing the caller object. Full matching uses private independent originals. Input, returned identity/representation and supplied expected-receipt mutation controls are required around asynchronous settlement and transfer. Parsed actual UIDs, digest and retained body remain bound independently of exposed aliases. No runtime alias bug is claimed before implementation exists.
+
+Root read the original focused GLM own report and final two-clause factual check. The focused report incorrectly included a confirmed non-defect in its defects array and inferred a missing Readonly replacement because the controller excerpt omitted the already-present declaration. Those qualifications are preserved. Its useful delivery and acquisition corrections appear in the actual final plan. No final whole-plan author 0D/0S result is fabricated. Root independently assessed the composed artifact.
+
+The earlier pass's accepted decisions remain: one native showcase page and npm launcher, legacy client compatibility, bounded delivery with actual raw-body ownership, parsed leaf UIDs plus optional constrained-query parents, complete multipart identity and boundary retention, limits enforced before growth, explicit safe error codes, finite canceled-but-unsettled operation accounting, and partial remote status until F-202. All clinical data remain outside prompts and source.
+
+Approval permits an isolated S47 implementation after the normal claim and verified dependencies under the existing user exception. F-266 retains its active product writer set until release. Root will coordinate shared gate/catalogue providers. No acceptance, feature verification, S46 closure, canonical integration, push or merge follows from this plan approval.

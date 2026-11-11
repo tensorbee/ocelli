@@ -89,10 +89,10 @@ pub fn available_when(mode: Interpolation, tier: Tier, tier_b_linear: bool) -> b
 /// Sample one display image.
 ///
 /// Linear treats `0` as the centre of texel `(0, 0)`. Nearest forwards the
-/// same numbers to [`texel_of`], and [`texel_of`] reads a corner-origin image
+/// same numbers to `texel_of`, and `texel_of` reads a corner-origin image
 /// coordinate. The approved pair at `(0.5, 0.5)` is nearest texel 0 and
 /// linear `138.75`. Those two modes are not one geometric point. The raster
-/// passes an index to linear and `index + 0.5` to [`texel_of`].
+/// passes an index to linear and `index + 0.5` to `texel_of`.
 ///
 /// `samples` is row-major. `width` is the column count and the row count is
 /// the slice length divided by `width`. A linear footprint that leaves the

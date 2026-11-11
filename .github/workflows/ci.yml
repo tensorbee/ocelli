@@ -59,6 +59,7 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: bin/ocelli.sh gate docs
       # Successful tests otherwise hide their stdout. Retain these synthetic
       # per-channel observations without treating them as a quality threshold.
       - name: JPEG class-two observations, unmeasured

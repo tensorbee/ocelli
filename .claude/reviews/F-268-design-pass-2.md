@@ -1,0 +1,15 @@
+# F-268 design microscope, pass 2
+
+Reviewer: Codex, independent of GLM. Reviewed semantic proposal `08a440c76f4efc01a187d54c6143899c6e66deafa21731be177f9237b96009ee` and exact combined patch `a0637126625655503404694311235a65429d8f77caf70ea349ab8a959558d85c`. Approved canonical plan SHA256 `be8b9b25aafe8cf8ecf97c4d5469b07f7d5b165f38268a122419cbc3c8a889b3` differs only in coordinator approval-status metadata and the link to this review.
+
+Result: 0 defects, 0 smells, 2 nitpicks. Design is approved for isolated S47 work under the existing user exception. Workflow policy implementation still requires separate review and commit. No gate is adopted by this plan approval.
+
+Pass 1 D1 is closed. The docs Cargo child removes the overriding encoded rustdoc variable rather than setting it empty, then receives the exact authoritative denied pair through its own environment. Caller and other gates remain unchanged. The permanent AC8 runs the actual future gate under inherited encoded allows with a private-link fault, a broken-link fault and restored healthy source. It records actual intended diagnostics and own exits. This rejects the concrete precedence bypass root reproduced and does not change lints or tolerances.
+
+The record in AC8 is the existing test/probe evidence harness's responsibility, not a new output API for bin/ocelli.sh. Its implementation/reviewer stage already binds it to the future actual gate. This interpretation adds no command or mock wrapper. The Tests row is now correctly classified integration because rustdoc performs I/O.
+
+Root read the complete bounded author review. Its two defect labels infer a new gate-record API and a claim that the gate already exists. Neither is required by the text. Its diagnostic-name concern is a clarity preference: the contract requires actual named private and unresolved diagnostics, not an exact entire compiler sentence fixed forever. Duplication and the long AC8 cell are the two nonblocking editorial nits. No further wording loop is needed. Original raw labels, capped attempts and coordinator source limitations remain retained with their actual attribution.
+
+Public API preservation, the actual seven-file diagnostic map, fully qualified existing LutChain constructor, current floor and CI provider map, no exclusion-list change and mandatory real fault/recovery controls remain those checked in pass 1. Baseline diagnostics are 11 located failures at the captured native source, not future acceptance. No all-target or every-feature rustdoc claim follows from a default host selection.
+
+Implementation may start with the independent doc-comment fixes. F-266 currently owns scripts/guards/catalogue.py, the guard budget and generated runbook, so the F-268 policy/guard half must wait for explicit ownership release. Do not write those shared providers concurrently. Keep meaningful numerical/refusal comments unchanged, with no API visibility changes. Root will separately review policy and feature changes, then the final accepted union before feature verification and prepared commits. No S46 integration, shared completion totals, push or closure authority is added.

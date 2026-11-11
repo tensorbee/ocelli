@@ -4,7 +4,7 @@
 //! scalars. It cannot rebuild pan, zoom, rotation, flip, spacing, the VOI
 //! function, a selected LUT sequence, the colormap, or whether the presentation
 //! shape was declared. This record stores those inputs. [`View::camera_matrix`]
-//! stays the only matrix, and [`LutChain::new`] stays the only chain.
+//! stays the only matrix, and [`ocelli_pixel::LutChain::new`] stays the only chain.
 //!
 //! DICOM PS3.3 C.11.2.1.1: a LUT descriptor's entry count of zero means 65,536.
 //! PS3.3 C.11.6: presentation shape is `IDENTITY` or `INVERSE`, and an absent

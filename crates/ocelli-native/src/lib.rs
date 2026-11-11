@@ -109,7 +109,7 @@ pub fn tier_request(raw: Option<&str>) -> TierRequest {
 ///
 /// A missing variable is auto. A value that is not Unicode is refused.
 /// `None` means the resolver did not complete, which on a native backend it
-/// always should. See [`drive`].
+/// always should. See `drive`.
 #[must_use]
 pub fn resolve_tier() -> Option<Resolution> {
     let request = tier_request_from_var(std::env::var(TIER_OVERRIDE_VAR));

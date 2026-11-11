@@ -683,9 +683,47 @@ Repository bootstrap. Nothing is published.
   `@ocelli/core` under `/lib/` from an allowlist, so the region window needs
   `npm run build -w @ocelli/core` and reads unavailable without it. The
   bottom right corner names the window shown.
+- The local folder viewer offers three mouse profiles in its MOUSE section.
+  Ocelli, the default, starts the left button on Scroll with the middle
+  button zooming and the right button panning. Scroll on left drags the
+  window with the middle button and zooms with the right. Window on left
+  starts on W/L, pans with the middle button and zooms with the right.
+  Control with the left button pans in all three. The profile, the play
+  rate and the two hidden side columns are kept in this browser for the
+  page's address. Between two frames of one multi-frame file, Play waits
+  that file's Frame Time `(0018,1063)`, and the FPS control otherwise, with
+  a line saying which and Use the slider to take the rate back.
+  `ocelli-dicom` gains `cine_timing`, which reads one object's cine timing
+  alone through the same rules as `assemble_display`.
+- The local folder viewer saves its marks. Save marks downloads one DICOM
+  SR TID 1500 file per study for the Freeform, Rectangle, Ellipse, Length
+  and Text marks, and one Key Object Selection per study for the key
+  images. Nothing is written into the opened folder. Opening the folder
+  again with those files in it, or Load marks, places each mark and key
+  image on its image by SOP Instance UID and frame. A save names the
+  reports it replaces in Predecessor Documents Sequence. Angle, Cobb,
+  Bidirectional, Arrow and Probe marks are not saved and are counted.
+  `@ocelli/core` gains `writeTid1500Groups`, `readTid1500Groups`,
+  `writeKeyObjects` and `readKeyObjects`, `GraphicType` gains `ELLIPSE`, and
+  an `IMAGE` item gains an optional `frame`. Save marks and Load marks need
+  `npm run build` first.
+- The local folder viewer draws a series whose images store no window at
+  one automatic window for the whole series, and the corner says `Auto
+  window`. The window runs from the 1st to the 99th nearest-rank percentile
+  of modality values over up to 16 images spread through the series, each
+  through its own rescale, with stored zero and the Pixel Padding Value left
+  out, and the function is LINEAR_EXACT. `POST /series-window` computes it
+  once per series and the page sends it back unchanged with each preview. A
+  thumbnail, and a series whose window the local process refuses, use each
+  image's own automatic window and say `Auto window, this image`. A window in
+  the file is always used as it is. `ocelli-pixel` gains `series_sample`,
+  `AutoWindowPool`, `auto_window` and `AutoWindow`. cornerstone3D 5.8.2 takes
+  each image's own minimum and maximum instead, so this is not a parity row.
+- Corrected nine public Rust documentation reference lines across seven files and added a workspace gate denying `rustdoc::private_intra_doc_links` and `rustdoc::broken_intra_doc_links` for default and native public docs.
 
 ### Changed
 
+- Shipped native builds now compile no Metal backend and no objc2 crate, proven per Apple target by the resolved dependency graph, and the desktop reports an explicit no-backend result instead of panicking when no backend is compiled. Development builds keep Metal for the tier A gate.
 - Every public options and request object in `@ocelli/core` now refuses an
   unknown key with `OcelliError` code `UnknownOption`, naming the key, before
   any fetch or write. A misspelt option used to be ignored.

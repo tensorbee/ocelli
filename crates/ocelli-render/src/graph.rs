@@ -1853,7 +1853,7 @@ impl RenderGraph {
     /// Register `pass` into `target` and create its stored-sample texture.
     ///
     /// The texture is created here, at registration.
-    /// [`selected_stored_format`] asks the adapter for `R32Float`, then
+    /// `selected_stored_format` asks the adapter for `R32Float`, then
     /// `Rg32Float`, then `Rgba32Float`. `R32Float` is used on every tier when
     /// it can be sampled and written. Tier B may use the next float format
     /// when `R32Float` cannot, because `textureLoad` still returns the stored

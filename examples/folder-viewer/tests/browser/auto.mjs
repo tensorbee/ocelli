@@ -490,7 +490,171 @@ async function dragWindow(page) {
   await page.mouse.up();
 }
 
-/** One page: the PT series scrolled through, a drag, Reset, the row, MR and CT. */
+/** One page: the PT series held in the window, an optional ArrowDown, then release and the row. */
+export async function observeTilesBeforeSeriesWindow(url, chromium, folder, scroll = false, fail = false) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const held = [];
+    let asked = 0;
+    await page.route("**/series-window", (route) => {
+      // A failed request never stores a window, so abort instead of holding.
+      if (fail) {
+        asked += 1;
+        route.abort();
+        return;
+      }
+      held.push(route);
+    });
+    await page.goto(url);
+    await page.evaluate(() => {
+      window.__labels = [];
+      new MutationObserver(() => {
+        for (const label of document.querySelectorAll(".cell .tiles .tile-label")) {
+          const text = label.textContent || "";
+          if (text) window.__labels.push(text);
+        }
+      }).observe(document.body, { subtree: true, characterData: true, childList: true });
+    });
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("3 series."));
+    // page.waitForFunction runs in the page and cannot see Node state, so poll here.
+    if (!fail) {
+      const heldDeadline = Date.now() + 5000;
+      while (held.length < 1) {
+        if (Date.now() > heldDeadline) throw new Error("series-window request was never held");
+        await page.waitForTimeout(50);
+      }
+    }
+    await page.keyboard.press("Shift+G");
+    await page.waitForTimeout(1500);
+    if (scroll) {
+      // Exercise tile layout again while the series window request is still held.
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(300);
+    }
+    if (fail) {
+      // A refusal is not asked again for this open, so count every route call.
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(400);
+      await page.keyboard.press("ArrowDown");
+      await page.waitForTimeout(400);
+    }
+    const tiles = () => page.$$eval(".cell.active .tiles .tile", (nodes) => nodes.map((node) => ({
+      label: (node.querySelector(".tile-label") || {}).textContent || "",
+    })));
+    const during = await tiles();
+    for (const route of held.splice(0)) await route.continue();
+    const end = Date.now() + 8000;
+    for (;;) {
+      const labels = await page.$$eval(".cell.active .tile-label", (nodes) => nodes.map((node) => node.textContent || ""));
+      if (labels.length === 4 && (fail ? labels.every((label) => label.includes("WW ")) : labels.every((label) => label.endsWith("  Auto window")))) break;
+      if (Date.now() > end) {
+        if (fail) break;
+        throw new Error("tiles never settled to Auto window");
+      }
+      await page.waitForTimeout(50);
+    }
+    const after = await tiles();
+    const log = await page.evaluate(() => window.__labels);
+    return { during, after, log, fail, asked };
+  } finally {
+    await browser.close();
+  }
+}
+
+export async function observeSeriesSwitchDuringWait(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const held = [];
+    let open = false;
+    await page.route("**/series-window", (route) => (open ? route.continue() : held.push(route)));
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folder);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").startsWith("3 series."));
+    const deadline = Date.now() + 5000;
+    while (held.length < 1) {
+      if (Date.now() > deadline) throw new Error("series-window request was never held");
+      await page.waitForTimeout(50);
+    }
+    await page.keyboard.press("Shift+G");
+    await page.waitForTimeout(800);
+    await page.locator("#series-list button").filter({ hasText: "#2" }).click();
+    await page.waitForTimeout(300);
+    // The pump is still waiting on the PT request, so the MR request is sent
+    // only once that wait ends. Continue the PT request, then read while the
+    // MR request is held.
+    await held[0].continue();
+    const mrDeadline = Date.now() + 5000;
+    while (held.length < 2) {
+      if (Date.now() > mrDeadline) throw new Error("the MR series-window request was never held");
+      await page.waitForTimeout(50);
+    }
+    await page.waitForTimeout(1200);
+    const labels = () => page.$$eval(".cell.active .tile-label", (nodes) => nodes.map((node) => node.textContent || ""));
+    const during = await labels();
+    open = true;
+    for (const route of held.slice(1)) await route.continue();
+    const end = Date.now() + 8000;
+    let after;
+    for (;;) {
+      // The MR series holds three images, so the fourth tile stays empty.
+      after = (await labels()).filter((label) => label !== "");
+      if (after.length > 0 && after.every((label) => label.endsWith("  Auto window"))) break;
+      if (Date.now() > end) break;
+      await page.waitForTimeout(50);
+    }
+    return { during, after, held: held.length };
+  } finally {
+    await browser.close();
+  }
+}
+
+export function seriesSwitchDuringWaitProblems(seen) {
+  const problems = [];
+  if (seen.held < 2) {
+    problems.push(`expected at least two held series-window requests but saw ${seen.held}`);
+  }
+  if (seen.during.some((label) => label.includes("WW "))) {
+    problems.push(`MR tiles were painted before the MR series-window request was released: ${JSON.stringify(seen.during)}`);
+  }
+  if (seen.after.length === 0 || !seen.after.every((label) => label.endsWith("  Auto window"))) {
+    problems.push(`the MR tiles did not settle to Auto window labels after the MR request: ${JSON.stringify(seen.after)}`);
+  }
+  return problems;
+}
+
+export function failedSeriesWindowTileProblems(seen) {
+  // A failed series-window request leaves each image at its own window and never leaves tile mode blank.
+  const problems = [];
+  if (seen.asked !== 1) {
+    problems.push(`a failed request is a refusal for this open and was asked ${seen.asked} times instead of once`);
+  }
+  if (seen.after.length !== 4 || !seen.after.every((tile) => (tile.label || "").includes("WW "))) {
+    problems.push("a failed series-window request did not leave four tiles with WW labels");
+  }
+  return problems;
+}
+
+export function tilesBeforeSeriesWindowProblems(seen) {
+  // F-227 never draws an image at two windows, and tile mode must wait for the series window too.
+  const problems = [];
+  if (!seen.during.every((tile) => tile.label === "")) {
+    problems.push("tile mode painted before the series window was stored");
+  }
+  if (seen.after.length !== 4 || !seen.after.every((tile) => (tile.label || "").endsWith("  Auto window"))) {
+    problems.push("tile labels did not all end with Auto window");
+  }
+  if (seen.log.some((label) => label.includes("this image"))) {
+    problems.push("tile labels mentioned this image");
+  }
+  const windows = new Set(seen.log.map((label) => label.replace(/^Image \d+ {2}/, "").replace("  Auto window", "")).filter((label) => label.includes("WW ")));
+  if (windows.size !== 1) problems.push(`tile labels showed ${windows.size} distinct WW/WL strings`);
+  return problems;
+}
+
+/** One page: the PT series opened and read. */
 export async function observeSeries(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -687,12 +851,16 @@ async function main() {
   const pairChanged = mkdtempSync(join(tmpdir(), "ocelli-f227-changed-"));
   const big = mkdtempSync(join(tmpdir(), "ocelli-f227-big-"));
   let seen;
+  let tilesScroll;
   let refused;
   let linked;
   let restart;
   let evicted;
   let changed;
   let starved;
+  let tiles;
+  let tilesFailed;
+  let seriesSwitch;
   try {
     writeFolder(folder);
     writePair(pairRestart);
@@ -705,6 +873,11 @@ async function main() {
     evicted = await observeEvicted(binary, chromium, big);
     changed = await observeChanged(binary, chromium, pairChanged);
     starved = await observeStarved(binary, chromium, big);
+    tiles = await alone((url) => observeTilesBeforeSeriesWindow(url, chromium, folder));
+    tilesScroll = await alone((url) => observeTilesBeforeSeriesWindow(url, chromium, folder, true));
+    tilesFailed = await alone((url) => observeTilesBeforeSeriesWindow(url, chromium, folder, false, true));
+    seriesSwitch = await alone((url) => observeSeriesSwitchDuringWait(url, chromium, folder));
+    console.log("tiles before series window with ArrowDown:", JSON.stringify({ during: tilesScroll.during.length, after: tilesScroll.after.length, labels: tilesScroll.log.length }));
   } finally {
     for (const dir of [folder, pairRestart, pairChanged, big]) rmSync(dir, { recursive: true, force: true });
     // Every case stops its own viewer. Any still alive here is a leak, even
@@ -723,6 +896,7 @@ async function main() {
   console.log(`4 MiB cache: ${evicted.replies.map((reply) => reply.status).join(", ")}, slice 1 ${JSON.stringify(evicted.slices[0].line)}`);
   console.log(`changed: ${changed.marked} marked, ${changed.replies.map((reply) => reply.status).join(", ")}, slice 1 ${JSON.stringify(changed.slices[0].line)}`);
   console.log(`1 MiB cache: ${starved.replies} replies, slice 1 ${JSON.stringify(starved.first.line)}`);
+  console.log(`tiles: during ${tiles.during.length} blank expected, after ${tiles.after.length} tiles, ${tiles.log.length} labels seen`);
   const problems = seriesProblems(seen).concat(
     refusedProblems(refused),
     linkedProblems(linked),
@@ -730,6 +904,10 @@ async function main() {
     evictedProblems(evicted),
     changedProblems(changed),
     starvedProblems(starved),
+    tilesBeforeSeriesWindowProblems(tiles),
+    tilesBeforeSeriesWindowProblems(tilesScroll),
+    failedSeriesWindowTileProblems(tilesFailed),
+    seriesSwitchDuringWaitProblems(seriesSwitch),
   );
   if (problems.length) {
     for (const problem of problems) console.error(problem);

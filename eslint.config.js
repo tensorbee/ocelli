@@ -549,6 +549,10 @@ const config = tseslint.config(
         cache: "readonly",
         Event: "readonly",
         window: "readonly",
+        // S46 review remediation, auto.mjs logs tile labels with a
+        // MutationObserver and window.mjs waits on the page's inflight map.
+        MutationObserver: "readonly",
+        inflight: "readonly",
         // F-215's marks.mjs reads the page's marks and key images, and
         // fetches the synthetic study's slices under node.
         notes: "readonly",

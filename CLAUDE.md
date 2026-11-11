@@ -177,8 +177,10 @@ What exists, in the order it matters:
   row through cornerstone3D 5.8.2 under headless Chromium on SwiftShader and
   writes reference pixels plus a metadata sidecar. F-011 added the comparator,
   so it now returns a per-view verdict against section 25.1's tolerances and
-  can attribute a divergence to a side. There is still no Ocelli renderer to
-  compare against, so detection is proved by a declared mutation catalogue
+  can attribute a divergence to a side. The oracle compares an Ocelli native
+  candidate against the cornerstone reference through compare produce and
+  compare gate, and the pixel arithmetic is also validated by hand-computed
+  fixtures. Detection is still proved by a declared mutation catalogue
   applied to real reference frames. `bin/ocelli.sh gate oracle` runs both
   halves, and the bare `bin/ocelli.sh oracle` is the reference half alone.
 - **The corpus**, behind `corpus/manifest.tsv`, covering all nineteen transfer
@@ -234,8 +236,8 @@ What exists, in the order it matters:
   section 18.4's uniform and the three window functions, agreeing with
   `LutChain::map_into` on a real adapter to two `f32` ULP at 255. S11's F-041.
   F-038 renders into a caller-supplied texture view and acquires no surface.
-  Decision D7 still holds. The oracle has no Ocelli renderer to compare
-  against.
+  Decision D7 still holds. The oracle compares an Ocelli native candidate
+  against the cornerstone reference through compare produce and compare gate.
 - **The npm packaging pipeline**, proven against a consumer outside the
   workspace.
 
@@ -253,7 +255,7 @@ it survived four clean per-story reviews because no story in either sprint
 touched this file and each review looked at its own diff.
 
 What is true is narrower and is what D7 actually asks: **the oracle existed
-before any of that code, and it still has no Ocelli renderer to compare
-against.** The pixel arithmetic is validated by hand-computed fixtures citing
-their PS3.3 section, which is the other half of section 27.2, and the oracle's
-verdict on rendered frames arrives when there is a renderer to render them.
+before any of that code, and it compares an Ocelli native candidate against
+the cornerstone reference through compare produce and compare gate.** The
+pixel arithmetic is validated by hand-computed fixtures citing their PS3.3
+section, which is the other half of section 27.2.
