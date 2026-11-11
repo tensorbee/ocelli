@@ -2241,6 +2241,7 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::ExitStatus;
+    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     /// Creates a unique scratch directory for a single produce invocation.
@@ -2249,6 +2250,13 @@ mod tests {
     /// pre-existing path is never deleted, the caller retries with a fresh
     /// name instead.
     fn produce_test_scratch_dir() -> ProduceScratchDirGuard {
+        // The guard's BEFORE snapshot rides on this call. Every
+        // producer-writing test creates its scratch before it produces, so
+        // the first scratch creation in a process is captured before that
+        // process's own copies of the producer tests can write into the
+        // checkout. A snapshot taken later, inside the guard itself, would
+        // bake those writes into the baseline and go blind to them.
+        f272_ensure_before_snapshot();
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let pid = std::process::id();
         for attempt in 0..1024u32 {
@@ -3447,14 +3455,14 @@ mod tests {
     /// even if it points at an escape target. Unreadable entries are fail
     /// closed, never silently skipped.
     ///
-    /// The protected tree root itself must be a readable directory; otherwise
+    /// The protected tree root itself must be a readable directory, otherwise
     /// the walk fails closed. Exactly one top-level entry named "node_modules"
     /// under the declared dependency cache root is excluded, and only when it
     /// is an actual directory. Nothing else is skipped: nested node_modules
     /// directories outside the cache root and all files, locks, references,
     /// and outputs are still hashed, and every symlink outside the exclusion
     /// still fails closed. The exclusion is positional, not name-based: the
-    /// caller supplies the protected root; exclusion applies only to an
+    /// caller supplies the protected root, and exclusion applies only to an
     /// immediate real node_modules child of the protected root.
     fn f272_walk(
         root: &Path,
@@ -3537,10 +3545,11 @@ mod tests {
     /// Ask the current test binary to list its full inventory and, in a second
     /// child run, the filtered selection under the namespace with skip names
     /// applied. Both invocations run the real binary via `current_exe` and both
-    /// exit statuses are captured and checked. The excluded count is derived as
-    /// full inventory minus the selected inventory; the selection must be a
-    /// nonempty subset of the full inventory or the function fails closed with
-    /// an empty selection and the filtered list status. No hard-coded totals.
+    /// exit statuses are captured and checked. The excluded count is derived
+    /// as full inventory minus the selected inventory. The selection must be
+    /// a nonempty subset of the full inventory, or the function fails closed
+    /// with an empty selection and the filtered list status. No hard-coded
+    /// totals.
     fn f272_list_selected_tests() -> (Vec<String>, usize, ExitStatus) {
         let exe = match std::env::current_exe() {
             Ok(exe) => exe,
@@ -3639,6 +3648,26 @@ mod tests {
             .collect::<PathBuf>()
     }
 
+    /// Process wide BEFORE snapshot of the protected tree, captured once per
+    /// process by the first producer scratch creation. Every producer-writing
+    /// site creates its scratch before it produces, so that capture precedes
+    /// the producer writes of the run. The guard reuses it as its baseline,
+    /// which keeps the writes of this process's own producer-test copies
+    /// inside the comparison instead of baking them into the baseline.
+    /// Capturing inside the guard instead would start the baseline after
+    /// those writes and miss them.
+    ///
+    /// The boundary stays the plan's: a producer-writing test that wrote
+    /// before any scratch creation would escape this capture, and a final
+    /// digest says nothing about writes restored before it is compared.
+    static F272_BEFORE_SNAPSHOT: OnceLock<([u8; 32], BTreeSet<String>)> = OnceLock::new();
+
+    fn f272_ensure_before_snapshot() -> ([u8; 32], BTreeSet<String>) {
+        let captured =
+            F272_BEFORE_SNAPSHOT.get_or_init(|| f272_tree_digest(&f272_protected_tree()));
+        captured.clone()
+    }
+
     #[test]
     fn guard_no_checkout_write() {
         let (tests, filtered_out, list_status) = f272_list_selected_tests();
@@ -3654,7 +3683,11 @@ mod tests {
         f272_validate_selection(&tests);
 
         let tree = f272_protected_tree();
-        let (before_digest, before_notes) = f272_tree_digest(&tree);
+        // Reuse the process wide capture when an earlier producer test
+        // already made it, and capture here otherwise. Either way the
+        // baseline is in place before any producer write in this process,
+        // because every producer-writing site creates its scratch first.
+        let (before_digest, before_notes) = f272_ensure_before_snapshot();
         assert!(
             before_notes.is_empty(),
             "the protected oracle tree snapshot failed closed on unsupported or unreadable entries before the run"
