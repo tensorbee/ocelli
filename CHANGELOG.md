@@ -718,6 +718,7 @@ Repository bootstrap. Nothing is published.
   the file is always used as it is. `ocelli-pixel` gains `series_sample`,
   `AutoWindowPool`, `auto_window` and `AutoWindow`. cornerstone3D 5.8.2 takes
   each image's own minimum and maximum instead, so this is not a parity row.
+- Corrected nine public Rust documentation reference lines across seven files and added a workspace gate denying `rustdoc::private_intra_doc_links` and `rustdoc::broken_intra_doc_links` for default and native public docs.
 
 ### Changed
 

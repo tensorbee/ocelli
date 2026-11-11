@@ -384,7 +384,7 @@ pub struct RegionExtent {
 ///
 /// # Errors
 ///
-/// The refusals of [`decode_held`], then those of [`region_extent`].
+/// The refusals of `decode_held`, then those of `region_extent`.
 pub fn region_extent_frame(
     bytes: &[u8],
     frame: u32,

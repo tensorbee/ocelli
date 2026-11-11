@@ -2,7 +2,7 @@
 //!
 //! Targets: wasm32 yes, native yes. See `docs/hld/03-architecture-and-crates.md`.
 //!
-//! F-001 creates the crate. F-070 fills [`measure`]. F-073 adds length,
+//! F-001 creates the crate. F-070 fills `measure`. F-073 adds length,
 //! height, Cobb and bidirectional beside those functions. The angle tool
 //! stays [`angle_at`]. F-074 adds rectangle, ellipse and circle. A probe
 //! is not a second sampler in this crate. F-076 adds a polygon area and one
@@ -10,7 +10,7 @@
 //! local rules in `.claude/plans/F-070-design.md`,
 //! `.claude/plans/F-073-design.md`, `.claude/plans/F-074-design.md` and
 //! `.claude/plans/F-076-design.md`. F-075 adds ROI statistics, a histogram
-//! and SUVbw in [`stats`]. Those numbers are not a second area and not the
+//! and SUVbw in `stats`. Those numbers are not a second area and not the
 //! modality LUT. F-195 adds calibration provenance, SUVlbm, SUVbsa, a length
 //! ratio and a contour volume. Those numbers share the F-075 decay and are
 //! not a second length. F-077 adds [`livewire_path`] and [`livewire_mask`]. The

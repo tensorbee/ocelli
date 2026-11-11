@@ -136,6 +136,8 @@ AC1's run is both the evidence and the fix list. The feature profile covers
 the changed crates. Evidence invalidates on any later link-affecting edit,
 which is what the proposed check exists to catch.
 
+Full native/default workspace docs gate exits 0. A tiny two-member fixture gate exits healthy 0, private 1, broken 1. Raw Cargo baseline EXIT 101 was fixed to 0, not 101 failures. 68 unit tests total including 3 new stdlib tests, including the selector-ordering regression. Two deep refusal probes and a healthy control are green. Three wrong-gate mutants are semantic RED. No whole-feature completion.
+
 ## Boundary and tier
 
 - wasm-bindgen: not touched
@@ -171,7 +173,9 @@ accepts it.
 
 ## User-facing documentation impact
 
-`README.md` no change. The workspace docs are the deliverable.
+`README.md`, `use.html`, and `more.html` no change, because the edit set
+introduces no viewer, runtime, or API behavior change. The workspace docs
+are the deliverable.
 
 ## Gate providers and mandatory controls
 
@@ -188,4 +192,4 @@ Otherwise valid fresh source with a healthy link must pass the actual check. Sep
 
 ## Open questions
 
-The lead settled the additive docs check placement in the floor because no GPU or corpus is needed. A normal separately reviewed WORKFLOW, affected-command, and adapter-sync change is neither implemented nor adopted. No other material doc-fix choice remains. Independent design approval is recorded in `.claude/reviews/F-268-design-pass-2.md`. Open question owner: Codex lead (parent integrator) is the assigned independent design review owner, distinct from the GLM author.
+The lead settled the additive docs check placement in the floor because no GPU or corpus is needed. The separately reviewed WORKFLOW, affected-command and adapter-sync change is implemented on this branch and approved in `.claude/reviews/F-268-policy-pass-1.md`. No other material doc-fix choice remains. Independent design approval is recorded in `.claude/reviews/F-268-design-pass-2.md`. Open question owner: Codex lead (parent integrator) is the assigned independent design review owner, distinct from the GLM author.

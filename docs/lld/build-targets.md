@@ -1,10 +1,23 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-245
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-245
 **Last updated:** 2026-11-11
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
+
+## F-268: workspace docs floor and gate
+
+The public workspace documentation builds with native/default scope. A named
+`docs` floor gate and a Rust-job CI step invoke `bin/ocelli.sh gate docs`, which
+spawns `cargo doc --workspace --no-deps --locked --keep-going` as a child with
+`RUSTDOCFLAGS='-D rustdoc::private_intra_doc_links -D
+rustdoc::broken_intra_doc_links'`, removing only the child's encoded variable,
+while the caller's `CARGO_TARGET_DIR` is preserved. Lints are denied, never
+suppressed. API-preserving comment fixes are the remedy. Permanent deep Cargo
+probes use a two-member synthetic workspace whose encoded allow flags are
+inherited, with the fault outside `default-members`, a fresh owned target per
+run, a healthy control checked for real docs, and target cleanup after.
 
 ## The two targets, and the two crates that are not shared
 

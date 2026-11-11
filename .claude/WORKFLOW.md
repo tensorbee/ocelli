@@ -175,6 +175,11 @@ gate covers. Four profiles:
   before a release.
 - **named gates**, the inner loop.
 
+F-268 added a `docs` gate to the additive floor. It runs the workspace
+documentation build with rustdoc lint denials for private and broken intra-doc
+links, needing no GPU, corpus, or browser. The gate lives in `bin/ocelli.sh`,
+which stays the authoritative definition, so this file records no gate count.
+
 **No profile's gate list is written out here**, and that is deliberate.
 `bin/ocelli.sh gate --list` prints every gate with its GPU column, and the
 `--floor` exclusion list in `bin/ocelli.sh` is compared for set equality against
