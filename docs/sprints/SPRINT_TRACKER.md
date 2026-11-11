@@ -227,6 +227,7 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-215 | Folder viewer marks saved as TID 1500 and key images as a Key Object Selection | S46 | 4w | not measured | 2026-11-10 |
 | F-227 | Automatic window per series when the file has none | S46 | 3w | not measured | 2026-11-11 |
 | F-268 | Rustdoc links resolve | S47 | 1w | not measured | 2026-11-11 |
+| F-269 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | S47 | 1w | not measured | 2026-11-11 |
 
 ## S46 acceptance status correction, 2026-11-09
 

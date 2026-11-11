@@ -160,10 +160,11 @@ pub(super) fn decode_scan(
             // Causal neighborhood
             let (a, b, cc, d) = reconstructed.neighborhood(c, current_line_left_guard);
 
-            // Local gradients (ISO 14495-1 §A.3.1)
-            let d1 = d - b; // vertical gradient (above-right − above)
-            let d2 = b - cc; // horizontal gradient (above − above-left)
-            let d3 = cc - a; // diagonal gradient (above-left − left)
+            // Local gradients (ISO 14495-1 §A.3.1 names D1, D2 and D3 the
+            // local gradients, without orientation adjectives)
+            let d1 = d - b;
+            let d2 = b - cc;
+            let d3 = cc - a;
 
             // Quantize gradients
             let q1 = quant(d1, t1, t2, t3, near);
@@ -299,6 +300,15 @@ pub(super) fn decode_scan(
 /// `[-floor(RANGE / 2), ceil(RANGE / 2) - 1]` before coding, so a value outside
 /// it is a damaged scan, which would otherwise wrap or clamp to some sample.
 /// CharLS 2.4.4 was measured to open some such scans.
+///
+/// Decoder-only premise for the `k < qbpp` cap: this refusal runs before both
+/// state updates, the regular update and the run-interruption update, so the
+/// A and N state stays within the T.87 A.2.1 initialization bound and the
+/// reset bounds of A.6.1 and A.7.2 Code segment A.23, the run-interruption
+/// reset. The encoder instead relies on its own `modulo_reduce` before its
+/// updates and does not call this function. Pass 8 measured at its tip that
+/// with this refusal disabled the cap binds about two million times on
+/// damaged streams, a decoder-only measurement not re-proven here.
 fn in_coded_range(errval: i32, range: i32) -> bool {
     -(range / 2) <= errval && errval < (range + 1) / 2
 }
@@ -378,7 +388,8 @@ mod tests {
     #[test]
     fn decode_scan_constant_zero_left_predictor_2x2() {
         // All gradients are zero, so rows are represented by run hits only.
-        // The test byte provides five hit bits plus padding.
+        // The decode reads four hit bits, two per row, and the fifth 1 is
+        // unread padding.
         let data: &[u8] = &[0b11111000u8];
         let mut reader = BitReader::new(data);
         let params = ScanParams {

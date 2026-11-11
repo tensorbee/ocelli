@@ -6112,3 +6112,20 @@ The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchma
 **User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
 **Deviations from the design plan.** The handoff named head 188dfd61, and the integrated head is the reviewed fix f5079387 that followed it. The `docs)` arm comment was reworded by the coordinator at integration to say the whole encoded variable is unset.
 **Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude.
+
+## F-269, Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87, completed 2026-11-11
+
+**What was built.** Every factual comment block in `vendor/ritk-codecs-0.6.0/src/jpeg_ls` was audited against the code below it and the T.87 clause it names, and each false one was corrected or removed. Corrections landed in four files, comments only, with no code token changed. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md` records each block's rating with a locator measured from the final bytes, the four F-243 pass 8 items first, and the cap on k recorded as resting on the coded range checks. The vendored pins and the provenance hash are refreshed from the bytes.
+
+**HLD sections implemented.** none, a vendored source audit.
+**Deviations.** D-20, its description refreshed to name the F-269 audit and the four files.
+**Crates / packages modified.** `vendor/ritk-codecs-0.6.0/src/jpeg_ls/context/mod.rs`, `context/tests.rs`, `encoder.rs` and `scan.rs`, comments only. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md`, `scripts/pin_and_size_check.py` and `scripts/tests/test_pin_and_size_check.py`, `docs/hld/DEVIATIONS.md`.
+**Tests added.** `unit`, the pin test's patched-file list gains `context/tests.rs`. No arithmetic test, the story changes no code.
+**Fixture provenance.** no pixel arithmetic. Clauses were checked against the T.87 text whose PDF SHA-256 is recorded in the provenance file.
+**Verification.** Independent review passes 7 to 10 by Claude on the GLM fix commits, the last with no defect or smell after the coordinator regenerated the stale handoff. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. No code changed.
+**LLD updated.** none, no LLD describes the vendored comments.
+**User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
+**Deviations from the design plan.** Pass 7's D4 premise, that the decoder clamps on one run-mode branch, was the reviewer's error. Pass 8 corrected it, and the encoder comment was then corrected rather than rated doubtful, so corrections landed in four files rather than three. The integrated head is a35cc608 with the regenerated handoff f253e41b, after the head the original handoff named.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 10's nitpick, the encoder.rs 246 banner entry's clause range, is carried in its review file.
