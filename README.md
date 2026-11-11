@@ -173,15 +173,26 @@ the wasm module.
 
 `bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
 directory is a build artefact and is not committed, so a clean clone still
-opens with the header on `core not built`. After that build, reload the page.
-The worker loads the module, and the header reads `core ready` only after
-that load succeeds. The build alone does not flip the header. The module a
+opens with the header on `core not built`. In `npm run dev`, after that
+build, reload the page. The worker loads the module, and the header reads
+`core ready` only after that load succeeds. The build alone does not flip
+the header. The module a
 published consumer gets is `@ocelli/wasm`, which `npm pack` stages from this
 build with the decode module, the two third-party files and a build id
 naming the HEAD the modules were built from, the tree of the staged index,
 and whether the working tree had unstaged tracked changes. The packages gate
 refuses a build id recorded with unstaged tracked changes, or one that does
 not name the index it was staged from.
+
+A built dist of the example serves from any static host.
+`npm run build -w @ocelli/example-viewer` emits `examples/viewer-react/dist`,
+and a plain static server over that directory reads `core ready` like
+`npm run dev` does. The dist does not pick up a module built later.
+`vite build` reads `crates/ocelli-wasm/pkg` once, when the build starts, so
+the package must exist before that build. A dist built without it keeps the
+external `/@fs` import of the pkg-absent build, and its header stays
+`core not built` on every host until the dist is rebuilt with the package
+present.
 
 ### The Content Security Policy an embedding page needs
 

@@ -28,7 +28,9 @@ Present: the build passes and the wasm glue and the `.wasm` are emitted as
 their own files, and the worker references its own emitted chunk. Any reach
 at the build machine's absolute `/@fs` pkg path is refused, in a fetch, an
 import or any other position, including the spellings where one path segment
-is decoded and the rest stays encoded. The intentional absent-state external
+is decoded and the rest stays encoded. A spelling of the real checkout root
+is refused the same way, because the temporary tree links node_modules and
+packages into it. The intentional absent-state external
 encoded import is the one exemption.
 
 The stand-in pkg is two files, a glue module that references its `.wasm`
@@ -261,42 +263,45 @@ def _worker_text(raw: dict[str, bytes]) -> str | None:
     return _text(raw, workers[0])
 
 
-def _known_roots(base: Path) -> tuple[bytes, bytes]:
-    """The build base's known-root byte patterns: raw and once-URL-encoded.
+def _known_roots(base: Path) -> list[tuple[bytes, str]]:
+    """The known-root byte patterns, each with the label its refusal names.
 
-    `base` is the actual temporary build root. The raw form is the resolved
-    POSIX path's UTF-8 bytes; the encoded form is exactly what
-    `URL.pathname` yields per `wasm_url`, one encoding, computed by Node's
-    `pathToFileURL` for the same reason `wasm_url` uses it: Python's `quote`
-    would disagree with the build's own encoding on `+` and other
+    Two roots are known. `base` is the actual temporary build root. The
+    real checkout `ROOT` is known too, because `make_tree` symlinks
+    `node_modules` and `packages` into it, so a build that resolves those
+    symlinks spells the checkout path rather than the base. Each root
+    contributes its raw UTF-8 bytes and its once-URL-encoded form, exactly
+    what `URL.pathname` yields per `wasm_url`, computed by Node's
+    `pathToFileURL` for the same reason `wasm_url` uses it: Python's
+    `quote` would disagree with the build's own encoding on `+` and other
     punctuation. They are separate patterns, not one concatenated with
     `/@fs`.
     """
-    root = base.resolve().as_posix().encode("utf-8")
-    encoded = _node_url_pathname(base.resolve()).encode("utf-8")
-    return root, encoded
+    patterns: list[tuple[bytes, str]] = []
+    for path, noun in ((base.resolve(), "root"), (ROOT, "checkout root")):
+        patterns.append((path.as_posix().encode("utf-8"), f"raw {noun}"))
+        patterns.append((_node_url_pathname(path).encode("utf-8"),
+                         f"encoded {noun}"))
+    return patterns
 
 
 def _absolute_reach(raw: dict[str, bytes], base: Path) -> str | None:
-    """The first file reaching the build machine's absolute path, named.
+    """The first file reaching a known root or the /@fs prefix, named.
 
-    Scans every emitted file's raw bytes, binaries included, for three
-    separate patterns: the raw UTF-8 root bytes, their once-URL-encoded
-    form, and the standalone `/@fs` loader prefix. The root patterns come
-    from the actual build `base`, not from the URL. The WASM never decodes
-    and a valid binary is never refused for its encoding; the actual WASM
-    carries a `/Users/` registry marker that matches none of these.
+    Scans every emitted file's raw bytes, binaries included. The known
+    roots are the build `base` and the real checkout `ROOT`, each as raw
+    UTF-8 bytes and as its once-URL-encoded form, per `_known_roots`, and
+    the standalone `/@fs` loader prefix is its own pattern. A valid WASM
+    binary is never decoded, and the actual WASM carries a `/Users/`
+    registry marker that matches none of these patterns.
     """
-    root, encoded = _known_roots(base)
-    fs_marker = b"/@fs"
+    known = _known_roots(base)
+    known.append((b"/@fs", "/@fs"))
     for name in sorted(raw):
         blob = raw[name]
-        if root in blob:
-            return f"{name} (raw root)"
-        if encoded in blob:
-            return f"{name} (encoded root)"
-        if fs_marker in blob:
-            return f"{name} (/@fs)"
+        for pattern, label in known:
+            if pattern in blob:
+                return f"{name} ({label})"
     return None
 
 

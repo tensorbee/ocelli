@@ -140,32 +140,41 @@ class PresentEmissionCheck(unittest.TestCase):
         self.assertNotEqual(problems, [])
 
     def test_a_unicode_name_decoded_in_one_segment_is_refused(self) -> None:
-        # The URL encodes ünï as %C3%BCn%C3%AF. A worker spelling the name
-        # decoded while the rest stays encoded is the same build-machine
-        # reach, refused through the standalone /@fs and encoded-root
-        # patterns of the raw scan.
-        url = "/@fs/a%C3%BCt/crates/ocelli-wasm/pkg/ocelli_wasm.js"
-        worker = 'import("/@fs/aüt/crates/ocelli-wasm/pkg/ocelli_wasm.js")'
+        # The URL encodes üt as %C3%BCt. A worker spelling that one segment
+        # decoded spells the raw root verbatim, so the raw-root pattern is
+        # the refusal that fires and the assertion names it. The encoded
+        # base appears nowhere in the worker, and the glue import keeps the
+        # missing-glue refusal from masking the reach scan.
+        url = "/@fs/a%C3%BCt/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
+        worker = ('import("/@fs/aüt/c/crates/ocelli-wasm/pkg/'
+                  'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
-            self._names(), self._raw(worker), url,
-            Path("/aüt/c"))
-        self.assertNotEqual(problems, [])
+            self._names(), self._raw(worker), url, Path("/aüt/c"))
+        self.assertTrue(any("raw root" in p for p in problems))
 
     def test_a_percent_name_decoded_in_one_segment_is_refused(self) -> None:
-        # The URL encodes p%t as p%25t. A worker spelling the name decoded
-        # while the rest stays encoded is the same reach.
-        url = "/@fs/p%25t/crates/ocelli-wasm/pkg/ocelli_wasm.js"
-        worker = 'import("/@fs/p%t/crates/ocelli-wasm/pkg/ocelli_wasm.js")'
+        # The URL encodes p%t as p%25t. A worker spelling that one segment
+        # decoded spells the raw root verbatim, so the raw-root pattern is
+        # the refusal that fires, and the encoded base p%25t/c appears
+        # nowhere in the worker.
+        url = "/@fs/p%25t/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
+        worker = ('import("/@fs/p%t/c/crates/ocelli-wasm/pkg/'
+                  'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
             self._names(), self._raw(worker), url, Path("/p%t/c"))
-        self.assertNotEqual(problems, [])
+        self.assertTrue(any("raw root" in p for p in problems))
 
     def test_a_space_name_decoded_in_one_segment_is_refused(self) -> None:
-        url = "/@fs/a%20b/crates/ocelli-wasm/pkg/ocelli_wasm.js"
-        worker = 'import("/@fs/a b/crates/ocelli-wasm/pkg/ocelli_wasm.js")'
+        # The URL encodes the space as %20. A worker spelling that one
+        # segment decoded spells the raw root verbatim, so the raw-root
+        # pattern is the refusal that fires, and the encoded base
+        # a%20b/c appears nowhere in the worker.
+        url = "/@fs/a%20b/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
+        worker = ('import("/@fs/a b/c/crates/ocelli-wasm/pkg/'
+                  'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
             self._names(), self._raw(worker), url, Path("/a b/c"))
-        self.assertNotEqual(problems, [])
+        self.assertTrue(any("raw root" in p for p in problems))
 
     def test_the_fully_encoded_url_without_a_space_is_accepted(self) -> None:
         # The genuine present-state shape: the worker references only its own
@@ -387,10 +396,13 @@ class EmittedMap(unittest.TestCase):
                              b"\x00asm\x01" + root_bytes)
 
     def test_an_encoded_root_without_fs_is_refused(self) -> None:
-        # The once-URL-encoded root bytes in a file with no /@fs marker:
-        # caught by the encoded-root pattern alone, exactly the non-worker
-        # encoded-root case the raw/encoded split exists for.
-        with tempfile.TemporaryDirectory() as temp:
+        # The once-URL-encoded root bytes in a file with no /@fs marker.
+        # The tree lives under a space-named prefix, so the encoded root
+        # differs from the raw root and only the encoded pattern matches
+        # the planted spelling: under a plain temporary directory the
+        # quoted root equals the raw one and the raw pattern matches
+        # first, which would prove nothing about this branch.
+        with tempfile.TemporaryDirectory(prefix="view er-") as temp:
             base = self._tree(temp, {
                 "assets/core-worker-a1.js": 'import("./ocelli_wasm-B.js")',
                 "assets/ocelli_wasm-B.js": "glue",
@@ -403,7 +415,59 @@ class EmittedMap(unittest.TestCase):
             names, raw = v.emitted(base)
             problems = v.present_problems(
                 names, raw, f"/@fs{encoded_root}/pkg/ocelli_wasm.js", base)
-            self.assertNotEqual(problems, [])
+            self.assertTrue(any("encoded root" in p and "main-D.js" in p
+                                for p in problems))
+
+    def test_a_resolved_checkout_path_is_refused(self) -> None:
+        # make_tree links node_modules and packages into the real checkout,
+        # so a build that resolves those links spells the checkout path,
+        # not the temporary base. The checkout root is a known root of its
+        # own, refused with no /@fs spelling anywhere.
+        with tempfile.TemporaryDirectory() as temp:
+            base = self._tree(temp, {
+                "assets/core-worker-a1.js": 'import("./ocelli_wasm-B.js")',
+                "assets/ocelli_wasm-B.js": "glue",
+                "assets/ocelli_wasm_bg-C.wasm": b"\x00asm\x01",
+            })
+            (base / "dist" / "chunks").mkdir(parents=True, exist_ok=True)
+            (base / "dist" / "chunks" / "resolved-D.js").write_text(
+                f'const lib = "{v.ROOT.as_posix()}/packages/core/dist/'
+                f'index.js"', encoding="utf-8")
+            names, raw = v.emitted(base)
+            problems = v.present_problems(
+                names, raw, "/@fs/unused/pkg/ocelli_wasm.js", base)
+            self.assertTrue(any("checkout root" in p and "resolved-D.js" in p
+                                for p in problems))
+
+    def test_an_encoded_checkout_root_is_refused(self) -> None:
+        # The checkout root's encoded spelling, for a checkout whose own
+        # path percent-encodes. ROOT is a module constant naming the real
+        # checkout, so the test points it at a space-named tree and puts it
+        # back: the planted spelling is the encoded form, the raw form with
+        # the space appears nowhere, and no /@fs is present.
+        with tempfile.TemporaryDirectory(prefix="view er-") as temp:
+            base = self._tree(temp, {
+                "assets/core-worker-a1.js": 'import("./ocelli_wasm-B.js")',
+                "assets/ocelli_wasm-B.js": "glue",
+                "assets/ocelli_wasm_bg-C.wasm": b"\x00asm\x01",
+            })
+            fake_root = Path(temp) / "check out"
+            fake_root.mkdir()
+            saved = v.ROOT
+            v.ROOT = fake_root
+            try:
+                (base / "dist" / "chunks").mkdir(parents=True, exist_ok=True)
+                encoded = quote(fake_root.as_posix(), safe="/")
+                (base / "dist" / "chunks" / "link-E.js").write_text(
+                    f'const lib = "{encoded}/packages/core/dist/index.js"',
+                    encoding="utf-8")
+                names, raw = v.emitted(base)
+                problems = v.present_problems(
+                    names, raw, "/@fs/unused/pkg/ocelli_wasm.js", base)
+            finally:
+                v.ROOT = saved
+            self.assertTrue(any("encoded checkout root" in p
+                                and "link-E.js" in p for p in problems))
 
     def test_another_root_target_is_a_separate_map(self) -> None:
         # The map is rooted at the explicit base, so a sibling tree's dist

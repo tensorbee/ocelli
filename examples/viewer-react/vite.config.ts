@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -63,16 +63,18 @@ export default defineConfig(({ command }) => {
     server: {
       port: 5173,
       fs: {
-        // The minimal dev filesystem allowance: the checkout root, decoded
-        // to a path and resolved to its real path. This is a dev-server
-        // allowance only, not a build resolver and not a production HTTP
-        // policy. The old value was the percent-encoded
+        // The minimal dev filesystem allowance: the checkout root decoded
+        // to a path. Vite 7 resolves each allow entry with path.resolve and
+        // compares the URL-decoded request path against it with plain
+        // prefix checks, realpathing neither side, so the entry must spell
+        // the checkout exactly as the `/@fs` request does. Both spellings
+        // come from this config's `import.meta.url`, which the decoded form
+        // preserves and a realpathed entry could contradict. This is a
+        // dev-server allowance only, not a build resolver and not a
+        // production HTTP policy. The old value was the percent-encoded
         // `repoRoot.pathname`, which answered 403 for the pkg URL under any
-        // checkout path that `URL.pathname` encodes. The plain decoded
-        // `fileURLToPath(repoRoot)` also serves the matrix on this machine;
-        // the realpath resolution is kept so a checkout reached through a
-        // symlink prefix cannot disagree with Vite's own resolved roots.
-        allow: [realpathSync.native(fileURLToPath(repoRoot))],
+        // checkout path that `URL.pathname` encodes.
+        allow: [fileURLToPath(repoRoot)],
       },
       proxy:
         helper === undefined

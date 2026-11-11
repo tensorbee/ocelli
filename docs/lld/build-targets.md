@@ -52,7 +52,7 @@ is a different number.
 
 `crates/ocelli-wasm/pkg/` is generated and gitignored.
 
-When the pkg is PRESENT, the build uses a decoded /@fs specifier during Rollup compilation and Rollup rewrites it into a bundled emitted chunk, so PRESENT output has no checkout-root or /@fs reach. When ABSENT, the build keeps the encoded /@fs specifier as an external runtime import. Dev uses the encoded URL in both states. Dev fs.allow uses the decoded real root. A rejected import or default-init failure leaves core not built.
+When the pkg is PRESENT, the build uses a decoded /@fs specifier during Rollup compilation and Rollup rewrites it into a bundled emitted chunk. The viewer build check refuses a PRESENT dist whose emitted files spell the temporary build base or the real checkout root, raw or URL-encoded, or carry the standalone /@fs marker. It bans no other absolute path. The real `ocelli_wasm_bg.wasm` carries Rust panic location strings with absolute cargo registry paths under the builder home directory, and the check does not refuse them. When ABSENT, the build keeps the encoded /@fs specifier as an external runtime import. Dev uses the encoded URL in both states. Dev fs.allow is the decoded checkout root. A rejected import or default-init failure leaves core not built.
 
 `bin/ocelli.sh wasm-decode` builds the same crate with
 `--no-default-features --features decode-worker` into
