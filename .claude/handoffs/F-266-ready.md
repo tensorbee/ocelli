@@ -1,47 +1,10 @@
-# F-266 prepared worker handoff
+# F-266 ready, regenerated at the reviewed head for S47 integration
 
 **Branch**: `work/f-266-glm`
 **Base**: `1d627bd93f0c0e3b44231be9a0f3e76607a8eeb9`
-**Head**: `ace04b78c277ff4ac604c86d732a8e21352fda0a`
-**Files touched**: .claude/plans/F-266-design.md, .claude/reviews/F-266-amendment-pass-1.md, .claude/reviews/F-266-amendment-pass-2.md, .claude/reviews/F-266-amendment-pass-3.md, .claude/reviews/F-266-design-pass-1.md, .claude/reviews/F-266-design-pass-2.md, .claude/reviews/F-266-implementation-pass-1.md, .claude/reviews/F-266-implementation-pass-2.md, .claude/reviews/F-266-implementation-pass-3.md, .claude/reviews/F-266-implementation-pass-4.md, CHANGELOG.md, README.md, docs/lld/README.md, docs/lld/build-targets.md, docs/lld/typescript-packaging.md, docs/runbooks/guard-verification.md, docs/sprints/BACKLOG.md, examples/viewer-react/csp-probe.mjs, examples/viewer-react/src/core-worker.ts, examples/viewer-react/vite.config.ts, scripts/guards/catalogue.py, scripts/tests/test_viewer_build_check.py, scripts/viewer_build_check.py
-**Review**: `.claude/reviews/F-266-implementation-pass-4.md`
-**Verify tree**: `cdbfaa2424389faceaf35c08fb7da6ddd77c6957`
+**Head**: `1bef5b74604022570053b93e73f99f9668ea521d`
+**Files touched**: `.agents/skills/verify/SKILL.md, .claude/WORKFLOW.md, .claude/commands/verify.md, .claude/plans/F-202-design.md, .claude/plans/F-204-design.md, .claude/plans/F-205-design.md, .claude/plans/F-223-design.md, .claude/plans/F-227-design.md, .claude/plans/F-238-design.md, .claude/plans/F-241-design.md, .claude/plans/F-245-design.md, .claude/plans/F-266-design.md, .claude/plans/F-268-design.md, .claude/plans/F-273-design.md, .claude/reviews/F-238-completion-pass-1.md, .claude/reviews/F-238-completion-pass-2.md, .claude/reviews/F-245-design-pass-1.md, .claude/reviews/F-245-design-pass-2.md, .claude/reviews/F-245-dev-flate-amendment-pass-1.md, .claude/reviews/F-245-study-scope-type-pass-1.md, .claude/reviews/F-266-amendment-pass-1.md, .claude/reviews/F-266-amendment-pass-2.md, .claude/reviews/F-266-amendment-pass-3.md, .claude/reviews/F-266-design-pass-1.md, .claude/reviews/F-266-design-pass-2.md, .claude/reviews/F-266-implementation-pass-1.md, .claude/reviews/F-266-implementation-pass-2.md, .claude/reviews/F-266-implementation-pass-3.md, .claude/reviews/F-266-implementation-pass-4.md, .claude/reviews/F-268-claude-pass-4.md, .claude/reviews/F-268-claude-pass-5.md, .claude/reviews/F-268-design-pass-1.md, .claude/reviews/F-268-design-pass-2.md, .claude/reviews/F-268-doc-comments-pass-1.md, .claude/reviews/F-268-final-union-pass-1.md, .claude/reviews/F-268-final-union-pass-2.md, .claude/reviews/F-268-final-union-pass-3.md, .claude/reviews/F-268-policy-pass-1.md, .claude/reviews/F-273-architecture-pass-1.md, .claude/reviews/F-273-design-pass-1.md, .claude/reviews/F-273-design-pass-2.md, .claude/reviews/F-273-design-pass-3.md, .claude/reviews/F-273-design-pass-4.md, .claude/reviews/F-273-design-pass-5.md, .claude/reviews/F-273-filing-pass-1.md, .claude/reviews/F-273-filing-pass-2.md, .claude/reviews/F-273-registration-plan-pass-1.md, .claude/reviews/F-273-test-placement-plan-pass-1.md, .claude/reviews/S46-sprint-pass-1.md, .claude/reviews/S46-sprint-pass-2.md, .claude/reviews/S46-sprint-pass-3.md, .claude/reviews/S46-sprint-pass-4.md, .claude/reviews/S46-sprint-pass-5.md, .claude/reviews/S46-sprint-pass-6.md, .claude/reviews/model-comparison-S46-checkpoint-review.md, .github/workflows/ci.yml, .opencode/commands/verify.md, CHANGELOG.md, CLAUDE.md, README.md, bin/ocelli.sh, ci/guard-probe-budget.json, crates/ocelli-codec/src/jpegxl.rs, crates/ocelli-codec/tests/jpegxl.rs, crates/ocelli-geom/src/lib.rs, crates/ocelli-native/src/lib.rs, crates/ocelli-render/src/graph.rs, crates/ocelli-render/src/interpolation.rs, crates/ocelli-viewport/src/snapshot.rs, crates/ocelli-volume/src/ortho.rs, docs/benchmarks/s46-model-comparison.md, docs/lld/README.md, docs/lld/benchmarks.md, docs/lld/build-targets.md, docs/lld/cache.md, docs/lld/pixel-pipeline.md, docs/lld/public-api.md, docs/lld/series-open.md, docs/lld/typescript-packaging.md, docs/runbooks/guard-verification.md, docs/sprints/AS_BUILT.md, docs/sprints/BACKLOG.md, docs/sprints/CURRENT_SPRINT.md, docs/sprints/SPRINT_PLAN.md, docs/sprints/SPRINT_TRACKER.md, docs/sprints/allocation.json, eslint.config.js, examples/folder-viewer/src/measure.rs, examples/folder-viewer/src/more.html, examples/folder-viewer/src/page.html, examples/folder-viewer/tests/browser/auto.mjs, examples/folder-viewer/tests/browser/window.mjs, examples/viewer-react/csp-probe.mjs, examples/viewer-react/src/core-worker.ts, examples/viewer-react/vite.config.ts, scripts/guards/catalogue.py, scripts/tests/test_guard_catalogue.py, scripts/tests/test_viewer_build_check.py, scripts/viewer_build_check.py`
+**Review**: `.claude/reviews/F-266-claude-pass-9.md, 0 defects and 0 smells`
+**Verify tree**: `91e56d6431012bfc5f4b46b17e85d3cf95d6a033`
 
-## Verified source
-
-The source commit above passed the actual feature floor, all 29 gates, and
-full corpus verification over this exact staged tree. The corpus has 133
-verified rows, with none missing or mismatched. The nine corpus integration
-tests passed. The checked generator passed separately. The hook supplied the
-feature-profile provenance trailers from the exact-tree receipt.
-
-The real branch-built glue and WASM match the preserved runtime-tested input
-bytes exactly. The WASM SHA256 is
-`e9f275dc62700c3b325acbef2283d72c180535c7eec37af59b5936ac316327f2`.
-The glue SHA256 is
-`be1870549103534b68fdfc2a4ad183994b7a99630536059c68b5ee2a5b871002`.
-The build-source, runtime, received-policy, body-digest and mutation evidence
-is retained under `/private/tmp/ocelli-s46-codex/f266-final-feature-profile/`
-and `/private/tmp/ocelli-s46-codex/f266-final-readiness/`.
-
-The independent review closed every implementation defect and smell, with
-one optional line-wrapping nit. The HTTP matrix distinguishes six real-pkg
-PRESENT 200 observations, five ABSENT HTML 200 fallbacks and one literal-
-percent ABSENT HTTP 500 no-package observation. The 500 is not healthy HTTP
-or browser readiness evidence. Source-bound preflight-fetch, actual CSP
-header-removal, outside-worker, plus-path and non-UTF-8 sensitivity controls
-remain separately attributed.
-
-## Transport and integration boundary
-
-This tracked handoff is a local transport addition after the verified source
-commit. It is not an implementation change, has no verification receipt and
-carries no verification trailer. Its transport tree must never be presented
-as the verified source tree above. It is not push-ready. No CI, push,
-canonical integration, shared Done status or S46 closure is claimed.
-
-Root integrates the complete branch by three-way merge from the base above,
-consumes this handoff and performs the normal final canonical checks and
-completion records. The current worker leaves shared delivery completion to
-that integrator. CURRENT_SPRINT remains S46 under the explicit isolated S47
-work-order exception.
+Regenerated by the Claude coordinator on 2026-11-11 after independent review passes 5 to 9 on the GLM fix commits cffe24fc, 7ee7baf6, 691d30e1 and 1bef5b74, with the sprint merged at b0078f6e. The operator narrowed the story on 2026-11-11 to no checkout-root or /@fs reach, with F-281 for the wasm registry paths. The verify tree above is the head's own tree, which has no verify record. The feature profile runs once on the integrated tree.
