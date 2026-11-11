@@ -282,7 +282,7 @@
     "bench.tier-startup": 1,
     "bindgen": 3,
     "bootstrap-importer": 5,
-    "catalogue": 90,
+    "catalogue": 92,
     "census": 35,
     "census-runbook": 3,
     "ci-floor": 27,
@@ -347,7 +347,7 @@
     "unsafe": 9,
     "viewer-build": 11
   },
-  "gates_declared": 36,
+  "gates_declared": 37,
   "note": "Recorded measurements, not guesses. `wall_clock_seconds` is what the harness took on the machine that recorded it. `constants` is the declared-constant ratchet, `constants_count` and `gates_declared` are the counts that catch one of those being removed rather than changed, `entry_sites` is the per-entry refusal count for the catalogue entries claiming their file with `\"*\"`, so a refusal added to an already claimed file moves a number when it takes one of the shapes scripts/guards/discover.py scans, `oracle_faults` is the fault-count ratchet and `uncovered` is the uncovered-refusal ratchet, all written by scripts/guard_census.py --record.",
   "oracle_faults": 23,
   "uncovered": {

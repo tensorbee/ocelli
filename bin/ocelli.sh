@@ -63,6 +63,7 @@ GATES=(
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
   "nostd|no|no_std crates reach no dependency std feature (D-09)"
+  "docs|no|cargo doc paired intra-doc denials (F-268)"
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
@@ -107,6 +108,9 @@ run_gate() {
     fmt)         cargo fmt --all --check ;;
     clippy)      cargo clippy --workspace --all-targets -- -D warnings ;;
     test)        cargo test --workspace ;;
+    # F-268. The inherited encoded rustdoc flags variable is unset for this child only.
+    docs)
+        env -u CARGO_ENCODED_RUSTDOCFLAGS RUSTDOCFLAGS='-D rustdoc::private_intra_doc_links -D rustdoc::broken_intra_doc_links' cargo doc --workspace --no-deps --locked --keep-going ;;
     # F-239, D-31, the lead ruling after the codec part's review pass 4 (S1).
     # The two vendored decoders are excluded from the workspace, so the `test`
     # arm above never reaches their unit tests, and AC25's 1e-4 coefficient

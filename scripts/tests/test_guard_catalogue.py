@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -30,9 +31,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from guards import census, discover, sandbox  # noqa: E402
+from guards import catalogue, census, discover, sandbox  # noqa: E402
 from guards.catalogue import (CONSTANTS, DEFECTS, DICOM_FIXTURE,  # noqa: E402
-                              GUARDS, _close_preflight,
+                              GUARDS, _close_preflight, _run_docs_gate,
+                              _write_docs_fixture,
                               _example_dev_reaches_a_url, _write_close_state,
                               _workspace_manifest_with_exclusion)
 
@@ -319,6 +321,66 @@ class ExampleDevControlKeepsBackgroundChild(unittest.TestCase):
             self.assertIn("example helper http://127.0.0.1:9", done.stderr)
             self.assertIn("fixture: child PID and URL observed", done.stdout)
         self.assertEqual((ROOT / "bin/example-dev.sh").read_bytes(), launcher)
+
+
+class DocProbeHarnessPreconditions(unittest.TestCase):
+    """Harness preconditions: helper input refusal and no-op transport rejection."""
+
+    def test_write_docs_fixture_rejects_unknown_fault(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdirectory:
+            box = sandbox.Sandbox(path=Path(tempdirectory))
+            with self.assertRaises(ValueError) as caught:
+                _write_docs_fixture(box, 'unsupported-arm')
+        self.assertEqual(str(caught.exception), "unknown fault: 'unsupported-arm'")
+
+    def test_run_docs_gate_rejects_noop_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdirectory:
+            box = sandbox.Sandbox(path=Path(tempdirectory))
+            with mock.patch.object(box, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')) as fake_run:
+                with self.assertRaises(AssertionError) as caught:
+                    _run_docs_gate(box, 'healthy')
+            fake_run.assert_called_once()
+        self.assertEqual(str(caught.exception), 'docs gate passed without real rendered docs')
+
+
+class UnextractableGateProbeSelection(unittest.TestCase):
+    def test_selector_picks_joined_arm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            box = sandbox.Sandbox(path=Path(directory))
+            box.write(
+                "scripts/ci_floor_check.py",
+                "NOT_IN_FLOOR = {}\n",
+            )
+            box.write(
+                ".github/workflows/ci.yml",
+                "jobs:\n"
+                "  synth:\n"
+                "    steps:\n"
+                "      - run: bin/ocelli.sh gate wrapped\n"
+                "      - run: bin/ocelli.sh gate inline\n"
+                "      - run: bin/ocelli.sh gate joined\n",
+            )
+            box.write(
+                "bin/ocelli.sh",
+                "GATES=(\n"
+                '  "wrapped|no|fixture"\n'
+                '  "inline|no|fixture"\n'
+                '  "joined|no|fixture"\n'
+                ")\n"
+                "run_gate() { local name=$1; case \"$name\" in\n"
+                "  wrapped) env FLAG=x cargo doc --no-deps ;;\n"
+                "  inline) env FLAG=x cargo doc --no-deps &&\n"
+                "    python3 later.py ;;\n"
+                "  joined) python3 first.py &&\n"
+                "    python3 second.py &&\n"
+                "    node --test synthetic.mjs ;;\n"
+                "esac; }\n"
+                "skip() { return 3; }\n",
+            )
+            runner_before = box.read('bin/ocelli.sh')
+            selected = catalogue._a_gate_with_an_unextractable_arm_command(box)
+            self.assertEqual(selected, "joined")
+            self.assertEqual(box.read('bin/ocelli.sh'), runner_before)
 
 
 class CatalogueIsWellFormed(unittest.TestCase):
