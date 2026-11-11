@@ -78,6 +78,14 @@ shader's `slope * stored + intercept` gives a different bit from
 version is `YBR_PARTIAL_420` converted twice, or at full range where PS3.3
 C.7.6.3.1.2 gives partial range.
 
+## Design round answers, 2026-11-11
+
+- **F-235 Q1.** O1-prime: integer stacks read a folded 256-wide modality table built by `ocelli_pixel::modality`, and interpolated routes apply stage 1 on the CPU before upload. Stage 1 stays in `ocelli-pixel` alone.
+- **F-241.** F-223 is dropped from its dependencies. AC25 needs only the existing comparison harness.
+- **F-266.** Its promise is narrowed to no checkout-root or `/@fs` reach in any emitted file. F-281, S48, removes the cargo registry paths the shipped wasm still carries.
+- **F-202, F-204, F-205.** Designed after F-245 is integrated, and they may carry to S48.
+- **F-267.** The story row already decides top-level first where both levels carry a value, so it is not an open question.
+
 ## What done means
 
 - **F-273** is done when the declared scalar route preserves full-range
