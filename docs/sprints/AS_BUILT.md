@@ -6112,3 +6112,54 @@ The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchma
 **User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
 **Deviations from the design plan.** The handoff named head 188dfd61, and the integrated head is the reviewed fix f5079387 that followed it. The `docs)` arm comment was reworded by the coordinator at integration to say the whole encoded variable is unset.
 **Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude.
+
+## F-269, Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87, completed 2026-11-11
+
+**What was built.** Every factual comment block in `vendor/ritk-codecs-0.6.0/src/jpeg_ls` was audited against the code below it and the T.87 clause it names, and each false one was corrected or removed. Corrections landed in four files, comments only, with no code token changed. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md` records each block's rating with a locator measured from the final bytes, the four F-243 pass 8 items first, and the cap on k recorded as resting on the coded range checks. The vendored pins and the provenance hash are refreshed from the bytes.
+
+**HLD sections implemented.** none, a vendored source audit.
+**Deviations.** D-20, its description refreshed to name the F-269 audit and the four files.
+**Crates / packages modified.** `vendor/ritk-codecs-0.6.0/src/jpeg_ls/context/mod.rs`, `context/tests.rs`, `encoder.rs` and `scan.rs`, comments only. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md`, `scripts/pin_and_size_check.py` and `scripts/tests/test_pin_and_size_check.py`, `docs/hld/DEVIATIONS.md`.
+**Tests added.** `unit`, the pin test's patched-file list gains `context/tests.rs`. No arithmetic test, the story changes no code.
+**Fixture provenance.** no pixel arithmetic. Clauses were checked against the T.87 text whose PDF SHA-256 is recorded in the provenance file.
+**Verification.** Independent review passes 7 to 10 by Claude on the GLM fix commits, the last with no defect or smell after the coordinator regenerated the stale handoff. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. No code changed.
+**LLD updated.** none, no LLD describes the vendored comments.
+**User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
+**Deviations from the design plan.** Pass 7's D4 premise, that the decoder clamps on one run-mode branch, was the reviewer's error. Pass 8 corrected it, and the encoder comment was then corrected rather than rated doubtful, so corrections landed in four files rather than three. The integrated head is a35cc608 with the regenerated handoff f253e41b, after the head the original handoff named.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 10's nitpick, the encoder.rs 246 banner entry's clause range, is carried in its review file.
+
+## F-266, Built example viewer loads its core from its own output, completed 2026-11-11
+
+**What was built.** A `vite build` of `examples/viewer-react` with the wasm package present gives a dist whose worker imports the bundled glue and wasm chunk from its own output, so the dist serves from a static host at its root and reads `core ready`. The worker's preflight fetch is gone and readiness needs the import and the default init. `scripts/viewer_build_check.py` refuses an emitted file that spells the temporary build base, the real checkout root, raw or URL-encoded, as a standalone path token or after a `.` or `..` segment, or any `/@fs` route. The dev server's `fs.allow` uses the decoded `fileURLToPath` of the repository root, so a checkout path with a space, unicode or a percent sign serves the package.
+
+**HLD sections implemented.** none, packaging and the example build.
+**Deviations.** none
+**Crates / packages modified.** `examples/viewer-react/vite.config.ts`, `src/core-worker.ts` and `csp-probe.mjs`, `scripts/viewer_build_check.py` and its tests, `scripts/guards/catalogue.py`, the regenerated `docs/runbooks/guard-verification.md`, README, `docs/lld/build-targets.md` and `typescript-packaging.md`, CHANGELOG.
+**Tests added.** `unit`, the build-check suite in `scripts/tests/test_viewer_build_check.py`, 62 cases, each root and boundary branch pinned by a mutant. `browser`, the csp-probe built-dist positive on a plain static server requiring `core ready`, five 200s, no `/@fs` request and byte-equal assets.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Independent review passes 5 to 9 by Claude on the GLM fix commits, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. A build and serving story.
+**LLD updated.** `docs/lld/build-targets.md`, what the check refuses and the host-prefixed trade-off, and `docs/lld/typescript-packaging.md`, the built dist's loading.
+**User-facing documentation.** `README.md`, static hosting at a host's root, the wasm package before `vite build`, and `npm run build` first for the package dists.
+**Deviations from the design plan.** The operator narrowed the promise on 2026-11-11 from no absolute build-machine path to no checkout-root or `/@fs` reach, because the shipped wasm carries cargo registry paths in panic locations, and filed F-281. The coordinator corrected the CHANGELOG bullet at integration to match. A root spelled behind an `http://host:port` or `file://host` prefix is not refused, an accepted trade-off named in the LLD.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 9's two nitpicks are carried in its review file.
+
+## F-272, Oracle tests write nothing into the checkout, completed 2026-11-11
+
+**What was built.** Every `tools/oracle/src/produce.rs` test that runs the producer now writes into a per-process scratch directory, so `cargo test` never creates or overwrites `tools/oracle/compare-out`. The guard `guard_no_checkout_write` runs the producer tests in a child process against a fresh temporary mirror root, selected through one test helper reading an environment override. The mirror copies `tools/oracle/out`, holds a directory symlink to the real `corpus/data` (never a copy), and the child's working directory is inside the mirror, so any write by a selected test appears as a new entry under the mirror's `tools/oracle`. A source scan in the test module requires the manifest-dir read once in the real-root helper and every real-root helper reference inside an allowlist.
+
+**HLD sections implemented.** none, test hygiene for the oracle.
+**Deviations.** none
+**Crates / packages modified.** `tools/oracle/src/produce.rs`, inside `mod tests` only, and `docs/lld/oracle.md`.
+**Tests added.** `unit`, the guard, the mirror and corpus-link tests, the child-cwd test, the scratch-owner and concurrency tests, and the two source-scan tests, each proven red by a planted mutant in a scratch copy.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Independent review passes 4 to 10 by Claude, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the guard links the corpus and opens no corpus file.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Test plumbing only.
+**LLD updated.** `docs/lld/oracle.md`, what the guard covers and the open forms it does not.
+**User-facing documentation.** none.
+**Deviations from the design plan.** The lead amendment of 2026-11-11 (a8dc0bbe) replaced the in-process snapshot with the mirror root, superseding AC3's no-copy sentence for `tools/oracle/out` only. The scan stops two literal patterns, and its stated open forms are a rewrite through the protected-tree helper, macro-built environment names, a root walked from `current_exe` or `file!()`, a call to an allowlisted function that reads the real root, and two string-literal evasions. An identical rewrite of an existing file stays undetected. The coordinator wrote the final documentation commit 9c1b5346.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over five fix rounds, reviewed by Claude. Pass 10's nitpick is carried in its review file.

@@ -1,7 +1,7 @@
 # TypeScript packaging
 
-**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-228, F-230, F-236, F-237
-**Last updated:** 2026-11-09
+**F-IDs that contributed:** F-003, F-004, F-005, F-021, F-X017, F-035, F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-198, F-217, F-218, F-221, F-228, F-230, F-236, F-237, F-266
+**Last updated:** 2026-11-10
 
 What `@ocelli/core`, `@ocelli/wasm` and `@ocelli/react` publish, and what proves it.
 
@@ -399,8 +399,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval
 `script-src 'self'` loads the page bundle, the module worker's own imports
 and the wasm-bindgen glue through `import()`. `'wasm-unsafe-eval'` lets the
 worker compile `ocelli_wasm_bg.wasm` and is narrower than `'unsafe-eval'`,
-which would also allow `eval`. `connect-src 'self'` covers the glue's fetch
-of the module and the worker's probe fetch of the glue. `worker-src 'self'`
+which would also allow `eval`. `connect-src 'self'` covers the glue's fetch of the wasm module, while dynamic module imports, including the worker's own imports and the glue, are covered by `script-src 'self'` through `import()`. `worker-src 'self'`
 is an explicit pin rather than a requirement: the worker is also allowed
 through `worker-src`'s fallback to `script-src 'self'`, and the pin keeps a
 later widening of `script-src` from widening worker construction with it.
@@ -440,10 +439,18 @@ source directory found under `packages/*/src` and the example's `src` for
 `createObjectURL`, `blob:`, `data:`, `eval(` and `new Function(`, so
 nothing Ocelli ships needs a weaker policy to run.
 
-The probe is `examples/viewer-react/csp-probe.mjs`. It serves the built
-example and the built wasm package through Playwright routes on the invented
-origins `http://ocelli.test` and `http://dicomweb.test`, so it binds no
-port, and it measures the strict header, each directive's minimality, the
+The probe is `examples/viewer-react/csp-probe.mjs`. Its first case serves
+the unmodified built dist from a real plain static HTTP server that answers
+every ordinary well-formed, decodable unknown path, including any `/@fs`
+reach, with a 404, and proves `core ready` with the worker, the bundled glue
+and the module asset all requested over that server, the actual received
+HTTP policy checked for the document, the worker, the glue and the WASM
+module, with the body hashes tied to the unmodified emitted files and only
+the WASM bytes identical to the release pkg input, the bundled glue being
+rewritten. The policy cases then serve the built example and the built wasm
+package through Playwright routes on the invented origins
+`http://ocelli.test` and `http://dicomweb.test`, so they bind no
+port, and they measure the strict header, each directive's minimality, the
 worker-src fallback, where the worker's policy comes from, the blob control
 and its positive half, the dcmjs document paths and a cross-origin DICOMweb
 instance from `corpus/data/syntax`. The pure parts run in `npm run test`

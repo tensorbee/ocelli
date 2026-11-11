@@ -461,3 +461,7 @@ extension is the pass 2 ruling above, a decision rather than a carried item.
 Pass 7's correction to pass 6's mutant count, 25 killed and 8 surviving
 rather than 26 and 7, is a record fix in the review file and is not carried.
 No video test ran for this filing.
+
+## Operator design round, 2026-11-11
+
+F-223 is removed from this story's dependencies. AC25 extends the `--compare-cornerstone` harness already on the sprint branch and does not wait on F-223's equipped acceptance, which continues as F-273.

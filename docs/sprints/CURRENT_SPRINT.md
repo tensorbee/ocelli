@@ -13,11 +13,11 @@
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier | Rust | 2w | pending |
 | F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | pending |
 | F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | in-progress |
-| F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | prepared |
+| F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | done |
 | F-267 | E38.62 | Folder viewer corners on enhanced multiframe CT and MR | Rust | 2w | pending |
 | F-268 | E19.8 | Rustdoc links resolve | Build | 1w | done |
-| F-269 | E4.14 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | Rust | 1w | prepared |
-| F-272 | E2.8 | Oracle tests write nothing into the checkout | Test | 1w | prepared |
+| F-269 | E4.14 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | Rust | 1w | done |
+| F-272 | E2.8 | Oracle tests write nothing into the checkout | Test | 1w | done |
 | F-273 | E38.64 | Reference scalar normalization for the equipped comparison | All | 3w | in-progress |
 | F-278 | E38.68 | Comparison page states what it is | TS | 1w | pending |
 
@@ -77,6 +77,14 @@ shader's `slope * stored + intercept` gives a different bit from
 `ocelli_pixel::modality`, invisible until a window edge lands on it. F-241's
 version is `YBR_PARTIAL_420` converted twice, or at full range where PS3.3
 C.7.6.3.1.2 gives partial range.
+
+## Design round answers, 2026-11-11
+
+- **F-235 Q1.** O1-prime: integer stacks read a folded 256-wide modality table built by `ocelli_pixel::modality`, and interpolated routes apply stage 1 on the CPU before upload. Stage 1 stays in `ocelli-pixel` alone.
+- **F-241.** F-223 is dropped from its dependencies. AC25 needs only the existing comparison harness.
+- **F-266.** Its promise is narrowed to no checkout-root or `/@fs` reach in any emitted file. F-281, S48, removes the cargo registry paths the shipped wasm still carries.
+- **F-202, F-204, F-205.** Designed after F-245 is integrated, and they may carry to S48.
+- **F-267.** The story row already decides top-level first where both levels carry a value, so it is not an open question.
 
 ## What done means
 

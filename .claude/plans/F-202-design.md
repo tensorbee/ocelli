@@ -209,3 +209,7 @@ actual consumer selector, and resolve any provider gap found by the inventory
 without silently expanding another story's completion claim. These are draft
 design tasks within this assigned sprint, not an unscheduled backlog escape.
 The scope, one-viewer requirement and sprint allocation are already decided.
+
+## Operator design round, 2026-11-11
+
+This plan stays draft until F-245 is integrated on the sprint branch. It is then designed against the landed one viewer rather than F-245's plan. The story may carry to S48 if F-245 lands late.
