@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244
-**Last updated:** 2026-11-09
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-245
+**Last updated:** 2026-11-11
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -889,3 +889,40 @@ and a sandbox-denied browser startup. Corrected data inspection and the
 unchanged browser command with required OS permission passed. Those are
 checker/setup diagnostics, not product failures. Source and physical index
 remained unchanged throughout.
+
+## The F-245 npm dev launcher, and the viewer browser suite
+
+F-245 adds `bin/folder-viewer-dev.mjs`. The root `npm run dev` runs it. It
+builds `@ocelli/core` first, then runs
+`cargo build -p ocelli-folder-viewer --message-format=json`, selects the one
+native bin compiler-artifact executable from the build output rather than any
+hardcoded target path, and runs that binary as a direct child. A custom
+`CARGO_TARGET_DIR` is honoured. The launcher spawns each phase in its own
+POSIX process group, forwards `SIGINT` and `SIGTERM` to the owned group,
+preserves the first signal, gives the group a 2000 ms grace then `SIGKILL`
+and a further 2000 ms confirmation, and never signals a pid it does not own.
+The legacy React demo keeps `bin/example-dev.sh` under
+`npm run dev:boundary-demo`, unchanged.
+
+The launcher's unit is `tools/bench/tests/folder_viewer_dev_test.mjs`. It is
+registered in both the `bench` gate's `node --test` list in `bin/ocelli.sh`
+and the `tools/bench/package.json` test script. The synthetic fixtures copy
+the tracked launcher byte for byte and refuse a missing one with
+`MISSING_IMPLEMENTATION`.
+
+`examples/folder-viewer/tests/browser/dicomweb.mjs` is the new browser
+workflow suite. It builds its wholly synthetic DICOMweb upstream in the
+script, starts the release viewer with `OCELLI_PORT` and stops it by its PID,
+and runs directly with
+`OCELLI_PORT=0 node examples/folder-viewer/tests/browser/dicomweb.mjs`.
+Registration under the `viewer-browser` gate in `bin/ocelli.sh` is owned by
+the F-268 shared slice and has not happened yet, so the suite is not in that
+gate's list and the ten existing modules are unchanged. Until registration
+lands, the suite is run directly and no gate claims it.
+
+`eslint.config.js` gains one comment-conditional globals entry for that
+suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
+`fetch`, added where the browser context requires them, with no rule
+disabled and no allowlist widened. `scripts/guards/catalogue.py` and
+`ci/guard-probe-budget.json` are unchanged by this story: the launcher and
+the suite add no new repository refusal and no permanent watcher.

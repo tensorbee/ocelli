@@ -116,9 +116,9 @@ packages/
   react/            @ocelli/react
 
 examples/
-  viewer-react/     the example viewer, and the manual smoke test
-  example-server/   loopback helper for the example viewer's frame-open, series-open and overlay panels
-  folder-viewer/    local series page for a folder on this machine
+  viewer-react/     the boundary demo, kept under the dev:boundary-demo script
+  example-server/   loopback helper for the boundary demo's frame-open, series-open and overlay panels
+  folder-viewer/    the showcase viewer, local series and DICOMweb sources
 
 tools/
   oracle/           the differential harness against cornerstone3D
@@ -146,19 +146,50 @@ bin/ocelli.sh gate --floor
 
 ## Start the example viewer
 
-The showcase is `examples/viewer-react`, package `@ocelli/example-viewer`.
-From the repository root:
+The showcase is the folder viewer, `examples/folder-viewer`. It is one
+ordinary HTML page with one native backend, served the same way by the npm
+dev path and by cargo. From the repository root:
 
 ```bash
 npm ci
-bin/ocelli.sh wasm
 npm run dev
 ```
 
-Open <http://localhost:5173>. Vite prints that address when the server is ready.
+`npm run dev` runs `bin/folder-viewer-dev.mjs`. The launcher builds
+`@ocelli/core`, builds the native backend with cargo, selects the binary from
+cargo's compiler-artifact output rather than a hardcoded target path, and
+runs it. A custom `CARGO_TARGET_DIR` is honoured. The backend prints its
+address on stdout, an ephemeral port unless `OCELLI_PORT` is set, and opening
+that address shows the viewer. `SIGINT` or `SIGTERM` to the launcher stops
+the backend it started. The same page is served by
+`cargo run -p ocelli-folder-viewer`, which is the native path.
 
-`npm run dev` also starts `ocelli-example-server` on `127.0.0.1`. The helper
-prints only its base URL. The Frame open section posts to it through Vite.
+The page opens a local folder or the synthetic study, and with
+`OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set it
+also offers a DICOMweb source, described under Start the local series viewer
+below. The Use book the viewer serves at `/use` and the More page at `/more`
+carry the user-facing detail.
+
+### The boundary demo
+
+The earlier React Vite demo, `examples/viewer-react`, package
+`@ocelli/example-viewer`, is kept under its own script and is not the
+showcase:
+
+```bash
+npm run dev:boundary-demo
+```
+
+The demo page loads the wasm module, so build it first when it is missing:
+
+```bash
+bin/ocelli.sh wasm
+```
+
+Open <http://localhost:5173>. Vite prints that address when the server is ready.
+It also starts `ocelli-example-server` on `127.0.0.1` through
+`bin/example-dev.sh`. The helper prints only its base URL. The Frame open
+section posts to it through Vite.
 The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
 centre 100 and width 200, then shows the display value and the padding count.
 The Series section posts three synthetic objects, or a multipart body of files
