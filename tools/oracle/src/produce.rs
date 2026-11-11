@@ -2308,30 +2308,37 @@ mod tests {
     }
 
     /// The one-root rule. A producer test that reads reference or corpus
-    /// data must obtain the repository root only through
-    /// `producer_repo_root`, so no writer can bypass the guard's mirror
-    /// override with its own real-root computation. The scan reads this
-    /// file's own test module and asserts two things. The single
-    /// manifest-dir read must sit inside the real-root helper. And every
-    /// textual reference to the real-root helper must sit inside an
-    /// explicitly allowlisted guard-infrastructure function, so a
-    /// producer test cannot reach the real tree by calling the helper
-    /// itself. The counted markers are built through `concat` so this
-    /// test's own source carries no second read, no second module
-    /// boundary and no second reference.
+    /// data is supposed to obtain the repository root only through
+    /// `producer_repo_root`. What the scan stops is exactly two literal
+    /// patterns, no more. The text CARGO_MANIFEST_DIR must appear once in
+    /// the test module's code and only inside the real-root helper. And
+    /// every code occurrence of the text f272_real_repo_root outside the
+    /// helper's own definition must sit inside an explicitly allowlisted
+    /// guard-infrastructure function whose enclosing item is a plain
+    /// four-space fn, so a producer test cannot launder the reference
+    /// through a use, a const, a nested mod or any other item that is
+    /// not a plain fn after an allowlisted function. A mention on a
+    /// comment-only line is prose about the scan and is not counted,
+    /// which is what lets this comment name both patterns. The scan does
+    /// not stop a macro-built
+    /// environment name such as env!(concat!(...)) or
+    /// std::env::var(concat!(...)), a root found by walking current_exe
+    /// or file!(), or a call to an allowlisted function that returns a
+    /// real path, and those forms stay open. The counted markers are
+    /// built through `concat` so this test's own source carries no
+    /// second read, no second module boundary and no second reference.
     #[test]
     fn manifest_dir_is_read_only_in_the_real_root_helper() {
         let marker = concat!("CARGO", "_MANIFEST_DIR");
         let module_marker = concat!("mod", " tests {");
         let helper_marker = concat!("f272", "_real_repo_root");
         let definition_marker = concat!("fn ", "f272", "_real_repo_root");
-        let fn_marker = "\n    fn ";
         let allowlist = [
             "producer_repo_root",
             "f272_link_corpus_side",
-            "f272_protected_tree",
             "f272_populate_mirror_root",
             "mirror_corpus_side_is_a_symlink_and_never_a_copy",
+            "guard_no_checkout_write",
         ];
         let source = include_str!("produce.rs");
         let module = match source.rsplit_once(module_marker) {
@@ -2342,15 +2349,17 @@ mod tests {
             Some(at) => at,
             None => unreachable!("the real-root helper must exist in the test module"),
         };
-        let next_fn = module[helper_at..]
-            .find(fn_marker)
-            .map(|at| helper_at + at)
-            .unwrap_or(module.len());
-        let reads: Vec<usize> = module.match_indices(marker).map(|(at, _)| at).collect();
+        let starts = f272_four_space_line_starts(module);
+        let next_item = f272_next_item_start(module, helper_at, &starts);
+        let reads: Vec<usize> = module
+            .match_indices(marker)
+            .map(|(at, _)| at)
+            .filter(|at| !f272_on_comment_line(module, *at))
+            .collect();
         assert_eq!(
             reads.len(),
             1,
-            "{marker} must be read in exactly one place in the test module, found {}",
+            "{marker} must be read in exactly one place in the test module's code, found {}",
             reads.len()
         );
         let read = match reads.first() {
@@ -2358,12 +2367,13 @@ mod tests {
             None => unreachable!("the count assertion guarantees exactly one read"),
         };
         assert!(
-            read > helper_at && read < next_fn,
+            read > helper_at && read < next_item,
             "the single {marker} read must sit inside the real-root helper body"
         );
         let references: Vec<usize> = module
             .match_indices(helper_marker)
             .map(|(at, _)| at)
+            .filter(|at| !f272_on_comment_line(module, *at))
             .collect();
         assert!(
             !references.is_empty(),
@@ -2371,25 +2381,186 @@ mod tests {
         );
         // The definition occurrence is the helper's own name inside its
         // own signature. Its body is already bounded by the manifest-read
-        // check above, so it is exempt from the enclosing-function test.
+        // check above, so it is exempt from the enclosing-item test.
         let definition_name_at = helper_at + "fn ".len();
         for at in references {
             if at == definition_name_at {
                 continue;
             }
-            let owner = match module[..at].rfind(fn_marker) {
-                Some(fn_at) => {
-                    let rest = &module[fn_at + fn_marker.len()..];
-                    let end = rest.find('(').unwrap_or(0);
-                    &rest[..end]
-                }
-                None => "",
+            let owner = match f272_plain_fn_owner(module, at, &starts) {
+                Some(owner) => owner,
+                None => unreachable!(
+                    "a real-root helper reference at byte {at} must sit inside a plain four-space fn item, any other enclosing item is refused"
+                ),
             };
             assert!(
                 allowlist.contains(&owner),
                 "every real-root helper reference must sit inside an allowlisted guard-infrastructure function, found owner {owner}"
             );
         }
+    }
+
+    /// Whether an occurrence sits on a comment-only line, one that starts
+    /// with a double slash after leading spaces. A mention there is prose
+    /// about the scan and is not counted as a read or a reference.
+    fn f272_on_comment_line(module: &str, at: usize) -> bool {
+        let line_start = module[..at].rfind('\n').map_or(0, |newline| newline + 1);
+        module[line_start..]
+            .trim_start_matches(' ')
+            .starts_with("//")
+    }
+
+    /// Collects the starts of every line at exactly four spaces of
+    /// indentation. Inside this test module those are the top-level item
+    /// lines and their wrapped continuation lines alike.
+    fn f272_four_space_line_starts(module: &str) -> Vec<usize> {
+        let mut starts = Vec::new();
+        let mut offset = 0;
+        while let Some(at) = module[offset..].find('\n') {
+            let line = offset + at + 1;
+            let rest = &module[line..];
+            if rest.len() >= 5 && rest.starts_with("    ") && !rest[4..].starts_with(' ') {
+                starts.push(line);
+            }
+            offset = line;
+        }
+        starts
+    }
+
+    /// Names the item a reference at `at` sits in, and only when that item
+    /// is a plain four-space fn. The nearest preceding four-space line is
+    /// the innermost boundary the reference can belong to, whatever kind
+    /// of item it is, so a use, a const, a nested mod, an attribute or a
+    /// doc line refuses instead of inheriting the owner of an allowlisted
+    /// function above it. A wrapped signature line refuses the same way,
+    /// which fails closed on an allowlisted function whose signature is
+    /// wrapped.
+    fn f272_plain_fn_owner<'a>(module: &'a str, at: usize, starts: &[usize]) -> Option<&'a str> {
+        let line = *starts.iter().rev().find(|&&start| start <= at)?;
+        let rest = module[line..].strip_prefix("    fn ")?;
+        let end = rest.find('(')?;
+        Some(&rest[..end])
+    }
+
+    /// The byte offset where the first top-level item line after `after`
+    /// starts. For the real-root helper's single-line signature that is
+    /// the helper's closing brace, so the manifest-dir read bound ends
+    /// with the helper body and a read planted in an item between the
+    /// helper and the next function lands outside it. A wrapped helper
+    /// signature would draw the bound at its own continuation line and
+    /// refuse the helper's read, which fails closed.
+    fn f272_next_item_start(module: &str, after: usize, starts: &[usize]) -> usize {
+        starts
+            .iter()
+            .find(|&&line| line > after)
+            .copied()
+            .unwrap_or(module.len())
+    }
+
+    /// Owner attribution must refuse a reference whose enclosing item is
+    /// anything but a plain four-space fn, so an item smuggled in after
+    /// an allowlisted function cannot inherit that function as its owner.
+    /// Every case puts the allowlisted guard above the smuggled item,
+    /// which is the exact shape the refusal exists for. The synthetic
+    /// module text is built through `concat` so this test's own source
+    /// carries no counted reference and no second module boundary of its
+    /// own.
+    #[test]
+    fn owner_attribution_refuses_anything_but_a_plain_four_space_fn() {
+        let helper = concat!("f272", "_real_repo_root");
+        let guard = concat!("guard", "_no_checkout_write");
+        let module_marker = concat!("mod", " tests {");
+        let smuggled = [
+            // A const item naming the helper as a value.
+            format!("    const LAUNDERED: fn() -> PathBuf = {helper};\n"),
+            // A use item importing it into a sibling scope.
+            format!("    use some_other_module::{helper};\n"),
+            // A nested mod whose inner fn hides below the boundary.
+            format!(
+                "    mod inner {{\n        fn sneaky() {{\n            let _ = {helper}();\n        }}\n    }}\n"
+            ),
+            // A visibility-qualified fn is not a plain fn item.
+            format!("    pub(crate) fn sneaky() {{\n        let _ = {helper}();\n    }}\n"),
+            // Neither is an async fn.
+            format!("    async fn sneaky() {{\n        let _ = {helper}();\n    }}\n"),
+            // An attribute line is its own boundary.
+            format!("    #[doc = \"see {helper}\"]\n"),
+            // So is a doc comment line.
+            format!("    /// see {helper}\n"),
+            // A wrapped signature refuses too, which fails closed.
+            format!(
+                "    fn wrapped(\n        taken: bool,\n    ) {{\n        let _ = {helper}();\n    }}\n"
+            ),
+        ];
+        for smuggled_item in smuggled {
+            let module = format!(
+                "{module_marker}\n    fn {guard}() {{\n        let _ = {helper}();\n    }}\n{smuggled_item}}}\n"
+            );
+            let starts = f272_four_space_line_starts(&module);
+            let references: Vec<usize> = module.match_indices(helper).map(|(at, _)| at).collect();
+            assert_eq!(
+                references.len(),
+                2,
+                "each case must hold the guard's reference and the smuggled one, found {}",
+                references.len()
+            );
+            let control_at = match references.first() {
+                Some(at) => *at,
+                None => unreachable!("the count assertion guarantees a control reference"),
+            };
+            let smuggled_at = match references.get(1) {
+                Some(at) => *at,
+                None => unreachable!("the count assertion guarantees a smuggled reference"),
+            };
+            assert_eq!(
+                f272_plain_fn_owner(&module, control_at, &starts),
+                Some(guard),
+                "the control reference inside the allowlisted guard must keep its owner"
+            );
+            assert_eq!(
+                f272_plain_fn_owner(&module, smuggled_at, &starts),
+                None,
+                "a reference smuggled after an allowlisted function must be refused instead of inheriting its owner"
+            );
+        }
+    }
+
+    /// The manifest-read bound must end at the next top-level item line
+    /// of any kind. A read planted in a const between the real-root
+    /// helper and the next plain fn sits outside the helper body under
+    /// that bound, while a bound drawn at the next plain fn would
+    /// swallow it. The synthetic module text is built through `concat`
+    /// so this test's own source carries no counted read of its own.
+    #[test]
+    fn the_manifest_read_bound_ends_at_the_next_item_of_any_kind() {
+        let marker = concat!("CARGO", "_MANIFEST_DIR");
+        let module_marker = concat!("mod", " tests {");
+        let helper = concat!("f272", "_real_repo_root");
+        let module = format!(
+            "{module_marker}\n    fn {helper}() {{\n        let kept = 1;\n    }}\n    const PLANTED: &str = env!({marker});\n    fn next_fn() {{}}\n"
+        );
+        let helper_at = match module.find(helper) {
+            Some(at) => at,
+            None => unreachable!("the synthetic module must hold the helper"),
+        };
+        let starts = f272_four_space_line_starts(&module);
+        let next_item = f272_next_item_start(&module, helper_at, &starts);
+        let read_at = match module.find(marker) {
+            Some(at) => at,
+            None => unreachable!("the synthetic module must hold the planted read"),
+        };
+        assert!(
+            read_at >= next_item,
+            "the bound must end at the helper's closing brace, so the planted read sits outside the helper body"
+        );
+        let next_fn = module[helper_at..]
+            .find("\n    fn ")
+            .map(|at| helper_at + at)
+            .unwrap_or(module.len());
+        assert!(
+            next_fn > read_at,
+            "the control: a bound drawn at the next plain fn would place the planted read inside the helper body"
+        );
     }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
@@ -3742,9 +3913,13 @@ mod tests {
         }
     }
 
-    /// Actual protected oracle tree beside this manifest, no surrogate.
-    fn f272_protected_tree() -> PathBuf {
-        f272_real_repo_root()
+    /// Normalised protected oracle tree path below a repository root the
+    /// caller supplies. The guard passes the real root in, so this
+    /// helper computes no root of its own and cannot hand a producer
+    /// test the real checkout. Where a caller may obtain a root, and
+    /// where that is refused, is exactly what the scan test states.
+    fn f272_protected_tree(repo_root: &Path) -> PathBuf {
+        repo_root
             .join("tools/oracle")
             .components()
             .collect::<PathBuf>()
@@ -3893,11 +4068,17 @@ mod tests {
     /// copies only. An identical rewrite of an existing file, in the real
     /// tree or inside the mirrored `out` copy, changes no digest and is
     /// caught by neither check, and that gap stays open. The module's
-    /// source scan only stops a producer test computing a second real
-    /// root. It enforces that rule by allowing exactly one manifest-dir
-    /// read and an explicit allowlist of the guard-infrastructure
-    /// functions that may reference the real-root helper, and it does not
-    /// stop a rewrite made through the helper. Neither check observes the
+    /// source scan stops exactly two literal patterns. The text
+    /// CARGO_MANIFEST_DIR must appear once in the test module's code and
+    /// only inside the real-root helper, and every code occurrence of the
+    /// text f272_real_repo_root outside the helper's own definition must
+    /// sit inside an explicitly allowlisted guard-infrastructure function
+    /// whose enclosing item is a plain four-space fn. The scan does not
+    /// stop a rewrite made through the helper, a macro-built environment
+    /// name such as env!(concat!(...)) or std::env::var(concat!(...)), a
+    /// root found by walking current_exe or file!(), or a call to an
+    /// allowlisted function that returns a real path, and those forms
+    /// stay open. Neither check observes the
     /// parent process's own writes before the guard. It is never a claim
     /// about transient writes restored before a digest, and never about
     /// the parent's own state.
@@ -3915,7 +4096,7 @@ mod tests {
         );
         f272_validate_selection(&tests);
 
-        let tree = f272_protected_tree();
+        let tree = f272_protected_tree(&f272_real_repo_root());
         let (before_digest, before_notes) = f272_tree_digest(&tree);
         assert!(
             before_notes.is_empty(),
