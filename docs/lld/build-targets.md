@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268
-**Last updated:** 2026-11-10
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266
+**Last updated:** 2026-11-11
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -64,6 +64,8 @@ dev-profile size measurement is not a smaller version of the same number. It
 is a different number.
 
 `crates/ocelli-wasm/pkg/` is generated and gitignored.
+
+When the pkg is PRESENT, the build uses a decoded /@fs specifier during Rollup compilation and Rollup rewrites it into a bundled emitted chunk. The story's promise is narrowed to no checkout-root or /@fs reach in any emitted file: the viewer build check refuses a PRESENT dist whose emitted files spell the temporary build base or the real checkout root, raw or URL-encoded, matched as a path prefix with a boundary, or carry the standalone /@fs marker. The boundary is byte-level. A root preceded by relative dots, the `.` and `..` segments a sourcemap's relative sources spell through the symlinked packages, is a left boundary. A root glued to a host name's last letter or digit, as in an `http://localhost:5173/...` or `file://localhost/...` spelling of the checkout, is accepted rather than refused: bytes alone cannot tell that host prefix from the github URL name the boundary must not fire on. It bans no other absolute path. The check builds with the stand-in pkg and never scans the real `ocelli_wasm_bg.wasm`, which carries Rust panic location strings with absolute cargo registry paths under the builder home directory. F-281 removes those registry paths. When ABSENT, the build keeps the encoded /@fs specifier as an external runtime import. Dev uses the encoded URL in both states. Dev fs.allow is the decoded checkout root. A rejected import or default-init failure leaves core not built.
 
 `bin/ocelli.sh wasm-decode` builds the same crate with
 `--no-default-features --features decode-worker` into

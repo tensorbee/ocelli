@@ -1,12 +1,20 @@
 /**
  * F-228, the built example viewer under the embedding policy, measured.
  *
- * Every response is served by page.route on the invented origins
- * http://ocelli.test and http://dicomweb.test, so the probe binds no port and
- * starts no server. Each case is one page load under one variation of the
- * policy, and each case asserts its own named failure, not only the absence
- * of success. Chromium is the acceptance browser, plan item 10. Firefox and
- * WebKit are not run here and are not claimed.
+ * The policy cases run on the invented origins http://ocelli.test and
+ * http://dicomweb.test through page.route, so they bind no port and start no
+ * server. The unmodified-dist positive runs on a real plain static HTTP
+ * server instead: it serves only files under the emitted dist, answers every
+ * ordinary well-formed, decodable unknown path, including any /@fs reach, with
+ * a plain 404, and never maps a
+ * repository path, never intercepts a request and never prepends worker
+ * bytes. That is F-266's genuine positive; the policy cases remain the
+ * F-228 evidence and keep their own instrumentation.
+ *
+ * Each case is one page load under one variation of the policy, and each
+ * case asserts its own named failure, not only the absence of success.
+ * Chromium is the acceptance browser, plan item 10. Firefox and WebKit are
+ * not run here and are not claimed.
  *
  * The policy exists once, in src/csp-policy.ts. This probe imports it under
  * Node 24's type stripping and never carries a copy. Each variation header
@@ -15,16 +23,17 @@
  * varies the two together, and its positive control restores
  * 'wasm-unsafe-eval' while `blob:` stays allowed.
  *
- * The served worker chunk carries a small collector prelude. A dedicated
- * worker's securitypolicyviolation events stay in the worker, because
- * addInitScript does not run there, and Chromium does not forward the
- * browser's own CSP console text out of a worker, so the violation listener
- * is the channel that carries that evidence. The worker script's own console
- * calls do reach page.on("console") whatever the method, and the collector
- * wraps every console method the worker global exposes, so the strict case
- * asserts the full collected message set from the page and the worker
- * empty. The prelude is probe instrumentation and is not part of the
- * policy claim.
+ * The policy cases' served worker chunk carries a small collector prelude.
+ * A dedicated worker's securitypolicyviolation events stay in the worker,
+ * because addInitScript does not run there, and Chromium does not forward
+ * the browser's own CSP console text out of a worker, so the violation
+ * listener is the channel that carries that evidence. The worker script's
+ * own console calls do reach page.on("console") whatever the method, and
+ * the collector wraps every console method the worker global exposes, so
+ * the strict case asserts the full collected message set from the page and
+ * the worker empty. The prelude is probe instrumentation on the policy
+ * cases and is not part of the unmodified positive, which serves the real
+ * dist bytes unchanged.
  *
  * Build first:
  *
@@ -36,12 +45,14 @@
  *     node examples/viewer-react/csp-probe.mjs
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("../../tools/oracle/node_modules/playwright");
@@ -362,10 +373,273 @@ function isWorkerChunk(url) {
   return /\/assets\/core-worker-.+\.js$/.test(new globalThis.URL(url).pathname);
 }
 
+/**
+ * The real plain static server for the unmodified positive. It serves files
+ * under the emitted dist only, answers every ordinary well-formed, decodable
+ * unknown path with a plain 404, and keeps a log of every request with its
+ * response status and the sha256
+ * of the served bytes. There is no repository or /@fs mapping, no fallback
+ * to index.html, no request interception and no worker prefix.
+ */
+const STATIC_MIME = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".wasm": "application/wasm",
+  ".svg": "image/svg+xml",
+  ".json": "application/json",
+  ".map": "application/json",
+};
+
+const staticLog = [];
+
+function startStaticServer() {
+  return new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      const url = new globalThis.URL(req.url ?? "/", "http://static.test");
+      let path = decodeURIComponent(url.pathname);
+      if (path === "/") {
+        path = "/index.html";
+      }
+      const file = join(DIST, path);
+      // The header is recorded at writeHead time. Reading it back with
+      // res.getHeader in the same tick does not reflect what writeHead was
+      // passed, which is the observation bug the first policied run exposed.
+      const policy = STRICT;
+      const finish = (status, type, bytes) => {
+        // The genuine positive carries the existing STRICT policy. The
+        // document and every emitted asset are served with the same header
+        // the policy cases measure, so the positive proves the policy's
+        // allowed path, not an unpolicied load. The bodies stay the exact
+        // unmodified dist bytes.
+        res.writeHead(status, type === null
+          ? { "Content-Security-Policy": policy }
+          : {
+              "Content-Type": type,
+              "Content-Security-Policy": policy,
+            });
+        res.end(bytes);
+        // requestPath is the URL as requested (`/` for the document); served
+        // is the dist-relative path that answered it. The two differ for the
+        // document, so the assertion keys on the resolved name.
+        staticLog.push({
+          url: req.url ?? "/",
+          served: path,
+          status,
+          policy,
+          digest: bytes === undefined ? null : createHash("sha256").update(bytes).digest("hex"),
+        });
+      };
+      if (
+        !file.startsWith(DIST) || !existsSync(file) ||
+        !file.startsWith(`${DIST}/`)
+      ) {
+        finish(404, "text/plain", Buffer.from("csp-probe: not found"));
+        return;
+      }
+      if (!statSync(file).isFile()) {
+        finish(404, "text/plain", Buffer.from("csp-probe: not found"));
+        return;
+      }
+      const type = STATIC_MIME[file.slice(file.lastIndexOf("."))] ?? null;
+      finish(200, type, readFileSync(file));
+    });
+    server.listen(0, "127.0.0.1", () => {
+      resolve({
+        base: `http://127.0.0.1:${server.address().port}`,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+/**
+ * The unmodified positive over real plain HTTP. Waits for the settled
+ * post-status state, not the initial not-built render, and records what the
+ * server actually served.
+ */
+async function realServerPositive(browser) {
+  const { base, close } = await startStaticServer();
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(`${base}/`, { waitUntil: "load", timeout: 30000 });
+    // The header reads "core not built" before the worker posts anything.
+    // The settled state is the header after the status message or a tier
+    // paragraph, whichever lands. A fixed early read races the worker.
+    await page.waitForFunction(
+      () => {
+        const header =
+          document.querySelector("header span")?.textContent ?? "";
+        if (header === "core ready") {
+          return true;
+        }
+        return [...document.querySelectorAll("p")].some((p) =>
+          (p.textContent ?? "").startsWith("Tier "),
+        );
+      },
+      undefined,
+      { timeout: 30000 },
+    );
+    const state = await page.evaluate(() => {
+      const paragraphs = [...document.querySelectorAll("p")].map(
+        (p) => p.textContent ?? "",
+      );
+      return {
+        header: document.querySelector("header span")?.textContent ?? null,
+        tier: paragraphs.find((text) => text.startsWith("Tier "))?.slice(5) ??
+          null,
+      };
+    });
+    await context.close();
+    // What the server actually served for the document, worker, glue and
+    // wasm, with the header policy each response carried.
+    const served = staticLog.filter((entry) =>
+      /core-worker-|ocelli_wasm|index\.html|index-/.test(new globalThis.URL(entry.url, base).pathname));
+    const absolute = staticLog.filter((entry) =>
+      new globalThis.URL(entry.url, base).pathname.startsWith("/@fs"));
+    // Every 200 response carried the strict policy, on the document, the
+    // worker chunk and the assets alike. The 404s carry it too, but the
+    // assertion is about what the run was served.
+    const served200 = staticLog.filter((entry) => entry.status === 200);
+    assert.equal(
+      served200.length,
+      5,
+      `the run served the document, the entry chunk, the worker chunk, the glue chunk and the module asset, got ${served200.length} responses: ${served200.map((s) => s.url).join(", ")}`,
+    );
+    // Independent actual received-header observation: finite awaited GETs of
+    // the exact recorded URLs, reading the received response headers, not the
+    // server's staticLog.policy and not getHeader on the server side. These
+    // requests append to staticLog but every later assertion uses the arrays
+    // captured above, so the original browser's five 200 responses stay the
+    // counted snapshot.
+    for (const entry of served200) {
+      const response = await fetch(`${base}${entry.url}`);
+      const observed = response.headers.get("content-security-policy");
+      await response.arrayBuffer();
+      assert.equal(
+        observed,
+        STRICT,
+        `the response actually received for ${entry.url} carries the strict policy, got ${observed}`,
+      );
+    }
+    // Permanent actual awaited GET of an existing directory: before this
+    // repair readFileSync threw on it instead of answering the fixed 404.
+    const directory = await fetch(`${base}/assets/`);
+    const directoryBody = await directory.text();
+    assert.equal(
+      directory.status,
+      404,
+      `GET /assets/ answers 404, got ${directory.status}`,
+    );
+    assert.equal(
+      directoryBody,
+      "csp-probe: not found",
+      `GET /assets/ answers the fixed not-found text, got ${directoryBody}`,
+    );
+    // Served-body digests bound to the actual emitted dist files, not to
+    // raw pkg inputs: the glue chunk is the bundler's rewrite, so the
+    // binding is to the file at the emitted name.
+    const servedAssets = served200.filter((entry) =>
+      /\/assets\//.test(new globalThis.URL(entry.url, base).pathname));
+    for (const entry of servedAssets) {
+      const name = new globalThis.URL(entry.url, base).pathname.slice("/assets/".length);
+      const emitted = createHash("sha256")
+        .update(readFileSync(join(DIST, "assets", name)))
+        .digest("hex");
+      assert.equal(
+        entry.digest,
+        emitted,
+        `the served bytes of ${name} are the emitted dist file's bytes`,
+      );
+    }
+    const documentEntry = served200.find((entry) => entry.served === "/index.html");
+    assert.equal(
+      state.header,
+      "core ready",
+      "the unmodified dist must reach core ready on plain static HTTP",
+    );
+    assert.notEqual(state.tier, null, "the resolved tier is shown");
+    assert.deepEqual(
+      errors,
+      [],
+      "no page error fires on the unmodified dist",
+    );
+    assert.equal(
+      absolute.length,
+      0,
+      `no /@fs request reaches the server, got ${absolute.map((a) => a.url).join(", ")}`,
+    );
+    const workerEntries = served.filter((entry) =>
+      /core-worker-/.test(entry.url));
+    assert.equal(workerEntries.length, 1, "the worker chunk was served once");
+    assert.equal(workerEntries[0].status, 200, "the worker chunk answers 200");
+    const glueEntries = served.filter((entry) =>
+      /ocelli_wasm-[^/]*\.js$/.test(entry.url));
+    assert.equal(
+      glueEntries.length,
+      1,
+      "the emitted glue chunk was requested from the worker and served",
+    );
+    assert.equal(glueEntries[0].status, 200, "the glue chunk answers 200");
+    const wasmEntries = served.filter((entry) =>
+      /ocelli_wasm_bg-[^/]*\.wasm$/.test(entry.url));
+    assert.equal(
+      wasmEntries.length,
+      1,
+      "the emitted module asset was requested and served",
+    );
+    assert.equal(wasmEntries[0].status, 200, "the module asset answers 200");
+    const inputGlue = createHash("sha256")
+      .update(readFileSync(join(PKG, "ocelli_wasm.js")))
+      .digest("hex");
+    const inputWasm = createHash("sha256")
+      .update(readFileSync(join(PKG, "ocelli_wasm_bg.wasm")))
+      .digest("hex");
+    assert.equal(
+      wasmEntries[0].digest,
+      inputWasm,
+      "the served module bytes are byte-identical to the release pkg input",
+    );
+    // The glue chunk is Vite's bundled rewrite of the pkg glue, so it is NOT
+    // byte-identical to the input. The identities that are claimed are: the
+    // module asset identical to its pkg input, and the chunk names recorded.
+    assert.notEqual(
+      glueEntries[0].digest,
+      inputGlue,
+      "the glue chunk is the bundler's rewrite, not a passthrough of the input file",
+    );
+    assert.match(
+      workerEntries[0].url,
+      /core-worker-/,
+      "the served worker is the emitted hashed chunk",
+    );
+    assert.notEqual(
+      documentEntry,
+      undefined,
+      "the document response is in the served log",
+    );
+    const documentEmitted = createHash("sha256")
+      .update(readFileSync(join(DIST, "index.html")))
+      .digest("hex");
+    assert.equal(
+      documentEntry.digest,
+      documentEmitted,
+      "the served document bytes are the emitted index.html's bytes",
+    );
+    return {
+      detail: `tier ${state.tier}, strict policy on every 200 response, worker/glue/wasm all 200 over real plain HTTP with served bytes equal to the emitted dist files, no /@fs request, module asset identical to the pkg input (${inputWasm.slice(0, 12)}...), glue chunk ${glueEntries[0].digest.slice(0, 12)}..., worker chunk ${workerEntries[0].digest.slice(0, 12)}...`,
+    };
+  } finally {
+    close();
+  }
+}
+
 const failures = [];
 const notRun = [];
 let passed = 0;
-
 function report(name, outcome, detail) {
   globalThis.console.log(
     `${name.padEnd(20)} ${outcome.padEnd(8)} ${detail ?? ""}`.trimEnd(),
@@ -518,6 +792,17 @@ try {
   globalThis.console.log(`csp-probe, Chromium ${browser.version()}`);
   globalThis.console.log(`policy ${STRICT}`);
 
+  // The unmodified positive runs first and gates the comparisons: without a
+  // genuine core-ready over real plain HTTP there is no baseline.
+  let realDist;
+  try {
+    realDist = await realServerPositive(browser);
+    report("real-dist", "PASS", realDist.detail);
+  } catch (error) {
+    realDist = null;
+    report("real-dist", "FAIL", firstLine(error instanceof Error ? error.message : String(error)));
+  }
+
   const baseline = await runCase(
     browser,
     "control",
@@ -545,6 +830,12 @@ try {
   if (baseline === null) {
     globalThis.console.error(
       "csp-probe: the control run failed, so the comparisons have no baseline",
+    );
+  } else if (realDist === null) {
+    // The policy comparisons still run, but the unmet genuine positive is a
+    // named failure the exit code already carries.
+    globalThis.console.error(
+      "csp-probe: the unmodified-dist positive failed, the policy comparisons have no real-server baseline",
     );
   } else {
     await runCase(browser, "strict", async (page, messages) => {
@@ -684,11 +975,16 @@ try {
     });
 
     await runCase(browser, "no-connect", async (page, messages, routed) => {
+      // The import-only worker loads its glue through a script module
+      // import, which script-src 'self' allows. connect-src 'none' still
+      // refuses the wasm fetch inside that glue, so the page stays core not
+      // built, no module bytes reach the server, and the worker's own
+      // connect-src violation names the refused wasm fetch.
       const state = await open(page, () => NO_CONNECT, routed);
       assert.equal(
         state.header,
         "core not built",
-        "connect-src 'none' refuses the worker's probe fetch of the glue",
+        "connect-src 'none' refuses the wasm fetch inside the glue import",
       );
       assert.equal(
         state.notPublished,
@@ -696,19 +992,19 @@ try {
         "the canvas is not published under connect-src 'none'",
       );
       assert.deepEqual(
-        routed.filter((entry) => entry.url.includes("ocelli_wasm")),
+        routed.filter((entry) => entry.url.includes("ocelli_wasm_bg")),
         [],
-        "no glue or module request reached the route, connect-src refused the fetch before it was issued",
+        "no module bytes were fetched, connect-src refused the fetch inside the glue",
       );
       const [worker] = await workerProbe(page, 0);
       assert.ok(worker, "the worker chunk carried the probe collector");
       const refused = worker.violations.filter(
-        (text) => text.startsWith("connect-src") && text.includes("ocelli_wasm"),
+        (text) => text.startsWith("connect-src") && text.includes("wasm"),
       );
       assert.equal(
         refused.length,
         1,
-        "the worker's own connect-src violation names the refused glue fetch",
+        "the worker's own connect-src violation names the refused wasm fetch",
       );
       return { detail: `core not built, ${refused[0]}` };
     });

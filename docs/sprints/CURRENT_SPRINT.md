@@ -13,7 +13,7 @@
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier | Rust | 2w | pending |
 | F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | pending |
 | F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | in-progress |
-| F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | prepared |
+| F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | done |
 | F-267 | E38.62 | Folder viewer corners on enhanced multiframe CT and MR | Rust | 2w | pending |
 | F-268 | E19.8 | Rustdoc links resolve | Build | 1w | done |
 | F-269 | E4.14 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | Rust | 1w | done |

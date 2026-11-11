@@ -10,6 +10,7 @@ Repository bootstrap. Nothing is published.
 
 ### Added
 
+- The React viewer example, when built and served by a static host, reaches its bundled wasm core through that host alone, and no emitted file spells the checkout path or a `/@fs` route. The wasm module still carries the cargo registry paths of its panic locations, which F-281 removes.
 - The embedding Content Security Policy is documented and browser-proven, and the local folder viewer serves strict page-specific script and style hashes.
 - Release tooling packages the wasm module and its notice files separately as `@ocelli/wasm`, alongside the matching `@ocelli/core` version.
 - Folder viewer colour frames draw through the library colour stage with per-channel window and invert and named refusals.
