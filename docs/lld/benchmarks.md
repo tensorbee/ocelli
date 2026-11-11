@@ -1,7 +1,7 @@
 # The benchmark harness
 
 **F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-224, F-225, F-227, F-239, F-240, F-243
-**Last updated:** 2026-11-09
+**Last updated:** 2026-11-11
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
 instrument:
@@ -724,10 +724,29 @@ workloads store Window Center 40, so they never ask for a series window.
 run includes three series window rounds, and its bound carries F-227's named
 term `P * 4 MiB` for the rounds' pools, `serverRssBound`'s
 `SERIES_POOL_BYTES`, with the fixed constant at 24 MiB so the total stays
-F-216's 528,194,192 bytes. The
-figures of record are measured at sprint close on an idle host and kept in a
-surviving run file. The implementer's runs during the story are informational
-only, taken on a loaded host.
+F-216's 528,194,192 bytes. The implementer's runs during the story are
+informational only, taken on a loaded host.
+
+The figures of record for F-227 are one run of `bin/ocelli.sh bench
+viewer.open viewer.first_image` on 2026-11-11, release build, nine samples
+each, on host class `darwin|27.0.0|arm64|Apple_M4_Max|16|51539607552`, the key
+F-216's viewer baselines are recorded under. That names the host class and not
+the physical machine. The run record is private evidence kept outside the
+checkout.
+
+| Row | Median | F-216 threshold |
+| --- | ---: | ---: |
+| `viewer.open` | 940 ms | 1,100 ms |
+| `viewer.first_image`, CT | 10.1 ms | 20 ms |
+| `viewer.first_image`, DX | 28.2 ms | 250 ms |
+| `pet_no_window` first image, informational | 14 ms | none |
+| `pet_no_window` open, informational | 106 ms | none |
+
+`thresholds_met` was true and `restart_recovered` was true. The expectation
+stated before measurement for the `pet_no_window` first image was under 30 ms.
+The host was not otherwise idle: other agent work was paused, the operator's
+foreground applications were open, and the load average was 3.20 before and
+4.20 after. The thresholds were met under that load.
 
 F-227's sampled-frame preview cost was observed separately on 2026-11-09. Three fresh release servers each received the existing 267-file synthetic no-window PET workload. The default cache was 256 MiB. `/held` reported zero decoded frames before and after `/series-window`. The first preview of sampled frame 0 reported `decoded`, and the identical next request reported `held`. Bodies and frame, dimensions and window headers matched, including the exact series-window strings sent.
 
@@ -739,7 +758,7 @@ F-227's sampled-frame preview cost was observed separately on 2026-11-09. Three 
 
 These are informational monotonic HTTP request-to-complete-body durations, including scheduling, cache, rendering and transport. Fixed decoded-then-held order conditions the observations. They do not isolate decoder CPU cost, establish idle-host timing or replace the registered PET first-image observation. No threshold was introduced. The single invocation exited 0. All three owned servers stopped, and the observation procedure, binary and all 267 copied input hashes remained unchanged. The release binary matches root's source-0fad producer receipt. Historical progress-only 1.25/0.88 ms remains a separate observation with unrecovered primary evidence.
 
-F-227's independent AC16 acceptance instrument is now [the pydicom calculator](../../tools/bench/auto_window_reference.md), paired with [the private viewer-order export helper](../../tools/bench/export_active_window_check.md). It compares exact binary32 window strings from an independently sampled pool. The standalone helper downloads local caller input and adds no product control or endpoint. Its one cached route observation is separate from manual first/middle/last, scrolling and labels. The explicit Python suite contains 42 synthetic controls. The 11 VM controls run in the benchmark gate through both registered runner lists. Actual native and Chromium download/CLI composition checks remain separate. They establish instrument readiness, not the still-owed actual-study or idle-host observations.
+F-227's independent AC16 acceptance instrument is now [the pydicom calculator](../../tools/bench/auto_window_reference.md), paired with [the private viewer-order export helper](../../tools/bench/export_active_window_check.md). It compares exact binary32 window strings from an independently sampled pool. The standalone helper downloads local caller input and adds no product control or endpoint. Its one cached route observation is separate from manual first/middle/last, scrolling and labels. The explicit Python suite contains 42 synthetic controls. The 11 VM controls run in the benchmark gate through both registered runner lists. Actual native and Chromium download/CLI composition checks remain separate. They establish instrument readiness. The actual-study observation is the operator's, recorded as passed on 2026-11-10 in the F-227 AS_BUILT entry with no study detail, and the timing of record is the run above.
 
 Playwright's `postDataBuffer` is empty for these fetch bodies. The window
 subject also records the byte length of the body the page passes to `fetch`.

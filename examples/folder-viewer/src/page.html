@@ -2659,7 +2659,7 @@ async function showIndex(vp, next) {
     faultShown(vp, image);
     return;
   }
-  if (vp.tileMode) paintTiles(vp);
+  if (vp.tileMode && !seriesWindowWanted(vp, image)) paintTiles(vp);
   schedulePrefetch(vp);
   // A series that is still to get its window is drawn only once it has it,
   // so no grey of this image's own window is taken from the cache first.
@@ -2689,17 +2689,27 @@ async function pumpMain(vp) {
       const wanted = vp.viewIndex;
       const image = currentImage(vp);
       if (!image || !drawable(image.info) || !cellShown(vp)) break;
-      const moved = () => token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image;
+      // The key is captured right before the request is sent, so a
+      // reply for a stale key is never painted and the loop re-runs
+      // for the current key.
+      // Initialised so a failure before the request compares a real key.
+      let key = cacheKey(image, vp);
+      const moved = () =>
+        token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image || cacheKey(image, vp) !== key;
       try {
         if (seriesWindowWanted(vp, image)) {
           // F-227. The first image of a series that stores no window waits
           // for the series window, so it is never drawn at two windows.
           await ensureSeriesWindow(seriesOf(vp));
-          if (moved()) continue;
+          // After the wait the tiles paint at the series window, or at each
+          // image's own window once the series is refused, and a series
+          // still waiting is not painted.
+          if (vp.tileMode && cellShown(vp) && !seriesWindowWanted(vp, currentImage(vp))) paintTiles(vp);
+          if (token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image) continue;
           if (vp.cell === activeCell) syncWindowList();
           schedulePrefetch(vp);
-          if (vp.tileMode) paintTiles(vp);
         }
+        key = cacheKey(image, vp);
         const grey = await fetchGrey(image, vp);
         if (moved()) continue;
         applyGrey(vp, grey, image);
@@ -2818,6 +2828,7 @@ function seriesWindowWanted(vp, image) {
 
 // One shared request per series per open. A refusal stores nothing and marks
 // the series, so its images keep their own windows without asking again.
+// A failed request is treated as a refusal for this open.
 function ensureSeriesWindow(series) {
   if (!series || seriesWindows.has(series.key) || seriesWindowRefused.has(series.key)) return Promise.resolve();
   const pending = seriesWindowJobs.get(series.key);
@@ -2827,7 +2838,9 @@ function ensureSeriesWindow(series) {
     if (generation !== cacheGeneration) return;
     if (entry) seriesWindows.set(series.key, entry);
     else seriesWindowRefused.add(series.key);
-  }).catch(() => {}).finally(() => {
+  }).catch((error) => {
+    if (!(error && error.name === "AbortError") && generation === cacheGeneration) seriesWindowRefused.add(series.key);
+  }).finally(() => {
     if (seriesWindowJobs.get(series.key) === job) seriesWindowJobs.delete(series.key);
   });
   seriesWindowJobs.set(series.key, job);
@@ -3803,6 +3816,7 @@ function resetView(vp) {
   vp.draftWindow = null;
   vp.activePreset = null;
   vp.windowIndex = 0;
+  vp.windowChoice = (vp.windowChoice || 0) + 1;
   vp.invert = false;
   vp.rotation = 0;
   vp.flipH = false;
@@ -3975,6 +3989,8 @@ async function chooseWindow(vp, next) {
   if (!image || !drawable(image.info)) return false;
   const token = vp.loadToken;
   const index = vp.viewIndex;
+  vp.windowChoice = (vp.windowChoice || 0) + 1;
+  const choice = vp.windowChoice;
   const trial = {
     overrideWindow: next.override || null,
     activePreset: next.preset || null,
@@ -3983,7 +3999,7 @@ async function chooseWindow(vp, next) {
     loadToken: token,
     viewIndex: index
   };
-  const still = () => token === vp.loadToken && index === vp.viewIndex && currentImage(vp) === image;
+  const still = () => token === vp.loadToken && index === vp.viewIndex && choice === (vp.windowChoice || 0) && !vp.draftWindow && currentImage(vp) === image;
   try {
     await fetchGrey(image, trial);
   } catch (error) {
@@ -4111,6 +4127,7 @@ async function fetchRegion(image, rect) {
 async function applyRegion(vp, a, b) {
   const image = currentImage(vp);
   if (!image || !image.info.monochrome) return;
+  const choice = (vp.windowChoice = (vp.windowChoice || 0) + 1);
   const core = await loadLibrary();
   if (!core) {
     setWindowNotice(SENTENCE["tool-wlregion"]);
@@ -4118,7 +4135,7 @@ async function applyRegion(vp, a, b) {
   }
   const token = vp.loadToken;
   const index = vp.viewIndex;
-  const still = () => token === vp.loadToken && index === vp.viewIndex && currentImage(vp) === image;
+  const still = () => token === vp.loadToken && index === vp.viewIndex && currentImage(vp) === image && choice === vp.windowChoice;
   let extent;
   try {
     extent = await fetchRegion(image, [a.x, a.y, b.x, b.y]);
@@ -4483,6 +4500,7 @@ function onPointerUp(event) {
     vp.draftWindow = null;
     vp.activePreset = null;
     vp.windowIndex = 0;
+    vp.windowChoice = (vp.windowChoice || 0) + 1;
     windowNotice = "";
     syncWindowList();
     showIndex(vp, vp.viewIndex);
@@ -6936,6 +6954,7 @@ function copyWindow(source) {
     vp.overrideWindow = win ? { center: win.center, width: win.width, fn: win.fn, from: win.from } : null;
     vp.activePreset = preset;
     vp.windowIndex = index;
+    vp.windowChoice = (vp.windowChoice || 0) + 1;
     vp.draftWindow = null;
     showIndex(vp, vp.viewIndex);
   }

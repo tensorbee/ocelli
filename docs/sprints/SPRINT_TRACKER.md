@@ -223,6 +223,9 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-239 | Folder viewer colour frames through the library's colour stage | S46 | 12w | not measured | 2026-11-09 |
 | F-240 | Matrix and tone-curve ICC profiles in stage 4 | S46 | 5w | not measured | 2026-11-09 |
 | F-238 | Native build without wgpu's Metal backend: the shipped native build compiles no objc2 crate, proven by the resolved dependency graph for every Apple target, while development builds keep Metal for the tier A gate | S46 | 2w | not measured | 2026-11-09 |
+| F-214 | Folder viewer mouse profiles and preferences | S46 | 2w | not measured | 2026-11-10 |
+| F-215 | Folder viewer marks saved as TID 1500 and key images as a Key Object Selection | S46 | 4w | not measured | 2026-11-10 |
+| F-227 | Automatic window per series when the file has none | S46 | 3w | not measured | 2026-11-11 |
 
 ## S46 acceptance status correction, 2026-11-09
 
@@ -234,3 +237,7 @@ F-208, F-209, F-212 and F-213 have delivered and reviewed implementation, but th
 - F-213, AC13, the synthetic CT and MR preset click-through.
 
 All earlier implementation entries, source, reviews, durations and delivery dates remain historical evidence. They do not establish these still-unperformed acceptance rows. No source capability is removed or rescheduled. The existing operator checklist remains the observation procedure.
+
+## S46 operator acceptance closure, 2026-11-10
+
+The operator's Chrome observations were recorded as passed on 2026-11-10: F-208 AC8 to AC12, F-209 AC16 to AC20 and AC22, F-212 AC12, F-213 AC13, F-214 AC12 and F-215 AC18. F-208, F-209, F-212 and F-213 return to `done`, and F-214 and F-215 are completed. Their earlier rows keep their original completion dates and durations, and no duration was measured for the observations. F-215 AC19 was optional and not chosen. F-227 is not part of this closure.

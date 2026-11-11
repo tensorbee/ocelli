@@ -3546,13 +3546,15 @@
       "layer": "Rust",
       "weeks": 8,
       "depends_eids": [
-        "E30.1"
+        "E30.1",
+        "E30.8"
       ],
       "notes": " Showcase-first replan, 2026-11-08: shifted four sprints. Any user-facing capability in this story must ship as a real workflow in the single showcase viewer, with its capability matrix and browser acceptance updated before completion.",
       "milestone": "M14",
       "sprint": "S51",
       "depends_fids": [
-        "F-119"
+        "F-119",
+        "F-276"
       ]
     },
     {
@@ -6056,6 +6058,165 @@
       "notes": "Filed under the approved F-223 pixel-refusal follow-up rule. Future route choice requires normal design approval and remains draft. Provisional 3w GLM-proposed estimate, not measured effort. F-223 AC18 and AC19 remain open and named here in carry prose, without a structural dependency cycle. Stock and diagnostic refusal evidence remains retained, with no native arithmetic, package, tolerance, baseline or timing change at filing.",
       "milestone": "M20",
       "sprint": "S47"
+    },
+    {
+      "fid": "F-274",
+      "eid": "E38.65",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Window link sends the numeric window: a linked viewport receives the source viewport's window centre and width, as cornerstone3D 5.8.2's VOI synchronizer sends them, instead of the index of a window in the file, so linked series whose files carry different windows show the same values",
+      "layer": "TS",
+      "weeks": 2,
+      "depends_eids": [
+        "E38.19",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-209",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S1. Cornerstone-floor rule: cornerstone3D 5.8.2 synchronizes VOI by its numeric range, the F-209 index copy is weaker than that, and every feature must be at least what 5.8.2 does. Changing F-209's documented design choice needs normal design approval. S47 already exceeds both packing caps, so the story is in S48. Estimate 2w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-275",
+      "eid": "E38.66",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Pooled series window after a file changes: when F-224 refuses a changed file in a series whose window F-227 pooled, the folder viewer applies one designed rule to that window, and the window is never recomputed from the refused file",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E5.7",
+        "E38.33",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-224",
+        "F-227",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S2. Today the pooled window stays in force, and dropping it would recompute from a file F-224 now refuses, so the rule is a design decision rather than a repair. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-276",
+      "eid": "E30.8",
+      "phase": "P1.5",
+      "epic": "E30 Out-of-core volume streaming",
+      "epic_key": "E30",
+      "story": "Pyramid means across differing rescales and padding: a coarser ocelli-volume level either refuses a box whose slices carry different Rescale Slope or Intercept or averages each slice through its own rescale, chosen at design, and samples in the Pixel Padding Value range never enter a level mean, with hand-computed fixtures citing PS3.3 C.11.1 and C.7.5.1.1.2",
+      "layer": "Rust",
+      "weeks": 2,
+      "depends_eids": [
+        "E30.1",
+        "E30.7"
+      ],
+      "depends_fids": [
+        "F-119",
+        "F-222"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S3 and pass 2 smell S3. crates/ocelli-volume/src/levels.rs averages stored values across slices that may carry different rescales, latent until F-120 consumes the pyramid, so F-120 depends on this story and it is scheduled the sprint before F-120's. Estimate 2w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M14",
+      "sprint": "S50"
+    },
+    {
+      "fid": "F-277",
+      "eid": "E38.67",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Per-image auto window memory bounded: the full-frame allocation the folder viewer's local process makes for a per-image automatic window, outside the counted resident term, measured at the largest frame the viewer admits and then either counted in that term or bounded by a named limit with a test at the limit",
+      "layer": "Rust",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.33",
+        "E38.26"
+      ],
+      "depends_fids": [
+        "F-227",
+        "F-216"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S5, examples/folder-viewer/src/preview.rs. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-278",
+      "eid": "E38.68",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Comparison page states what it is: the generator of docs/benchmarks/cornerstone-comparison.md writes that the figures are a synthetic controlled observation, with its date and host conditions, says the equipped acceptance is open, and writes each unavailable-cell bullet once",
+      "layer": "TS",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.64"
+      ],
+      "depends_fids": [
+        "F-273"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 smell S8 and nitpick N5. The page is generated by tools/bench/src/comparison_run.mjs, so the fix is in its generator. F-273 owns strict publication in S47 and its backlog row carries no notes, so this is its own story after F-273. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S47"
+    },
+    {
+      "fid": "F-279",
+      "eid": "E38.69",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "S46 review hygiene: a linked region window drops its region label, the region window tool says by name that it does not apply to a colour frame, the palette ICC arm looks its profile up once, and ContentId refuses a sample shape that disagrees with the frame description",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.19",
+        "E38.23",
+        "E5.7",
+        "E38.37",
+        "E38.38",
+        "E38.40"
+      ],
+      "depends_fids": [
+        "F-209",
+        "F-213",
+        "F-224",
+        "F-239",
+        "F-240",
+        "F-245"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 1 nitpicks N1, N2, N3 and N4. Nitpicks named by the closing S46 review pass, in its review file, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
+    },
+    {
+      "fid": "F-280",
+      "eid": "E38.70",
+      "phase": "P1",
+      "epic": "E38 Series open",
+      "epic_key": "E38",
+      "story": "Viewer window has one owner: every folder viewer window setter, the pump, a preset, a drag, Reset, a linked copy, the region window and the series window, goes through one window change entry point that owns the latest choice, so a late reply never overwrites a newer window, with a real browser control per setter that holds the late request",
+      "layer": "All",
+      "weeks": 1,
+      "depends_eids": [
+        "E38.18",
+        "E38.19",
+        "E38.23",
+        "E38.33"
+      ],
+      "depends_fids": [
+        "F-208",
+        "F-209",
+        "F-213",
+        "F-227"
+      ],
+      "notes": "Filed from the S46 whole-sprint review pass 3, which found the third late window reply in a third setter. Pass 3 N3, a double tile paint in one pump iteration, folds in. Pass 5 N1, a failed series-window request kept as a refusal for the whole open, and N6, refreshFrameWindows painting tiles without the series-window guard, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "milestone": "M20",
+      "sprint": "S48"
     }
   ]
 }

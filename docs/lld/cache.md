@@ -1,7 +1,7 @@
 # Cache
 
-**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224, F-231, F-213
-**Last updated:** 2026-11-07
+**F-IDs that contributed:** F-031, F-032, F-033, F-034, F-035, F-036, F-043, F-047, F-101, F-113, F-119, F-216, F-226, F-224, F-231, F-213, F-227
+**Last updated:** 2026-11-11
 
 One budget, three tiers, explicit eviction. HLD section 8's sentence, and HLD
 section 20's `Budgeted` trait and `Lru<K, V>`, made into `crates/ocelli-cache`.

@@ -1,7 +1,7 @@
 # Series open
 
-**F-IDs that contributed:** F-192
-**Last updated:** 2026-11-04
+**F-IDs that contributed:** F-192, F-214
+**Last updated:** 2026-11-10
 
 `assemble_display` orders a bag of already parsed frames into display groups. It does not build a volume and it does not scan a directory.
 
@@ -10,6 +10,7 @@
 ```rust
 pub fn assemble_display(frames: &[ParsedFrame]) -> Result<Vec<DisplaySeries>, SeriesOpenError>
 pub fn declared_frame_count(parsed: &ParsedDicom) -> Result<u32, SeriesOpenError>
+pub fn cine_timing(metadata: &MetadataSet) -> Result<CineTiming, SeriesOpenError>
 ```
 
 `DisplaySeries` keeps the spatial order, the cine timing, the playback sequencing, the spatial slots, and two reports. Those reports are shear and a non-uniform through-plane step. Accessors return those pieces. A slot is one projected position. Frames that share it stay in the slot.
@@ -42,6 +43,8 @@ Timing is read from the first frame in display order, from the top-level cine mo
 | (0018,0040) | Frames per second |
 
 An absent or zero-length source is skipped. A vector whose length differs from the group is skipped before its values are read. PS3.3 C.7.6.5.1.2 says the first vector component is zero. A later component that is non-finite, zero, or negative is an error and does not fall through. Frame Time, the recommended rate, and cine rate use the same rule for their single value. When every source is absent, timing is `Unavailable`. The library does not invent a frame rate.
+
+`cine_timing` reads the timing of one object alone, from its metadata projection, with the same sources, order and refusals and the object's declared frame count as the length a Frame Time Vector must have. It does not read Preferred Playback Sequencing, so a bad value there never hides a good Frame Time. PS3.3 C.7.6.5.1.1 defines Frame Time as the interval between frames of one multi-frame image, so on an object of one frame a Frame Time of zero is `Unavailable` and not an error. A malformed frame declaration or functional-group sequence is `SeriesOpenReason::Metadata`, and a present but unusable timing value is `SeriesOpenReason::Cine`. The folder viewer's inspect reply reports it as `cine` and `frameTimeMs`, and its Play waits that Frame Time only between frames of the same file.
 
 Preferred Playback Sequencing `(0018,1244)` is US. Value 0 is `Loop` and value 1 is `Sweep`. An absent value is `Loop`. Any other value or value representation is an error. The example page labels `Sweep` as Bounce. The design text named the strings LOOP and SWEEP. PS3.6 gives the attribute value representation US, and that is what the reader accepts.
 

@@ -24,7 +24,9 @@ use std::sync::Arc;
 
 use jxl_oxide::frame::Encoding;
 use jxl_oxide::image::BitDepth;
-use jxl_oxide::image::color::{ColourEncoding, ColourSpace, TransferFunction};
+use jxl_oxide::image::color::{
+    ColourEncoding, ColourSpace, EnumColourEncoding, Primaries, TransferFunction, WhitePoint,
+};
 use jxl_oxide::{AllocTracker, InitializeResult, JxlImage};
 use jxl_render::ImageBuffer;
 
@@ -329,6 +331,16 @@ fn read_header(src: &[u8], limit: usize) -> Result<(JxlImage, usize), CodecError
     }
 }
 
+fn rgb_encoding_supported(encoding: &EnumColourEncoding) -> bool {
+    if !matches!(encoding.white_point, WhitePoint::D65) {
+        return false;
+    }
+    if !matches!(encoding.primaries, Primaries::Srgb) {
+        return false;
+    }
+    matches!(encoding.tf, TransferFunction::Srgb)
+}
+
 fn validate_header(mode: Mode, image: &JxlImage, desc: &FrameDesc) -> Result<(), CodecError> {
     let header = image.image_header();
     if header.metadata.orientation != 1 {
@@ -353,6 +365,15 @@ fn validate_header(mode: Mode, image: &JxlImage, desc: &FrameDesc) -> Result<(),
             // output contract is RGB or preserved greyscale, so anything else
             // refuses before a sample is written.
             if !matches!(encoding.colour_space, ColourSpace::Rgb | ColourSpace::Grey) {
+                return Err(CodecError::UnsupportedPixelFormat);
+            }
+            // RGB frames are written straight through as device RGB, so only
+            // the sRGB combination of D65, sRGB primaries and sRGB transfer is
+            // safe to decode. Grey samples are stored values that the DICOM
+            // Modality and VOI stages interpret, so only PQ and HLG refuse.
+            if matches!(encoding.colour_space, ColourSpace::Rgb)
+                && !rgb_encoding_supported(encoding)
+            {
                 return Err(CodecError::UnsupportedPixelFormat);
             }
             match encoding.tf {
@@ -542,5 +563,45 @@ fn allocation_limited(err: &(dyn std::error::Error + 'static)) -> bool {
     match err.source() {
         Some(source) => allocation_limited(source),
         None => false,
+    }
+}
+
+#[cfg(test)]
+mod rgb_encoding_tests {
+    use super::*;
+    use jxl_oxide::image::color::RenderingIntent;
+
+    #[test]
+    fn srgb_rgb_encoding_is_supported() {
+        let encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
+        assert!(rgb_encoding_supported(&encoding));
+    }
+
+    #[test]
+    fn linear_transfer_is_refused() {
+        let mut encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
+        encoding.tf = TransferFunction::Linear;
+        assert!(!rgb_encoding_supported(&encoding));
+    }
+
+    #[test]
+    fn bt709_transfer_is_refused() {
+        let mut encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
+        encoding.tf = TransferFunction::Bt709;
+        assert!(!rgb_encoding_supported(&encoding));
+    }
+
+    #[test]
+    fn p3_primaries_are_refused() {
+        let mut encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
+        encoding.primaries = Primaries::P3;
+        assert!(!rgb_encoding_supported(&encoding));
+    }
+
+    #[test]
+    fn dci_white_point_is_refused() {
+        let mut encoding = EnumColourEncoding::srgb(RenderingIntent::Relative);
+        encoding.white_point = WhitePoint::Dci;
+        assert!(!rgb_encoding_supported(&encoding));
     }
 }
