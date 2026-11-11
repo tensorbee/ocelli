@@ -8,11 +8,12 @@
 //            throughout
 //
 // The remote path resolves no tier and adds no GPU path. The tier-independent
-// observable asserted here is that the remote panel never shows a canvas and
-// the fixed unavailable status holds in the one browser this suite runs,
-// while the local render stays byte-identical. All three tiers answer the
-// same, per the plan's boundary section and docs/lld/feature-availability.md.
-// The served More matrix row is snapshotted against overstated claims.
+// observable asserted here is that no canvas appears anywhere on the page
+// through the remote stages and the fixed unavailable status holds in the one
+// browser this suite runs, while the local render stays byte-identical. All
+// three tiers answer the same, per the plan's boundary section and
+// docs/lld/feature-availability.md. The served More matrix row is snapshotted
+// against overstated claims.
 //
 // The buffers are wholly synthetic Part 10 files written by this script, carry
 // no patient attributes, and live only in memory. It starts the viewer with

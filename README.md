@@ -227,7 +227,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval
 In Chromium the worker's policy comes from its own response and not from the
 page's, so a header on the HTML document alone leaves the worker
 unrestricted, and a header on the worker alone without `'wasm-unsafe-eval'`
-breaks the compile. Send the same header on every response. The example viewer's image page sets `connect-src` to exactly the studies service origin configured at startup, while Use and More keep the self-only policy, and IPv6 literal hosts are refused at startup because browsers do not match them in `connect-src`.
+breaks the compile. Send the same header on every response. The folder viewer's image page sets `connect-src` to exactly the studies service origin configured at startup, while Use and More keep the self-only policy, and IPv6 literal hosts are refused at startup because browsers do not match them in `connect-src`.
 `worker-src 'self'` is an explicit pin rather than a requirement, because
 the worker is also allowed through the fallback to `script-src 'self'`: the
 pin keeps a later widening of `script-src` from widening worker construction
