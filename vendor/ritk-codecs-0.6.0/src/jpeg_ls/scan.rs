@@ -388,7 +388,8 @@ mod tests {
     #[test]
     fn decode_scan_constant_zero_left_predictor_2x2() {
         // All gradients are zero, so rows are represented by run hits only.
-        // The test byte provides five hit bits plus padding.
+        // The decode reads four hit bits, two per row, and the fifth 1 is
+        // unread padding.
         let data: &[u8] = &[0b11111000u8];
         let mut reader = BitReader::new(data);
         let params = ScanParams {
