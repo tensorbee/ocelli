@@ -17,7 +17,7 @@
 | F-267 | E38.62 | Folder viewer corners on enhanced multiframe CT and MR | Rust | 2w | pending |
 | F-268 | E19.8 | Rustdoc links resolve | Build | 1w | done |
 | F-269 | E4.14 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | Rust | 1w | done |
-| F-272 | E2.8 | Oracle tests write nothing into the checkout | Test | 1w | prepared |
+| F-272 | E2.8 | Oracle tests write nothing into the checkout | Test | 1w | done |
 | F-273 | E38.64 | Reference scalar normalization for the equipped comparison | All | 3w | in-progress |
 | F-278 | E38.68 | Comparison page states what it is | TS | 1w | pending |
 

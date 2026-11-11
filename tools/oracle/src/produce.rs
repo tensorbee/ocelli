@@ -2236,8 +2236,335 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::{ProducePaths, produce_applicable, stack_selection_reason};
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeSet;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::process::ExitStatus;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Creates a unique scratch directory under the system temporary
+    /// directory. Producer invocations write their outputs into it, and the
+    /// checkout-write guard builds its temporary mirror root in one.
+    ///
+    /// The name only implies ownership once exclusive creation succeeds. A
+    /// pre-existing path is never deleted, the caller retries with a fresh
+    /// name instead.
+    fn produce_test_scratch_dir() -> ProduceScratchDirGuard {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let pid = std::process::id();
+        for attempt in 0..1024u32 {
+            let name = format!(
+                "ocelli-produce-scratch-{}-{}-{}",
+                pid,
+                attempt,
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            let path = std::env::temp_dir().join(name);
+            match fs::create_dir(&path) {
+                Ok(()) => {
+                    return ProduceScratchDirGuard { path };
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => unreachable!("failed to create unique scratch directory"),
+            }
+        }
+        unreachable!("exhausted retry attempts creating unique scratch directory");
+    }
+
+    /// Removes an owned scratch directory on scope exit, including unwind.
+    struct ProduceScratchDirGuard {
+        path: PathBuf,
+    }
+
+    impl Drop for ProduceScratchDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// Environment variable through which the checkout-write guard points a
+    /// child producer run at its temporary mirror root. It is set only on
+    /// the guard's child process and read by `producer_repo_root` and by
+    /// the child-side working-directory pin.
+    const F272_REPO_ROOT_OVERRIDE: &str = "F272_PRODUCER_REPO_ROOT";
+
+    /// The repository root the producer tests read reference and corpus data
+    /// from. Producer tests that read those trees obtain the root only
+    /// through this helper, so the guard can point a child run at a mirror
+    /// root through the override. The module's source scan enforces that
+    /// this helper holds the test module's only manifest-dir read.
+    fn producer_repo_root() -> PathBuf {
+        match std::env::var_os(F272_REPO_ROOT_OVERRIDE) {
+            Some(root) => PathBuf::from(root),
+            None => f272_real_repo_root(),
+        }
+    }
+
+    /// The real repository root beside this manifest, independent of the
+    /// override. The guard digests it and copies the mirror from it.
+    fn f272_real_repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// The one-root rule. A producer test that reads reference or corpus
+    /// data is supposed to obtain the repository root only through
+    /// `producer_repo_root`. What the scan stops is exactly two literal
+    /// patterns, no more. The text CARGO_MANIFEST_DIR must appear once in
+    /// the test module's code and only inside the real-root helper. And
+    /// every occurrence the line scan treats as code of the text
+    /// f272_real_repo_root outside the
+    /// helper's own definition must sit inside an explicitly allowlisted
+    /// guard-infrastructure function whose enclosing item is a plain
+    /// four-space fn, so a producer test cannot launder the reference
+    /// through a use, a const, a nested mod or any other item that is
+    /// not a plain fn after an allowlisted function. A mention on a
+    /// comment-only line is prose about the scan and is not counted,
+    /// which is what lets this comment name both patterns.
+    /// The scan is textual and line-based, so it does not stop a rewrite made
+    /// through the helper, a macro-built environment name such as
+    /// env!(concat!(...)) or std::env::var(concat!(...)), a root found by
+    /// walking current_exe or file!(), a call to an allowlisted function that
+    /// reads the real root, or a string literal that hides a code occurrence
+    /// behind a comment-looking line or plants a fake four-space fn line to
+    /// borrow an allowlisted owner, and those forms stay open. The counted markers are
+    /// built through `concat` so this test's own source carries no
+    /// second read, no second module boundary and no second reference.
+    #[test]
+    fn manifest_dir_is_read_only_in_the_real_root_helper() {
+        let marker = concat!("CARGO", "_MANIFEST_DIR");
+        let module_marker = concat!("mod", " tests {");
+        let helper_marker = concat!("f272", "_real_repo_root");
+        let definition_marker = concat!("fn ", "f272", "_real_repo_root");
+        let allowlist = [
+            "producer_repo_root",
+            "f272_link_corpus_side",
+            "f272_populate_mirror_root",
+            "mirror_corpus_side_is_a_symlink_and_never_a_copy",
+            "guard_no_checkout_write",
+        ];
+        let source = include_str!("produce.rs");
+        let module = match source.rsplit_once(module_marker) {
+            Some((_, module)) => module,
+            None => unreachable!("the test module must exist in this source file"),
+        };
+        let helper_at = match module.find(definition_marker) {
+            Some(at) => at,
+            None => unreachable!("the real-root helper must exist in the test module"),
+        };
+        let starts = f272_four_space_line_starts(module);
+        let next_item = f272_next_item_start(module, helper_at, &starts);
+        let reads: Vec<usize> = module
+            .match_indices(marker)
+            .map(|(at, _)| at)
+            .filter(|at| !f272_on_comment_line(module, *at))
+            .collect();
+        assert_eq!(
+            reads.len(),
+            1,
+            "{marker} must be read in exactly one place in the test module's code, found {}",
+            reads.len()
+        );
+        let read = match reads.first() {
+            Some(read) => *read,
+            None => unreachable!("the count assertion guarantees exactly one read"),
+        };
+        assert!(
+            read > helper_at && read < next_item,
+            "the single {marker} read must sit inside the real-root helper body"
+        );
+        let references: Vec<usize> = module
+            .match_indices(helper_marker)
+            .map(|(at, _)| at)
+            .filter(|at| !f272_on_comment_line(module, *at))
+            .collect();
+        assert!(
+            !references.is_empty(),
+            "the real-root helper must be referenced in the test module, the allowlist scan must match something"
+        );
+        // The definition occurrence is the helper's own name inside its
+        // own signature. Its body is already bounded by the manifest-read
+        // check above, so it is exempt from the enclosing-item test.
+        let definition_name_at = helper_at + "fn ".len();
+        for at in references {
+            if at == definition_name_at {
+                continue;
+            }
+            let owner = match f272_plain_fn_owner(module, at, &starts) {
+                Some(owner) => owner,
+                None => unreachable!(
+                    "a real-root helper reference at byte {at} must sit inside a plain four-space fn item, any other enclosing item is refused"
+                ),
+            };
+            assert!(
+                allowlist.contains(&owner),
+                "every real-root helper reference must sit inside an allowlisted guard-infrastructure function, found owner {owner}"
+            );
+        }
+    }
+
+    /// Whether an occurrence sits on a comment-only line, one that starts
+    /// with a double slash after leading spaces. A mention there is prose
+    /// about the scan and is not counted as a read or a reference.
+    fn f272_on_comment_line(module: &str, at: usize) -> bool {
+        let line_start = module[..at].rfind('\n').map_or(0, |newline| newline + 1);
+        module[line_start..]
+            .trim_start_matches(' ')
+            .starts_with("//")
+    }
+
+    /// Collects the starts of every line at exactly four spaces of
+    /// indentation. Inside this test module those are the top-level item
+    /// lines and their wrapped continuation lines alike.
+    fn f272_four_space_line_starts(module: &str) -> Vec<usize> {
+        let mut starts = Vec::new();
+        let mut offset = 0;
+        while let Some(at) = module[offset..].find('\n') {
+            let line = offset + at + 1;
+            let rest = &module[line..];
+            if rest.len() >= 5 && rest.starts_with("    ") && !rest[4..].starts_with(' ') {
+                starts.push(line);
+            }
+            offset = line;
+        }
+        starts
+    }
+
+    /// Names the item a reference at `at` sits in, and only when that item
+    /// is a plain four-space fn. The nearest preceding four-space line is
+    /// the innermost boundary the reference can belong to, whatever kind
+    /// of item it is, so a use, a const, a nested mod, an attribute or a
+    /// doc line refuses instead of inheriting the owner of an allowlisted
+    /// function above it. A wrapped signature line refuses the same way,
+    /// which fails closed on an allowlisted function whose signature is
+    /// wrapped.
+    fn f272_plain_fn_owner<'a>(module: &'a str, at: usize, starts: &[usize]) -> Option<&'a str> {
+        let line = *starts.iter().rev().find(|&&start| start <= at)?;
+        let rest = module[line..].strip_prefix("    fn ")?;
+        let end = rest.find('(')?;
+        Some(&rest[..end])
+    }
+
+    /// The byte offset where the first top-level item line after `after`
+    /// starts. For the real-root helper's single-line signature that is
+    /// the helper's closing brace, so the manifest-dir read bound ends
+    /// with the helper body and a read planted in an item between the
+    /// helper and the next function lands outside it. A wrapped helper
+    /// signature would draw the bound at its own continuation line and
+    /// refuse the helper's read, which fails closed.
+    fn f272_next_item_start(module: &str, after: usize, starts: &[usize]) -> usize {
+        starts
+            .iter()
+            .find(|&&line| line > after)
+            .copied()
+            .unwrap_or(module.len())
+    }
+
+    /// Owner attribution must refuse a reference whose enclosing item is
+    /// anything but a plain four-space fn, so an item smuggled in after
+    /// an allowlisted function cannot inherit that function as its owner.
+    /// Every case puts the allowlisted guard above the smuggled item,
+    /// which is the exact shape the refusal exists for. The synthetic
+    /// module text is built through `concat` so this test's own source
+    /// carries no counted reference and no second module boundary of its
+    /// own.
+    #[test]
+    fn owner_attribution_refuses_anything_but_a_plain_four_space_fn() {
+        let helper = concat!("f272", "_real_repo_root");
+        let guard = concat!("guard", "_no_checkout_write");
+        let module_marker = concat!("mod", " tests {");
+        let smuggled = [
+            // A const item naming the helper as a value.
+            format!("    const LAUNDERED: fn() -> PathBuf = {helper};\n"),
+            // A use item importing it into a sibling scope.
+            format!("    use some_other_module::{helper};\n"),
+            // A nested mod whose inner fn hides below the boundary.
+            format!(
+                "    mod inner {{\n        fn sneaky() {{\n            let _ = {helper}();\n        }}\n    }}\n"
+            ),
+            // A visibility-qualified fn is not a plain fn item.
+            format!("    pub(crate) fn sneaky() {{\n        let _ = {helper}();\n    }}\n"),
+            // Neither is an async fn.
+            format!("    async fn sneaky() {{\n        let _ = {helper}();\n    }}\n"),
+            // An attribute line is its own boundary.
+            format!("    #[doc = \"see {helper}\"]\n"),
+            // So is a doc comment line.
+            format!("    /// see {helper}\n"),
+            // A wrapped signature refuses too, which fails closed.
+            format!(
+                "    fn wrapped(\n        taken: bool,\n    ) {{\n        let _ = {helper}();\n    }}\n"
+            ),
+        ];
+        for smuggled_item in smuggled {
+            let module = format!(
+                "{module_marker}\n    fn {guard}() {{\n        let _ = {helper}();\n    }}\n{smuggled_item}}}\n"
+            );
+            let starts = f272_four_space_line_starts(&module);
+            let references: Vec<usize> = module.match_indices(helper).map(|(at, _)| at).collect();
+            assert_eq!(
+                references.len(),
+                2,
+                "each case must hold the guard's reference and the smuggled one, found {}",
+                references.len()
+            );
+            let control_at = match references.first() {
+                Some(at) => *at,
+                None => unreachable!("the count assertion guarantees a control reference"),
+            };
+            let smuggled_at = match references.get(1) {
+                Some(at) => *at,
+                None => unreachable!("the count assertion guarantees a smuggled reference"),
+            };
+            assert_eq!(
+                f272_plain_fn_owner(&module, control_at, &starts),
+                Some(guard),
+                "the control reference inside the allowlisted guard must keep its owner"
+            );
+            assert_eq!(
+                f272_plain_fn_owner(&module, smuggled_at, &starts),
+                None,
+                "a reference smuggled after an allowlisted function must be refused instead of inheriting its owner"
+            );
+        }
+    }
+
+    /// The manifest-read bound must end at the next top-level item line
+    /// of any kind. A read planted in a const between the real-root
+    /// helper and the next plain fn sits outside the helper body under
+    /// that bound, while a bound drawn at the next plain fn would
+    /// swallow it. The synthetic module text is built through `concat`
+    /// so this test's own source carries no counted read of its own.
+    #[test]
+    fn the_manifest_read_bound_ends_at_the_next_item_of_any_kind() {
+        let marker = concat!("CARGO", "_MANIFEST_DIR");
+        let module_marker = concat!("mod", " tests {");
+        let helper = concat!("f272", "_real_repo_root");
+        let module = format!(
+            "{module_marker}\n    fn {helper}() {{\n        let kept = 1;\n    }}\n    const PLANTED: &str = env!({marker});\n    fn next_fn() {{}}\n"
+        );
+        let helper_at = match module.find(helper) {
+            Some(at) => at,
+            None => unreachable!("the synthetic module must hold the helper"),
+        };
+        let starts = f272_four_space_line_starts(&module);
+        let next_item = f272_next_item_start(&module, helper_at, &starts);
+        let read_at = match module.find(marker) {
+            Some(at) => at,
+            None => unreachable!("the synthetic module must hold the planted read"),
+        };
+        assert!(
+            read_at >= next_item,
+            "the bound must end at the helper's closing brace, so the planted read sits outside the helper body"
+        );
+        let next_fn = module[helper_at..]
+            .find("\n    fn ")
+            .map(|at| helper_at + at)
+            .unwrap_or(module.len());
+        assert!(
+            next_fn > read_at,
+            "the control: a bound drawn at the next plain fn would place the planted read inside the helper body"
+        );
+    }
 
     fn classified(photo: &str, samples: u64, color: bool, mono16: bool) -> serde_json::Value {
         let mut categories = vec!["synthetic".to_owned()];
@@ -2284,9 +2611,8 @@ mod tests {
 
     #[test]
     fn a_missing_reference_run_is_unrun() {
-        let dir =
-            std::env::temp_dir().join(format!("ocelli-produce-missing-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir = produce_test_scratch_dir();
+        let dir = dir.path.clone();
         let summary = produce_applicable(&ProducePaths {
             reference_run: dir.join("reference"),
             corpus_root: dir.join("corpus"),
@@ -2303,15 +2629,16 @@ mod tests {
         assert_eq!(summary.collector, "not-run-by-producer");
         assert_eq!(summary.host_measurement, "unavailable");
         assert!(summary.accounts());
-        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn applicable_monochrome_rows_reach_the_comparator() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
-        let out = root.join("tools/oracle/compare-out");
+        let scratch = produce_test_scratch_dir();
+        let scratch = scratch.path.clone();
+        let out = scratch;
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
@@ -3132,16 +3459,18 @@ mod tests {
     /// 409.625. Without that snap the row stays at two samples.
     #[test]
     fn uniform_slice_edge_matches_the_reference_within_one_lsb() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let scratch = produce_test_scratch_dir();
+            let scratch = scratch.path.clone();
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
                 corpus_root: corpus,
-                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
-                candidate_run: root.join("tools/oracle/compare-out/candidate"),
-                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+                reference_subset: scratch.join("reference-selected"),
+                candidate_run: scratch.join("candidate"),
+                dispositions: scratch.join("dispositions.json"),
             });
             assert_eq!(summary.resources, "reference-run-absent");
             return;
@@ -3209,16 +3538,18 @@ mod tests {
     /// checks that the producer refuses a missing reference run, as the
     /// neighbouring tests do, so the test returns instead of panicking.
     fn rendered_pair(id: &str) -> Option<(Vec<u8>, Vec<u8>)> {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let root = producer_repo_root();
         let reference = root.join("tools/oracle/out");
         let corpus = root.join("corpus/data");
         if !reference.join("run.json").is_file() || !corpus.is_dir() {
+            let scratch = produce_test_scratch_dir();
+            let scratch = scratch.path.clone();
             let summary = produce_applicable(&ProducePaths {
                 reference_run: root.join("tools/oracle/missing-run"),
                 corpus_root: corpus,
-                reference_subset: root.join("tools/oracle/compare-out/reference-selected"),
-                candidate_run: root.join("tools/oracle/compare-out/candidate"),
-                dispositions: root.join("tools/oracle/compare-out/dispositions.json"),
+                reference_subset: scratch.join("reference-selected"),
+                candidate_run: scratch.join("candidate"),
+                dispositions: scratch.join("dispositions.json"),
             });
             assert_eq!(summary.resources, "reference-run-absent");
             return None;
@@ -3320,5 +3651,1053 @@ mod tests {
             }
         }
         assert_eq!(over, 0, "{id} worst {worst} at {at:?}");
+    }
+
+    fn f272_tree_digest(dir: &Path) -> ([u8; 32], BTreeSet<String>) {
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let mut notes: BTreeSet<String> = BTreeSet::new();
+        let mut unsupported = false;
+        f272_walk(dir, dir, &mut paths, &mut notes, &mut unsupported);
+        paths.sort();
+        let mut hasher = Sha256::new();
+        hasher.update(b"f272-tree-v1");
+        for path in &paths {
+            let relative = path.strip_prefix(dir).unwrap_or(path);
+            hasher.update(relative.to_string_lossy().as_bytes());
+            hasher.update([0]);
+            let metadata = match fs::symlink_metadata(path) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    unsupported = true;
+                    notes.insert("metadata-unreadable".to_owned());
+                    hasher.update(b"metadata-unreadable");
+                    hasher.update([0]);
+                    continue;
+                }
+            };
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                unsupported = true;
+                notes.insert("symlink".to_owned());
+                hasher.update(b"symlink");
+                hasher.update([0]);
+            } else if file_type.is_dir() {
+                hasher.update(b"dir");
+                hasher.update([0]);
+            } else if file_type.is_file() {
+                hasher.update(b"file");
+                hasher.update([0]);
+                match fs::File::open(path) {
+                    Ok(mut file) => {
+                        let mut sink = Sha256::new();
+                        if std::io::copy(&mut file, &mut sink).is_ok() {
+                            hasher.update(sink.finalize());
+                        } else {
+                            unsupported = true;
+                            notes.insert("content-unreadable".to_owned());
+                            hasher.update(b"content-unreadable");
+                        }
+                        hasher.update([0]);
+                    }
+                    Err(_) => {
+                        unsupported = true;
+                        notes.insert("content-unreadable".to_owned());
+                        hasher.update(b"content-unreadable");
+                        hasher.update([0]);
+                    }
+                }
+            } else {
+                unsupported = true;
+                notes.insert("other-entry".to_owned());
+                hasher.update(b"other-entry");
+                hasher.update([0]);
+            }
+        }
+        for note in &notes {
+            hasher.update(b"note");
+            hasher.update([0]);
+            hasher.update(note.as_bytes());
+            hasher.update([0]);
+        }
+        if unsupported {
+            hasher.update(b"unsupported-entries-present");
+        } else {
+            hasher.update(b"clean");
+        }
+        (hasher.finalize().into(), notes)
+    }
+
+    /// Depth-first walk that never follows symlinks out of the tree. A symlink
+    /// is recorded as a note and counts as unsupported, so fail-closed holds
+    /// even if it points at an escape target. Unreadable entries are fail
+    /// closed, never silently skipped.
+    ///
+    /// The protected tree root itself must be a readable directory, otherwise
+    /// the walk fails closed. Exactly one top-level entry named "node_modules"
+    /// under the declared dependency cache root is excluded, and only when it
+    /// is an actual directory. Nothing else is skipped: nested node_modules
+    /// directories outside the cache root and all files, locks, references,
+    /// and outputs are still hashed, and every symlink outside the exclusion
+    /// still fails closed. The exclusion is positional, not name-based: the
+    /// caller supplies the protected root, and exclusion applies only to an
+    /// immediate real node_modules child of the protected root.
+    fn f272_walk(
+        root: &Path,
+        dir: &Path,
+        paths: &mut Vec<PathBuf>,
+        notes: &mut BTreeSet<String>,
+        unsupported: &mut bool,
+    ) {
+        let is_root = dir == root;
+        let read = match fs::read_dir(dir) {
+            Ok(read) => read,
+            Err(_) => {
+                *unsupported = true;
+                notes.insert("read-dir-failed".to_owned());
+                return;
+            }
+        };
+        for entry in read {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    *unsupported = true;
+                    notes.insert("entry-unreadable".to_owned());
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => {
+                    paths.push(path);
+                    *unsupported = true;
+                    notes.insert("file-type-unreadable".to_owned());
+                    continue;
+                }
+            };
+            if is_root
+                && path.file_name().and_then(|name| name.to_str()) == Some("node_modules")
+                && file_type.is_dir()
+            {
+                continue;
+            }
+            paths.push(path.clone());
+            if file_type.is_symlink() {
+                *unsupported = true;
+                notes.insert("symlink".to_owned());
+                continue;
+            }
+            if file_type.is_dir() {
+                f272_walk(root, &path, paths, notes, unsupported);
+            }
+        }
+    }
+
+    /// Normalize one line from a libtest listing into a bare Rust test name.
+    /// Accepts the terse form `<full test name>: test` and the plain form with
+    /// no colon/whitespace. Returns `None` for empty input, summary lines, and
+    /// anything else that does not name a test, so malformed listings fail
+    /// closed downstream instead of silently inflating counts.
+    fn f272_normalize_list_line(line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if trimmed.starts_with("running ") || trimmed.ends_with("test result:") {
+            return None;
+        }
+        if let Some((name, suffix)) = trimmed.split_once(": ") {
+            if suffix == "test" && !name.contains(char::is_whitespace) {
+                return Some(name.to_owned());
+            }
+            return None;
+        }
+        if trimmed.contains(char::is_whitespace) {
+            return None;
+        }
+        Some(trimmed.to_owned())
+    }
+
+    /// Ask the current test binary to list its full inventory and, in a second
+    /// child run, the filtered selection under the namespace with skip names
+    /// applied. Both invocations run the real binary via `current_exe` and both
+    /// exit statuses are captured and checked. The excluded count is derived
+    /// as full inventory minus the selected inventory. The selection must be
+    /// a nonempty subset of the full inventory, or the function fails closed
+    /// with an empty selection and the filtered list status. No hard-coded
+    /// totals.
+    fn f272_list_selected_tests() -> (Vec<String>, usize, ExitStatus) {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe must resolve the test binary"),
+        };
+
+        let full = match std::process::Command::new(&exe)
+            .args(["--list", "--format", "terse"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => unreachable!("the test binary must be spawnable"),
+        };
+        let full_status = full.status;
+        if !full_status.success() {
+            return (Vec::new(), 0, full_status);
+        }
+        eprintln!(
+            "f272: full inventory listed, count: {}, exit status: {}",
+            String::from_utf8_lossy(&full.stdout)
+                .lines()
+                .filter(|line| line.trim().ends_with(": test"))
+                .count(),
+            full_status
+        );
+
+        let filtered = match std::process::Command::new(&exe)
+            .args([
+                "--list",
+                "--format",
+                "terse",
+                "--skip",
+                "produce::tests::guard_no_checkout_write",
+                "produce::tests::",
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => unreachable!("the test binary must be spawnable"),
+        };
+        let status = filtered.status;
+        eprintln!("f272: filtered list exit status: {}", status);
+
+        let full_names: BTreeSet<String> = String::from_utf8_lossy(&full.stdout)
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .collect();
+        let selected_inventory: BTreeSet<String> = String::from_utf8_lossy(&filtered.stdout)
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .collect();
+
+        let selected: Vec<String> = selected_inventory
+            .iter()
+            .filter(|name| name.starts_with("produce::tests::"))
+            .cloned()
+            .collect();
+
+        if selected.is_empty() || full_status.success() && full_names.is_empty() {
+            return (Vec::new(), 0, status);
+        }
+
+        let is_subset = selected.iter().all(|name| full_names.contains(name));
+        if !is_subset {
+            return (Vec::new(), 0, status);
+        }
+
+        let actual_excluded = full_names.len() - selected.len();
+        (selected, actual_excluded, status)
+    }
+
+    /// Validate the selection: zero selected tests or a missing required
+    /// producer test is a permanent semantic RED control and never passes.
+    fn f272_validate_selection(tests: &[String]) {
+        assert!(
+            !tests.is_empty(),
+            "the producer selection selected zero tests, the filter is stale or nonmatching and cannot pass"
+        );
+        for required in [
+            "produce::tests::a_missing_reference_run_is_unrun",
+            "produce::tests::applicable_monochrome_rows_reach_the_comparator",
+        ] {
+            assert!(
+                tests.iter().any(|test| test == required),
+                "required test {required} is missing from the filtered list, the selection cannot pass"
+            );
+        }
+    }
+
+    /// Normalised protected oracle tree path below a repository root the
+    /// caller supplies. The guard passes the real root in, so this
+    /// helper computes no root of its own and cannot hand a producer
+    /// test the real checkout. Where a caller may obtain a root, and
+    /// where that is refused, is exactly what the scan test states.
+    fn f272_protected_tree(repo_root: &Path) -> PathBuf {
+        repo_root
+            .join("tools/oracle")
+            .components()
+            .collect::<PathBuf>()
+    }
+
+    /// Creates the mirror's corpus side: a directory symlink to the
+    /// canonical real corpus root, which `open_corpus` canonicalises back
+    /// to the same directory, so the child reads the same bytes and no
+    /// corpus file is ever duplicated. When the real corpus is absent the
+    /// mirror holds no corpus side at all.
+    fn f272_link_corpus_side(mirror_root: &Path) {
+        let corpus = f272_real_repo_root().join("corpus/data");
+        if corpus.is_dir() {
+            match fs::create_dir_all(mirror_root.join("corpus")) {
+                Ok(()) => {}
+                Err(_) => unreachable!("the mirror's corpus parent directory must create"),
+            }
+            let target = match corpus.canonicalize() {
+                Ok(target) => target,
+                Err(_) => unreachable!("the real corpus directory must canonicalise"),
+            };
+            #[cfg(unix)]
+            match std::os::unix::fs::symlink(&target, mirror_root.join("corpus/data")) {
+                Ok(()) => {}
+                Err(_) => unreachable!("the mirror's corpus directory symlink must create"),
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = &target;
+                unreachable!(
+                    "the mirror requires a directory symlink to the real corpus, which this platform cannot create"
+                );
+            }
+        }
+    }
+
+    /// Populates the guard's temporary mirror root with the read side the
+    /// producer tests need. The real `tools/oracle/out` reference run is
+    /// copied, because the mirror digest must see a write inside it. The
+    /// corpus side is linked, never copied, by `f272_link_corpus_side`.
+    /// The protected oracle directory is created even when there is
+    /// nothing to copy, so its digest is always defined.
+    fn f272_populate_mirror_root(mirror_root: &Path) {
+        match fs::create_dir_all(mirror_root.join("tools/oracle")) {
+            Ok(()) => {}
+            Err(_) => unreachable!("the mirror root's protected oracle directory must create"),
+        }
+        let out = f272_real_repo_root().join("tools/oracle/out");
+        if out.is_dir() {
+            f272_mirror_copy(&out, &mirror_root.join("tools/oracle/out"));
+        }
+        f272_link_corpus_side(mirror_root);
+    }
+
+    /// Collects every file path under a directory, names only, no content
+    /// read. Used by the mirror corpus proof to compare file identities.
+    #[cfg(unix)]
+    fn f272_collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => unreachable!("directory {} must be readable", dir.display()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    unreachable!("a directory entry under {} must be readable", dir.display())
+                }
+            };
+            let path = entry.path();
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("corpus entry {} must be statable", path.display()),
+            };
+            if metadata.file_type().is_symlink() {
+                unreachable!(
+                    "corpus entry {} is a symlink and the proof stats real corpus files only",
+                    path.display()
+                );
+            }
+            if metadata.is_dir() {
+                f272_collect_files(&path, files);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+
+    /// Recursive copy used to build the mirror. A source entry that is a
+    /// symlink, dangling or not, is refused with a named condition instead
+    /// of followed, so the mirror never copies through a link and a broken
+    /// link cannot reach the digest as a silent stat failure.
+    fn f272_mirror_copy(source: &Path, destination: &Path) {
+        match fs::create_dir_all(destination) {
+            Ok(()) => {}
+            Err(_) => unreachable!("mirror directory {} must create", destination.display()),
+        }
+        let entries = match fs::read_dir(source) {
+            Ok(entries) => entries,
+            Err(_) => unreachable!("mirror source {} must be readable", source.display()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => unreachable!("mirror source entry must be readable"),
+            };
+            let from = entry.path();
+            let to = destination.join(entry.file_name());
+            let metadata = match fs::symlink_metadata(&from) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("mirror source entry {} must be statable", from.display()),
+            };
+            if metadata.file_type().is_symlink() {
+                unreachable!(
+                    "mirror source {} is a symlink, dangling or not, and the mirror copies real entries only",
+                    from.display()
+                );
+            }
+            if metadata.is_dir() {
+                f272_mirror_copy(&from, &to);
+            } else {
+                match fs::copy(&from, &to) {
+                    Ok(_) => {}
+                    Err(_) => unreachable!("mirror copy of {} must succeed", from.display()),
+                }
+            }
+        }
+    }
+
+    /// Re-runs the producer selection as a child against a temporary mirror
+    /// root and proves the run wrote nothing protected.
+    ///
+    /// What the guard covers and what it does not, stated once here and
+    /// matched by docs/lld/oracle.md. The mirror check catches any selected
+    /// producer test that writes a protected `tools/oracle` path during the
+    /// child run, whatever the parent process did before the guard and
+    /// however deterministic the written bytes are, because the mirror
+    /// holds the read side copy of the real `out` run, so a protected
+    /// write lands in it as a new entry or a changed copy. The child also
+    /// runs with its working directory inside the mirror's protected
+    /// oracle tree, so a relative output path lands in the digested mirror
+    /// too. The digest of the real protected tree across the child run is
+    /// a backstop for a root computed without `producer_repo_root` when
+    /// the child's bytes differ from the state the parent's own run left
+    /// behind. A deterministic write is caught for new entries and changed
+    /// copies only. An identical rewrite of an existing file, in the real
+    /// tree or inside the mirrored `out` copy, changes no digest and is
+    /// caught by neither check, and that gap stays open. The module's
+    /// source scan stops exactly two literal patterns. The text
+    /// CARGO_MANIFEST_DIR must appear once in the test module's code and
+    /// only inside the real-root helper, and every occurrence the line scan
+    /// treats as code of the text f272_real_repo_root outside the helper's own definition must
+    /// sit inside an explicitly allowlisted guard-infrastructure function
+    /// whose enclosing item is a plain four-space fn. A mention on a
+    /// comment-only line is not counted.
+    /// The scan is textual and line-based, so it does not stop a rewrite made
+    /// through the helper, a macro-built environment name such as
+    /// env!(concat!(...)) or std::env::var(concat!(...)), a root found by
+    /// walking current_exe or file!(), a call to an allowlisted function that
+    /// reads the real root, or a string literal that hides a code occurrence
+    /// behind a comment-looking line or plants a fake four-space fn line to
+    /// borrow an allowlisted owner, and those forms stay open.
+    /// Neither check observes the
+    /// parent process's own writes before the guard. It is never a claim
+    /// about transient writes restored before a digest, and never about
+    /// the parent's own state.
+    #[test]
+    fn guard_no_checkout_write() {
+        let (tests, filtered_out, list_status) = f272_list_selected_tests();
+        assert!(
+            list_status.success(),
+            "the test binary list run exited nonzero, failing closed"
+        );
+        let selected_count = tests.len();
+        println!(
+            "F272 list selected_count={} filtered_out={} status={:?} tests={:?}",
+            selected_count, filtered_out, list_status, tests
+        );
+        f272_validate_selection(&tests);
+
+        let tree = f272_protected_tree(&f272_real_repo_root());
+        let (before_digest, before_notes) = f272_tree_digest(&tree);
+        assert!(
+            before_notes.is_empty(),
+            "the protected oracle tree snapshot failed closed on unsupported or unreadable entries before the run"
+        );
+
+        let mirror = produce_test_scratch_dir();
+        f272_populate_mirror_root(&mirror.path);
+        let mirror_tree = mirror.path.join("tools/oracle");
+        let (mirror_before, mirror_before_notes) = f272_tree_digest(&mirror_tree);
+        assert!(
+            mirror_before_notes.is_empty(),
+            "the mirror root snapshot failed closed on unsupported or unreadable entries before the run"
+        );
+
+        let child_status = match std::process::Command::new(match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe resolves the test binary"),
+        })
+        .args(["produce::tests::"])
+        .args(["--skip", "produce::tests::guard_no_checkout_write"])
+        .current_dir(&mirror_tree)
+        .env(F272_REPO_ROOT_OVERRIDE, &mirror.path)
+        .status()
+        {
+            Ok(child_status) => child_status,
+            Err(_) => unreachable!("the suite child must spawn"),
+        };
+        assert!(
+            child_status.success(),
+            "the producer suite child exited unsuccessfully, {child_status}"
+        );
+
+        let (mirror_after, mirror_after_notes) = f272_tree_digest(&mirror_tree);
+        assert!(
+            mirror_after_notes.is_empty(),
+            "the mirror root snapshot failed closed on unsupported or unreadable entries after the run"
+        );
+        assert_eq!(
+            mirror_before, mirror_after,
+            "the temporary mirror root gained or changed protected entries during the producer child run, checkout writes are exposed"
+        );
+
+        let (after_digest, after_notes) = f272_tree_digest(&tree);
+        assert!(
+            after_notes.is_empty(),
+            "the protected oracle tree snapshot failed closed on unsupported or unreadable entries after the run"
+        );
+        assert_eq!(
+            before_digest, after_digest,
+            "the protected oracle tree changed during the producer run, checkout writes are exposed"
+        );
+        println!(
+            "selected {selected_count}, filtered out {filtered_out}, list exit {list_status}, child exit {child_status}"
+        );
+    }
+
+    /// The guard's child must run with its working directory inside the
+    /// mirror's protected oracle tree, so a relative output path lands in
+    /// the digested mirror. Pointing the child at the mirror root instead
+    /// would let a relative path escape the digest, and this test fails
+    /// that form. Outside a guard child there is no override and nothing
+    /// to prove.
+    #[test]
+    fn the_guard_child_runs_inside_the_mirror_tree() {
+        let root = match std::env::var_os(F272_REPO_ROOT_OVERRIDE) {
+            Some(root) => PathBuf::from(root),
+            None => return,
+        };
+        // The temporary directory on macOS is reached through /var, a
+        // symlink to /private/var, and current_dir reports the physical
+        // form. Both sides are canonicalised so the comparison is about
+        // the tree and not about the spelling of the path.
+        let cwd = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
+            Ok(cwd) => cwd,
+            Err(_) => unreachable!("the guard child must have a readable working directory"),
+        };
+        let protected = match root.join("tools/oracle").canonicalize() {
+            Ok(protected) => protected,
+            Err(_) => {
+                unreachable!("the mirror's protected oracle tree must exist during the child run")
+            }
+        };
+        assert!(
+            cwd.starts_with(&protected),
+            "the guard child must run inside the mirror's protected oracle tree, cwd {} mirror root {}",
+            cwd.display(),
+            root.display()
+        );
+    }
+
+    /// Permanent control: a stale or nonmatching filter must yield zero
+    /// selected tests. The current binary itself is asked to list with a
+    /// genuinely nonmatching filter, so this is real child evidence rather
+    /// than a local filter of a good list or a hand-made empty vector. This
+    /// uses only --list and never runs the suite recursively.
+    #[test]
+    fn f272_stale_selection_is_a_permanent_red_control() {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(_) => unreachable!("current_exe must resolve the test binary"),
+        };
+        let output = match std::process::Command::new(&exe)
+            .args([
+                "--list",
+                "--format",
+                "terse",
+                "produce::tests::definitely-not-a-real-test::",
+            ])
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => {
+                unreachable!("the test binary must be spawnable for the stale filter control")
+            }
+        };
+        let status = output.status;
+        assert!(
+            status.success(),
+            "the list run must exit cleanly to be evidence, {status}"
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        let selected: Vec<String> = text
+            .lines()
+            .filter_map(f272_normalize_list_line)
+            .filter(|name| name.starts_with("produce::tests::"))
+            .filter(|name| name != "produce::tests::guard_no_checkout_write")
+            .collect();
+        assert!(
+            selected.is_empty(),
+            "an impossible filter selected tests, which contradicts the permanent zero-selected control"
+        );
+        assert!(
+            std::panic::catch_unwind(|| {
+                let empty: Vec<String> = Vec::new();
+                f272_validate_selection(&empty)
+            })
+            .is_err(),
+            "an empty selection must fail closed and never pass"
+        );
+    }
+
+    /// The mirror's corpus side is a directory symlink to the canonical real
+    /// corpus root, and no corpus file under it is a copy. Each file reached
+    /// through the link has the same device and inode as the real file,
+    /// which a copied tree would not. The corpus is stat'd through the link
+    /// and never read, so no file content is opened. On a tree without a
+    /// real corpus the mirror holds no corpus side at all, and that absence
+    /// is asserted instead.
+    #[cfg(unix)]
+    #[test]
+    fn mirror_corpus_side_is_a_symlink_and_never_a_copy() {
+        use std::os::unix::fs::MetadataExt;
+
+        let corpus = f272_real_repo_root().join("corpus/data");
+        let mirror = produce_test_scratch_dir();
+        f272_link_corpus_side(&mirror.path);
+        let link = mirror.path.join("corpus/data");
+        if !corpus.is_dir() {
+            assert!(
+                fs::symlink_metadata(&link).is_err(),
+                "a mirror corpus side exists while the real corpus is absent"
+            );
+            return;
+        }
+        let link_metadata = match fs::symlink_metadata(&link) {
+            Ok(metadata) => metadata,
+            Err(_) => unreachable!("the mirror corpus side must exist when the real corpus does"),
+        };
+        assert!(
+            link_metadata.file_type().is_symlink(),
+            "the mirror corpus side must be a directory symlink, not a copied directory"
+        );
+        let canonical_real = match corpus.canonicalize() {
+            Ok(path) => path,
+            Err(_) => unreachable!("the real corpus directory must canonicalise"),
+        };
+        let canonical_link = match link.canonicalize() {
+            Ok(path) => path,
+            Err(_) => unreachable!("the mirror corpus symlink must resolve"),
+        };
+        assert_eq!(
+            canonical_link, canonical_real,
+            "the mirror corpus symlink must resolve to the canonical real corpus root"
+        );
+        let mut files = Vec::new();
+        f272_collect_files(&canonical_real, &mut files);
+        assert!(
+            !files.is_empty(),
+            "the real corpus holds no files, so the no-copy proof compares nothing"
+        );
+        for file in &files {
+            let relative = file.strip_prefix(&canonical_real).unwrap_or(file);
+            let through_link = link.join(relative);
+            let real = match fs::metadata(file) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!("corpus file {} must be statable", file.display()),
+            };
+            let linked = match fs::metadata(&through_link) {
+                Ok(metadata) => metadata,
+                Err(_) => unreachable!(
+                    "corpus file {} must be statable through the mirror link",
+                    relative.display()
+                ),
+            };
+            assert_eq!(
+                (real.dev(), real.ino()),
+                (linked.dev(), linked.ino()),
+                "corpus file {} is a copy in the mirror rather than the linked real file",
+                relative.display()
+            );
+        }
+        // The child's corpus reads go through open_corpus, which
+        // canonicalises its root before it opens anything. The
+        // canonical-resolve assertion above is the check for that: the
+        // link must resolve to the canonical real root, and a copied
+        // tree or a wrong target resolves elsewhere, so the assertion
+        // can fail.
+    }
+
+    fn fixture_worker(
+        panic_before_produce: bool,
+    ) -> (PathBuf, Option<(ProduceScratchDirGuard, Vec<u8>)>) {
+        let owner = produce_test_scratch_dir();
+        let path_witness = owner.path.clone();
+        let outcome = std::panic::catch_unwind(move || {
+            if panic_before_produce {
+                unreachable!("closed unreachable before produce_applicable");
+            }
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: owner.path.join("reference"),
+                corpus_root: owner.path.join("corpus"),
+                reference_subset: owner.path.join("subset"),
+                candidate_run: owner.path.join("candidate"),
+                dispositions: owner.path.join("dispositions.json"),
+            });
+            assert_eq!(summary.resources, "reference-run-absent");
+            assert_eq!(summary.compared, 0);
+            assert_eq!(summary.unrun, 1);
+            assert_eq!(summary.selected, 0);
+            assert_eq!(summary.tier_a, "unrun");
+            assert_eq!(summary.instruments, "not-run-by-producer");
+            assert_eq!(summary.collector, "not-run-by-producer");
+            assert_eq!(summary.host_measurement, "unavailable");
+            assert!(summary.accounts());
+            let bytes = match fs::read(owner.path.join("dispositions.json")) {
+                Ok(bytes) => bytes,
+                Err(_) => unreachable!("dispositions.json must exist on disk after produce"),
+            };
+            (owner, bytes)
+        });
+        match outcome {
+            Ok((owner, bytes)) => (path_witness, Some((owner, bytes))),
+            Err(_payload) => (path_witness, None),
+        }
+    }
+
+    #[test]
+    fn concurrent_fixture_invocations_use_distinct_paths() {
+        let (first, second) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| fixture_worker(false));
+            let right = scope.spawn(|| fixture_worker(false));
+            let left_result = left.join();
+            let right_result = right.join();
+            let left = match left_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("fixture worker thread must not panic"),
+            };
+            let right = match right_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("fixture worker thread must not panic"),
+            };
+            (left, right)
+        });
+        let (left_witness, left_outcome) = first;
+        let (right_witness, right_outcome) = second;
+        let (left_owner, left_bytes) = match left_outcome {
+            Some(pair) => pair,
+            None => unreachable!("first fixture worker must produce"),
+        };
+        let (right_owner, right_bytes) = match right_outcome {
+            Some(pair) => pair,
+            None => unreachable!("second fixture worker must produce"),
+        };
+        assert!(
+            left_witness != right_witness,
+            "fixture invocations must use distinct witness paths"
+        );
+        let left_exists = match fs::metadata(&left_witness) {
+            Ok(meta) => meta.is_dir(),
+            Err(_) => unreachable!("first scratch directory must still exist"),
+        };
+        assert!(left_exists);
+        let right_exists = match fs::metadata(&right_witness) {
+            Ok(meta) => meta.is_dir(),
+            Err(_) => unreachable!("second scratch directory must still exist"),
+        };
+        assert!(right_exists);
+        let left_actual = match fs::read(left_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("first dispositions.json must be readable"),
+        };
+        let right_actual = match fs::read(right_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("second dispositions.json must be readable"),
+        };
+        assert!(
+            left_actual == left_bytes,
+            "first dispositions.json bytes must match"
+        );
+        assert!(
+            right_actual == right_bytes,
+            "second dispositions.json bytes must match"
+        );
+        drop(left_owner);
+        drop(right_owner);
+        let left_gone = match fs::symlink_metadata(&left_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("first scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(left_gone);
+        let right_gone = match fs::symlink_metadata(&right_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("second scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(right_gone);
+    }
+
+    #[test]
+    fn one_sided_fixture_failure_is_bounded_and_cleans_up() {
+        let (healthy, failed) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| fixture_worker(false));
+            let right = scope.spawn(|| fixture_worker(true));
+            let left_result = left.join();
+            let right_result = right.join();
+            let left = match left_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("healthy fixture worker thread must not panic"),
+            };
+            let right = match right_result {
+                Ok(value) => value,
+                Err(_) => unreachable!("failing fixture worker thread must be contained"),
+            };
+            (left, right)
+        });
+        let (healthy_witness, healthy_outcome) = healthy;
+        let (failed_witness, failed_outcome) = failed;
+        let (healthy_owner, healthy_bytes) = match healthy_outcome {
+            Some(pair) => pair,
+            None => unreachable!("healthy fixture worker must produce"),
+        };
+        assert!(failed_outcome.is_none());
+        let failed_gone = match fs::symlink_metadata(&failed_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("failed scratch directory must already be absent"),
+            },
+            Ok(_) => false,
+        };
+        assert!(failed_gone);
+        let healthy_actual = match fs::read(healthy_witness.join("dispositions.json")) {
+            Ok(bytes) => bytes,
+            Err(_) => unreachable!("healthy dispositions.json must be readable"),
+        };
+        assert!(
+            healthy_actual == healthy_bytes,
+            "healthy dispositions.json bytes must match"
+        );
+        drop(healthy_owner);
+        let healthy_gone = match fs::symlink_metadata(&healthy_witness) {
+            Err(err) => match err.kind() {
+                std::io::ErrorKind::NotFound => true,
+                _ => unreachable!("healthy scratch directory must be absent after drop"),
+            },
+            Ok(_) => false,
+        };
+        assert!(healthy_gone);
+        assert!(failed_gone);
+    }
+
+    #[test]
+    fn private_refusal_fixtures_reach_their_actual_branches() {
+        for overlap in [false, true] {
+            let dir = produce_test_scratch_dir();
+            let dir = dir.path.clone();
+            let reference = dir.join("reference");
+            match std::fs::create_dir_all(&reference) {
+                Ok(()) => {}
+                Err(_) => unreachable!("reference dir must create"),
+            }
+            match std::fs::write(reference.join("run.json"), "{\"rows\":[]}") {
+                Ok(()) => {}
+                Err(_) => unreachable!("run.json must write"),
+            }
+            let loaded = crate::sidecar::Run::load(&reference);
+            assert!(loaded.is_ok(), "reference run with empty rows must load");
+            let subset = dir.join("subset");
+            let candidate = dir.join("candidate");
+            let dispositions = dir.join("dispositions.json");
+            let reference_subset = if overlap { reference.clone() } else { subset };
+            let candidate_run = if overlap {
+                reference.clone()
+            } else {
+                candidate
+            };
+            let summary = produce_applicable(&ProducePaths {
+                reference_run: reference.clone(),
+                corpus_root: dir.join("corpus"),
+                reference_subset: reference_subset.clone(),
+                candidate_run: candidate_run.clone(),
+                dispositions: dispositions.clone(),
+            });
+            if !overlap {
+                assert_eq!(summary.resources, "corpus-absent");
+                assert_eq!(summary.selected, 0);
+                assert_eq!(summary.produced, 0);
+                assert_eq!(summary.compared, 0);
+                assert_eq!(summary.recorded, 0);
+                assert_eq!(summary.unrun, 0);
+                assert!(summary.accounts());
+            } else {
+                assert_eq!(summary.resources, "output-directory-refused");
+                assert_eq!(summary.selected, 0);
+                assert_eq!(summary.produced, 0);
+                assert_eq!(summary.compared, 0);
+                assert_eq!(summary.recorded, 0);
+                assert_eq!(summary.unrun, 1);
+                assert!(summary.accounts());
+            }
+            assert!(dispositions.is_file(), "dispositions must be written");
+        }
+    }
+    #[test]
+    fn scratch_owner_cleans_up_on_finish_and_unwind() {
+        // Normal cleanup: guard dropped at scope end, path cloned out first.
+        let finished_path = {
+            let owned = produce_test_scratch_dir();
+            assert!(owned.path.exists());
+            owned.path.clone()
+        };
+        assert!(!finished_path.exists());
+
+        // Unwind cleanup: guard moved into the closure and dropped on unwind.
+        let unwind_path = {
+            let owned = produce_test_scratch_dir();
+            assert!(owned.path.exists());
+            let path = owned.path.clone();
+            let outcome = std::panic::catch_unwind(move || {
+                let _guard = owned;
+                unreachable!("synthetic unwind control");
+            });
+            assert!(outcome.is_err());
+            path
+        };
+        assert!(!unwind_path.exists());
+    }
+    #[test]
+    fn actual_inventory_accounting_matches_binary() {
+        let (selected, excluded, status) = f272_list_selected_tests();
+        assert!(status.success(), "filtered listing process did not succeed");
+        f272_validate_selection(&selected);
+
+        let exe = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(_) => unreachable!("current_exe unavailable"),
+        };
+        let out = match std::process::Command::new(exe)
+            .args(["--list", "--format", "terse"])
+            .output()
+        {
+            Ok(o) => o,
+            Err(_) => unreachable!("binary spawn failed"),
+        };
+        assert!(out.status.success(), "full listing process did not succeed");
+
+        let raw = match String::from_utf8(out.stdout) {
+            Ok(s) => s,
+            Err(_) => unreachable!("non-utf8 stdout"),
+        };
+        let count = raw.lines().filter(|line| line.ends_with(": test")).count();
+
+        let expected = selected.len() + excluded;
+        assert_eq!(
+            count, expected,
+            "raw libtest inventory count mismatch: actual {} expected {}",
+            count, expected
+        );
+    }
+    #[test]
+    fn exact_node_cache_exclusion_preserves_real_outputs() {
+        let owner = produce_test_scratch_dir();
+        let root = owner.path.clone();
+        let node_modules = root.join("node_modules");
+        let nested_node_modules = root.join("nested").join("node_modules");
+        let out = root.join("out");
+        let compare_out = root.join("compare-out");
+        for dir in [
+            node_modules.clone(),
+            nested_node_modules.clone(),
+            out.clone(),
+            compare_out.clone(),
+        ] {
+            match fs::create_dir_all(&dir) {
+                Ok(()) => {}
+                Err(_) => unreachable!("fixture directory creation failed"),
+            }
+        }
+        let cache_path = node_modules.join("cache.bin");
+        let protected: Vec<PathBuf> = vec![
+            root.join("Cargo.lock"),
+            root.join("package-lock.json"),
+            out.join("reference.raw"),
+            compare_out.join("dispositions.json"),
+            nested_node_modules.join("kept.txt"),
+        ];
+        let mut contents: Vec<PathBuf> = protected.clone();
+        contents.push(cache_path.clone());
+        for path in &contents {
+            match fs::write(path, b"initial") {
+                Ok(()) => {}
+                Err(_) => unreachable!("fixture file creation failed"),
+            }
+        }
+        let (initial, notes) = f272_tree_digest(&root);
+        assert!(notes.is_empty());
+        match fs::write(&cache_path, b"cache-changed") {
+            Ok(()) => {}
+            Err(_) => unreachable!("cache file write failed"),
+        }
+        let (after_cache, notes) = f272_tree_digest(&root);
+        assert!(notes.is_empty());
+        assert_eq!(after_cache, initial);
+        for path in &protected {
+            match fs::write(path, b"protected-changed") {
+                Ok(()) => {}
+                Err(_) => unreachable!("protected file write failed"),
+            }
+            let (changed, notes) = f272_tree_digest(&root);
+            assert!(notes.is_empty());
+            assert_ne!(changed, initial);
+            match fs::write(path, b"initial") {
+                Ok(()) => {}
+                Err(_) => unreachable!("protected file restore failed"),
+            }
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn installed_cache_symlink_is_accepted() {
+        let owner = produce_test_scratch_dir();
+        let bin_dir = owner.path.join("node_modules").join(".bin");
+        match fs::create_dir_all(&bin_dir) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create node_modules/.bin directory"),
+        }
+        let tool_js = owner.path.join("node_modules").join("tool.js");
+        match fs::write(&tool_js, b"export default 1;\n") {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to write tool.js"),
+        }
+        let link_path = bin_dir.join("tool");
+        match std::os::unix::fs::symlink("../tool.js", &link_path) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create relative symlink"),
+        }
+        let (_, notes) = f272_tree_digest(&owner.path);
+        assert!(notes.is_empty());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn symlink_outside_dependency_cache_is_refused() {
+        let owner = produce_test_scratch_dir();
+        let file = owner.path.join("entry.txt");
+        let link = owner.path.join("entry-link");
+        match fs::File::create(&file) {
+            Ok(_) => {}
+            Err(_) => unreachable!("failed to create private scratch file"),
+        }
+        let (_, notes) = f272_tree_digest(&owner.path);
+        assert!(notes.is_empty());
+        match std::os::unix::fs::symlink(&file, &link) {
+            Ok(()) => {}
+            Err(_) => unreachable!("failed to create symlink beside the private file"),
+        }
+        let (_, notes_after) = f272_tree_digest(&owner.path);
+        assert!(
+            !notes_after.is_empty(),
+            "symlink outside the dependency cache must be refused with a note"
+        );
     }
 }

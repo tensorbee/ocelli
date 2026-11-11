@@ -6146,3 +6146,20 @@ The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchma
 **User-facing documentation.** `README.md`, static hosting at a host's root, the wasm package before `vite build`, and `npm run build` first for the package dists.
 **Deviations from the design plan.** The operator narrowed the promise on 2026-11-11 from no absolute build-machine path to no checkout-root or `/@fs` reach, because the shipped wasm carries cargo registry paths in panic locations, and filed F-281. The coordinator corrected the CHANGELOG bullet at integration to match. A root spelled behind an `http://host:port` or `file://host` prefix is not refused, an accepted trade-off named in the LLD.
 **Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 9's two nitpicks are carried in its review file.
+
+## F-272, Oracle tests write nothing into the checkout, completed 2026-11-11
+
+**What was built.** Every `tools/oracle/src/produce.rs` test that runs the producer now writes into a per-process scratch directory, so `cargo test` never creates or overwrites `tools/oracle/compare-out`. The guard `guard_no_checkout_write` runs the producer tests in a child process against a fresh temporary mirror root, selected through one test helper reading an environment override. The mirror copies `tools/oracle/out`, holds a directory symlink to the real `corpus/data` (never a copy), and the child's working directory is inside the mirror, so any write by a selected test appears as a new entry under the mirror's `tools/oracle`. A source scan in the test module requires the manifest-dir read once in the real-root helper and every real-root helper reference inside an allowlist.
+
+**HLD sections implemented.** none, test hygiene for the oracle.
+**Deviations.** none
+**Crates / packages modified.** `tools/oracle/src/produce.rs`, inside `mod tests` only, and `docs/lld/oracle.md`.
+**Tests added.** `unit`, the guard, the mirror and corpus-link tests, the child-cwd test, the scratch-owner and concurrency tests, and the two source-scan tests, each proven red by a planted mutant in a scratch copy.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Independent review passes 4 to 10 by Claude, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the guard links the corpus and opens no corpus file.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Test plumbing only.
+**LLD updated.** `docs/lld/oracle.md`, what the guard covers and the open forms it does not.
+**User-facing documentation.** none.
+**Deviations from the design plan.** The lead amendment of 2026-11-11 (a8dc0bbe) replaced the in-process snapshot with the mirror root, superseding AC3's no-copy sentence for `tools/oracle/out` only. The scan stops two literal patterns, and its stated open forms are a rewrite through the protected-tree helper, macro-built environment names, a root walked from `current_exe` or `file!()`, a call to an allowlisted function that reads the real root, and two string-literal evasions. An identical rewrite of an existing file stays undetected. The coordinator wrote the final documentation commit 9c1b5346.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over five fix rounds, reviewed by Claude. Pass 10's nitpick is carried in its review file.
