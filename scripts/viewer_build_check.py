@@ -301,24 +301,50 @@ def _is_name_byte(byte: int) -> bool:
     return byte in _NAME_BYTES or byte >= 0x80
 
 
+def _dot_segment_before(blob: bytes, start: int) -> bool:
+    """Whether relative dots end immediately before `start`.
+
+    The dots immediately before the position must run back to the
+    start of the content or to a `/`, the byte-level form of the `.`
+    and `..` segments a sourcemap's relative sources spell, as in
+    `../../w/x.js` for a checkout at `/w` through the symlinked
+    packages. A dot glued into a longer name, as in `pkg./w`, is not
+    a relative segment.
+    """
+    index = start - 1
+    if index < 0 or blob[index] != ord("."):
+        return False
+    while index >= 0 and blob[index] == ord("."):
+        index -= 1
+    return index < 0 or blob[index] == ord("/")
+
+
 def _spells_root(blob: bytes, root: bytes) -> bool:
     """Whether the content spells the root as a path prefix.
 
     The root counts when it stands alone: the byte before it starts the
-    content or is not a name byte, and the byte after it ends the
-    content or is not one. A root glued into a longer name is not a root
-    spelling: a checkout at `/ocelli` matches neither a healthy worker's
-    `import("./ocelli_wasm-a1.js")` nor a URL that merely carries the
-    name. Reaches a bare substring would catch stay caught: a root
-    followed by a quote, an apostrophe, a backtick, an encoded
-    separator, a query mark, a fragment mark, a backslash, whitespace or
-    the end of the content is a reach, in a JSON field or a const
-    binding as well as an import.
+    content, is not a name byte, or ends relative dots that run back
+    to the content start or a `/`, and the byte after it ends the
+    content or is not one. A root glued into a longer name is not a
+    root spelling: a checkout at `/ocelli` matches neither a healthy
+    worker's `import("./ocelli_wasm-a1.js")` nor a URL that merely
+    carries the name. Reaches a bare substring would catch stay caught
+    on the right: a root followed by a quote, an apostrophe, a
+    backtick, an encoded separator, a query mark, a fragment mark, a
+    backslash, whitespace or the end of the content is a reach, in a
+    JSON field or a const binding as well as an import. On the left the
+    boundary names one acceptance. A host-prefixed spelling,
+    `http://localhost:5173/w/...` or `file://localhost/w/...`, is glued
+    to the host's last letter or digit and is not a reach, because
+    bytes alone cannot tell that host from the github URL name a
+    refusal must not fire on.
     """
     start = blob.find(root)
     while start != -1:
         end = start + len(root)
-        before = start == 0 or not _is_name_byte(blob[start - 1])
+        before = (start == 0
+                  or not _is_name_byte(blob[start - 1])
+                  or _dot_segment_before(blob, start))
         after = end == len(blob) or not _is_name_byte(blob[end])
         if before and after:
             return True

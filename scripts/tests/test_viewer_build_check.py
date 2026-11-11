@@ -86,16 +86,21 @@ class SpecifierForms(unittest.TestCase):
 
 
 class RootSpelling(unittest.TestCase):
-    """The root boundary spells a standalone path token, review pass 3.
+    """The root boundary spells a standalone path token, review passes 3 and 4.
 
     Each expected value is the boundary rule applied to the planted
     bytes, not the helper's behavior: a root is a reach when the byte
-    before it starts the content or is not a filename continuation byte
-    and the byte after it ends the content or is not one. The
-    continuation set is `[A-Za-z0-9._-]` and every non-ASCII byte, so a
-    glued `/ocelli_wasm` and `/ocelli-x` match nothing and a root
-    followed by a quote, an encoded separator or the end of the content
-    is caught.
+    before it starts the content, is not a filename continuation byte,
+    or ends relative dots that run back to the content start or a
+    `/`, and the byte after it ends the content or is not a
+    continuation byte. The continuation set is `[A-Za-z0-9._-]` and
+    every non-ASCII byte, so a glued `/ocelli_wasm` and `/ocelli-x`
+    match nothing and a root followed by a quote, an encoded separator
+    or the end of the content is caught. A host prefix before the
+    root, as in an `http://localhost:5173/w/...` spelling of the
+    checkout, is glued to the host's last letter or digit and not
+    caught: bytes alone cannot tell that host from the github URL name
+    the boundary must not fire on.
     """
 
     def test_a_root_at_the_end_of_the_content_is_a_reach(self) -> None:
@@ -165,6 +170,27 @@ class RootSpelling(unittest.TestCase):
     def test_a_root_after_a_non_ascii_name_is_not_a_reach(self) -> None:
         self.assertFalse(
             v._spells_root('const p = "é/w"'.encode("utf-8"), b"/w"))
+
+    def test_a_root_after_a_dot_dot_segment_is_a_reach(self) -> None:
+        # The pass 4 finding: a sourcemap's relative sources spell the
+        # checkout through the symlinked packages, `../../w/x.js` for a
+        # checkout at /w. The dot run before the root walks back to a
+        # `/`, so the left boundary holds and the reach is refused.
+        self.assertTrue(v._spells_root(b"../../w/x.js", b"/w"))
+
+    def test_a_root_after_a_single_dot_segment_is_a_reach(self) -> None:
+        # One step from the dot-dot case: a single-dot segment before
+        # the root walks back to the start of the content. A mutant
+        # that keeps only the content-start half of the walk leaves
+        # this green.
+        self.assertTrue(v._spells_root(b"./w/x.js", b"/w"))
+
+    def test_a_root_after_a_name_glued_dot_is_not_a_reach(self) -> None:
+        # The other neighbour: a dot that a longer name ends with is
+        # not a segment, so pkg./w stays glued. A mutant that accepts
+        # any dot before the root, without walking back, refuses this
+        # healthy spelling and must be caught here.
+        self.assertFalse(v._spells_root(b"pkg./w/x.js", b"/w"))
 
 
 class PresentEmissionCheck(unittest.TestCase):
