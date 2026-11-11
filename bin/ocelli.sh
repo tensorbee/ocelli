@@ -230,6 +230,7 @@ run_gate() {
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
+                   tools/bench/tests/folder_viewer_dev_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs \
                    tools/bench/tests/viewer_work_test.mjs \
                    tools/bench/tests/viewer_colour_frame_test.mjs \
