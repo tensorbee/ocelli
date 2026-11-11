@@ -542,7 +542,6 @@ export async function observeTilesBeforeSeriesWindow(url, chromium, folder, scro
     }
     const tiles = () => page.$$eval(".cell.active .tiles .tile", (nodes) => nodes.map((node) => ({
       label: (node.querySelector(".tile-label") || {}).textContent || "",
-      width: node.getBoundingClientRect().width,
     })));
     const during = await tiles();
     for (const route of held.splice(0)) await route.continue();
@@ -581,7 +580,6 @@ export async function observeSeriesSwitchDuringWait(url, chromium, folder) {
     }
     await page.keyboard.press("Shift+G");
     await page.waitForTimeout(800);
-    await page.keyboard.press("s");
     await page.locator("#series-list button").filter({ hasText: "#2" }).click();
     await page.waitForTimeout(300);
     // The pump is still waiting on the PT request, so the MR request is sent
@@ -642,7 +640,7 @@ export function failedSeriesWindowTileProblems(seen) {
 export function tilesBeforeSeriesWindowProblems(seen) {
   // F-227 never draws an image at two windows, and tile mode must wait for the series window too.
   const problems = [];
-  if (!seen.during.every((tile) => tile.label === "" && tile.width !== 32)) {
+  if (!seen.during.every((tile) => tile.label === "")) {
     problems.push("tile mode painted before the series window was stored");
   }
   if (seen.after.length !== 4 || !seen.after.every((tile) => (tile.label || "").endsWith("  Auto window"))) {

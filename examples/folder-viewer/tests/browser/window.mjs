@@ -714,6 +714,9 @@ export function heldPresetDuringDragProblems(seen) {
   if (first.startsWith("WW 1500  WL -600")) {
     problems.push("the corner still shows the preset window after the drag");
   }
+  if (!first.endsWith("  manual")) {
+    problems.push(`the corner's first line does not end with the manual marker: ${first}`);
+  }
   return problems;
 }
 

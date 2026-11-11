@@ -519,8 +519,7 @@ fn codestream_colour_encodings_the_decoder_does_not_report_refuse() -> TestResul
     // is what the decoder must produce, and XYB has no matrix to get there, so
     // an encoding the decoder does not report refuses: a colour space other
     // than RGB or grey, and RGB other than D65 sRGB primaries with the sRGB
-    // transfer. The
-    // rewriter is proved against the original bytes first.
+    // transfer. The rewriter is proved against the original bytes first.
     let fixture = include_bytes!("fixtures/jpegxl_lossless_rgb8.jxl");
     let reproduced = rewrite_colour_encoding(fixture, DeclaredColourEncoding::AllDefault)?;
     assert_eq!(

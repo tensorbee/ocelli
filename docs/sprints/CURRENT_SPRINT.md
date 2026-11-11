@@ -109,10 +109,18 @@ review file alone.
 - **F-280, S48**, from pass 3. Three passes running found a late window
   reply overwriting a newer choice, each in a different setter, so every
   folder viewer window setter goes through one entry point that owns the
-  latest choice. Pass 3 N3, a double tile paint, folds in.
+  latest choice. Pass 3 N3, a double tile paint, folds in, with pass 5 N1, a
+  failed series-window request kept as a refusal for the whole open, and
+  pass 5 N6, a per-frame window refresh that paints tiles without the
+  series-window guard.
 - **Dispositioned, not filed.** Pass 1 N7 is a count in the F-238 AS_BUILT
   entry, which is append-only, so it stays as written. Pass 1 N6, pass 2 N1 to
-  N4 and pass 3 N1, N2 and N4 are corrected in the tree.
+  N4, pass 3 N1, N2 and N4, pass 4 N1 to N4, pass 5 N2 to N5 and pass 6 N1
+  to N3 are corrected in the tree. Pass 4 N5, the held-region control passing
+  when no library build is served, is kept as written, because it matches the
+  existing region check and that check reports the missing build by name.
+  Nitpicks the closing review pass names are carried into F-279 by that pass's
+  review file.
 
 ## Pulled forward from S47
 

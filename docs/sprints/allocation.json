@@ -6189,7 +6189,7 @@
         "F-240",
         "F-245"
       ],
-      "notes": "Filed from the S46 whole-sprint review pass 1 nitpicks N1, N2, N3 and N4. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "notes": "Filed from the S46 whole-sprint review pass 1 nitpicks N1, N2, N3 and N4. Nitpicks named by the closing S46 review pass, in its review file, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
       "milestone": "M20",
       "sprint": "S48"
     },
@@ -6214,7 +6214,7 @@
         "F-213",
         "F-227"
       ],
-      "notes": "Filed from the S46 whole-sprint review pass 3, which found the third late window reply in a third setter. Pass 3 N3, a double tile paint in one pump iteration, folds in. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
+      "notes": "Filed from the S46 whole-sprint review pass 3, which found the third late window reply in a third setter. Pass 3 N3, a double tile paint in one pump iteration, folds in. Pass 5 N1, a failed series-window request kept as a refusal for the whole open, and N6, refreshFrameWindows painting tiles without the series-window guard, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
       "milestone": "M20",
       "sprint": "S48"
     }
