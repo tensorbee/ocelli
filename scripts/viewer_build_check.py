@@ -285,18 +285,42 @@ def _known_roots(base: Path) -> list[tuple[bytes, str]]:
     return patterns
 
 
+# The filename continuation bytes. A root with one of these glued to
+# either side is part of a longer name, which is a different path.
+_NAME_BYTES = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+
+
+def _is_name_byte(byte: int) -> bool:
+    """Whether one byte continues a filename across a root boundary.
+
+    The continuation set is the ASCII name characters `[A-Za-z0-9._-]`
+    plus every non-ASCII byte, so a non-ASCII character glues the same
+    way an ASCII one does.
+    """
+    return byte in _NAME_BYTES or byte >= 0x80
+
+
 def _spells_root(blob: bytes, root: bytes) -> bool:
     """Whether the content spells the root as a path prefix.
 
-    The root counts when the byte after it is the path separator or the
-    root runs to the end of the content. A root glued into a longer name
-    is not a root spelling: a checkout at `/ocelli` must not match a
-    healthy worker's `import("./ocelli_wasm-a1.js")`.
+    The root counts when it stands alone: the byte before it starts the
+    content or is not a name byte, and the byte after it ends the
+    content or is not one. A root glued into a longer name is not a root
+    spelling: a checkout at `/ocelli` matches neither a healthy worker's
+    `import("./ocelli_wasm-a1.js")` nor a URL that merely carries the
+    name. Reaches a bare substring would catch stay caught: a root
+    followed by a quote, an apostrophe, a backtick, an encoded
+    separator, a query mark, a fragment mark, a backslash, whitespace or
+    the end of the content is a reach, in a JSON field or a const
+    binding as well as an import.
     """
     start = blob.find(root)
     while start != -1:
         end = start + len(root)
-        if end == len(blob) or blob[end:end + 1] == b"/":
+        before = start == 0 or not _is_name_byte(blob[start - 1])
+        after = end == len(blob) or not _is_name_byte(blob[end])
+        if before and after:
             return True
         start = blob.find(root, start + 1)
     return False

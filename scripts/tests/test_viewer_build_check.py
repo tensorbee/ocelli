@@ -85,6 +85,88 @@ class SpecifierForms(unittest.TestCase):
         )
 
 
+class RootSpelling(unittest.TestCase):
+    """The root boundary spells a standalone path token, review pass 3.
+
+    Each expected value is the boundary rule applied to the planted
+    bytes, not the helper's behavior: a root is a reach when the byte
+    before it starts the content or is not a filename continuation byte
+    and the byte after it ends the content or is not one. The
+    continuation set is `[A-Za-z0-9._-]` and every non-ASCII byte, so a
+    glued `/ocelli_wasm` and `/ocelli-x` match nothing and a root
+    followed by a quote, an encoded separator or the end of the content
+    is caught.
+    """
+
+    def test_a_root_at_the_end_of_the_content_is_a_reach(self) -> None:
+        # A binary whose last bytes are the root: the root runs to the
+        # end of the content.
+        self.assertTrue(v._spells_root(b"\x00asm\x01/w", b"/w"))
+
+    def test_a_root_at_the_start_of_the_content_is_a_reach(self) -> None:
+        self.assertTrue(
+            v._spells_root(b"/w/crates/ocelli-wasm/pkg/ocelli_wasm.js",
+                           b"/w"))
+
+    def test_a_root_followed_by_a_separator_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b'import("/w/pkg/x.js")', b"/w"))
+
+    def test_a_root_followed_by_a_quote_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b'const r="/w"', b"/w"))
+
+    def test_a_root_followed_by_an_apostrophe_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b"const r = '/w'", b"/w"))
+
+    def test_a_root_followed_by_a_backtick_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b"const r = `/w`", b"/w"))
+
+    def test_a_root_followed_by_an_encoded_separator_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(
+            b'"/w%2Fcrates%2Focelli-wasm%2Fpkg%2Focelli_wasm.js"', b"/w"))
+
+    def test_a_root_followed_by_a_query_mark_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b'"https://x.test/r?to=/w?import"',
+                                       b"/w"))
+
+    def test_a_root_followed_by_a_fragment_mark_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b'"https://x.test/r?to=/w#f"',
+                                       b"/w"))
+
+    def test_a_root_followed_by_a_backslash_is_a_reach(self) -> None:
+        # A JS escape spelling the next segment: the root is followed by
+        # the escape's own backslash.
+        self.assertTrue(v._spells_root(b'import("/w\\x2fcrates/x.js")',
+                                       b"/w"))
+
+    def test_a_root_followed_by_whitespace_is_a_reach(self) -> None:
+        self.assertTrue(v._spells_root(b"/* /w */", b"/w"))
+
+    def test_a_root_glued_into_an_underscored_name_is_not_a_reach(self) -> None:
+        self.assertFalse(v._spells_root(b'import("./w_a1.js")', b"/w"))
+
+    def test_a_root_glued_into_a_hyphenated_name_is_not_a_reach(self) -> None:
+        self.assertFalse(v._spells_root(b'import("./w-x.js")', b"/w"))
+
+    def test_a_root_glued_after_a_longer_name_is_not_a_reach(self) -> None:
+        # The pass 3 N1 case: a checkout at /ocelli must not refuse a
+        # dist that merely carries the name in a URL.
+        self.assertFalse(v._spells_root(
+            b"https://github.com/tensorbee/ocelli/issues", b"/ocelli"))
+
+    def test_a_root_glued_into_a_non_ascii_name_is_not_a_reach(self) -> None:
+        self.assertFalse(v._spells_root('="/wé"'.encode("utf-8"), b"/w"))
+
+    def test_a_root_before_a_utf8_continuation_byte_is_not_a_reach(self) -> None:
+        # Byte 0x80 is never a lead byte, only a continuation, so a root
+        # followed by it is inside a multi-byte character and glued. A
+        # continuation test written as `> 0x80` would spell this blob.
+        self.assertFalse(v._spells_root(b'="/w\x80"', b"/w"))
+
+    def test_a_root_after_a_non_ascii_name_is_not_a_reach(self) -> None:
+        self.assertFalse(
+            v._spells_root('const p = "é/w"'.encode("utf-8"), b"/w"))
+
+
 class PresentEmissionCheck(unittest.TestCase):
     """AC6: the present-state check reads the emitted worker, not the config."""
 
@@ -141,40 +223,44 @@ class PresentEmissionCheck(unittest.TestCase):
 
     def test_a_unicode_name_decoded_in_one_segment_is_refused(self) -> None:
         # The URL encodes üt as %C3%BCt. A worker spelling that one segment
-        # decoded spells the raw root verbatim, so the raw-root pattern is
-        # the refusal that fires and the assertion names it. The encoded
-        # base appears nowhere in the worker, and the glue import keeps the
-        # missing-glue refusal from masking the reach scan.
+        # decoded spells the raw root inside the /@fs URL, where the root
+        # is glued to the loader prefix's last byte, so the root boundary
+        # does not spell it and the standalone /@fs marker is the refusal
+        # that fires. The encoded base appears nowhere in the worker, and
+        # the glue import keeps the missing-glue refusal from masking the
+        # reach scan.
         url = "/@fs/a%C3%BCt/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
         worker = ('import("/@fs/aüt/c/crates/ocelli-wasm/pkg/'
                   'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
             self._names(), self._raw(worker), url, Path("/aüt/c"))
-        self.assertTrue(any("raw root" in p for p in problems))
+        self.assertTrue(any("/@fs)" in p for p in problems))
 
     def test_a_percent_name_decoded_in_one_segment_is_refused(self) -> None:
         # The URL encodes p%t as p%25t. A worker spelling that one segment
-        # decoded spells the raw root verbatim, so the raw-root pattern is
-        # the refusal that fires, and the encoded base p%25t/c appears
-        # nowhere in the worker.
+        # decoded spells the raw root inside the /@fs URL, glued to the
+        # loader prefix's last byte, so the standalone /@fs marker is the
+        # refusal that fires, and the encoded base p%25t/c appears nowhere
+        # in the worker.
         url = "/@fs/p%25t/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
         worker = ('import("/@fs/p%t/c/crates/ocelli-wasm/pkg/'
                   'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
             self._names(), self._raw(worker), url, Path("/p%t/c"))
-        self.assertTrue(any("raw root" in p for p in problems))
+        self.assertTrue(any("/@fs)" in p for p in problems))
 
     def test_a_space_name_decoded_in_one_segment_is_refused(self) -> None:
         # The URL encodes the space as %20. A worker spelling that one
-        # segment decoded spells the raw root verbatim, so the raw-root
-        # pattern is the refusal that fires, and the encoded base
-        # a%20b/c appears nowhere in the worker.
+        # segment decoded spells the raw root inside the /@fs URL, glued
+        # to the loader prefix's last byte, so the standalone /@fs marker
+        # is the refusal that fires, and the encoded base a%20b/c appears
+        # nowhere in the worker.
         url = "/@fs/a%20b/c/crates/ocelli-wasm/pkg/ocelli_wasm.js"
         worker = ('import("/@fs/a b/c/crates/ocelli-wasm/pkg/'
                   'ocelli_wasm.js");import("./ocelli_wasm-Bcd23.js")')
         problems = v.present_problems(
             self._names(), self._raw(worker), url, Path("/a b/c"))
-        self.assertTrue(any("raw root" in p for p in problems))
+        self.assertTrue(any("/@fs)" in p for p in problems))
 
     def test_the_fully_encoded_url_without_a_space_is_accepted(self) -> None:
         # The genuine present-state shape: the worker references only its own
@@ -228,6 +314,81 @@ class PresentEmissionCheck(unittest.TestCase):
                 self._names(),
                 self._raw('import"./ocelli_wasm-Bcd23.js";'
                           'import("/ocelli/pkg/ocelli_wasm.js")'),
+                "/@fs/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js",
+                Path("/ocelli"))
+        finally:
+            v.ROOT = saved
+        self.assertTrue(any("raw root" in p for p in problems))
+
+    def test_a_quote_terminated_root_in_a_binding_is_refused(self) -> None:
+        # The pass 3 D1 shape: the root bound to a name and reached by
+        # concatenation. The root is followed by a quote, so the old
+        # slash-only boundary missed it and the standalone boundary
+        # catches it. No /@fs appears, so the marker cannot fire and the
+        # root pattern is the refusal that names itself.
+        worker = ('const r="/w";'
+                  'import(r+"/crates/ocelli-wasm/pkg/ocelli_wasm.js");'
+                  'import("./ocelli_wasm-Bcd23.js")')
+        problems = v.present_problems(
+            self._names(), self._raw(worker),
+            "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js", Path("/w"))
+        self.assertTrue(any("raw root" in p for p in problems))
+
+    def test_an_encoded_separator_reach_is_refused(self) -> None:
+        # The other pass 3 D1 shape: the root followed by %2F segments,
+        # the mixed spelling the module docstring refuses. No /@fs
+        # appears, so only the root pattern can refuse.
+        worker = ('const u="/w%2Fcrates%2Focelli-wasm%2Fpkg%'
+                  '2Focelli_wasm.js";import("./ocelli_wasm-Bcd23.js")')
+        problems = v.present_problems(
+            self._names(), self._raw(worker),
+            "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js", Path("/w"))
+        self.assertTrue(any("raw root" in p for p in problems))
+
+    def test_a_json_field_root_is_refused(self) -> None:
+        # The pass 3 D1 JSON shape: the root as a quoted value in a
+        # non-worker emitted file. The reach is caught without decoding
+        # the file as anything but bytes.
+        worker = 'import("./ocelli_wasm-Bcd23.js")'
+        problems = v.present_problems(
+            self._names() + ["assets/meta.json"],
+            self._raw(worker, {"assets/meta.json": b'{"root":"/w"}'}),
+            "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js", Path("/w"))
+        self.assertTrue(any("raw root" in p and "meta.json" in p
+                            for p in problems))
+
+    def test_a_url_carrying_the_root_name_is_not_a_refusal(self) -> None:
+        # The pass 3 N1 case at the consumer: a checkout at /ocelli must
+        # not refuse an emitted file that merely carries the name in a
+        # URL. Under a right-boundary-only check the URL's /ocelli is
+        # followed by a slash and refused, so this goes red there.
+        saved = v.ROOT
+        v.ROOT = Path("/ocelli")
+        try:
+            worker = ('const issues = '
+                      '"https://github.com/tensorbee/ocelli/issues";'
+                      'import("./ocelli_wasm-Bcd23.js")')
+            problems = v.present_problems(
+                self._names(), self._raw(worker),
+                "/@fs/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js",
+                Path("/ocelli"))
+        finally:
+            v.ROOT = saved
+        self.assertEqual(problems, [])
+
+    def test_a_real_checkout_reach_is_still_refused(self) -> None:
+        # The other half of pass 3 N1: the preceding-byte check must not
+        # swing so far that a genuine root spelling passes. The reach is
+        # quoted on both sides and carries no /@fs, so the root pattern
+        # is the refusal that fires.
+        saved = v.ROOT
+        v.ROOT = Path("/ocelli")
+        try:
+            worker = ('const lib = '
+                      '"/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js";'
+                      'import("./ocelli_wasm-Bcd23.js")')
+            problems = v.present_problems(
+                self._names(), self._raw(worker),
                 "/@fs/ocelli/crates/ocelli-wasm/pkg/ocelli_wasm.js",
                 Path("/ocelli"))
         finally:
