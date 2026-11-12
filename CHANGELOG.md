@@ -16,6 +16,7 @@ Repository bootstrap. Nothing is published.
 - Folder viewer colour frames draw through the library colour stage with per-channel window and invert and named refusals.
 - Matrix and tone-curve ICC profiles apply in the native CPU colour path. Unsupported kinds stay named and unapplied.
 - The local viewer shows scoped DICOM conformance findings without exposing file values in findings or stopping display.
+- On an enhanced multiframe CT or MR the local folder viewer's corners show the shown frame's own slice thickness, kVp, mAs, TR and TE from its functional groups, with the top-level attribute first when it carries a usable value.
 - Compressed DICOM files with an empty Basic Offset Table open, including frames spanning fragments when their JPEG or JPEG 2000 markers prove the boundaries.
 
 - Frame open reads one Part 10 object into the existing LUT chain inputs. The example page shows the synthetic display value and the padding count.

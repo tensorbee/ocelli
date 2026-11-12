@@ -476,8 +476,17 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    labels, with a person name in family, given order and a date as
    year-month-day. They also show the birth date, sex, age, study time,
    institution, slice location and thickness, kVp, mAs, TR and TE when the
-   file has them. With no Patient's Age, the age is worked out from the birth
-   date at the study date.
+   file has them. On an enhanced multiframe CT or MR the thickness, kVp,
+   mAs, TR and TE lines show the shown frame's own values from its
+   functional groups, with mAs from Exposure in mAs and TE on an enhanced
+   MR from Effective Echo Time, and a field the file does not carry leaves
+   its line out. A Multi-energy CT whose CT X-Ray Details Sequence
+   carries several items leaves the kVp line out by design, and one
+   whose CT Exposure Sequence carries several items leaves the mAs line
+   out. Where a classic top-level attribute and a group value both
+   exist, the top-level attribute wins when it has a value the viewer
+   can use. With no Patient's Age, the age is worked out
+   from the birth date at the study date.
    Edge letters show the patient direction from Image Orientation (Patient),
    or from Patient Orientation on an image without it, such as a projection
    radiograph, and hide while the picture is flipped or rotated. An image

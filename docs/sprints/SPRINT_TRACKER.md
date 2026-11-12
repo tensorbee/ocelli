@@ -230,6 +230,7 @@ Otherwise record `not measured` rather than inventing a capacity input.
 | F-269 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | S47 | 1w | not measured | 2026-11-11 |
 | F-266 | Built example viewer loads its core from its own output | S47 | 1w | not measured | 2026-11-11 |
 | F-272 | Oracle tests write nothing into the checkout | S47 | 1w | not measured | 2026-11-11 |
+| F-267 | Folder viewer corners on enhanced multiframe CT and MR | S47 | 2w | not measured | 2026-11-12 |
 
 ## S46 acceptance status correction, 2026-11-09
 

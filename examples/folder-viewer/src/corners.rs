@@ -146,6 +146,23 @@ pub fn exposure_mas(exposure: Option<&str>, micro: Option<&str>) -> (Option<Stri
     (None, "")
 }
 
+/// The one FD token, PS3.5 6.2 FD.
+///
+/// A finite value as `Display` writes it, which is the shortest form that
+/// reads back as the same value and never an exponent. `None` for a
+/// non-finite one, because PS3.5 6.2 permits NaN and infinity in an FD and
+/// a corner line prints a quantity with a unit, the treatment `push_cine`
+/// gives a non-finite Frame Time. There is no padding to trim, the same
+/// reason the DS rule trims and this one does not.
+#[must_use]
+pub fn fd_text(value: f64) -> Option<String> {
+    if value.is_finite() {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
 /// Left, right, top and bottom letters from Patient Orientation (0020,0020).
 ///
 /// PS3.3 C.7.6.1.1.1. The first value is the direction of the rows and
@@ -309,4 +326,53 @@ fn integer_string(stored: &str) -> Option<i64> {
     }
     let value = text.strip_prefix('+').unwrap_or(text).parse::<i64>().ok()?;
     i32::try_from(value).ok().map(i64::from)
+}
+
+#[cfg(test)]
+mod fd_rule {
+    use super::fd_text;
+
+    /// PS3.3 2026c C.8.15.3.8 Table C.8-124 declares Exposure in mAs
+    /// (0018,9332) FD and C.8.13.5.4 Table C.8-91 declares Effective Echo
+    /// Time (0018,9082) FD. PS3.5 6.2 encodes FD as IEEE 754 binary64 with
+    /// no padding to trim, and `Display` on a finite `f64` prints the
+    /// shortest form that reads back as the same value and never an
+    /// exponent. Each row is written as its stored bits, and the expected
+    /// token is worked by hand from those two rules, never from a run of
+    /// `fd_text`:
+    ///
+    /// 5.5 is 1.375 times 2^2, so the biased exponent is 1025 and the
+    /// mantissa 0.375 is 0110 followed by zeros, `4016 0000 0000 0000`.
+    /// 3.0 is 1.5 times 2^1, exponent 1024, mantissa 1000 followed by
+    /// zeros, `4008 0000 0000 0000`. 12.25 is 1.53125 times 2^3, exponent
+    /// 1026, mantissa 0.53125 is 10001 followed by zeros, `4028 8000 0000
+    /// 0000`. 0.1, 0.123456789, 1e-7 and 1e21 are the plan's stored rows.
+    /// 1e21 is 5^21 times 2^21 and 5^21 is below 2^53, so it is exact and
+    /// prints as its 22 digits. Negative zero keeps its sign. The three
+    /// non-finite rows are the PS3.5 sentence that all IEEE 754 values are
+    /// permitted, and this plan shows a non-finite value as an absent
+    /// field, the same treatment `push_cine` gives a non-finite Frame Time.
+    #[test]
+    fn fd_text_formats_one_finite_value_and_shows_no_non_finite_one() -> Result<(), String> {
+        for (bits, want) in [
+            (0x4016_0000_0000_0000, Some("5.5")),
+            (0x4008_0000_0000_0000, Some("3")),
+            (0x4028_8000_0000_0000, Some("12.25")),
+            (0x3fb9_9999_9999_999a, Some("0.1")),
+            (0x3fbf_9add_3739_635f, Some("0.123456789")),
+            (0x3e7a_d7f2_9abc_af48, Some("0.0000001")),
+            (0x444b_1ae4_d6e2_ef50, Some("1000000000000000000000")),
+            (0x8000_0000_0000_0000, Some("-0")),
+            (0x7ff0_0000_0000_0000, None),
+            (0xfff0_0000_0000_0000, None),
+            (0x7ff8_0000_0000_0000, None),
+        ] {
+            let got = fd_text(f64::from_bits(bits));
+            let want = want.map(str::to_owned);
+            if got != want {
+                return Err(format!("{bits:#018x} gave {got:?}, want {want:?}"));
+            }
+        }
+        Ok(())
+    }
 }

@@ -6163,3 +6163,20 @@ The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchma
 **User-facing documentation.** none.
 **Deviations from the design plan.** The lead amendment of 2026-11-11 (a8dc0bbe) replaced the in-process snapshot with the mirror root, superseding AC3's no-copy sentence for `tools/oracle/out` only. The scan stops two literal patterns, and its stated open forms are a rewrite through the protected-tree helper, macro-built environment names, a root walked from `current_exe` or `file!()`, a call to an allowlisted function that reads the real root, and two string-literal evasions. An identical rewrite of an existing file stays undetected. The coordinator wrote the final documentation commit 9c1b5346.
 **Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over five fix rounds, reviewed by Claude. Pass 10's nitpick is carried in its review file.
+
+## F-267, Folder viewer corners on enhanced multiframe CT and MR, completed 2026-11-12
+
+**What was built.** The local folder viewer's corner text on an enhanced multiframe CT or MR now reads slice thickness, kVp, mAs, TR and TE for the shown frame from its functional groups. Each value is read from the top-level attribute first when it carries a usable value, then from the frame's per-frame group, then from the shared group. mAs reads the top-level Exposure, then Exposure in uAs over 1000, then the frame's CT Exposure group's Exposure in mAs, and TE on an enhanced MR comes from Effective Echo Time. A field that is absent everywhere, unusable, or inside a sequence carrying several items, such as a Multi-energy CT's X-Ray Details or Exposure Sequence, leaves its line out rather than guessing. The server carries the tokens as reply headers and the page prints them per frame.
+
+**HLD sections implemented.** none, the local example only.
+**Deviations.** none
+**Crates / packages modified.** `examples/folder-viewer/src/corners.rs`, `preview.rs`, `serve.rs`, `lib.rs`, `page.html`, its `tests/preview.rs` and the new browser check `tests/browser/corners.mjs`, the `viewer-browser` arm of `bin/ocelli.sh`, and README.
+**Tests added.** `fixture`, the corner token tests in `tests/preview.rs` with hand-built enhanced CT and MR groups citing PS3.3 C.7.6.16.2.1, C.8.13.5.2, C.8.13.5.4, C.8.15.3.8 and C.8.15.3.9, each row proven red by a named mutant. `browser`, `corners.mjs`, an enhanced CT, a classic CT and an enhanced MR whose corners must name each frame's own values, with the header names and the TR and TE keys pinned by mutants.
+**Fixture provenance.** no pixel arithmetic. The values are attribute text reprinted as stored, with the citing PS3.3 section per field.
+**Verification.** Independent review passes 1 and 2 by Claude on the GLM commits and the coordinator's pass 3, the last with no defect, smell or nitpick. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the fixtures are synthetic.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Corner text only.
+**LLD updated.** none, the local example is not the published API and `ocelli-dicom` did not change.
+**User-facing documentation.** `README.md`, the corner sentence in step 8 of the local series viewer, with the per-sequence Multi-energy rule and the usable top-level value rule.
+**Deviations from the design plan.** The plan's six inline `FrameFacts` fields became one boxed `CornerTokens`, because the frame cache charges a held frame by its struct size. The box's 136 bytes and the token strings stay uncharged per held frame, the same as the edge letters, and the field's comment says so.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over two fix rounds, reviewed by Claude, with one coordinator comment commit.

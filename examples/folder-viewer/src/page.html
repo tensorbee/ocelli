@@ -3294,7 +3294,17 @@ async function requestGrey(image, options) {
         top: response.headers.get("X-Ocelli-Edge-Top") || "",
         bottom: response.headers.get("X-Ocelli-Edge-Bottom") || "",
         calibrationSource: response.headers.get("X-Ocelli-Calibration-Source") || "",
-        calibrationColumn: headerNumber(response, "X-Ocelli-Calibration-Column")
+        calibrationColumn: headerNumber(response, "X-Ocelli-Calibration-Column"),
+        // F-267. The shown frame's own acquisition values, stamped with the
+        // identity they belong to. The exposure source header is not
+        // parsed, because nothing on the page reads a source name.
+        sliceThickness: headerNumber(response, "X-Ocelli-Slice-Thickness"),
+        kvp: headerNumber(response, "X-Ocelli-Kvp"),
+        exposureMas: headerNumber(response, "X-Ocelli-Exposure-Mas"),
+        repetitionTime: headerNumber(response, "X-Ocelli-Repetition-Time"),
+        echoTime: headerNumber(response, "X-Ocelli-Echo-Time"),
+        serial: fileSerial(image.file),
+        frame: image.frame
       }
     };
   }
@@ -3673,10 +3683,23 @@ function paintOverlays(vp) {
   if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
   if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
   if (info.sliceLocation != null) lower.push("Location " + info.sliceLocation + " mm");
-  if (info.sliceThickness != null) lower.push("Thickness " + info.sliceThickness + " mm");
-  const tube = [info.kvp != null ? info.kvp + " kVp" : "", info.exposureMas != null ? info.exposureMas + " mAs" : ""].filter(Boolean).join("  ");
+  // F-267. The acquisition values of the shown frame ride the grey reply,
+  // stamped with the serial and frame they belong to. They are used only
+  // while they match the image being painted, so a repaint through the
+  // corner toggle, a flip, a tile change or a resize while the next
+  // frame's grey is in flight paints the scan values, never the previous
+  // image's per-frame ones.
+  const facts = vp.shownFacts;
+  const fresh = facts && facts.serial === fileSerial(image.file) && facts.frame === image.frame;
+  const thickness = fresh ? facts.sliceThickness : info.sliceThickness;
+  const kvp = fresh ? facts.kvp : info.kvp;
+  const exposureMas = fresh ? facts.exposureMas : info.exposureMas;
+  const repetitionTime = fresh ? facts.repetitionTime : info.repetitionTime;
+  const echoTime = fresh ? facts.echoTime : info.echoTime;
+  if (thickness != null) lower.push("Thickness " + thickness + " mm");
+  const tube = [kvp != null ? kvp + " kVp" : "", exposureMas != null ? exposureMas + " mAs" : ""].filter(Boolean).join("  ");
   if (tube) lower.push(tube);
-  const timing = [info.repetitionTime != null ? "TR " + info.repetitionTime + " ms" : "", info.echoTime != null ? "TE " + info.echoTime + " ms" : ""].filter(Boolean).join("  ");
+  const timing = [repetitionTime != null ? "TR " + repetitionTime + " ms" : "", echoTime != null ? "TE " + echoTime + " ms" : ""].filter(Boolean).join("  ");
   if (timing) lower.push(timing);
   assignText(corners.bl, lower.join("\n"));
   const win = vp.draftWindow || vp.overrideWindow || vp.shownWindow;
