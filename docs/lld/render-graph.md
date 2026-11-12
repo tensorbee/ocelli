@@ -98,10 +98,13 @@ and a stale pass issues no draw whatever its kind or position. A stale stack
 therefore shows the clear colour with any fresh slab drawn over it, a stale
 slab shows the base layer beneath it, and a target holding only slabs never
 keeps a stale composite. A stale viewport alone on its target clears. The
-grouping compares registered views' textures, so it covers caller views,
-and a surface viewport is its own target, because its placeholder view is
-created for that viewport alone. The
-marking runs once per tick, after the frame is known to encode and before
+grouping compares registered views' textures, so it covers caller views. A
+surface-bound viewport is excluded from the grouping, from every
+first-into-target decision and from the co-target dirty marking, and the
+graph enforces that rather than trusting the caller: the texture it
+acquires is its own, so no viewport sharing its registered view is marked
+or held back by it, and its staleness decides only its acquired texture.
+The marking runs once per tick, after the frame is known to encode and before
 the surface textures are acquired, so a marked surface viewport acquires in
 the same frame. A tick that returns before the encode marks nothing, and
 the target keeps the composite of the last encoded frame. A slab's
@@ -209,14 +212,16 @@ fully dirty. The caller re-supplies a caller-owned source through `rebind`.
 A viewport that owns a stored texture is recreated through `rebind_stored`
 at the extent the registry still holds, and that call does not increment
 `uploads`. Held frame textures are dropped before the surfaces they came
-from. The shell still holds the canvases and supplies them again through
+from, and the surface-bound marks clear with them. The shell still holds the
+canvases and supplies them again through
 `bind_surface`. The registry keeps each pass, its last uniform values, the stored
 extent and the colour table bytes, so nothing but GPU objects is rebuilt.
 The kept camera is the CSS matrix and the device pixel ratio. `rebind`
 writes those into a new 80-byte `DeviceCamera` uniform.
 
 **A bound surface is the colour attachment for that tick.** `bind_surface`
-records the surface and its extent and sets the camera flag. It does not call
+records the surface and its extent, sets the camera flag and marks the slot
+surface-bound for the stale grouping. It does not call
 `rebind` and it does not increment `uploads`. `tick` calls
 `get_current_texture` for each dirty surface viewport that can encode.
 Success and Suboptimal are drawn. Any other status leaves the slot empty,

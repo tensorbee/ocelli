@@ -1103,6 +1103,11 @@ struct SlotState {
     interpolation: Interpolation,
     /// The stored texture is a host orthographic plane. A stack upload clears it.
     orthographic: bool,
+    /// Whether a surface is bound through [`RenderGraph::bind_surface`]. The
+    /// viewport draws into the texture it acquires, which no other viewport
+    /// renders into, so the grouping excludes it from its registered view
+    /// and its staleness decides only its acquired texture.
+    surface_bound: bool,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -1408,6 +1413,7 @@ impl Registry {
                     dpr: 1.0,
                     interpolation: Interpolation::Nearest,
                     orthographic: false,
+                    surface_bound: false,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
                     shade: ShadeWeights::unlit(),
                     clip: ClipList::empty(),
@@ -2383,6 +2389,11 @@ impl RenderGraph {
     /// `get_current_texture`, which panics on a surface that was never
     /// configured.
     ///
+    /// A bound viewport draws into the texture it acquires, so the graph
+    /// groups it with no other viewport: no viewport sharing its registered
+    /// view is marked or held back by its staleness, and its staleness
+    /// decides only the texture it acquires.
+    ///
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
@@ -2415,6 +2426,7 @@ impl RenderGraph {
         });
         if let Some(state) = self.registry.state_mut(id) {
             state.dirty.camera = true;
+            state.surface_bound = true;
         }
         Ok(())
     }
@@ -4591,6 +4603,9 @@ impl RenderGraph {
         }
         for state in self.registry.states.iter_mut().flatten() {
             state.dirty = Dirty::full();
+            // The surfaces were dropped with the dead device and the shell
+            // re-binds them, so the bound state clears with them.
+            state.surface_bound = false;
         }
     }
 
@@ -4664,23 +4679,33 @@ impl RenderGraph {
     /// would clear or load against a composite a stale viewport must stop
     /// holding.
     ///
+    /// A surface-bound viewport is skipped both ways. It draws into the
+    /// texture it acquires, which no other viewport renders into, so its
+    /// staleness marks no co-target and no viewport sharing its registered
+    /// view is marked by it.
+    ///
     /// This runs after the frame is known to encode and before the surface
     /// textures are acquired, so a marked surface viewport acquires in the
     /// same frame. A tick that returns before the encode marks nothing.
     fn mark_shared_targets_stale(&mut self) {
         let RenderGraph { registry, gpu, .. } = self;
-        for (index, held) in gpu.iter().enumerate() {
-            let Some(slot) = held else {
-                continue;
-            };
-            if !viewport_is_stale(registry, gpu, index) {
+        for index in 0..gpu.len() {
+            if gpu.get(index).and_then(Option::as_ref).is_none() {
                 continue;
             }
-            let texture = slot.target.texture();
-            for other in slots_on_texture(gpu, texture) {
-                if let Some(state) = registry.states.get_mut(other).and_then(Option::as_mut) {
-                    state.dirty.data = true;
-                }
+            let bound = registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|state| state.surface_bound);
+            if bound {
+                continue;
+            }
+            if !target_is_stale(registry, gpu, index) {
+                continue;
+            }
+            if let Some(state) = registry.states.get_mut(index).and_then(Option::as_mut) {
+                state.dirty.data = true;
             }
         }
     }
@@ -4780,12 +4805,26 @@ impl RenderGraph {
             // the stale one. A target with no stale viewport keeps the state
             // table's rule: a slab loads, everything else clears.
             let stale = viewport_is_stale(registry, gpu, index);
-            let texture = slot.target.texture();
-            let stale_target =
-                slots_on_texture(gpu, texture).any(|other| viewport_is_stale(registry, gpu, other));
-            let first_into_target = !slots_on_texture(gpu, texture)
-                .take_while(|other| *other < index)
-                .any(|other| frame_passes.get(other).copied().unwrap_or(false));
+            let bound = registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|state| state.surface_bound);
+            // A surface-bound viewport draws into the texture it acquires
+            // this frame, which no other viewport renders into, so its pass
+            // is the first and only pass on that target and its own
+            // staleness decides the load. Every other viewport groups
+            // through its registered view.
+            let (stale_target, first_into_target) = if bound {
+                (stale, true)
+            } else {
+                (target_is_stale(registry, gpu, index), {
+                    let texture = slot.target.texture();
+                    !slots_on_texture(registry, gpu, texture)
+                        .take_while(|other| *other < index)
+                        .any(|other| frame_passes.get(other).copied().unwrap_or(false))
+                })
+            };
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
             let surface_view = frame_textures
                 .get(index)
@@ -5017,15 +5056,38 @@ fn viewport_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize)
 ///
 /// Two views of one texture are different view objects, so the comparison
 /// goes through the texture each view names, which wgpu compares by
-/// resource identity.
+/// resource identity. A slot with a bound surface is never returned: it
+/// draws into the texture it acquires, which no other slot renders into,
+/// so it groups with no other viewport.
 fn slots_on_texture<'a>(
+    registry: &'a Registry,
     gpu: &'a [Option<GpuSlot>],
     texture: &'a wgpu::Texture,
 ) -> impl Iterator<Item = usize> + 'a {
     gpu.iter().enumerate().filter_map(move |(index, held)| {
         let slot = held.as_ref()?;
+        if registry
+            .states
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some_and(|state| state.surface_bound)
+        {
+            return None;
+        }
         (slot.target.texture() == texture).then_some(index)
     })
+}
+
+/// Whether any viewport that renders into `texture` through a registered
+/// view is stale on the frame now encoding. A surface-bound viewport is
+/// never returned by the grouping, so neither its staleness nor a share of
+/// its registered view reaches this answer.
+fn target_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize) -> bool {
+    let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    let texture = slot.target.texture();
+    slots_on_texture(registry, gpu, texture).any(|other| viewport_is_stale(registry, gpu, other))
 }
 
 fn voi_of(pass: &Pass) -> VoiParams {
@@ -6191,6 +6253,379 @@ mod route_tests {
         assert_eq!(
             colour_decision(false, false, ContentKind::PreApplied),
             Ok(())
+        );
+    }
+}
+
+/// The surface grouping fixture, on a real adapter.
+///
+/// `bind_surface` cannot run here. A native `wgpu::Surface` is created from
+/// a `SurfaceTarget`, and the safe native variants hold a
+/// `Box<dyn WindowHandle>` whose macOS handle value is a live `NSView`
+/// pointer, which needs an Objective-C runtime dependency the plan does not
+/// name, and fabricating the pointer is undefined behaviour behind
+/// `SurfaceTargetUnsafe`, which is `unsafe`. The fixture therefore places
+/// the one decision state `bind_surface` writes, `SlotState::surface_bound`,
+/// through the graph's own registry, and holds no bound object. That is the
+/// narrowest real seam that exercises the state on the real frame path.
+/// With the state present and no object, the viewport's pass falls back to
+/// its registered view, which is the encode the reviewed failure describes
+/// for the viewport that goes first.
+#[cfg(test)]
+mod surface_grouping_tests {
+    use crate::caps::TierRequest;
+    use crate::gpu::GpuContext;
+    use crate::graph::{BlendMode, FrameOutcome, Pass, RenderGraph, StackPass, ViewportId};
+    use crate::voi::VoiParams;
+    use ocelli_pixel::{
+        LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
+        VoiFunction, VoiTransform,
+    };
+
+    fn from_bits(bits: u32) -> f32 {
+        f32::from_bits(bits)
+    }
+
+    /// The F-227 rescale pairs and windows, pinned as bits, as the sibling
+    /// fixtures in `tests/slab.rs` pin them.
+    fn pair_chain(slope: u32, intercept: u32, center: u32, width: u32) -> LutChain {
+        let modality =
+            ModalityTransform::new(None, Some(from_bits(slope)), Some(from_bits(intercept)));
+        let voi = VoiTransform::new(
+            None,
+            &[from_bits(center)],
+            &[from_bits(width)],
+            0,
+            VoiFunction::LinearExact,
+            0.0,
+            255.0,
+        );
+        assert!(modality.is_ok() && voi.is_ok());
+        let (Ok(modality), Ok(voi)) = (modality, voi) else {
+            unreachable!("asserted immediately above")
+        };
+        let built = LutChain::new(
+            modality,
+            voi,
+            PhotometricInterpretation::Monochrome2,
+            PresentationLutEvidence::Absent,
+        );
+        assert!(built.is_ok());
+        match built {
+            Ok(chain) => chain,
+            Err(_) => unreachable!("asserted immediately above"),
+        }
+    }
+
+    fn params(chain: &LutChain) -> VoiParams {
+        match VoiParams::from_chain(chain) {
+            Ok(voi) => voi,
+            Err(_) => unreachable!("the fixture chain expresses a uniform"),
+        }
+    }
+
+    fn float_source(device: &wgpu::Device, queue: &wgpu::Queue, value: f32) -> wgpu::TextureView {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping source"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let bytes = [value];
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&bytes),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    fn read_target(context: &GpuContext, target: &wgpu::Texture) -> [f32; 4] {
+        let device = context.device();
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("surface grouping readback"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("surface grouping readback"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        context.queue().submit(std::iter::once(encoder.finish()));
+        let slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        let _ = receiver.recv();
+        let Ok(data) = slice.get_mapped_range() else {
+            return [0.0; 4];
+        };
+        let Some(row) = data
+            .get(0..16)
+            .and_then(|slice| <[u8; 16]>::try_from(slice).ok())
+        else {
+            return [0.0; 4];
+        };
+        let mut pixels = [0.0_f32; 4];
+        for (index, word) in pixels.iter_mut().enumerate() {
+            let Some(chunk) = row
+                .get(index * 4..index * 4 + 4)
+                .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
+            else {
+                continue;
+            };
+            *word = f32::from_le_bytes(chunk);
+        }
+        pixels
+    }
+
+    fn within_two_ulp(got: f32, expected: f32) -> bool {
+        if got.to_bits() == expected.to_bits() {
+            return true;
+        }
+        if got.is_sign_negative() != expected.is_sign_negative() {
+            return false;
+        }
+        got.to_bits().abs_diff(expected.to_bits()) <= 2
+    }
+
+    /// **The reviewed failure: a surface-bound viewport must group with no
+    /// other viewport on its registered target.**
+    ///
+    /// Two stack viewports are registered on two views of one 1x1 texture
+    /// T, and the first carries the decision state `bind_surface` writes.
+    /// PS3.3 C.11.1 pins the pair-A rescale as bits, slope `0x3571C0F8` and
+    /// intercept `0x44E7C2FC`, applied as multiply then add, so the stored
+    /// viewport's uploaded 2372.5 stages `0x44E7C30E`
+    /// (1854.095458984375). PS3.3 C.11.2.1.3.2, LINEAR_EXACT centre
+    /// `0x44E7C333` width `0x3C23D70A` output 0 to 255, displays it
+    /// 12.32666015625, normalized over 255 to 0.04833984375. The bound
+    /// viewport's own caller view is `PreApplied`, so its 1x1 texel value
+    /// 2371.5 is read as a modality value and staged with nothing. The
+    /// first frame draws both, the registration order putting the stored
+    /// viewport last, so T holds its 0.04833984375 composite.
+    ///
+    /// `set_voi` with pair B (`0x3D47EF8C`, `0xC52D91AC`, window centre
+    /// `0xC5265588` width 2.0) makes the stored viewport stale. The bound
+    /// viewport is in no grouping, so it is not marked dirty and does not
+    /// encode, and the stale viewport's pass is the first into T, which
+    /// clears to `0.0, 0.0, 0.0, 1.0` on `Rgba32Float`. A grouping that
+    /// keeps the bound viewport marks it dirty, its pass encodes first and
+    /// the stale pass loads instead of clearing, which is the reviewed
+    /// failure. The fresh upload then re-pre-applies with the recorded
+    /// pair, staged `0xC52654C0`, displayed 133.7255859375, normalized
+    /// 0.5244140625. The bound viewport's own rescale change marks no
+    /// co-target, so only its clear-only pass encodes.
+    #[test]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn a_surface_bound_viewport_groups_with_nothing_on_its_registered_target() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // One texture T, two views: the reviewed shared registered target.
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let bound_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stale_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xC526_5588, 0x4000_0000);
+
+        let registered = graph.register(
+            &context,
+            bound_view,
+            float_source(context.device(), context.queue(), 2371.5),
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(bound) = registered else { return };
+        assert_eq!(bound, ViewportId(0));
+        // The state `bind_surface` writes for a bound viewport. No bound
+        // object can exist in this harness, so the pass falls back to the
+        // registered view.
+        if let Some(Some(state)) = graph
+            .registry
+            .states
+            .get_mut(usize::try_from(bound.0).unwrap_or(usize::MAX))
+        {
+            state.surface_bound = true;
+        }
+
+        let stored = graph.register_stored(
+            &context,
+            &adapter,
+            stale_view,
+            1,
+            1,
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(stored.is_ok());
+        let Ok(stored) = stored else { return };
+        assert_eq!(stored, ViewportId(1));
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let composited = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(composited[0], 0.048_339_844_f32),
+            "the first frame is not the stored viewport's composite: {got}",
+            got = composited[0]
+        );
+
+        // The rescale change makes the stored viewport stale. The bound
+        // viewport draws into the texture it acquires, so it is in no
+        // grouping: it is not marked, does not encode, and the stale
+        // viewport's pass is the first into T, which clears.
+        assert!(graph.set_voi(&context, stored, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let cleared = read_target(&context, &texture);
+        assert_eq!(
+            cleared[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the shared target did not clear: {got}",
+            got = cleared[0]
+        );
+        assert_eq!(cleared[1].to_bits(), 0.0_f32.to_bits());
+        assert_eq!(cleared[2].to_bits(), 0.0_f32.to_bits());
+        assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+
+        // The fresh upload re-pre-applies with the recorded pair and the
+        // stored viewport draws its new composite into T.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let fresh = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(fresh[0], 0.524_414_06_f32),
+            "the stored viewport did not draw its fresh composite: {got}",
+            got = fresh[0]
+        );
+
+        // The bound viewport's own rescale change marks no co-target: only
+        // its clear-only pass encodes, and the stored viewport stays clean.
+        assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        // Its stale pass is the first and only pass on its target this
+        // frame, so the readback is the clear colour, not the loaded
+        // composite from the frame before it.
+        let rebound_target = read_target(&context, &texture);
+        assert_eq!(
+            rebound_target[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the bound viewport's clear-only pass did not clear its target: {got}",
+            got = rebound_target[0]
         );
     }
 }
