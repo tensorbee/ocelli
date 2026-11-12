@@ -22,8 +22,8 @@ evaluated stage 1, all three window functions and stage 3, because HLD section
 `fn_kind`, and a shader given those has to evaluate something. F-235 moved
 stage 1's evaluation back out of the shader: `voi.wgsl` now reads stage 1's
 RESULTS, from a folded modality table the graph fills with this crate's own
-`modality` outputs or from bytes a CPU pre-apply staged, and the uniform's
-`slope` and `intercept` are carried in the 32 bytes and read by nothing. The
+`modality` outputs or from bytes a CPU pre-apply staged, and the shader reads
+neither of the uniform's `slope` and `intercept`. The
 window functions and stage 3 are still evaluated there, from `center`,
 `width` and `fn_kind`.
 

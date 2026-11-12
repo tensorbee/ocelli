@@ -395,8 +395,7 @@ pub enum GraphError {
 /// `Rg32Float` and, only if that also lacks those usages, `Rgba32Float`.
 /// `Rgba8Unorm` is not a candidate. A folded modality table follows the
 /// selection where an adapter is available, and falls back to this
-/// constant in `register` and `rebind`, which hold no adapter and whose
-/// caller cannot be asked.
+/// constant in `register` and `rebind`, which receive no adapter.
 pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 /// Colour table format. Height 1. Not a stored-sample candidate.
@@ -2108,8 +2107,7 @@ impl RenderGraph {
                 None,
                 route,
                 // No adapter is available to a caller-view registration, so
-                // the table uses the preferred format, which the selection
-                // doc names as preferred on every tier.
+                // the table uses the preferred stored format.
                 STORED_FORMAT,
             )
             .map_err(|_| GraphError::RouteInvalid)?;
@@ -2531,8 +2529,7 @@ impl RenderGraph {
                 colour,
                 route,
                 // No adapter is available to a caller-view rebind, so the
-                // table uses the preferred format, which the selection doc
-                // names as preferred on every tier.
+                // table uses the preferred stored format.
                 STORED_FORMAT,
             )
             .map_err(|_| GraphError::RouteInvalid)?;
@@ -5082,8 +5079,9 @@ fn pre_apply_slab(image: &SlabImage, slope: f32, intercept: f32) -> SlabImage {
     applied
 }
 
-// The arguments are the recorded state the staging binds from, the same
-// values the registry keeps, so a re-stage can supply them again.
+// The slot's own uniform, route uniform and table view are passed in
+// beside the layouts, because the slot is borrowed immutably here and the
+// staging reads them.
 #[allow(clippy::too_many_arguments)]
 fn stage_slab(
     ctx: &GpuContext,
