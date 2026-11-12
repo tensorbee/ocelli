@@ -84,6 +84,8 @@ C.7.6.3.1.2 gives partial range.
 - **F-241.** F-223 is dropped from its dependencies. AC25 needs only the existing comparison harness.
 - **F-266.** Its promise is narrowed to no checkout-root or `/@fs` reach in any emitted file. F-281, S48, removes the cargo registry paths the shipped wasm still carries.
 - **F-202, F-204, F-205.** Designed after F-245 is integrated, and they may carry to S48.
+- **F-202, 2026-11-12.** The decode-worker feature may enable an allowlisted set of crates, one reviewed change to `scripts/decode_graph_check.py` recorded as a deviation, with any crate outside the list still refused. The decode module gets its own lazily loaded budget, measured at implementation, and the render module's budget is unchanged. Decode requests stage the instance once and then carry indices, a recorded departure from HLD section 24.
+- **F-245 AC8, 2026-11-12.** The idle-host performance acquisition runs at sprint end, with GLM paused, beside the consolidated `gate --sprint`.
 - **F-267.** The story row already decides top-level first where both levels carry a value, so it is not an open question.
 
 ## What done means
