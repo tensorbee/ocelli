@@ -486,9 +486,10 @@ fn connection_session(
             && (request.path == "/dicweb/qido" || request.path == "/dicweb/instance")
             && dicomweb.is_none()
         {
-            // A local-only viewer has no DICOMweb routes. The page never shows
-            // the remote source without a configured service, so the native
-            // parser is not reachable through them.
+            // A local-only viewer refuses the native DICOMweb POST routes
+            // with a 404. The page never shows the remote source without a
+            // configured service, so the native parser is not reachable
+            // through them.
             retire_request_body(&charge, request.body);
             (text_reply(404, None, "not found"), None)
         } else {

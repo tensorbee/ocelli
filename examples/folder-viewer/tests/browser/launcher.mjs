@@ -1,25 +1,35 @@
 // F-245 AC1. The page is served through the real npm launcher.
 //
 // bin/folder-viewer-dev.mjs is the script `npm run dev` runs. This control
-// starts it the way a user does, with a custom CARGO_TARGET_DIR so the
-// binary can only come from the directory cargo's own compiler artifact
-// names, waits for the one URL the backend prints, opens that page in
-// headless Chromium through tools/bench's pinned Playwright, and asserts it
-// boots. It then fetches the same page from a plain native start of the
-// same source and asserts the two bodies are identical, so the npm path
-// serves exactly what the native path serves. The npm process group is
-// signalled by the npm PID, and the owned cleanup is proved by the stopped
-// port: a backend orphaned by an unhandled signal would still be serving.
+// starts it the way a user does, with a private CARGO_TARGET_DIR under the
+// repository's ignored target/, waits for the one URL the backend prints,
+// opens that page in headless Chromium through tools/bench's pinned
+// Playwright, and asserts it boots. It then fetches the same page from a
+// plain native start of the same source and asserts the two bodies are
+// identical, so the npm path serves exactly what the native path serves.
+// The npm process group is signalled by the npm PID, and the owned cleanup
+// is proved by the stopped port: a backend orphaned by an unhandled signal
+// would still be serving.
 //
-// The launcher builds into the private target directory this script makes
-// and removes, so nothing outside the run is written. bin/ocelli.sh
+// The binary is also identified at the process layer. The pid listening on
+// the launcher's port is resolved with lsof, and its executable path is
+// read with ps and must sit inside the private target directory. A launcher
+// that ignored the compiler artifact cargo named and ran a stale build from
+// the default target directory would serve the same page with the same
+// debug note, and would fail only here. The path is the first word of the
+// process command, because comm alone is truncated to the last component
+// on Linux, where this suite runs in CI, and names no directory.
+//
+// The launcher rebuilds the core package dist in the checkout and builds
+// the debug profile into the private target directory, so the first run of
+// this control is a cold build of the whole graph, on the order of
+// gigabytes under target/, and later runs are incremental. bin/ocelli.sh
 // registers this suite under viewer-browser, after dicomweb.mjs.
 
 import { Buffer } from "node:buffer";
-import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { connect } from "node:net";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +43,33 @@ const DEBUG_NOTE = "This is the slow debug build.";
 
 function repoRoot() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+}
+
+// The private target directory the launcher builds into, kept between runs
+// so its debug build is incremental. It is distinct from the default
+// target/debug, so a path under it can only be the one cargo's own
+// compiler artifact named.
+function privateTargetDir() {
+  return path.join(repoRoot(), "target", "f245-launcher-debug");
+}
+
+function listeningPids(port) {
+  try {
+    const out = execFileSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], { encoding: "utf8" });
+    return out.split("\n").map((line) => line.trim()).filter(Boolean).map(Number);
+  } catch {
+    return [];
+  }
+}
+
+function executablePath(pid) {
+  try {
+    const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    const firstWord = command.split(/\s+/)[0] ?? "";
+    return firstWord;
+  } catch {
+    return "";
+  }
 }
 
 function startLauncher(targetDir) {
@@ -113,7 +150,8 @@ function signalGroup(pid, signal) {
 async function main() {
   const { chromium } = await loadPlaywright();
   const problems = [];
-  const targetDir = mkdtempSync(path.join(tmpdir(), "f245-launcher-target-"));
+  const targetDir = privateTargetDir();
+  mkdirSync(targetDir, { recursive: true });
   let launcher = null;
   let browser = null;
   try {
@@ -126,6 +164,20 @@ async function main() {
 
     launcher = startLauncher(targetDir);
     const { url, port } = await launcher.url;
+    // The process layer check. The page and the debug note are identical
+    // for any debug build, so the binary itself is identified: whatever
+    // listens on the launcher's port must run from the private target
+    // directory the launcher was given.
+    const pids = listeningPids(port);
+    if (pids.length === 0) {
+      problems.push(`no process was found listening on the launcher's port ${port}`);
+    }
+    for (const pid of pids) {
+      const comm = executablePath(pid);
+      if (!comm.startsWith(targetDir)) {
+        problems.push(`the backend on port ${port} runs from "${comm}", outside the private target directory`);
+      }
+    }
     const launcherPage = await (await fetch(url)).arrayBuffer();
     if (!Buffer.from(nativePage).equals(Buffer.from(launcherPage))) {
       problems.push("the launcher serves a different page than the native start");
@@ -182,7 +234,6 @@ async function main() {
       });
       signalGroup(launcher.child.pid, "SIGKILL");
     }
-    rmSync(targetDir, { recursive: true, force: true });
   }
   if (problems.length) {
     for (const problem of problems) console.error(problem);

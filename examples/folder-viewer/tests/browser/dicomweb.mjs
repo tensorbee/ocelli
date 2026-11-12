@@ -8,8 +8,13 @@
 //            throughout
 //   release  a local source choice is a new intent for the remote panel, so
 //            the synthetic open, the folder change and the folder picker
-//            each cancel a pending fetch, release a staged body and return
-//            the panel to its idle line
+//            each cancel a pending fetch and return the panel to its idle
+//            line, and a local choice made while the provider still loads
+//            keeps the studies search that load returns from writing over
+//            that line. The release of a staged body itself is read in the
+//            core unit suite, through a probe that carries no generation
+//            gate, because every receipt reader here is gated by the
+//            generation a release advances
 //
 // The remote path resolves no tier and adds no GPU path. The tier-independent
 // observable asserted here is that no canvas appears anywhere on the page
@@ -404,6 +409,48 @@ async function main() {
       problems.push("the page showed no canvas at the first local snapshot");
     }
 
+    // The panel's first open starts loading the provider. A local source
+    // chosen while that load is in flight is a release with no provider to
+    // cancel, and the studies search that load returns must not write over
+    // the release's idle line. The library request is held so the window is
+    // deterministic, on a page of its own so the flow below keeps its
+    // footing: the checks this page already ran have finished that same
+    // load, so here it is still in flight when the panel opens.
+    const libraryUrl = `${viewerOrigin}/lib/ocelli-core/index.js`;
+    let librarySeen = 0;
+    let releaseLibrary = () => {};
+    const libraryHeld = new Promise((resolve) => {
+      releaseLibrary = resolve;
+    });
+    const panelPage = await browser.newPage();
+    await panelPage.route(libraryUrl, async (route) => {
+      librarySeen += 1;
+      await libraryHeld;
+      await route.continue().catch(() => undefined);
+    });
+    await panelPage.goto(viewerOrigin);
+    await panelPage.waitForSelector("#source-dicomweb", { state: "visible" });
+    await panelPage.click("#source-dicomweb");
+    await panelPage.click("#source-synthetic");
+    await waitRemoteState(panelPage, REMOTE_IDLE);
+    releaseLibrary();
+    // The load now returns and builds the provider. The resumed open must
+    // then leave the release's idle line standing, so the provider is
+    // awaited first and the line is polled after it.
+    await panelPage.waitForFunction(() => remoteProvider !== null, undefined, { timeout: 30000 });
+    for (let tick = 0; tick < 100; tick += 1) {
+      const text = await panelPage.evaluate(() => document.querySelector("#remote-state")?.textContent ?? "");
+      if (text !== REMOTE_IDLE) {
+        problems.push(`the resumed search wrote "${text}" over the release's idle line`);
+        break;
+      }
+      await panelPage.waitForTimeout(50);
+    }
+    if (librarySeen !== 1) {
+      problems.push(`the library route saw ${librarySeen} requests, 1 expected`);
+    }
+    await panelPage.close();
+
     await page.waitForSelector("#source-dicomweb", { state: "visible" });
     await page.click("#source-dicomweb");
     await page.locator("#remote-list button", { hasText: study }).first().click();
@@ -476,8 +523,9 @@ async function main() {
       problems.push(`the page held ${shownAfterFetch} canvases after the validated fetch, ${local.canvases} before, so a display appeared`);
     }
 
-    // A validated fetch stages a receipt the page does not take, so the
-    // staged body is present until a local source change releases it.
+    // A validated fetch stages a receipt the page does not take. Whether a
+    // body is held is readable only while the generation is unmoved, which
+    // is exactly the state this check is in.
     const stagedAfterFetch = await page.evaluate(() => remoteProvider.readStagedInfo() !== null);
     if (!stagedAfterFetch) {
       problems.push("the validated fetch left no staged receipt");
@@ -485,18 +533,17 @@ async function main() {
 
     // Opening a local source is a new intent for the remote panel. The page
     // cancels a pending remote fetch and releases a staged body there, so a
-    // late reply can never claim the local image is unchanged. First the
-    // release of the body the settled fetch left behind.
+    // late reply can never claim the local image is unchanged. That the
+    // body itself is released is read in the core unit suite, through the
+    // probe that carries no generation gate: after a release, every receipt
+    // reader here is gated by the generation the release advanced.
     await page.click("#source-synthetic");
     await waitRemoteState(page, REMOTE_IDLE);
     await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));
-    const stagedAfterLocal = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
-    if (!stagedAfterLocal) {
-      problems.push("opening a local study kept the staged remote body");
-    }
 
     // Then a fetch held pending across the local change. The stale status
-    // must never appear, and the aborted reply must stage nothing.
+    // must never appear, because the aborted reply is discarded before it
+    // can stage anything.
     let heldPendingCount = 0;
     let releaseHeldPending = () => {};
     const heldPending = new Promise((resolve) => {
@@ -530,10 +577,6 @@ async function main() {
         break;
       }
       await page.waitForTimeout(50);
-    }
-    const stagedAfterCancel = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
-    if (!stagedAfterCancel) {
-      problems.push("the cancelled pending fetch staged a body");
     }
     await page.unroute(heldUrl);
 
@@ -631,8 +674,8 @@ async function main() {
 
     // The folder change path. A pending instance fetch is held at the native
     // route, then the hidden folder input is given a directory that holds no
-    // DICOM. The change event must cancel the pending fetch, release any
-    // staged body and leave the idle line, without opening a study.
+    // DICOM. The change event must cancel the pending fetch and leave the
+    // idle line, without opening a study.
     await page.locator("#remote-list button", { hasText: study }).first().click();
     await waitRemoteState(page, "Choose a series.");
     await page.locator("#remote-list button", { hasText: series }).first().click();
@@ -666,15 +709,12 @@ async function main() {
     if (changeSeen !== 1) {
       problems.push(`the folder change route saw ${changeSeen} requests, 1 expected`);
     }
-    if (await page.evaluate(() => remoteProvider.readStagedInfo() !== null)) {
-      problems.push("the folder change kept a staged remote body");
-    }
     await page.unroute(`${viewerOrigin}/dicweb/instance`);
 
     // The folder picker path. The release happens when the picker opens,
     // before any file is chosen, so the pending fetch is cancelled and the
     // idle line is shown while the chooser is up. The chooser is then given
-    // the same not-DICOM directory, so the change it fires releases again
+    // the same not-DICOM directory, so the change it fires is a release too
     // and its open is refused rather than shown.
     let pickerSeen = 0;
     let releasePicker = () => {};
@@ -707,9 +747,6 @@ async function main() {
     }
     if (pickerSeen !== 1) {
       problems.push(`the folder picker route saw ${pickerSeen} requests, 1 expected`);
-    }
-    if (await page.evaluate(() => remoteProvider.readStagedInfo() !== null)) {
-      problems.push("the folder picker kept a staged remote body");
     }
     await page.unroute(`${viewerOrigin}/dicweb/instance`);
 

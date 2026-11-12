@@ -1455,12 +1455,17 @@ probeRemoteSource();
 
 let remoteProvider = null;
 let remoteProviderPromise = null;
+// The panel's release epoch. A local source chosen while the provider is
+// still loading has no provider to cancel yet, so the epoch is what the
+// studies search that load returns must check before it writes anything.
+let remoteEpoch = 0;
 // Opening a local source is a new intent for the remote panel too. A pending
 // remote fetch is cancelled and a staged body is released, so a late reply
 // can never claim the local image is unchanged and no body is held. The
 // panel also returns to its idle line, so no stale status outlives the
 // release.
 function remoteRelease() {
+  remoteEpoch += 1;
   const provider = remoteProvider;
   if (provider) {
     provider.cancelPending();
@@ -1526,11 +1531,17 @@ function remoteBackItem() {
 }
 
 async function remoteOpenStudies() {
+  const epoch = remoteEpoch;
   let provider = null;
   try {
     provider = await remoteProviderFor();
   } catch (error) {
-    remoteState("The DICOMweb library is not available.");
+    provider = null;
+  }
+  if (epoch !== remoteEpoch) {
+    // A local source was chosen while the provider loaded. Its release
+    // already spoke and its idle line outlives this load, so nothing here
+    // is written over it.
     return;
   }
   if (!provider) {

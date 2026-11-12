@@ -1,6 +1,7 @@
 import type { InstanceIdentity, StagedMetadata } from "./index.js";
 import { afterEach, expect, vi } from "vitest";
 import { DicomwebProvider } from "./index.js";
+import { STAGED_BODY_PROBE } from "./dicomweb-viewer.js";
 import { OcelliError } from "./ocelli-error.js";
 
 const STUDY_UID = "2.25.1";
@@ -1683,7 +1684,11 @@ it("releases the staged body, aborts the held request and stages a fresh body", 
   // receipt is reported while the generation is unmoved, and after the
   // cancel the same call reports nothing and the old receipt is refused.
   // The held request's abort signal is the observation that does not depend
-  // on the generation at all: the cancel reached the wire.
+  // on the generation at all: the cancel reached the wire. The second
+  // intent also clears the staged body before the cancel runs, so the two
+  // gated calls below would stay green if cancelPending kept a body. The
+  // next test observes the clearing itself through the staged body probe,
+  // which carries no generation gate.
   const raw = new Uint8Array([10, 20, 30, 40]);
   const boundary = "f245-cancel-staged-boundary";
   const captured: CapturedCalls = { native: [], upstream: [] };
@@ -1773,6 +1778,44 @@ it("releases the staged body, aborts the held request and stages a fresh body", 
     for (const held of heldOperations) {
       held.resolve(new Response('{"code":"HttpStatus"}', { status: 503, headers: { "Content-Type": "application/json" } }));
     }
+  }
+});
+
+it("releases a settled staged body when a cancel runs with no new intent", async () => {
+  // The receipt readers gate on the generation, and a cancel advances it,
+  // so they cannot show the release of a body that was staged before the
+  // cancel. The staged body probe carries no gate, and no new intent runs
+  // between the settled fetch and the cancel here, so what the probe loses
+  // is the clearing in cancelPending itself.
+  const raw = new Uint8Array([3, 1, 4, 1, 5]);
+  const boundary = "f245-cancel-settled-boundary";
+  const captured: CapturedCalls = { native: [], upstream: [] };
+  const provider = makeWadoProvider(
+    raw,
+    boundary,
+    async (call) =>
+      new Response(JSON.stringify(await nativeInstanceEnvelope(call, boundary)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    captured,
+  );
+  try {
+    const staged = await provider.fetchSelectedInstance({
+      studyUid: STUDY_UID,
+      seriesUid: SERIES_UID,
+      instanceUid: INSTANCE_UID,
+    });
+    expect(provider[STAGED_BODY_PROBE]()).toBe(raw.byteLength);
+    provider.cancelPending();
+    expect(provider[STAGED_BODY_PROBE]()).toBeNull();
+    // The gated readers report nothing now too, which alone would not
+    // separate a release from the generation the cancel advanced.
+    expect(provider.readStagedInfo()).toBeNull();
+    expect(provider.takeStagedInstance(staged)).toBeNull();
+    expect(captured.native).toHaveLength(1);
+  } finally {
+    provider.dispose();
   }
 });
 });
