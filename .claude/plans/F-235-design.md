@@ -1439,3 +1439,9 @@ Approved after four GLM design rounds and the coordinator amendment after round 
 4. The container derivation lives in `produce.rs` where the sidecar is read, and `gpu_candidate.rs` only gains the route parameter. Its own test calls to `draw` (about lines 237 and 243) pass `PreApplied`.
 5. The count-0 refusal and the RouteInvalid decision unit get their own Tests row, and `RouteError` in `fill_modality_table`'s signature is defined as the shared check's error.
 6. The header's "design round 4" note and its evidence-invalidation sentence are read as superseded by this section, and AC19's evidence depends on the stale clear and on rebind's dirty marking.
+
+## Lead amendment after implementation review pass 1, 2026-11-11
+
+**A stale Load pass never clears.** A slab composites over another viewport in the same target, which is why its pass loads. When a slab is stale, its pass keeps `LoadOp::Load` and issues no draw, and the graph marks every viewport that renders into the same target dirty, so the base layer redraws beneath it on that frame. The clear rule of the state table applies only to passes that own their target. An acceptance fixture registers a stack and a slab on two views of one texture, makes the slab stale with `set_voi`, and reads the stack's pixels intact where the slab is absent.
+
+**AC5's tier B browser vehicle.** The headless Chromium WebGL2 run uses a second `wasm-bindgen` export in `crates/ocelli-wasm/src/canvas.rs` behind a cargo feature named `tier-b-probe`, off by default, so the shipped wasm and its size budget are unchanged. `tools/tier-b/run.mjs` builds with that feature and asserts 0.0, 255.0 and 127.5 with exit 0. Both files join the write set. The native GL vehicle records its miss on a host with no GL adapter, which is not the run, and the browser vehicle is the AC5 evidence.
