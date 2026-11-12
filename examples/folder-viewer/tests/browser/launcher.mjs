@@ -14,12 +14,12 @@
 // The binary is also identified at the process layer. The pid listening on
 // the launcher's port is resolved with lsof, and its process command is
 // read with ps, because comm alone is truncated to the last component on
-// Linux, where this suite runs in CI, and names no directory. The first
-// word of that command is the executable path the spawner set. The command
-// must begin with the private target directory followed by a path
-// separator. A launcher that ignored the compiler artifact cargo named and
-// ran a stale build from the default target directory would serve the same
-// page with the same debug note, and would fail only here.
+// Linux, where this suite runs in CI, and names no directory. That command
+// begins with the executable path the spawner set. It must begin with the
+// private target directory followed by a path separator. A launcher that
+// ignored the compiler artifact cargo named and ran a stale build from the
+// default target directory would serve the same page with the same debug
+// note, and would fail only here.
 //
 // The launcher rebuilds the core package dist in the checkout and builds
 // the debug profile into the private target directory, so the first run of

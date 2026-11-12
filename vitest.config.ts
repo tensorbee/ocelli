@@ -13,6 +13,11 @@ export default defineConfig({
       "examples/*/src/**/*.test.ts",
       "examples/*/src/**/*.test.tsx",
     ],
+    // The dicomweb-viewer module's own release tests live inside the module
+    // under vitest's in-source testing, because only code lexically inside
+    // the class can read its private staged field. This entry makes vitest
+    // collect that file and define import.meta.vitest for it.
+    includeSource: ["packages/core/src/dicomweb-viewer.ts"],
     // The wasm boundary file needs a built module. `npm run test` does not
     // build one. Run it with `npx vitest run --config vitest.boundary.config.ts`
     // after `wasm-pack build crates/ocelli-wasm --dev --target web --out-dir target/boundary-wasm`.

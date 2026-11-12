@@ -12,9 +12,9 @@
 //            line, and a local choice made while the provider still loads
 //            keeps the studies search that load returns from writing over
 //            that line. The release of a staged body itself is read in the
-//            core unit suite, through a probe that carries no generation
-//            gate, because every receipt reader here is gated by the
-//            generation a release advances
+//            provider module's own vitest block, through a peeker that
+//            carries no generation gate, because every receipt reader here
+//            is gated by the generation a release advances
 //
 // The remote path resolves no tier and adds no GPU path. The tier-independent
 // observable asserted here is that no canvas appears anywhere on the page
@@ -534,9 +534,10 @@ async function main() {
     // Opening a local source is a new intent for the remote panel. The page
     // cancels a pending remote fetch and releases a staged body there, so a
     // late reply can never claim the local image is unchanged. That the
-    // body itself is released is read in the core unit suite, through the
-    // probe that carries no generation gate: after a release, every receipt
-    // reader here is gated by the generation the release advanced.
+    // body itself is released is read in the provider module's own vitest
+    // block, through the peeker that carries no generation gate: after a
+    // release, every receipt reader here is gated by the generation the
+    // release advanced.
     await page.click("#source-synthetic");
     await waitRemoteState(page, REMOTE_IDLE);
     await page.waitForFunction(() => !(document.querySelector("#status")?.textContent ?? "").startsWith("Opening"));

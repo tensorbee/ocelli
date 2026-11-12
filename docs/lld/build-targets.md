@@ -941,7 +941,7 @@ one cargo's own compiler artifact named. The directory is kept between runs,
 so the first run is a cold full debug graph build and later runs are
 incremental. The binary is also identified at the process layer: the pid
 listening on the launcher's port is resolved with `lsof` and its process
-command is read with `ps -o command=`, whose first word is the executable
+command is read with `ps -o command=`, which begins with the executable
 path the spawner set. That command must begin with the private target
 directory followed by a path separator, so a launcher that ignored the
 compiler artifact and ran a stale build from the default target directory

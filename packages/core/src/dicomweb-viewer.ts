@@ -374,6 +374,12 @@ export type StagedMetadata = Readonly<{
 
 export type OwnedEncodedInstance = { body: ArrayBuffer; metadata: StagedMetadata };
 
+// Test-only peeker type. It is registered under vitest's in-source testing
+// by the static block in DicomwebProvider and read by that module's own
+// test block at the foot of this file. It never appears in the emitted
+// declaration file.
+type StagedBodyPeek = (provider: DicomwebProvider) => OwnedEncodedInstance | null;
+
 function decodeInstanceMetadata(
   bytes: Uint8Array,
   expected: {
@@ -499,7 +505,7 @@ export class DicomwebProvider {
     for (const entry of [...this.#live]) {
       entry.controller.abort();
     }
-    this.releaseStaged();
+    this.#release();
     const replaced = this.#queued;
     if (replaced !== null) {
       this.#queued = null;
@@ -601,7 +607,7 @@ export class DicomwebProvider {
     for (const entry of [...this.#live]) {
       entry.controller.abort();
     }
-    this.releaseStaged();
+    this.#release();
     const queued = this.#queued;
     this.#queued = null;
     if (queued !== null) {
@@ -616,6 +622,9 @@ export class DicomwebProvider {
       return;
     }
     this.#disposed = true;
+    // Released directly, so an override of cancelPending cannot keep the
+    // staged body either. The release is idempotent.
+    this.#release();
     this.cancelPending();
   }
 
@@ -1319,9 +1328,199 @@ export class DicomwebProvider {
   }
 
   releaseStaged(): void {
-    // The intent and cancel paths release through this public method, so a
-    // test-only subclass can observe a release without a probe shipping in
-    // the class.
+    // The documented public release. The intent, cancel and dispose paths
+    // release through the private #release, so an override of this method
+    // can neither block nor observe an internal release.
+    this.#release();
+  }
+
+  #release(): void {
     this.#staged = null;
   }
+
+  // Test-only observation seam. Every public staged reader gates on the
+  // current generation, which every intent and cancel advances, so no
+  // public reader can separate a released body from a stale one. Under
+  // vitest's in-source testing this block registers a peeker that reports
+  // the staged body with no gate. The guard is undefined in every other
+  // context, so the built module carries the block inert and nothing
+  // registers on it.
+  static {
+    if (import.meta.vitest) {
+      (DicomwebProvider as unknown as { __stagedBodyPeek?: StagedBodyPeek }).__stagedBodyPeek = (
+        provider: DicomwebProvider,
+      ): OwnedEncodedInstance | null => provider.#staged;
+    }
+  }
+}
+
+// The release of the staged body is observable only inside the class, so
+// the release tests live here under vitest's in-source testing. The public
+// readers gate on the generation every release advances, so they cannot
+// show the release itself. These tests prove both internal release lines
+// and the override contract: an override of releaseStaged can neither
+// observe nor block an internal release.
+if (import.meta.vitest) {
+  const { it, afterEach, expect, vi } = import.meta.vitest;
+
+  const peekStagedBody = (provider: DicomwebProvider): OwnedEncodedInstance | null => {
+    const peek = (DicomwebProvider as unknown as { __stagedBodyPeek?: StagedBodyPeek }).__stagedBodyPeek;
+    if (peek === undefined) {
+      throw new Error("the staged body peeker did not register");
+    }
+    return peek(provider);
+  };
+
+  const sha256Hex = async (buffer: BufferSource): Promise<string> =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+
+  const STUDY_UID = "2.25.1";
+  const SERIES_UID = "2.25.2";
+  const INSTANCE_UID = "2.25.3";
+  const IDENTITY = { studyUid: STUDY_UID, seriesUid: SERIES_UID, instanceUid: INSTANCE_UID };
+
+  // One provider whose upstream serves `raw` as one synthetic multipart
+  // instance and whose native route echoes the posted body in its receipt,
+  // the same shapes the unit suite's richer fixtures use.
+  function stagedProvider<C extends typeof DicomwebProvider>(
+    raw: Uint8Array,
+    boundary: string,
+    ctor: C = DicomwebProvider as C,
+  ): InstanceType<C> {
+    const upstreamFetch: typeof fetch = async () =>
+      new Response(raw.slice(), {
+        status: 200,
+        headers: { "Content-Type": `multipart/related; type="application/dicom"; boundary=${boundary}` },
+      });
+    const nativeFetch: typeof fetch = async (_input, init) => {
+      // The provider posts the staged instance as one ArrayBuffer body.
+      const body = new Uint8Array((init?.body ?? new ArrayBuffer(0)) as ArrayBuffer);
+      const headers = new Headers(init?.headers);
+      const envelope = {
+        identity: IDENTITY,
+        rawBodySha256: await sha256Hex(body),
+        sourceNonce: headers.get("X-Wado-Source-Nonce") ?? "",
+        generation: Number(headers.get("X-Wado-Generation") ?? "0"),
+        byteLength: body.byteLength,
+        representation: { field: "wado-rs-instances", boundary },
+      };
+      return new Response(JSON.stringify(envelope), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    vi.stubGlobal("fetch", nativeFetch);
+    // The constructor is constrained to the provider type, so the instance
+    // it builds is the caller's refined class.
+    return new ctor({
+      studiesServiceUrl: "https://upstream.example/dicomweb",
+      wadoUriUrl: "https://upstream.example/wado",
+      fetch: upstreamFetch,
+    }) as InstanceType<C>;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("releases the staged body when a cancel runs with no new intent", async () => {
+    const provider = stagedProvider(new Uint8Array([10, 20, 30, 40]), "f245-insource-cancel");
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(4);
+      provider.cancelPending();
+      expect(peekStagedBody(provider)).toBeNull();
+      expect(provider.readStagedInfo()).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("clears a staged body when a newer intent begins", async () => {
+    const provider = stagedProvider(new Uint8Array([2, 7, 1, 8]), "f245-insource-intent");
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(4);
+      const pending = provider.fetchSelectedInstance(IDENTITY);
+      // The intent releases before the newer fetch stages, so this read
+      // sits between the two and cannot be satisfied by the newer staging.
+      expect(peekStagedBody(provider)).toBeNull();
+      const settled = await pending;
+      expect(settled.generation).toBe(staged.generation + 1);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("releases on cancel even when an override of releaseStaged forgets super", async () => {
+    class OverrideWithoutSuper extends DicomwebProvider {
+      override releaseStaged(): void {
+        // A consumer override that releases nothing.
+      }
+    }
+    const provider = stagedProvider(new Uint8Array([3, 1, 4, 1, 5]), "f245-insource-override", OverrideWithoutSuper);
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(5);
+      provider.cancelPending();
+      expect(peekStagedBody(provider)).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("releases on dispose even when an override of releaseStaged forgets super", async () => {
+    class OverrideWithoutSuper extends DicomwebProvider {
+      override releaseStaged(): void {
+        // A consumer override that releases nothing.
+      }
+    }
+    const provider = stagedProvider(new Uint8Array([1, 6, 1, 8]), "f245-insource-dispose", OverrideWithoutSuper);
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(4);
+      provider.dispose();
+      expect(peekStagedBody(provider)).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("releases on dispose even when an override of cancelPending forgets super", async () => {
+    class CancelOverrideWithoutSuper extends DicomwebProvider {
+      override cancelPending(): void {
+        // A consumer override that cancels nothing.
+      }
+    }
+    const provider = stagedProvider(new Uint8Array([5, 1, 4]), "f245-insource-cancel-override", CancelOverrideWithoutSuper);
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(3);
+      provider.dispose();
+      expect(peekStagedBody(provider)).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("does not route an internal release through the public releaseStaged", async () => {
+    class RecordingOverride extends DicomwebProvider {
+      routed = 0;
+      override releaseStaged(): void {
+        this.routed += 1;
+        super.releaseStaged();
+      }
+    }
+    const provider = stagedProvider(new Uint8Array([9, 9, 9, 9]), "f245-insource-routing", RecordingOverride);
+    try {
+      await provider.fetchSelectedInstance(IDENTITY);
+      provider.cancelPending();
+      expect(provider.routed).toBe(0);
+      expect(peekStagedBody(provider)).toBeNull();
+    } finally {
+      provider.dispose();
+    }
+  });
 }
