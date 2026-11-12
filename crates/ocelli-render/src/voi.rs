@@ -17,6 +17,7 @@
 //! already draws: values there, layout here.
 
 use bytemuck::{Pod, Zeroable};
+use ocelli_core::Stored;
 use ocelli_pixel::{LutChain, VoiFunction};
 
 /// The WGSL this uniform is declared in, composed by a consumer with its own
@@ -190,6 +191,186 @@ const fn fn_kind(function: VoiFunction) -> u32 {
     }
 }
 
+/// Texels per folded modality table row.
+///
+/// The fold is the width the pinned wgpu limits force: a 16-bit container is
+/// 65,536 entries, a single row that wide exceeds every named
+/// `max_texture_dimension_2d`, and 256 fits the 2048 downlevel floor with
+/// 1024 bytes per `R32Float` row, already `COPY_BYTES_PER_ROW_ALIGNMENT`.
+pub const MODALITY_FOLD: u32 = 256;
+
+/// How a viewport's stage 1 reaches the shader.
+///
+/// `Tabled` is only legal for a whole integer container, because the
+/// table's index is the container's own value. A legal range covers every
+/// value the container can hold: `count` at least 1 and at most 65,536, and every covered
+/// value inside the union of the signed and unsigned 16-bit domains,
+/// -32,768 to 65,535. That expresses every integer DICOM container, 8, 12
+/// or 16 bits, signed or unsigned, and keeps the builder's conversion
+/// through `u16` or `i16` exact, since every accepted value fits one of
+/// them. The two ranges the volume ray derives from `brick_format`, `(0, 256)`
+/// for `R8Uint` and `(0, 65536)` for `R16Uint`, are the common cases, and
+/// a 12-bit stack declares `(0, 4096)`. Any other range is refused at
+/// registration, including `count` 0, which the shared check's decision
+/// unit pins because `div_ceil(0)` would otherwise reach `create_texture`
+/// as a zero extent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredRoute {
+    /// Integer stored data. `first` is the container's smallest value and
+    /// `count` its width. The graph builds and owns the folded table. The
+    /// table is `fold` texels wide and `count.div_ceil(fold)` high, so a
+    /// count that is not a multiple of the fold is accepted and its last
+    /// row is padded to the fold with entry values the validated index
+    /// range never reaches.
+    Tabled {
+        /// The container's smallest stored value.
+        first: i32,
+        /// The container's width in values.
+        count: u32,
+    },
+    /// Everything else, including F32, any width above 16 bits, and every
+    /// interpolated route. Stage 1 is applied on the CPU before the bytes
+    /// are written, and the uniform's rescale is written as identity.
+    PreApplied,
+}
+
+/// The 16-byte route uniform, `voi.wgsl`'s `ModalityRoute`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct ModalityRoute {
+    /// 1 reads the folded table, 0 returns its input unchanged.
+    pub tabled: u32,
+    /// The container's smallest stored value.
+    pub first: i32,
+    /// Texels per table row. The fold width, 256.
+    pub fold: u32,
+    pub pad: u32,
+}
+
+/// Why a tabled declaration or fill was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum RouteError {
+    /// The declared count is zero, above 65,536, or its covered values
+    /// leave the union of the signed and unsigned 16-bit domains.
+    #[error("the declared container range is empty or leaves the accepted 16-bit union")]
+    RangeOutside,
+    /// The pass stages its own pre-applied samples or composes no VOI
+    /// text, so a whole-integer container has nothing to serve.
+    #[error("this pass cannot serve a tabled declaration")]
+    PassRefusesTable,
+    /// The route declares no container, so there is nothing to fill.
+    #[error("a pre-applied route has no container to fill a table from")]
+    NotTabled,
+    /// The destination buffer is shorter than the declared container.
+    #[error("the table buffer is shorter than the declared container")]
+    BufferShort,
+}
+
+/// The largest container width a table may cover, `stored_sample_table`'s
+/// own limit: more than 65,536 entries is refused.
+const TABLE_MAX_ENTRIES: u32 = 65_536;
+
+/// The union of the signed and unsigned 16-bit domains' smallest value.
+const UNION_FIRST: i32 = -32_768;
+
+/// The union of the signed and unsigned 16-bit domains' largest value.
+const UNION_LAST: i32 = 65_535;
+
+/// Whether a `Tabled` declaration covers a legal whole-integer container.
+///
+/// `count` 0 is refused, because `count.div_ceil(fold)` of 0 is a zero
+/// texture extent and `create_texture` refuses that. A count above
+/// 65,536 is refused on `stored_sample_table`'s own limit. A covered
+/// value outside -32,768 to 65,535 is refused, because the builder's
+/// conversion through `u16` or `i16` must stay exact. A `PreApplied`
+/// route declares no container and is legal everywhere.
+///
+/// # Errors
+///
+/// [`RouteError::RangeOutside`] for an illegal container.
+pub fn check_container(route: StoredRoute) -> Result<(), RouteError> {
+    let StoredRoute::Tabled { first, count } = route else {
+        return Ok(());
+    };
+    if count == 0 || count > TABLE_MAX_ENTRIES {
+        return Err(RouteError::RangeOutside);
+    }
+    let span = i64::from(count) - 1;
+    let last = i64::from(first) + span;
+    if first < UNION_FIRST || last > i64::from(UNION_LAST) {
+        return Err(RouteError::RangeOutside);
+    }
+    Ok(())
+}
+
+/// Fill a folded modality table with `ocelli_pixel::modality`'s own outputs.
+///
+/// Entry `i` of `out` receives `modality(Stored(container_value), slope,
+/// intercept).0` for the container value `first + i`, walked as `i32`.
+/// The conversion to `f32` goes through the 16-bit types,
+/// `f32::from(u16::try_from(value))` at zero and above and
+/// `f32::from(i16::try_from(value))` below, exact for every value in the
+/// accepted union: `std` has no `From<i32>` for `f32`, and a direct `as`
+/// is a denied truncation cast. The buffer's tail beyond `count`, the
+/// padded last row's unused texels when `count` is not a multiple of the
+/// fold, is filled with `0.0` and is reachable by no validated index.
+/// The builder calls `ocelli_pixel::modality`, it does not re-derive the
+/// formula.
+///
+/// # Errors
+///
+/// [`RouteError::NotTabled`] for a `PreApplied` route, which has no
+/// container to walk. [`RouteError::RangeOutside`] for a container
+/// outside the accepted union. [`RouteError::BufferShort`] when `out`
+/// cannot hold the declared count.
+pub fn fill_modality_table(
+    route: StoredRoute,
+    slope: f32,
+    intercept: f32,
+    out: &mut [f32],
+) -> Result<(), RouteError> {
+    let StoredRoute::Tabled { first, count } = route else {
+        return Err(RouteError::NotTabled);
+    };
+    check_container(route)?;
+    let count_us = usize::try_from(count).map_err(|_| RouteError::BufferShort)?;
+    if out.len() < count_us {
+        return Err(RouteError::BufferShort);
+    }
+    for (index, slot) in out.iter_mut().enumerate().take(count_us) {
+        let offset = i32::try_from(index).map_err(|_| RouteError::RangeOutside)?;
+        let value = first.checked_add(offset).ok_or(RouteError::RangeOutside)?;
+        let container = if value >= 0 {
+            f32::from(u16::try_from(value).map_err(|_| RouteError::RangeOutside)?)
+        } else {
+            f32::from(i16::try_from(value).map_err(|_| RouteError::RangeOutside)?)
+        };
+        *slot = ocelli_pixel::modality(Stored(container), slope, intercept).0;
+    }
+    for slot in out.iter_mut().skip(count_us) {
+        *slot = 0.0;
+    }
+    Ok(())
+}
+
+impl VoiParams {
+    /// The same thirty-two bytes with the rescale written as identity.
+    ///
+    /// A viewport whose texture already holds modality values draws with
+    /// this uniform: the shader's stage 1 returns its input unchanged, so
+    /// a surviving rescale would apply stage 1 twice. `center`, `width`,
+    /// `ymin`, `ymax`, `fn_kind` and `invert` are untouched, because a
+    /// pre-applied upload changes nothing about the window.
+    #[must_use]
+    pub fn with_identity_rescale(self) -> Self {
+        Self {
+            slope: 1.0,
+            intercept: 0.0,
+            ..self
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{VOI_WGSL, fn_kind};
@@ -204,28 +385,257 @@ mod tests {
         assert_eq!(fn_kind(VoiFunction::Sigmoid), 2);
     }
 
-    /// **The shader carries no entry point and no binding but section 18.4's.**
+    /// **The shader carries no entry point, and reserves exactly bindings
+    /// 0, 1 and 2.**
     ///
     /// Its header says so and this is the assertion behind that sentence. An
     /// entry point added here would make the file compile on its own and stop
-    /// composing, and a second binding would collide with the consumer's.
+    /// composing, and a second binding beyond the reserved set would collide
+    /// with the consumer's. Binding 0 is section 18.4's uniform. Bindings 1
+    /// and 2 are the route uniform and the folded modality table, which the
+    /// header documents as reserved by this file. Bindings 3 upward belong to
+    /// the consumer.
     #[test]
-    fn the_shader_is_composable_and_reserves_only_binding_zero() {
+    fn the_shader_is_composable_and_reserves_bindings_zero_one_and_two() {
         assert!(
             !VOI_WGSL.contains("@vertex")
                 && !VOI_WGSL.contains("@fragment")
                 && !VOI_WGSL.contains("@compute"),
             "voi.wgsl grew an entry point, so it no longer composes"
         );
-        assert!(!VOI_WGSL.contains("@binding(1)"));
+        assert!(!VOI_WGSL.contains("@binding(3)"));
         assert!(!VOI_WGSL.contains("var<storage"));
-        // The DECLARATION, not the binding attribute, which the file's own
+        // The DECLARATIONS, not the binding attributes, which the file's own
         // header also names in prose when it explains what it reserves.
         assert_eq!(
             VOI_WGSL.matches("var<uniform> voi : VoiParams;").count(),
             1,
             "voi.wgsl declares the section 18.4 uniform other than once"
         );
+        assert_eq!(
+            VOI_WGSL.matches("var<uniform> modality_route : ModalityRoute;")
+                .count(),
+            1,
+            "voi.wgsl declares the route uniform other than once"
+        );
+        assert_eq!(
+            VOI_WGSL.matches("var modality_table : texture_2d<f32>;").count(),
+            1,
+            "voi.wgsl declares the folded table other than once"
+        );
+    }
+
+    /// **The count-0 refusal, and the accepted union's edges.**
+    ///
+    /// `count` 0 must refuse before `div_ceil` reaches `create_texture` as a
+    /// zero extent, which wgpu refuses with `TextureDimensionError::Zero`
+    /// rather than clipping. The union is -32,768 to 65,535, and a covered
+    /// value outside it would make the builder's `u16` or `i16` conversion
+    /// inexact.
+    #[test]
+    fn the_container_check_refuses_count_zero_and_ranges_outside_the_union() {
+        use super::{StoredRoute, check_container};
+        assert_eq!(
+            check_container(StoredRoute::Tabled {
+                first: 0,
+                count: 0
+            }),
+            Err(super::RouteError::RangeOutside),
+            "count 0 would reach create_texture as a zero extent"
+        );
+        assert_eq!(
+            check_container(StoredRoute::Tabled {
+                first: 0,
+                count: 65_537
+            }),
+            Err(super::RouteError::RangeOutside),
+            "more than 65,536 entries is stored_sample_table's own refusal"
+        );
+        assert_eq!(
+            check_container(StoredRoute::Tabled {
+                first: -32_769,
+                count: 1
+            }),
+            Err(super::RouteError::RangeOutside),
+            "one step below the signed 16-bit domain"
+        );
+        assert_eq!(
+            check_container(StoredRoute::Tabled {
+                first: 65_536,
+                count: 1
+            }),
+            Err(super::RouteError::RangeOutside),
+            "one step above the unsigned 16-bit domain"
+        );
+        assert_eq!(
+            check_container(StoredRoute::Tabled {
+                first: i32::MAX - 1,
+                count: 4
+            }),
+            Err(super::RouteError::RangeOutside),
+            "a covered last value that would overflow the walk is refused"
+        );
+        // The accepted edges and the common shapes.
+        assert!(check_container(StoredRoute::Tabled {
+            first: -32_768,
+            count: 65_536
+        })
+        .is_ok());
+        assert!(check_container(StoredRoute::Tabled {
+            first: 0,
+            count: 65_536
+        })
+        .is_ok());
+        assert!(check_container(StoredRoute::Tabled {
+            first: 0,
+            count: 4_095
+        })
+        .is_ok());
+        assert!(check_container(StoredRoute::Tabled {
+            first: 0,
+            count: 16
+        })
+        .is_ok());
+        assert!(check_container(StoredRoute::Tabled {
+            first: -32_768,
+            count: 1
+        })
+        .is_ok());
+        assert!(check_container(StoredRoute::PreApplied).is_ok());
+    }
+
+    /// **AC17's builder entry, pinned as bits.**
+    ///
+    /// The pair-B table: slope `0x3D47EF8C`, intercept `0xC52D91AC`. Entry
+    /// 2371 holds `0xC52655EC`, `ocelli_pixel::modality`'s own two-rounding
+    /// output, and not pair A's 3718.0, which is what a builder that reused
+    /// the old pair would leave. PS3.3 C.11.1: output units are m*SV + b,
+    /// applied as multiply then add. Hand-computed with struct pack
+    /// round-trips: 2371.0 * 0x3D47EF8C is 0x42E777F4, and
+    /// 0x42E777F4 + 0xC52D91AC is 0xC52655EC. Entry 459 is where the two
+    /// roundings and a fused multiply-add part company: the two-rounding
+    /// value is 0xC52C2B32 and the fused value is 0xC52C2B31, so a builder
+    /// that contracted would leave the wrong bits there.
+    #[test]
+    fn the_builder_fills_pair_bs_table_entry_from_ocelli_pixel() {
+        use super::{StoredRoute, fill_modality_table};
+        let route = StoredRoute::Tabled {
+            first: 0,
+            count: 65_536,
+        };
+        let mut table = vec![0.0_f32; 65_536];
+        fill_modality_table(
+            route,
+            f32::from_bits(0x3D47EF8C),
+            f32::from_bits(0xC52D91AC),
+            &mut table,
+        )
+        .expect("the 16-bit container is legal");
+        let entry = table.get(2371).copied().unwrap_or(f32::NAN);
+        assert_eq!(
+            entry.to_bits(),
+            0xC52655EC,
+            "index 2371 is modality(2371) under pair B, not pair A's 3718.0"
+        );
+        // Entry 0 is the intercept itself: modality(0) = 0 * slope + b.
+        let first_entry = table.first().copied().unwrap_or(f32::NAN);
+        assert_eq!(
+            first_entry.to_bits(),
+            f32::from_bits(0xC52D91AC).to_bits(),
+            "entry 0 is the intercept under the two-rounding order"
+        );
+        // The fused-distinguishing entry: two roundings give ...32, a
+        // contraction gives ...31.
+        let distinguishing = table.get(459).copied().unwrap_or(f32::NAN);
+        assert_eq!(
+            distinguishing.to_bits(),
+            0xC52C2B32,
+            "entry 459 is the two-rounding value, not the fused 0xC52C2B31"
+        );
+    }
+
+    /// **The padded tail and the refusals.**
+    ///
+    /// A count that is not a multiple of the fold pads its last row with
+    /// `0.0`, and no validated index reaches the padding. A short buffer,
+    /// an illegal container and a pre-applied route are refused without
+    /// writing. Entry 4094 is modality(4094, 2.0, -1024.0) = 7164.0, hand
+    /// computed from PS3.3 C.11.1.
+    #[test]
+    fn the_builder_pads_the_tail_and_refuses_the_rest() {
+        use super::{StoredRoute, fill_modality_table};
+        let route = StoredRoute::Tabled {
+            first: 0,
+            count: 4_095,
+        };
+        let mut table = vec![7.5_f32; 4_096];
+        fill_modality_table(route, 2.0, -1024.0, &mut table).expect("4095 fits the union");
+        assert_eq!(
+            table.get(4_094).copied().unwrap_or(f32::NAN).to_bits(),
+            7_164.0_f32.to_bits(),
+            "the last real entry is modality(4094) under slope 2, intercept -1024"
+        );
+        assert_eq!(
+            table.get(4_095).copied().unwrap_or(f32::NAN).to_bits(),
+            0.0_f32.to_bits(),
+            "the padded texel is zero"
+        );
+        assert_eq!(
+            fill_modality_table(
+                StoredRoute::Tabled {
+                    first: 0,
+                    count: 4_095
+                },
+                2.0,
+                -1024.0,
+                &mut [0.0_f32; 4_094]
+            ),
+            Err(super::RouteError::BufferShort)
+        );
+        assert_eq!(
+            fill_modality_table(
+                StoredRoute::Tabled {
+                    first: 0,
+                    count: 0
+                },
+                2.0,
+                -1024.0,
+                &mut []
+            ),
+            Err(super::RouteError::RangeOutside)
+        );
+        assert_eq!(
+            fill_modality_table(StoredRoute::PreApplied, 2.0, -1024.0, &mut []),
+            Err(super::RouteError::NotTabled)
+        );
+    }
+
+    /// **The route uniform is 16 bytes and `with_identity_rescale` moves
+    /// only the rescale.**
+    #[test]
+    fn modality_route_is_sixteen_bytes_and_identity_rescale_keeps_the_window() {
+        use super::ModalityRoute;
+        assert_eq!(std::mem::size_of::<ModalityRoute>(), 16);
+        let voi = super::VoiParams {
+            center: 40.0,
+            width: 400.0,
+            slope: 2.0,
+            intercept: -1024.0,
+            ymin: 0.0,
+            ymax: 255.0,
+            fn_kind: 1,
+            invert: 1,
+        };
+        let identity = voi.with_identity_rescale();
+        assert_eq!(identity.slope, 1.0);
+        assert_eq!(identity.intercept, 0.0);
+        assert_eq!(identity.center, voi.center);
+        assert_eq!(identity.width, voi.width);
+        assert_eq!(identity.ymin, voi.ymin);
+        assert_eq!(identity.ymax, voi.ymax);
+        assert_eq!(identity.fn_kind, voi.fn_kind);
+        assert_eq!(identity.invert, voi.invert);
+        assert_eq!(std::mem::size_of::<super::VoiParams>(), 32);
     }
 
     /// **Tier B legality, as far as a text check can carry it.**

@@ -137,8 +137,14 @@ pub use slab::{
     SlabError, fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
 };
 pub use surface::{SurfaceDrawError, SurfaceView};
-pub use tier_b::{Section183Error, Section183Pixels, read_section_18_3, stored_format_name};
-pub use voi::{VOI_WGSL, VoiParams, VoiParamsError};
+pub use tier_b::{
+    Section183Error, Section183Pixels, StageOnePairs, read_section_18_3, read_stage_one_pairs,
+    stored_format_name,
+};
+pub use voi::{
+    MODALITY_FOLD, ModalityRoute, RouteError, StoredRoute, VOI_WGSL, VoiParams, VoiParamsError,
+    check_container, fill_modality_table,
+};
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which
 /// is the one mistake a copy-pasted crate skeleton actually makes.

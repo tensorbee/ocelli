@@ -25,7 +25,7 @@ use ocelli_pixel::{
     PresentationLutEvidence, SampleLayout, StoredBits, StoredPixelDescription, VoiFunction,
     VoiTransform,
 };
-use ocelli_render::{CpuRaster, RasterGrid, RasterQuality};
+use ocelli_render::{CpuRaster, RasterGrid, RasterQuality, StoredRoute};
 use ocelli_viewport::presentation::{Colormap, Presentation};
 use ocelli_viewport::view::{INDEX_TO_IMAGE_CENTRE, View, Zoom, f32_from_f64};
 
@@ -588,6 +588,7 @@ fn render_row(
             .source_grid()
             .map_err(|_| RowStop::failed("pixel-layout-refused"))?;
         let presentation = presentation_of(sidecar)?;
+        let route = declared_route(sidecar)?;
         let rgba = gpu
             .draw(
                 &camera.view,
@@ -595,6 +596,7 @@ fn render_row(
                 &samples,
                 [columns, rows],
                 [width, height],
+                route,
             )
             .map_err(RowStop::failed)?;
         Ok((rgba, width, height))
@@ -1455,6 +1457,42 @@ fn declared_frames(sidecar: &Value) -> Result<usize, RowStop> {
                 _ => Err(RowStop::failed("pixel-data-length")),
             }
         }
+    }
+}
+
+/// The container route the GPU candidate declares, derived where the
+/// sidecar is read.
+///
+/// An integral decoded stack with the standard bit layout, `highBit` equal
+/// to `bitsStored - 1`, declares the container the bits name: unsigned
+/// first 0 count `1 << bits`, signed first `-(1 << (bits - 1))` count
+/// `1 << bits`. `bitsStored` 0 has no `highBit` and `bitsStored` above 16
+/// exceeds the accepted union, so both fall back to `PreApplied` rather
+/// than shift. Anything else that cannot be expressed pre-applies.
+fn declared_route(sidecar: &Sidecar) -> Result<StoredRoute, RowStop> {
+    let bits_stored = json_u8(sidecar, "/attributes/bitsStored")?;
+    let high_bit = json_u8(sidecar, "/attributes/highBit")?;
+    let representation = json_u8(sidecar, "/attributes/pixelRepresentation")?;
+    if bits_stored == 0 || bits_stored > 16 {
+        return Ok(StoredRoute::PreApplied);
+    }
+    if high_bit != bits_stored - 1 {
+        return Ok(StoredRoute::PreApplied);
+    }
+    if representation > 1 {
+        return Ok(StoredRoute::PreApplied);
+    }
+    let bits = u32::from(bits_stored);
+    if representation == 0 {
+        Ok(StoredRoute::Tabled {
+            first: 0,
+            count: 1 << bits,
+        })
+    } else {
+        Ok(StoredRoute::Tabled {
+            first: -(1 << (bits - 1)),
+            count: 1 << bits,
+        })
     }
 }
 

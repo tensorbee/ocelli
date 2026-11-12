@@ -11,8 +11,21 @@
 
 use ocelli_core::Pt;
 use ocelli_render::{
-    BlendMode, Dirty, FrameOutcome, GraphError, GraphResources, Pass, Recovered, RenderGraph,
-    SegPass, StackPass, SurfaceDrawError, SurfaceView, ViewportId, VoiParams,
+    BlendMode,
+    Dirty,
+    FrameOutcome,
+    GraphError,
+    GraphResources,
+    Pass,
+    Recovered,
+    RenderGraph,
+    SegPass,
+    StackPass,
+    StoredRoute,
+    SurfaceDrawError,
+    SurfaceView,
+    ViewportId,
+    VoiParams,
 };
 use ocelli_seg::{LabelColourLut, PlaneFrame, Representation, Rgba8, SurfaceMesh, present_surface};
 
@@ -180,14 +193,20 @@ fn resize_replaces_the_target_and_two_viewports_submit_once() {
 
     let (source_a, source_view_a) = source_view(context.device());
     let (old_target, old_view) = color_target(context.device(), 4);
-    let registered = graph.register(&context, old_view, source_view_a, stack_pass());
+    let registered = graph.register(&context, old_view, source_view_a, stack_pass(),
+        StoredRoute::PreApplied,
+    );
+
     assert!(registered.is_ok());
     let Ok(first) = registered else { return };
     assert_eq!(first, ViewportId(0));
 
     let (_source_b, source_view_b) = source_view(context.device());
     let (_other_target, other_view) = color_target(context.device(), 4);
-    let registered = graph.register(&context, other_view, source_view_b, stack_pass());
+    let registered = graph.register(&context, other_view, source_view_b, stack_pass(),
+        StoredRoute::PreApplied,
+    );
+
     assert!(registered.is_ok());
     let Ok(second) = registered else { return };
     assert_eq!(second, ViewportId(1));
@@ -248,7 +267,10 @@ fn resize_replaces_the_target_and_two_viewports_submit_once() {
     assert_eq!(stale, vec![0x11; 16]);
 
     let (stored_target, stored_view) = color_target(context.device(), 1);
-    let registered = graph.register_stored(&context, &adapter, stored_view, 1, 1, stack_pass());
+    let registered = graph.register_stored(&context, &adapter, stored_view, 1, 1, stack_pass(),
+        StoredRoute::Tabled { first: 0, count: 65_536 },
+    );
+
     assert!(registered.is_ok());
     let Ok(stored) = registered else { return };
     assert_eq!(graph.uploads(), 0);
@@ -458,7 +480,8 @@ fn shown_surface_matches_the_presenter() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::LabelmapEdgeProjection,
         }),
-    ) {
+    StoredRoute::PreApplied,
+) {
         Ok(id) => id,
         Err(_) => return,
     };
@@ -483,7 +506,8 @@ fn shown_surface_matches_the_presenter() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    ) {
+    StoredRoute::PreApplied,
+) {
         Ok(id) => id,
         Err(_) => return,
     };

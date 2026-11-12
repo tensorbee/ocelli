@@ -13,7 +13,15 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, GraphError, Pass, RenderGraph, StackPass, Upload, UploadError,
+    BlendMode,
+    FrameOutcome,
+    GraphError,
+    Pass,
+    RenderGraph,
+    StackPass,
+    StoredRoute,
+    Upload,
+    UploadError,
     VoiParams,
 };
 
@@ -274,7 +282,8 @@ fn section_18_3_stored_samples_match_the_chain_and_voi_does_not_upload() {
             voi: params(&linear),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: -32_768, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     assert_eq!(graph.uploads(), 0);
@@ -371,7 +380,8 @@ fn a_different_extent_replaces_the_stored_texture() {
             voi: params(&linear),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: -32_768, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     assert!(
@@ -430,7 +440,8 @@ fn recovery_recreates_the_stored_texture_without_counting_an_upload() {
             voi: params(&linear),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: -32_768, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     assert!(

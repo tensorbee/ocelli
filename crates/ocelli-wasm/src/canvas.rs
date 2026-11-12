@@ -11,7 +11,7 @@ use js_sys::Reflect;
 use js_sys::Uint8ClampedArray;
 use ocelli_render::{
     BlendMode, GpuContext, Pass, RasterResult, RenderGraph, ResolvedAdapter, StackPass,
-    TierRequest, ViewportId, VoiParams, device_extent, resolve, resolve_adapter,
+    StoredRoute, TierRequest, ViewportId, VoiParams, device_extent, resolve, resolve_adapter,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -274,7 +274,10 @@ fn attach_with_context(
         let Some(graph) = table.graph.as_mut() else {
             return Err("the render graph was not created".to_owned());
         };
-        match graph.register(context, target, source, stack_pass()) {
+        match graph.register(context, target, source, stack_pass(),
+            StoredRoute::PreApplied,
+        ) {
+
             Ok(id) => id,
             Err(error) => return Err(error.to_string()),
         }

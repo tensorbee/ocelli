@@ -13,7 +13,15 @@ use ocelli_pixel::{
     LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence, VoiFunction,
     VoiTransform,
 };
-use ocelli_render::{BlendMode, FrameOutcome, Pass, RenderGraph, StackPass, VoiParams};
+use ocelli_render::{
+    BlendMode,
+    FrameOutcome,
+    Pass,
+    RenderGraph,
+    StackPass,
+    StoredRoute,
+    VoiParams,
+};
 
 fn chain(function: VoiFunction, photometric: PhotometricInterpretation) -> LutChain {
     let modality = ModalityTransform::new(None, Some(1.0), Some(0.0));
@@ -122,7 +130,8 @@ fn render_one(
             voi,
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::PreApplied,
+);
     let viewport = match registered {
         Ok(viewport) => viewport,
         Err(_) => unreachable!("registration must fit"),

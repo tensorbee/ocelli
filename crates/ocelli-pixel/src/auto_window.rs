@@ -306,8 +306,13 @@ impl AutoWindowPool {
     /// `ocelli-pixel` evaluates it, gives exactly the output minimum for the 1st percentile and for
     /// the 1st moved 16 f32 units toward the 99th, and exactly the output maximum for the 99th and
     /// for the 99th moved 16 units toward the 1st, with the moves capped at the midpoint as
-    /// `margin_pair` says. A tier whose stage 1 rounds differently by fewer units than the move
-    /// therefore still draws the two percentiles black and white. The move is 16 units for
+    /// `margin_pair` says. Stage 1 no longer rounds differently on any tier
+    /// now that the GPU routes evaluate it with `ocelli-pixel`'s own bits,
+    /// so the move is not a tier allowance any more. It stays because the
+    /// moved values bound the window's edges, and the edge rounding the
+    /// F-227 review's fifth pass measured is still worth that much slack:
+    /// a window checked against the moved pair draws the two percentiles
+    /// black and white with the margin's worth of rounding to spare. The move is 16 units for
     /// percentiles at least 33 units apart and smaller below that, so the margin is smaller there
     /// too, and one unit for percentiles 3 or 4 units apart. Percentiles fewer than three units
     /// apart are not a Percentile window. The moved values bound the window, so the window is
@@ -468,9 +473,14 @@ impl AutoWindowPool {
         } else {
             // The centre must draw exactly the middle. Each percentile, and
             // each moved PERCENTILE_MARGIN units away from the other, must
-            // draw within half a grey of it, so a tier whose stage 1 rounds
-            // differently by fewer units still draws grey 127 or 128. Per the
-            // lead's amendment after review pass 6 this holds for equal
+            // draw within half a grey of it. Stage 1 no longer rounds
+            // differently on any tier now that the GPU routes evaluate it
+            // with `ocelli-pixel`'s own bits, so this is not a tier
+            // allowance any more. The margin's remaining role is the edge
+            // rounding the F-227 review's fifth pass measured: the moved
+            // points sit that much inside the window's ends, so a half
+            // grey of drift at the edges still draws grey 127 or 128. Per
+            // the lead's amendment after review pass 6 this holds for equal
             // percentiles too, whose outward values are the constant moved
             // 16 units down and 16 units up.
             let (low_out, high_out) = outward_pair(low, high);

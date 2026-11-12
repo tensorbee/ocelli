@@ -1,6 +1,8 @@
 // Two volumes on one plane. Volume B is in front.
 // `lut_chain` and `table_index` are prepended. This file does not re-type them.
-// The stored plane holds 0 when presence is 0. That texel is not windowed.
+// The stored plane holds modality values, because the graph pre-applies stage
+// 1 on the CPU when it packs, and the route flag is 0. A texel holds 0 when
+// presence is 0. That texel is not windowed.
 // There is no sampler. `textureLoad` does not filter a border of zeros.
 
 struct FusionParams {
@@ -10,7 +12,7 @@ struct FusionParams {
     last : u32,
 }
 
-@group(0) @binding(1) var<uniform> fusion : FusionParams;
+@group(0) @binding(3) var<uniform> fusion : FusionParams;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var presence_tex : texture_2d<f32>;
 @group(1) @binding(2) var colour_lut : texture_2d<f32>;

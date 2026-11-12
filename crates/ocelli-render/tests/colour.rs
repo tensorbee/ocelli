@@ -15,8 +15,17 @@ use ocelli_pixel::{
     PresentationLutEvidence, Rgb, SampleLayout, VoiFunction, VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, ColourLut, ColourLutError, FrameOutcome, IccProfilePresence, Pass, PresetId,
-    RenderGraph, StackPass, VoiParams,
+    BlendMode,
+    ColourLut,
+    ColourLutError,
+    FrameOutcome,
+    IccProfilePresence,
+    Pass,
+    PresetId,
+    RenderGraph,
+    StackPass,
+    StoredRoute,
+    VoiParams,
 };
 
 /// Not widened. The same bound `tests/upload.rs` and `tests/voi_shader.rs` use.
@@ -595,7 +604,8 @@ fn grey_and_stops_read_back_and_a_window_change_does_not_upload() {
             voi: params(&initial),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: 0, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     assert_eq!(graph.uploads(), 0);
@@ -695,7 +705,8 @@ fn grey_and_stops_read_back_and_a_window_change_does_not_upload() {
             voi: params(&finding),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: 0, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     let uploads_before = graph.uploads();
@@ -742,7 +753,8 @@ fn palette_stored_samples_read_back_the_descriptor_entries() {
             voi: params(&chain),
             blend: BlendMode::Composite,
         }),
-    );
+    StoredRoute::Tabled { first: 0, count: 65_536 },
+);
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
     assert!(
