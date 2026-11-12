@@ -6296,6 +6296,24 @@ fn an_enhanced_corner_reads_the_top_level_first() -> Result<(), String> {
         "15",
         grey_header(&stray, "X-Ocelli-Frame: 1\r\n", "X-Ocelli-Echo-Time")?,
     )?;
+    // AC3. A top-level Exposure 400 with the group's Exposure in mAs 5.5
+    // shows 400 with source Exposure, the mAs chain's own top-level-first
+    // rule, PS3.3 2026c C.8.2.1 Table C.8-3 and C.8.15.3.8 Table C.8-124.
+    let exposure = enhanced_ct(
+        &[ct_exposure(*b"FD", &f64_le(5.5))?],
+        &[vec![]],
+        &[planted_text((0x0018, 0x1152), *b"IS", "400")],
+    )?;
+    header_is(
+        "top-level Exposure over the group",
+        "400",
+        grey_header(&exposure, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "top-level Exposure source",
+        "Exposure",
+        grey_header(&exposure, "", "X-Ocelli-Exposure-Source")?,
+    )?;
     // AC16. A present non-text top-level element stops: a top-level KVP
     // written FD 120.0 and a top-level Slice Thickness written FD 4.0 show
     // nothing, though the group value is behind each.
