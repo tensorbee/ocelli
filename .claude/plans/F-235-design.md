@@ -1467,7 +1467,7 @@ not the surface attachment choice, and its module doc says so. The flag
 `surface_bound` and the attached surface must agree at every tick, which the
 graph asserts in debug builds.
 
-Any pass that draws into a freshly acquired surface texture clears it, because
-an acquired texture's contents are undefined. No pass loads an acquired
-surface texture.
+The first pass to draw into a freshly acquired surface texture in a frame
+clears it, because an acquired texture's contents are undefined. A later pass
+in the same frame into that texture may load what the first pass drew.
 
