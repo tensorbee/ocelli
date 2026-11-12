@@ -100,7 +100,8 @@ own answer.
 
 **The camera has one write route.** `set_view` takes the CSS matrix and a
 device pixel ratio. It writes the 80-byte `DeviceCamera` into the uniform at
-group 0 binding 2 and sets `Dirty.camera`. The uniform is sixteen column-major
+group 0 binding 4, past the route uniform and the folded modality table that
+`voi.wgsl` reserves at bindings 1 and 2, and sets `Dirty.camera`. The uniform is sixteen column-major
 CSS floats followed by four scale lanes. Lane `.x` is the device pixel ratio.
 The other three lanes are padding. The fragment shader divides the
 device-pixel position by that ratio before it multiplies by the CSS matrix.
@@ -288,7 +289,8 @@ blends stay uncompiled. `request_outcome` for those keys is `Unavailable`.
 
 **The integral is front to back on voxel centres.** A step whose residency
 flag is 0 is skipped before the brick is read. Display colour comes from the
-existing VOI uniform. Opacity is a 256-entry uniform at group 0 binding 2. The bytes are
+existing VOI uniform, whose stage 1 reads the folded modality table the ray
+composes at group 0 binding 2. Opacity is a 256-entry uniform at group 0 binding 4. The bytes are
 1024. A uniform array stride is 16, so the shader packs them as 64 `vec4`
 values and reads one component. The address is `table_index(display, 255)`,
 the same rule as `display_index`.
@@ -297,7 +299,7 @@ table of any other length, a non-finite entry, or an entry outside 0 to 1
 is refused and the previous table stays. The uniform is created at bind.
 `set_opacity` writes those bytes and does not upload a brick. The same bytes
 do not allocate a second uniform. Shade weights are a 16-byte uniform at
-group 0 binding 3. Ambient defaults to 1 and diffuse defaults to 0, so the
+group 0 binding 5. Ambient defaults to 1 and diffuse defaults to 0, so the
 unlit colour matches the opacity integral. `set_shade` writes that uniform
 and does not upload a brick. A non-finite weight, or a weight outside 0 to 1,
 is refused and the previous weights stay. The normal is the central difference
@@ -309,7 +311,7 @@ Otherwise it is `ambient + diffuse * max(0, dot(n, light))`. The shaded value
 is `colour * shade`. Transfer opacity is not multiplied by the shade. Colour
 and alpha accumulate `(1 - A) * colour * shade * alpha` and `(1 - A) * alpha`.
 The pipeline blend is off, so the integral is not blended a second time.
-Clip planes are a 256-byte uniform at group 0 binding 4. The prefix holds the
+Clip planes are a 256-byte uniform at group 0 binding 6. The prefix holds the
 patient origin and the three direction columns. Six slots follow. A slot with
 normal w of 0 is disabled. The kept side is `dot(point - plane_origin, normal) >= 0`,
 so a sample on the plane stays. A discarded sample adds no colour and no alpha.
@@ -320,7 +322,9 @@ does not refuse a component that narrowed to a non-zero value. Zero planes leave
 at bind. `set_clip_planes` writes it and does not upload a brick.
 
 **Every brick in the caller set is bound, or none of this call is.** Room is
-the sampled-texture limit minus one, because residency takes a binding. A
+the sampled-texture limit minus two: the residency texture and the folded
+modality table each take a binding, so the compiled slot count is
+`sampled - 2` minned with the bind-group room. A
 limit of zero, a ready count of zero, or a count above that room returns
 `SampledTextureLimit`. A count above the compiled slot count returns the same
 error before any texture for that call is created. The ray does not draw a
@@ -339,8 +343,11 @@ for a volume viewport. `set_view` stays stack-only.
 `PassKind::Slab` compiles four fragment pipelines from one module. The
 override `slab_blend` is 0 for composite, 1 for MIP, 2 for MinIP and 3 for
 average. `VOI_WGSL` is included once. Composite loads the centre sample.
-MIP, MinIP and average reduce stored samples and then call `lut_chain`
-once. There is no storage buffer and no compute entry. Labelmap edge on
+MIP, MinIP and average reduce what the value texture holds, modality values
+because the graph pre-applies stage 1 when it stages, and then call
+`lut_chain` once. For a positive slope MIP, MinIP and composite select the
+same texel, and for a negative slope MIP and MinIP swap. There is no storage
+buffer and no compute entry. Labelmap edge on
 this pass is uncompiled. `show_slab` returns `BlendUnavailable` and does
 not bind composite.
 

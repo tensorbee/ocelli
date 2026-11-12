@@ -1,16 +1,22 @@
-// F-042. Section 18.3 on headless Chromium WebGL2.
+// F-042 and F-235. Section 18.3 and the two stage-one pairs on headless
+// Chromium WebGL2.
 //
 // Playwright is the oracle's 1.62.1. This script does not add a dependency.
 // The Chromium launch does not pass the oracle's SwiftShader flags. A
 // software rasteriser that resolves tier C is not a tier B run.
 //
-// Exit 0: drew, tier B, within 0.001 of the hand rows and of LutChain.
+// The build runs here with `tier-b-probe`, a cargo feature that is off by
+// default, so the shipped module and its size budget do not carry it.
+//
+// Exit 0: drew, tier B, within 0.001 of the hand rows, of LutChain, and of
+// the pinned stage-one displays 0.0, 255.0 and 127.5.
 // Exit 1: drew a different number, or decidedBy is Benchmark.
 // Exit 2: the stack pass is unavailable and drew nothing.
 // Exit 3: no adapter, demoted, crash, or the tier is not B.
 
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
+import { spawnSync } from "node:child_process";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,18 +29,41 @@ const { chromium } = require("playwright");
 
 const LINEAR = [0, 127.819, 255, 63.91];
 const LINEAR_EXACT = [0, 127.5, 255, 63.75];
+const WINDOW_ENDS = [0, 255];
+const CANCELLATION = 127.5;
 const TOLERANCE = 0.001;
+
+const build = spawnSync(
+  "wasm-pack",
+  [
+    "build",
+    "crates/ocelli-wasm",
+    "--target",
+    "web",
+    "--out-dir",
+    "target/tier-b-probe",
+    "--",
+    "--features",
+    "tier-b-probe",
+  ],
+  { stdio: "inherit", cwd: repo },
+);
+if (build.status !== 0) {
+  console.error(`wasm-pack build failed with status ${build.status}`);
+  process.exit(build.status ?? 3);
+}
 
 const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <body>
 <script type="module">
-import init, { tierBSection183 } from "./ocelli_wasm.js";
+import init, { tierBSection183, tierBStageOnePairs } from "./ocelli_wasm.js";
 try {
   await init();
   const canvas = new OffscreenCanvas(64, 64);
-  const text = await tierBSection183(canvas);
-  document.body.dataset.result = text;
+  const section = await tierBSection183(canvas);
+  const pairs = await tierBStageOnePairs(new OffscreenCanvas(64, 64));
+  document.body.dataset.result = JSON.stringify({ section: JSON.parse(section), pairs: JSON.parse(pairs) });
 } catch (error) {
   document.body.dataset.result = JSON.stringify({
     status: "crash",
@@ -63,22 +92,27 @@ function rowClose(actual, expected, label) {
 
 function compare(report) {
   const problems = [
-    rowClose(report.linear, LINEAR, "linear"),
-    rowClose(report.exact, LINEAR_EXACT, "exact"),
-    rowClose(report.linear, report.cpuLinear, "linear-cpu"),
-    rowClose(report.exact, report.cpuExact, "exact-cpu"),
+    rowClose(report.section.linear, LINEAR, "linear"),
+    rowClose(report.section.exact, LINEAR_EXACT, "exact"),
+    rowClose(report.section.linear, report.section.cpuLinear, "linear-cpu"),
+    rowClose(report.section.exact, report.section.cpuExact, "exact-cpu"),
+    rowClose(report.pairs.windowEnds, WINDOW_ENDS, "window-ends"),
   ].filter((item) => item !== "");
-  const low = Array.isArray(report.exact) ? report.exact[0] : Number.NaN;
+  const low = Array.isArray(report.section.exact) ? report.section.exact[0] : Number.NaN;
   if (!close(low, 0)) {
     problems.push(`LINEAR_EXACT(-160) was ${low} wanted 0`);
   }
-  const centreLinear = Array.isArray(report.linear) ? report.linear[1] : Number.NaN;
-  const centreExact = Array.isArray(report.exact) ? report.exact[1] : Number.NaN;
+  const centreLinear = Array.isArray(report.section.linear) ? report.section.linear[1] : Number.NaN;
+  const centreExact = Array.isArray(report.section.exact) ? report.section.exact[1] : Number.NaN;
   const gap = Math.abs(centreLinear - centreExact);
   if (!(gap > 0.2)) {
     problems.push(`centre gap was ${gap}`);
   }
-  if (report.format === "Rgba8Unorm") {
+  const cancellation = report.pairs.cancellation;
+  if (!close(cancellation, CANCELLATION)) {
+    problems.push(`stage one of 56893 was ${cancellation} wanted ${CANCELLATION}`);
+  }
+  if (report.section.format === "Rgba8Unorm") {
     problems.push("stored format is Rgba8Unorm");
   }
   return problems;
@@ -174,15 +208,28 @@ if (report.status === "crash") {
   console.error(`probe crashed: ${report.reason}`);
   process.exit(3);
 }
-if (report.status === "unavailable") {
-  console.error(`tier B stack pass unavailable: ${report.reason}`);
-  process.exit(2);
-}
-if (report.status !== "drew" || report.tier !== "B") {
-  console.error(`not a tier B run: status ${report.status} tier ${report.tier} ${report.reason}`);
+const section = report.section ?? {};
+const pairs = report.pairs ?? {};
+if (section.status === "crash" || pairs.status === "crash") {
+  console.error(`probe crashed: ${section.reason ?? pairs.reason}`);
   process.exit(3);
 }
-if (report.decidedBy === "Benchmark") {
+if (section.status === "unavailable" || pairs.status === "unavailable") {
+  console.error(`tier B pass unavailable: ${section.reason ?? pairs.reason}`);
+  process.exit(2);
+}
+if (
+  section.status !== "drew" ||
+  section.tier !== "B" ||
+  pairs.status !== "drew" ||
+  pairs.tier !== "B"
+) {
+  console.error(
+    `not a tier B run: section ${section.status}/${section.tier} pairs ${pairs.status}/${pairs.tier} ${section.reason ?? pairs.reason}`,
+  );
+  process.exit(3);
+}
+if (section.decidedBy === "Benchmark" || pairs.decidedBy === "Benchmark") {
   console.error("AutoFinish completion was recorded as a fill-rate benchmark");
   process.exit(1);
 }
@@ -191,5 +238,7 @@ if (problems.length !== 0) {
   console.error(problems.join("\n"));
   process.exit(1);
 }
-console.log(`tier B section 18.3 matched within ${TOLERANCE} format ${report.format}`);
+console.log(
+  `tier B section 18.3 and the stage-one pairs matched within ${TOLERANCE} format ${section.format}`,
+);
 process.exit(0);

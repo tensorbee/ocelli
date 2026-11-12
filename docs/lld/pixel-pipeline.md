@@ -14,12 +14,18 @@ Living current-state document. It describes what the code does today.
 `ocelli-pixel` owns all interpretation between decoded DICOM sample containers
 and display values. No decoder interprets Bits Stored or signedness.
 
-**No shader re-makes a LUT DECISION, and one shader does evaluate the
+**No shader re-makes a LUT DECISION, and one shader does evaluate the window
 formulas.** That sentence read "no shader reimplements modality or VOI
 arithmetic" until F-041, which made it false: `crates/ocelli-render/shaders/voi.wgsl`
-evaluates stage 1, all three window functions and stage 3, because HLD section
+evaluated stage 1, all three window functions and stage 3, because HLD section
 18.4's uniform hands a shader `slope`, `intercept`, `center`, `width` and
-`fn_kind`, and a shader given those has to evaluate something.
+`fn_kind`, and a shader given those has to evaluate something. F-235 moved
+stage 1's evaluation back out of the shader: `voi.wgsl` now reads stage 1's
+RESULTS, from a folded modality table the graph fills with this crate's own
+`modality` outputs or from bytes a CPU pre-apply staged, and the uniform's
+`slope` and `intercept` are carried in the 32 bytes and read by nothing. The
+window functions and stage 3 are still evaluated there, from `center`,
+`width` and `fn_kind`.
 
 What exists once is every decision. The shader receives a resolved `invert`
 flag and no Photometric Interpretation, one selected window pair and no
