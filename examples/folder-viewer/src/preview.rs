@@ -285,7 +285,7 @@ pub struct FrameFacts {
     /// The acquisition tokens of the shown frame, or `None` when no field
     /// yields a token at any level, which includes a field that is present
     /// but unusable, stopped by the top-level rule, or inside a malformed
-    /// group. Boxed, because the frame cache charges [`HeldFrame`] by its
+    /// group. Boxed, because the frame cache charges `HeldFrame` by its
     /// struct size and the tokens' own bytes then ride the heap the way
     /// the edge letters' do.
     pub corners: Option<Box<CornerTokens>>,

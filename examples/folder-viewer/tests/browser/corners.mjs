@@ -264,8 +264,8 @@ export function enhancedMR({ series, sop, number, timing, echo }) {
     ])),
   );
   const shared = { group: 0x5200, element: 0x9229, vr: "SQ", value: item(rescaleGroup) };
-  const seconds = Buffer.alloc(8);
-  seconds.writeDoubleLE(echo);
+  const echoMs = Buffer.alloc(8);
+  echoMs.writeDoubleLE(echo);
   const perFrameItem = item(Buffer.concat([
     longEl(
       0x0018,
@@ -273,7 +273,7 @@ export function enhancedMR({ series, sop, number, timing, echo }) {
       "SQ",
       item(shortEl(0x0018, 0x0080, "DS", text(timing))),
     ),
-    longEl(0x0018, 0x9114, "SQ", item(shortEl(0x0018, 0x9082, "FD", seconds))),
+    longEl(0x0018, 0x9114, "SQ", item(shortEl(0x0018, 0x9082, "FD", echoMs))),
   ]));
   const perFrame = { group: 0x5200, element: 0x9230, vr: "SQ", value: perFrameItem };
   const pixels = Buffer.alloc(PIXELS * PIXELS * 2);
