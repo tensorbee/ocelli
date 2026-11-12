@@ -1,6 +1,6 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266, F-245
 **Last updated:** 2026-11-11
 
 The wasm build pipeline, the size budget, and the invariants that keep the
@@ -904,3 +904,66 @@ and a sandbox-denied browser startup. Corrected data inspection and the
 unchanged browser command with required OS permission passed. Those are
 checker/setup diagnostics, not product failures. Source and physical index
 remained unchanged throughout.
+
+## The F-245 npm dev launcher, and the viewer browser suite
+
+F-245 adds `bin/folder-viewer-dev.mjs`. The root `npm run dev` runs it. It
+builds `@ocelli/core` first, then runs
+`cargo build -p ocelli-folder-viewer --message-format=json`, selects the one
+native bin compiler-artifact executable from the build output rather than any
+hardcoded target path, and runs that binary as a direct child. A custom
+`CARGO_TARGET_DIR` is honoured. The launcher spawns each phase in its own
+POSIX process group, forwards `SIGINT` and `SIGTERM` to the owned group,
+preserves the first signal, gives the group a 2000 ms grace then `SIGKILL`
+and a further 2000 ms confirmation, and never signals a pid it does not own.
+The legacy React demo keeps `bin/example-dev.sh` under
+`npm run dev:boundary-demo`, unchanged.
+
+The launcher's unit is `tools/bench/tests/folder_viewer_dev_test.mjs`. It is
+registered in both the `bench` gate's `node --test` list in `bin/ocelli.sh`
+and the `tools/bench/package.json` test script. The synthetic fixtures copy
+the tracked launcher byte for byte and refuse a missing one with
+`MISSING_IMPLEMENTATION`.
+
+`examples/folder-viewer/tests/browser/dicomweb.mjs` is the new browser
+workflow suite. It builds its wholly synthetic DICOMweb upstream in the
+script, starts the release viewer with `OCELLI_PORT` and stops it by its PID.
+The suite picks its own port, so the gate command is plain
+`node examples/folder-viewer/tests/browser/dicomweb.mjs` with no port in the
+environment. It is registered in the `viewer-browser` gate's module list in
+`bin/ocelli.sh`, and the ten modules before it are unchanged.
+
+`examples/folder-viewer/tests/browser/launcher.mjs` is the launcher's browser
+control. It starts the viewer the way a user does, through `npm run dev`, with
+a private `CARGO_TARGET_DIR` under the repository's ignored `target/`,
+distinct from the default `target/debug`, so a path under it can only be the
+one cargo's own compiler artifact named. The directory is kept between runs,
+so the first run is a cold full debug graph build and later runs are
+incremental. The binary is also identified at the process layer: the pid
+listening on the launcher's port is resolved with `lsof` and its process
+command is read with `ps -o command=`, which begins with the executable
+path the spawner set. That command must begin with the private target
+directory followed by a path separator, so a launcher that ignored the
+compiler artifact and ran a stale build from the default target directory
+fails there. It waits for the one URL
+the backend prints, opens the page in headless Chromium, asserts the boot
+status and source chooser, fetches the same page from a plain native start of
+the release binary, and asserts the two bodies are identical. It signals the
+npm process group by the npm PID and asserts the port stops serving, so a
+backend orphaned by an unhandled signal fails the suite. It is registered in
+the `viewer-browser` gate's module list last, after `dicomweb.mjs`.
+
+`eslint.config.js` gains one comment-conditional globals entry for that
+suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
+`remoteProvider`, added where the browser context requires them, with no rule
+disabled and no allowlist widened. `fetch` was already a browser global there.
+`scripts/guards/catalogue.py` gains the `folder-viewer-dev` guard for
+`bin/folder-viewer-dev.mjs`, and `ci/guard-probe-budget.json` budgets that
+guard at six probes. Each probe drives the launcher's own refusal through a
+driver copy of the launcher file: a stop on a pid that is not a positive
+integer or is the launcher's own, a stop signal that is neither `SIGINT` nor
+`SIGTERM`, a group liveness probe that fails with something other than
+`ESRCH`, a group signal that fails the same way, an owned group still alive
+after the `SIGKILL` confirmation deadline, and an owned phase whose stop
+rejected. Each probe has a control invocation against a dead group that must
+settle quietly.

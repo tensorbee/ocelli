@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use ocelli_codec::{Capability, KNOWN_TRANSFER_SYNTAXES, Registry};
 use ocelli_dicom::{
     DicomwebSource, MetadataSet, MetadataValue, SeriesSource, SourceBatch, SourceError,
-    SourceResponse, SourceResponseKind, Tag, parse_part10,
+    SourceResponse, SourceResponseKind, SourceResponseLimits, Tag, parse_part10,
 };
 
 const EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1";
@@ -698,4 +698,148 @@ fn dicomweb_source_satisfies_the_transport_neutral_series_source_contract() {
         SourceResponse::new(SourceResponseKind::QidoJson, b"[]".to_vec()),
     );
     assert!(matches!(result, Ok(SourceBatch::Query(data_sets)) if data_sets.is_empty()));
+}
+
+#[test]
+fn f245_source_qido_encoded_cap() {
+    let body = b"[]";
+    let limits = SourceResponseLimits {
+        encoded_body_max: 2,
+        decoded_max: usize::MAX,
+        max_parts: 1,
+        max_rows: 0,
+    };
+    let result = DicomwebSource.consume_borrowed(body, &SourceResponseKind::QidoJson, &limits);
+    assert!(
+        matches!(result, Ok(SourceBatch::Query(rows)) if rows.is_empty()),
+        "2 byte body within 2 byte cap must yield empty Query"
+    );
+    let tight = SourceResponseLimits {
+        encoded_body_max: 1,
+        ..limits
+    };
+    let capped = DicomwebSource.consume_borrowed(body, &SourceResponseKind::QidoJson, &tight);
+    assert!(
+        capped.err() == Some(SourceError::SizeLimit),
+        "same body must hit SizeLimit under 1 byte cap"
+    );
+    let legacy = source(SourceResponseKind::QidoJson, body.to_vec());
+    assert!(
+        matches!(legacy, Ok(SourceBatch::Query(rows)) if rows.is_empty()),
+        "legacy source helper must return empty Query for same bytes"
+    );
+}
+
+#[test]
+fn f245_source_qido_root_row_cap() {
+    let mk = || SourceResponseLimits {
+        encoded_body_max: usize::MAX,
+        decoded_max: usize::MAX,
+        max_parts: 1,
+        max_rows: usize::MAX,
+    };
+    let src = DicomwebSource;
+    let empty = b"[]";
+    let mut lim = mk();
+    lim.encoded_body_max = 2;
+    lim.max_rows = 0;
+    let r = src.consume_borrowed(empty, &SourceResponseKind::QidoJson, &lim);
+    assert!(matches!(r, Ok(SourceBatch::Query(rows)) if rows.is_empty()));
+    let two = b"[{},{}]";
+    let mut lim = mk();
+    lim.encoded_body_max = two.len();
+    lim.max_rows = 2;
+    let r = src.consume_borrowed(two, &SourceResponseKind::QidoJson, &lim);
+    assert!(matches!(r, Ok(SourceBatch::Query(rows)) if rows.len() == 2));
+    let mut lim = mk();
+    lim.encoded_body_max = two.len();
+    lim.max_rows = 1;
+    let r = src
+        .consume_borrowed(two, &SourceResponseKind::QidoJson, &lim)
+        .err();
+    assert!(matches!(r, Some(SourceError::SizeLimit)));
+    let nested = br#"[{"00080008":{"vr":"CS","Value":["ORIGINAL","PRIMARY","AXIAL"]}}]"#;
+    let mut lim = mk();
+    lim.encoded_body_max = nested.len();
+    lim.max_rows = 1;
+    let r = src.consume_borrowed(nested, &SourceResponseKind::QidoJson, &lim);
+    assert!(matches!(r, Ok(SourceBatch::Query(rows)) if rows.len() == 1));
+    let one = b"[{}]";
+    let mut lim = mk();
+    lim.encoded_body_max = 4;
+    lim.max_rows = 0;
+    let r = src
+        .consume_borrowed(one, &SourceResponseKind::QidoJson, &lim)
+        .err();
+    assert!(matches!(r, Some(SourceError::SizeLimit)));
+}
+
+#[test]
+fn f245_source_second_part_is_refused_before_part10_parse() {
+    let first = part10(7);
+    let second: &[u8] = b"not-Part10";
+    let body = multipart(
+        "f245",
+        &[("application/dicom", &first), ("application/dicom", second)],
+    );
+    let kind = SourceResponseKind::WadoRsInstances {
+        boundary: String::from("f245"),
+    };
+    let limits = SourceResponseLimits {
+        encoded_body_max: body.len(),
+        decoded_max: usize::MAX,
+        max_parts: 1,
+        max_rows: 20000,
+    };
+    let actual = DicomwebSource.consume_borrowed(&body, &kind, &limits);
+    assert_eq!(actual.err(), Some(SourceError::SizeLimit));
+    assert!(matches!(
+        source(kind, body),
+        Err(SourceError::InvalidPart10 { part: 1, .. })
+    ));
+}
+
+#[test]
+fn f245_source_decoded_cap_reaches_part10() {
+    let first = part10(7);
+    let body = multipart("f245", &[("application/dicom", first.as_slice())]);
+    let kind = SourceResponseKind::WadoRsInstances {
+        boundary: String::from("f245"),
+    };
+    let limits = SourceResponseLimits {
+        encoded_body_max: body.len(),
+        decoded_max: 0,
+        max_parts: 1,
+        max_rows: 20000,
+    };
+    let err = DicomwebSource.consume_borrowed(&body, &kind, &limits).err();
+    assert_eq!(err, Some(SourceError::SizeLimit));
+    let relaxed = SourceResponseLimits {
+        decoded_max: usize::MAX,
+        ..limits
+    };
+    let result = DicomwebSource.consume_borrowed(&body, &kind, &relaxed);
+    assert!(matches!(result, Ok(SourceBatch::Instances(instances)) if instances.len() == 1));
+}
+
+#[test]
+fn f245_source_unsupported_kinds_never_fall_back() {
+    let raw = b"[]";
+    let limits = SourceResponseLimits {
+        encoded_body_max: 2,
+        decoded_max: usize::MAX,
+        max_parts: 1,
+        max_rows: 0,
+    };
+    let kinds = [
+        SourceResponseKind::WadoUriPart10,
+        SourceResponseKind::WadoRsFrames {
+            boundary: String::from("f245"),
+            media_type: String::from("application/octet-stream"),
+        },
+    ];
+    for kind in kinds.iter() {
+        let result = DicomwebSource.consume_borrowed(raw, kind, &limits);
+        assert_eq!(result.err(), Some(SourceError::UnsupportedRepresentation));
+    }
 }

@@ -268,8 +268,8 @@ bin/ocelli.sh clippy ocelli-pixel</code></pre>
 bin/ocelli.sh gate wasm        # the build plus the decode split and the size budget
 bin/ocelli.sh wasm --release
 npm run build                  # each workspace's build script, tsc for the packages and vite for viewer-react
-npm run dev                    # the example viewer on http://localhost:5173</code></pre>
-    <p>The example viewer in <code>examples/viewer-react</code> is the showcase, and its header reads <code>core ready</code> only after its worker has loaded the built module. This folder viewer is separate.</p>
+npm run dev                    # the folder viewer, the showcase, through bin/folder-viewer-dev.mjs</code></pre>
+    <p><code>npm run dev</code> builds <code>@ocelli/core</code>, selects the native folder viewer binary from cargo's compiler-artifact output and serves the page. The folder viewer is the showcase. The earlier React demo in <code>examples/viewer-react</code> is kept under <code>npm run dev:boundary-demo</code>, and its header reads <code>core ready</code> only after its worker has loaded the built module.</p>
 <pre><code>cargo run --release -p ocelli-folder-viewer   # prints one URL on 127.0.0.1</code></pre>
     <p><code>OCELLI_CACHE_MIB</code> sets the folder viewer's cache. Beside it, a multiframe in which any frame's window comes from a per-frame functional group keeps every frame's inspect reply, up to 16 MiB across every file and outside that cache, so a frame's window list is asked for by file id after the file's bytes are dropped. <code>GET /held</code> reports that pool as <code>kept</code>.</p>
     <p>Its region window loads the built <code>packages/core/dist</code> from the local process, which serves it under <code>/lib/</code>, so run <code>npm run build -w @ocelli/core</code> before starting the folder viewer. Without that build the region window reads unavailable and says so. Save marks and Load marks need the same build, and say so when it is missing.</p>
@@ -484,7 +484,22 @@ try {
   }
 }</code></pre>
     <p>That sink is the caller's, because the wasm session has no <code>commit_dicomweb_response</code> export yet. The Rust parser for these bodies exists as <code>ocelli_dicom::DicomwebSource</code>, shown in the Rust chapter, but no wasm export joins the two today.</p>
-    <p><code>postWadoInstance</code> wraps exactly this pattern for one instance. The example viewer uses it to hand a WADO-RS body to its worker.</p>
+    <p><code>DicomwebProvider</code> is the higher level wrapper the folder viewer uses. It wraps a <code>DicomwebClient</code> and is also exported from <code>@ocelli/core</code>. Its constructor takes <code>studiesServiceUrl</code>, <code>wadoUriUrl</code> and <code>fetch</code>, and it needs the viewer's native <code>/dicweb/qido</code> and <code>/dicweb/instance</code> routes to reach the native backend. The viewer page calls <code>cancelPending</code> and <code>releaseStaged</code> when a local source is chosen, so a late reply cannot claim that the local image is unchanged, and the remote panel returns to its idle line.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Method</th><th>Behaviour</th></tr></thead>
+      <tbody>
+        <tr><td><code>searchStudies()</code></td><td>searches studies through the configured service</td></tr>
+        <tr><td><code>searchSeries(studyUid)</code></td><td>searches series of one study</td></tr>
+        <tr><td><code>searchInstances(studyUid, seriesUid)</code></td><td>searches instances of one series</td></tr>
+        <tr><td><code>fetchSelectedInstance({ studyUid, seriesUid, instanceUid })</code></td><td>fetches one selected instance and stages its metadata</td></tr>
+        <tr><td><code>takeStagedInstance(expected)</code></td><td>returns the staged instance when it matches <code>expected</code></td></tr>
+        <tr><td><code>readStagedInfo()</code></td><td>reads the metadata of the staged instance</td></tr>
+        <tr><td><code>releaseStaged()</code></td><td>releases the staged instance</td></tr>
+        <tr><td><code>cancelPending()</code></td><td>cancels a pending request and releases the staged body</td></tr>
+        <tr><td><code>dispose()</code></td><td>releases everything the provider holds</td></tr>
+      </tbody>
+    </table></div>
+    <p><code>postWadoInstance</code> wraps exactly this pattern for one instance. The boundary demo uses it to hand a WADO-RS body to its worker.</p>
     <p>It takes eight options, and an option it does not know is refused with <code>OcelliError</code> code <code>UnknownOption</code>.</p>
     <div class="table-wrap"><table>
       <thead><tr><th>Option</th><th>Type</th></tr></thead>
@@ -567,7 +582,7 @@ const { pump, state, drawing } = useOcelliViewport({ viewport: viewportId(1), se
 pump?.enqueue({ kind: "ApplyPreset", preset: "lung" });   // sent on the next frame
 const checkpoint = pump?.checkpoint();                       // snapshot and slice index
 if (checkpoint) pump?.restore(checkpoint);</code></pre>
-    <p>Outside React, <code>createViewportPump(session, options)</code> gives the same <code>ViewportPump</code> with <code>enqueue</code>, <code>start</code>, <code>stop</code>, <code>flushNow</code>, <code>checkpoint</code> and <code>restore</code>. <code>examples/viewer-react/src/App.tsx</code> is the mount this repository runs.</p>
+    <p>Outside React, <code>createViewportPump(session, options)</code> gives the same <code>ViewportPump</code> with <code>enqueue</code>, <code>start</code>, <code>stop</code>, <code>flushNow</code>, <code>checkpoint</code> and <code>restore</code>. <code>examples/viewer-react/src/App.tsx</code> is the boundary demo's mount.</p>
   </section>
 
   <section class="chapter" id="rust-parse">

@@ -9,6 +9,7 @@ import {
 import { OcelliError, type DicomwebErrorCode } from "./ocelli-error.js";
 import {
   DICOMWEB_CLIENT_OPTION_KEYS,
+  DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS,
   QIDO_SEARCH_OPTION_KEYS,
   refuseUnknownOptions,
 } from "./options.js";
@@ -68,6 +69,34 @@ export interface DicomwebClientOptions {
   readonly cache?: DicomwebCacheMode;
 }
 
+export type DicomwebBoundedReceive = (
+  raw: Uint8Array,
+  kind: DicomwebResponseKind,
+) => Promise<void>;
+
+export interface DicomwebBoundedDeliveryOptions {
+  readonly studiesServiceUrl: string;
+  readonly wadoUriUrl: string;
+  readonly fetch: typeof fetch;
+  /**
+   * The cache mode of every request. `"no-cache"` revalidates a stored
+   * response with the server before using it, and is the default, so a
+   * re-processed object is never served from the browser's HTTP cache
+   * without asking. `"default"` is an explicit opt-in to the browser's
+   * heuristic freshness. `"force-cache"` and `"only-if-cached"` can serve a
+   * stored response that is stale, and are refused at construction. A proxy
+   * or a service worker between the browser and the server is outside what
+   * a cache mode controls.
+   */
+  readonly cache?: DicomwebCacheMode;
+  /** Largest total response size accepted, in bytes. */
+  readonly maxResponseBytes: number;
+  /** Receives one final assembled raw response body, not decoded pixels and not chunks. */
+  readonly receive: DicomwebBoundedReceive;
+  readonly wasm?: never;
+  readonly sink?: never;
+}
+
 interface ParsedContentType {
   readonly base: string;
   readonly parameters: ReadonlyMap<string, string>;
@@ -78,21 +107,100 @@ export class DicomwebClient {
   readonly #studiesServiceUrl: URL;
   readonly #wadoUriUrl: URL;
   readonly #fetch: typeof fetch;
-  readonly #wasm: WasmMemory;
-  readonly #sink: DicomwebResponseSink;
   readonly #cache: DicomwebCacheMode;
+  readonly #delivery:
+    | {
+        mode: "legacy";
+        wasm: DicomwebClientOptions["wasm"];
+        sink: DicomwebClientOptions["sink"];
+      }
+    | {
+        mode: "bounded";
+        maxResponseBytes: number;
+        receive: NonNullable<DicomwebBoundedDeliveryOptions["receive"]>;
+      };
 
-  constructor(options: DicomwebClientOptions) {
-    refuseUnknownOptions("DicomwebClientOptions", options, DICOMWEB_CLIENT_OPTION_KEYS);
-    if (options.cache !== undefined && !validCacheMode(options.cache)) {
-      throw new DicomwebError("InvalidRequest");
+  constructor(options: DicomwebClientOptions | DicomwebBoundedDeliveryOptions) {
+    const bounded = DicomwebClient.isBoundedDeliveryOptions(options);
+    if (bounded) {
+      refuseUnknownOptions(
+        "DicomwebBoundedDeliveryOptions",
+        options,
+        DICOMWEB_BOUNDED_DELIVERY_OPTION_KEYS,
+      );
+      const receive = options.receive;
+      const maxResponseBytes = options.maxResponseBytes;
+      if (Object.hasOwn(options, "wasm") || Object.hasOwn(options, "sink")) {
+        throw new OcelliError(
+          "InvalidOptions",
+          "Bounded delivery options must not include wasm or sink",
+        );
+      }
+      if (typeof receive !== "function") {
+        throw new OcelliError(
+          "InvalidOptions",
+          "receive must be a callable function",
+        );
+      }
+      if (
+        typeof maxResponseBytes !== "number" ||
+        !Number.isSafeInteger(maxResponseBytes) ||
+        maxResponseBytes <= 0
+      ) {
+        throw new OcelliError(
+          "InvalidOptions",
+          "maxResponseBytes must be a positive safe integer",
+        );
+      }
+      if (options.cache !== undefined && !validCacheMode(options.cache)) {
+        throw new OcelliError(
+          "InvalidOptions",
+          "cache is not a valid DicomwebCacheMode",
+        );
+      }
+      try {
+        this.#studiesServiceUrl = safeUrl(options.studiesServiceUrl);
+      } catch {
+        throw new OcelliError("InvalidOptions", "studiesServiceUrl is not a valid absolute URL");
+      }
+      try {
+        this.#wadoUriUrl = safeUrl(options.wadoUriUrl);
+      } catch {
+        throw new OcelliError("InvalidOptions", "wadoUriUrl is not a valid absolute URL");
+      }
+      this.#fetch = options.fetch;
+      this.#cache = options.cache ?? "no-cache";
+      this.#delivery = {
+        mode: "bounded",
+        maxResponseBytes,
+        receive,
+      };
+    } else {
+      refuseUnknownOptions("DicomwebClientOptions", options, DICOMWEB_CLIENT_OPTION_KEYS);
+      if (options.cache !== undefined && !validCacheMode(options.cache)) {
+        throw new DicomwebError("InvalidRequest");
+      }
+      this.#studiesServiceUrl = safeUrl(options.studiesServiceUrl);
+      this.#wadoUriUrl = safeUrl(options.wadoUriUrl);
+      this.#fetch = options.fetch;
+      this.#cache = options.cache ?? "no-cache";
+      this.#delivery = {
+        mode: "legacy",
+        wasm: options.wasm,
+        sink: options.sink,
+      };
     }
-    this.#studiesServiceUrl = safeUrl(options.studiesServiceUrl);
-    this.#wadoUriUrl = safeUrl(options.wadoUriUrl);
-    this.#fetch = options.fetch;
-    this.#wasm = options.wasm;
-    this.#sink = options.sink;
-    this.#cache = options.cache ?? "no-cache";
+  }
+
+  private static isBoundedDeliveryOptions(
+    options: DicomwebClientOptions | DicomwebBoundedDeliveryOptions,
+  ): options is DicomwebBoundedDeliveryOptions {
+    if (typeof options !== "object" || options === null) {
+      return false;
+    }
+    return (
+      Object.hasOwn(options, "receive") || Object.hasOwn(options, "maxResponseBytes")
+    );
   }
 
   async searchStudies(options: QidoSearchOptions = {}): Promise<void> {
@@ -299,6 +407,9 @@ export class DicomwebClient {
       }
       throw new DicomwebError("Network");
     }
+    if (this.#delivery.mode === "bounded" && signal?.aborted) {
+      throw new DicomwebError("Aborted");
+    }
     if (!response.ok) {
       throw new DicomwebError("HttpStatus", response.status);
     }
@@ -310,14 +421,137 @@ export class DicomwebClient {
     kind: DicomwebResponseKind,
     signal?: AbortSignal,
   ): Promise<void> {
-    let buffer: ArrayBuffer;
-    try {
-      buffer = await response.arrayBuffer();
-    } catch (error: unknown) {
-      throw transportError(error, signal);
+    if (this.#delivery.mode === "legacy") {
+      let buffer: ArrayBuffer;
+      try {
+        buffer = await response.arrayBuffer();
+      } catch (error: unknown) {
+        throw transportError(error, signal);
+      }
+      const bytes = new Uint8Array(buffer);
+      writeDicomwebResponse(this.#delivery.wasm, this.#delivery.sink, bytes, kind);
+      return;
     }
-    const bytes = new Uint8Array(buffer);
-    writeDicomwebResponse(this.#wasm, this.#sink, bytes, kind);
+    const bytes = await this.#readBounded(response, this.#delivery.maxResponseBytes, signal);
+    if (signal?.aborted) {
+      throw new DicomwebError("Aborted");
+    }
+    try {
+      const receive = this.#delivery.receive;
+      await receive(bytes, kind);
+    } catch (error: unknown) {
+      if (signal?.aborted) {
+        throw new DicomwebError("Aborted");
+      }
+      if (error instanceof OcelliError) {
+        throw error;
+      }
+      throw new OcelliError("CommitRefused", "Delivery callback refused the response");
+    }
+    if (signal?.aborted) {
+      throw new DicomwebError("Aborted");
+    }
+  }
+
+  async #readBounded(
+    response: Response,
+    cap: number,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    if (signal?.aborted) {
+      throw new DicomwebError("Aborted");
+    }
+    // Content-Length is never trusted as a refusal basis. The response body is
+    // counted independently during streaming; only bytes actually exceeding the
+    // cap cancel the transfer, and a body ending exactly at the cap is accepted
+    // even if an overreported header claims a larger size.
+
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const onAbort = (): void => {
+      // Controlled readers ignore the fetch signal, cancel wakes any pending read.
+      if (reader !== undefined) {
+        try {
+          void reader.cancel().catch(() => undefined);
+        } catch {
+          // Synchronous cancel failure must not mask the primary abort.
+        }
+      }
+    };
+    if (signal !== undefined) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    let chunks: Uint8Array[] = [];
+    let received = 0;
+    let completed = false;
+    try {
+      if (signal?.aborted) {
+        throw new DicomwebError("Aborted");
+      }
+      try {
+        reader = response.body?.getReader();
+      } catch (error: unknown) {
+        reader = undefined;
+        throw transportError(error, signal);
+      }
+      if (reader === undefined) {
+        completed = true;
+        return new Uint8Array(0);
+      }
+      while (true) {
+        if (signal?.aborted) {
+          throw new DicomwebError("Aborted");
+        }
+        let result: ReadableStreamReadResult<Uint8Array>;
+        try {
+          result = await reader.read();
+        } catch (error: unknown) {
+          throw transportError(error, signal);
+        }
+        // Post-read abort wins over done or chunk classification.
+        if (signal?.aborted) {
+          throw new DicomwebError("Aborted");
+        }
+        if (result.done) {
+          break;
+        }
+        const chunk = result.value;
+        received += chunk.byteLength;
+        if (received > cap) {
+          // Refuse before assembly or callback, no oversized copy is ever made.
+          throw new OcelliError("AllocationRefused", "Streamed length exceeds the response byte cap");
+        }
+        chunks.push(chunk);
+      }
+      // Exactly-cap success requires actual EOF, no premature refusal is invented.
+      const assembled = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) {
+        assembled.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      chunks = [];
+      completed = true;
+      return assembled;
+    } finally {
+      if (signal !== undefined) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      if (reader !== undefined) {
+        if (!completed) {
+          try {
+            void reader.cancel().catch(() => undefined);
+          } catch {
+            // Cancel failure must not mask the primary cap, abort or transport error.
+          }
+        }
+        try {
+          reader.releaseLock();
+        } catch {
+          // Release failure must not replace a primary cap, abort or transport error.
+        }
+      }
+    }
   }
 }
 

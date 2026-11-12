@@ -105,19 +105,29 @@ bin/ocelli.sh gate --all      # everything, including corpus and oracle
 ## Running the example viewer
 
 ```bash
-bin/ocelli.sh wasm            # produces crates/ocelli-wasm/pkg
-npm run dev                   # http://localhost:5173
+npm run dev                   # the folder viewer, the showcase, through bin/folder-viewer-dev.mjs
 ```
 
-A clean clone has no built core, so the viewer starts in its "core not built"
+The launcher builds `@ocelli/core`, selects the native folder viewer binary
+from cargo's compiler-artifact output and runs it. The backend prints its own
+address and serves the page. The
+earlier React Vite demo keeps its own entry:
+
+```bash
+bin/ocelli.sh wasm            # produces crates/ocelli-wasm/pkg
+npm run dev:boundary-demo     # http://localhost:5173
+```
+
+A clean clone has no built core, so the boundary demo starts in its "core not
+built"
 state rather than failing. That is deliberate. The same holds for
 `npm run build`, and its output depends on whether `crates/ocelli-wasm/pkg`
 exists when it runs. With the pkg it bundles the wasm as its own files.
 Without it the worker keeps a runtime import and reports the core as not
 built. Run `bin/ocelli.sh wasm` before the build, not after, for the bundled
-form. `docs/lld/typescript-packaging.md` has the detail. `npm run dev` also
-starts the loopback frame-open helper on `127.0.0.1`. The Frame open section
-uses it.
+form. `docs/lld/typescript-packaging.md` has the detail. The boundary demo
+also starts the loopback frame-open helper on `127.0.0.1`. The Frame open
+section uses it.
 
 ## Why some things are the way they are
 
@@ -137,7 +147,7 @@ surprise from below.
 and only meaningful when measuring size. Iterate with `check`.
 
 **Why the wasm module is not committed.** It is a build artefact, it is several
-megabytes, and a stale one in the tree is worse than none: the example viewer
+megabytes, and a stale one in the tree is worse than none: the boundary demo
 would show a core that is not the one the source builds.
 
 ## Troubleshooting

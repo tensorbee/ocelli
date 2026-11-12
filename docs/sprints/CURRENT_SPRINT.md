@@ -12,7 +12,7 @@
 | F-205 | E38.15 | Validated shared preferences in the single showcase viewer | All | 3w | pending |
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier | Rust | 2w | pending |
 | F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | pending |
-| F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | in-progress |
+| F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | integrated, AC8 owed |
 | F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | done |
 | F-267 | E38.62 | Folder viewer corners on enhanced multiframe CT and MR | Rust | 2w | pending |
 | F-268 | E19.8 | Rustdoc links resolve | Build | 1w | done |

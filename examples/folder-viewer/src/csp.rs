@@ -2,8 +2,9 @@
 //!
 //! Inline script and style text, including import maps, is hashed with the
 //! workspace SHA-256 and encoded with RFC 4648 base64. Each distinct page's
-//! policy is cached for the process lifetime. Production calls use the three
-//! embedded page constants.
+//! policy is cached for the process lifetime. The configured form with extra
+//! origins is built per context and not cached. Production calls use the
+//! three embedded page constants.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -23,12 +24,15 @@ pub(crate) fn page_policy(page: &'static str) -> &'static str {
     if let Some(&policy) = cache.get(page) {
         return policy;
     }
-    let policy: &'static str = Box::leak(build_policy(page).into_boxed_str());
+    let policy: &'static str = Box::leak(configured_main_policy(page, &[]).into_boxed_str());
     cache.insert(page, policy);
     policy
 }
 
-fn build_policy(page: &str) -> String {
+/// Builds the per-page policy for the page with the given already validated
+/// origins appended to connect-src. The caller must validate the origins.
+/// The empty-origin form is what page_policy caches.
+pub(crate) fn configured_main_policy(page: &str, origins: &[String]) -> String {
     let (scripts, styles) = collect_inline_bodies(page);
     let mut policy = String::from("default-src 'none'");
     policy.push_str("; script-src 'self'");
@@ -41,6 +45,10 @@ fn build_policy(page: &str) -> String {
     }
     policy.push_str("; img-src 'self' data:");
     policy.push_str("; connect-src 'self'");
+    for origin in origins {
+        policy.push(' ');
+        policy.push_str(origin);
+    }
     policy.push_str("; base-uri 'none'");
     policy.push_str("; form-action 'none'");
     policy.push_str("; frame-ancestors 'none'");
@@ -300,6 +308,70 @@ const fn is_html_space(byte: u8) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_empty_origin_list_preserves_the_existing_policy_bytes() {
+        // The cached default for COMBINED is the unchanged self-only shape.
+        let cached = page_policy(COMBINED);
+        let configured = configured_main_policy(COMBINED, &[]);
+        assert_eq!(configured, cached);
+    }
+
+    #[test]
+    fn a_configured_origin_changes_only_connect_src_and_keeps_the_page_hashes() {
+        let origins = vec![String::from("https://studies.example:8443")];
+        let configured = configured_main_policy(COMBINED, &origins);
+        // Every other directive is byte-identical to the cached page policy.
+        for name in [
+            "default-src",
+            "script-src",
+            "style-src",
+            "img-src",
+            "base-uri",
+            "form-action",
+            "frame-ancestors",
+        ] {
+            assert_eq!(
+                directive(&configured, name),
+                directive(page_policy(COMBINED), name)
+            );
+        }
+        // The page's own independent hash gold is still present.
+        assert!(configured.contains(HASH_BOOT_CALL));
+        assert!(configured.contains(HASH_H1_RULE));
+        // connect-src gains exactly the given origin after 'self'.
+        assert_eq!(
+            directive(&configured, "connect-src"),
+            "connect-src 'self' https://studies.example:8443"
+        );
+        // No forbidden source and no wildcard entered anywhere.
+        assert!(!configured.contains("unsafe-eval"));
+        assert!(!configured.contains("wasm-unsafe-eval"));
+        assert!(!configured.contains("blob:"));
+        assert!(!configured.contains('*'));
+    }
+
+    #[test]
+    fn configured_origins_never_enter_the_cached_default_and_the_pointer_stays_stable() {
+        let before = page_policy(NO_INLINE);
+        let configured = configured_main_policy(
+            NO_INLINE,
+            &[
+                String::from("https://studies.example:8443"),
+                String::from("http://studies.example:9000"),
+            ],
+        );
+        // The helper accepted both origins, in order.
+        assert_eq!(
+            directive(&configured, "connect-src"),
+            "connect-src 'self' https://studies.example:8443 http://studies.example:9000"
+        );
+        // The cached default policy is untouched: still self-only.
+        let after = page_policy(NO_INLINE);
+        assert!(std::ptr::eq(before, after));
+        assert_eq!(directive(after, "connect-src"), "connect-src 'self'");
+        assert!(!after.contains("studies.example"));
+    }
+
     use sha2::{Digest, Sha256};
 
     // Fixtures. Each is an exact page literal. The expected hashes beside
@@ -384,7 +456,7 @@ mod tests {
 
     /// One directive's text out of a policy. Base64 carries no space or
     /// semicolon, so splitting on the directive separator is exact.
-    fn directive(policy: &'static str, name: &str) -> &'static str {
+    fn directive<'a>(policy: &'a str, name: &str) -> &'a str {
         policy
             .split("; ")
             .find(|directive| directive.starts_with(name))

@@ -421,7 +421,7 @@ their actual viewer workflow and matrix evidence before completion.
 | F-203 | E38.13 | S49 | Orthographic and oblique MPR in the single showcase viewer | All | 6w | F-202, F-245, F-197, F-052, F-053, F-X004 | pending |
 | F-204 | E38.14 | S47 | One stored pixel per device pixel in the single showcase viewer | All | 2w | F-245, F-207 | pending |
 | F-205 | E38.15 | S47 | Validated shared preferences in the single showcase viewer | All | 3w | F-245, F-214 | pending |
-| F-245 | E38.40 | S47 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | F-207, F-228, F-231, F-021 | pending |
+| F-245 | E38.40 | S47 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | F-207, F-228, F-231, F-021 | in-progress |
 | F-246 | E38.41 | S48 | Nearest and linear display interpolation controls in the showcase | All | 3w | F-202, F-245, F-194 | pending |
 | F-247 | E38.42 | S48 | DICOM overlay planes and display shutters drawn in the showcase | All | 4w | F-202, F-245, F-193 | pending |
 | F-248 | E38.43 | S48 | Image and region histograms in the showcase | All | 3w | F-202, F-245, F-075, F-211 | pending |

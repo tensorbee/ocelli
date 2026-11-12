@@ -1,7 +1,7 @@
 # DICOM ingest
 
-**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211, F-234, F-225, F-244
-**Last updated:** 2026-11-09
+**F-IDs that contributed:** F-016, F-017, F-019, F-020, F-021, F-025, F-211, F-234, F-225, F-244, F-245
+**Last updated:** 2026-11-11
 
 `ocelli-dicom` owns the first ingest boundary. It accepts an in-memory DICOM
 Part 10 file, resolves its declared transfer syntax, and returns the complete
@@ -148,6 +148,52 @@ untrusted value bytes.
 The variants carry no input bytes, attribute values, instance identifiers,
 paths, or upstream parser tokens. A caller can report the error class without
 placing DICOM content in logs.
+
+## The bounded borrowed source path
+
+F-245 adds one borrowed bounded entry beside the owned `consume`. It receives
+explicit limits and returns the same `SourceBatch`, and it accepts only
+`QidoJson` and `WadoRsInstances`:
+
+```rust
+pub struct SourceResponseLimits {
+    pub encoded_body_max: usize,
+    pub decoded_max: usize,
+    pub max_parts: usize,
+    pub max_rows: usize,
+}
+
+pub fn consume_borrowed(
+    &self,
+    raw: &[u8],
+    kind: &SourceResponseKind,
+    limits: &SourceResponseLimits,
+) -> Result<SourceBatch, SourceError>
+
+pub struct ParseLimits {
+    pub decoded_dataset_max: usize,
+}
+
+pub fn parse_part10_with_limits(
+    bytes: &[u8],
+    limits: &ParseLimits,
+) -> Result<ParsedDicom, ParseError>
+```
+
+The method bounds the encoded length before growth, bounds inflated output
+before extending a read, bounds the part count and bounds row-visitor growth.
+`SourceError` gains `SizeLimit` and `UnsupportedRepresentation`, and
+`ParseError` gains `SizeLimit` for a decoded data set over its cap. A second
+multipart part is refused before it is parsed when the route requires exactly
+one. The legacy owned `consume` covering all four source kinds and the
+unbounded `parse_part10` are unchanged.
+
+The viewer layer sets the route limits, not the parser. The native viewer's
+query route admits a 2 MiB encoded body and 20000 rows, and the instance
+route admits a 32 MiB encoded body, a 128 MiB decoded cap, and one part. The
+viewer's own 16 MiB reply serialization cap is recorded in
+`docs/lld/dicomweb.md`. These limits bound the payload, not physical heap or
+resident set size, and no parser object peak is claimed bounded by them.
 
 ## Lossless metadata model
 

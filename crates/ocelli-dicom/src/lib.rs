@@ -34,7 +34,7 @@ pub use dicom_core::VR;
 pub use dicom_object::{DefaultDicomObject, Tag};
 pub use dicomweb::{
     DicomwebSource, EncodedFramePart, EncodedFrames, SeriesSource, SourceBatch, SourceError,
-    SourceResponse, SourceResponseKind,
+    SourceResponse, SourceResponseKind, SourceResponseLimits,
 };
 pub use frame_geometry::{
     FrameGeometry, FrameGeometryError, FrameGeometrySources, SpacingEvidence, SpacingRelationship,
@@ -63,7 +63,8 @@ pub use overlay::{
     read_overlays,
 };
 pub use parse::{
-    DispatchPath, MAX_SEQUENCE_DEPTH, ParseError, ParsedDicom, TransferSyntaxInfo, parse_part10,
+    DispatchPath, MAX_SEQUENCE_DEPTH, ParseError, ParseLimits, ParsedDicom, TransferSyntaxInfo,
+    parse_part10, parse_part10_with_limits,
 };
 pub use provider::{
     MetadataRequest, ProviderAnswer, ProviderFn, ProviderId, ProviderRegistry,

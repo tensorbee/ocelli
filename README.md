@@ -116,9 +116,9 @@ packages/
   react/            @ocelli/react
 
 examples/
-  viewer-react/     the example viewer, and the manual smoke test
-  example-server/   loopback helper for the example viewer's frame-open, series-open and overlay panels
-  folder-viewer/    local series page for a folder on this machine
+  viewer-react/     the boundary demo, kept under the dev:boundary-demo script
+  example-server/   loopback helper for the boundary demo's frame-open, series-open and overlay panels
+  folder-viewer/    the showcase viewer, local series and DICOMweb sources
 
 tools/
   oracle/           the differential harness against cornerstone3D
@@ -146,19 +146,51 @@ bin/ocelli.sh gate --floor
 
 ## Start the example viewer
 
-The showcase is `examples/viewer-react`, package `@ocelli/example-viewer`.
-From the repository root:
+The showcase is the folder viewer, `examples/folder-viewer`. It is one
+ordinary HTML page with one native backend, served the same way by the npm
+dev path and by cargo. From the repository root:
 
 ```bash
 npm ci
-bin/ocelli.sh wasm
 npm run dev
 ```
 
-Open <http://localhost:5173>. Vite prints that address when the server is ready.
+`npm run dev` runs `bin/folder-viewer-dev.mjs`. The launcher builds
+`@ocelli/core`, builds the native backend with cargo, selects the binary from
+cargo's compiler-artifact output rather than a hardcoded target path, and
+runs it. A custom `CARGO_TARGET_DIR` is honoured. The backend prints its
+address on stdout, an ephemeral port unless `OCELLI_PORT` is set, and opening
+that address shows the viewer. `SIGINT` or `SIGTERM` to the launcher stops
+the backend it started. The same page is served by
+`cargo run -p ocelli-folder-viewer`, which is the native path.
 
-`npm run dev` also starts `ocelli-example-server` on `127.0.0.1`. The helper
-prints only its base URL. The Frame open section posts to it through Vite.
+The page opens a local folder or the synthetic study, and with
+`OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set it
+also offers a DICOMweb source, described under Start the local series viewer
+below. The Use book the viewer serves at `/use` and the More page at `/more`
+carry the user-facing detail.
+
+### The boundary demo
+
+The earlier React Vite demo, `examples/viewer-react`, package
+`@ocelli/example-viewer`, is kept under its own script and is not the
+showcase:
+
+```bash
+npm run dev:boundary-demo
+```
+
+The demo page loads the wasm module, so build it first when it is missing:
+
+```bash
+bin/ocelli.sh wasm
+```
+
+Open <http://localhost:5173>. Vite prints that address when the server is ready.
+The script is `bin/example-dev.sh`, which also starts
+`ocelli-example-server` on `127.0.0.1`. The helper
+prints only its base URL. The Frame open
+section posts to it through Vite.
 The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
 centre 100 and width 200, then shows the display value and the padding count.
 The Series section posts three synthetic objects, or a multipart body of files
@@ -173,8 +205,8 @@ the wasm module.
 
 `bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
 directory is a build artefact and is not committed, so a clean clone still
-opens with the header on `core not built`. In `npm run dev`, after that
-build, reload the page. The worker loads the module, and the header reads
+opens with the header on `core not built`. In `npm run dev:boundary-demo`,
+after that build, reload the page. The worker loads the module, and the header reads
 `core ready` only after that load succeeds. The build alone does not flip
 the header. The module a
 published consumer gets is `@ocelli/wasm`, which `npm pack` stages from this
@@ -193,7 +225,7 @@ and resolves `@ocelli/core` and `@ocelli/react` from their built
 `packages/*/dist`. The viewer's own build script is `vite build` alone, so
 those dists come from `npm run build`, which must run first. A plain static
 server over that directory at its root reads
-`core ready` like `npm run dev` does. The dist does not pick up a module
+`core ready` like `npm run dev:boundary-demo` does. The dist does not pick up a module
 built later. `vite build` reads `crates/ocelli-wasm/pkg` once, when the
 build starts, so the package must exist before that build. A dist built
 without it keeps the external `/@fs` import of the pkg-absent build, and
@@ -213,7 +245,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval
 In Chromium the worker's policy comes from its own response and not from the
 page's, so a header on the HTML document alone leaves the worker
 unrestricted, and a header on the worker alone without `'wasm-unsafe-eval'`
-breaks the compile. Send the same header on every response.
+breaks the compile. Send the same header on every response. The folder viewer's image page sets `connect-src` to `'self'` plus the studies service origin configured at startup, while Use and More keep the self-only policy, and IPv6 literal hosts are refused at startup because browsers do not match them in `connect-src`.
 `worker-src 'self'` is an explicit pin rather than a requirement, because
 the worker is also allowed through the fallback to `script-src 'self'`: the
 pin keeps a later widening of `script-src` from widening worker construction
@@ -289,6 +321,8 @@ machine only.
 ```bash
 cargo run --release -p ocelli-folder-viewer
 ```
+
+With `OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set to absolute http or https URLs, the viewer shows a DICOMweb source that searches studies, series and instances and fetches one selected instance the native backend parses and validates. Remote images are not displayed yet, and the local study, its marks, documents and checks stay as they are. Choosing a local source cancels a pending remote request and releases a staged body, so a late remote reply cannot claim the local image is unchanged. The remote panel itself returns to its idle line. With neither value set the viewer runs local only, the remote panel stays hidden, and the native DICOMweb POST routes are refused. Setting only one value, or an invalid value, stops startup with a fixed message that does not echo the value.
 
 The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. A multiframe in which any frame's window comes from a per-frame functional group also keeps every frame's inspect reply, so the page can ask for a frame's window list by file id after the posted bytes are dropped. The parts no frame changes are kept once. No other file keeps one. This pool is outside `OCELLI_CACHE_MIB`, is charged at the bytes it holds, stays under a fixed 16 MiB across every file, and `GET /held` reports it as `kept`. Replies that would pass that cap after the files holding nothing are dropped are not kept, and that file's `/inspect` by id answers 410 once its bytes are gone. A forget drops a file's replies, and so does a file the cache has evicted, when it is next asked for. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes on those threads, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. At most two automatic series windows are computed at once, each holding up to 4 MiB outside `OCELLI_CACHE_MIB` while it runs, which is the bound's term `P * 4 MiB`, and a third waits for one of them to finish. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
 
@@ -684,8 +718,8 @@ is safe because nothing calls it.
 
 `OcelliViewport` renders a host `div`. Pass `session={null}` when you have no
 wasm session. The frame pump starts only after the session's `memory` is the
-built module. `examples/viewer-react/src/App.tsx` is the mount this repository
-runs.
+built module. `examples/viewer-react/src/App.tsx` is the boundary demo's
+mount, served by `npm run dev:boundary-demo`.
 
 ```tsx
 import { viewportId } from "@ocelli/core";

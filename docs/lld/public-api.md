@@ -1,7 +1,7 @@
 # Public API
 
-**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231, F-236, F-225, F-215
-**Last updated:** 2026-11-10
+**F-IDs that contributed:** F-100, F-101, F-104, F-050, F-103, F-102, F-X003, F-068, F-069, F-072, F-071, F-073, F-074, F-075, F-076, F-077, F-078, F-079, F-080, F-084, F-081, F-082, F-083, F-085, F-086, F-087, F-088, F-090, F-091, F-089, F-092, F-093, F-094, F-095, F-098, F-099, F-096, F-097, F-196, F-105, F-108, F-106, F-107, F-109, F-112, F-114, F-111, F-115, F-116, F-117, F-118, F-199, F-200, F-201, F-230, F-231, F-236, F-225, F-215, F-245
+**Last updated:** 2026-11-11
 
 The viewport, scene and tool surface. It is a new API, HLD section 2.1.
 F-101 built the wire. F-104 moved every boundary number into one Rust table
@@ -119,18 +119,21 @@ An options object in `@ocelli/core` refuses a key it does not declare.
 
 **The in-scope rule.** Every exported interface or type alias in
 `packages/core/src` whose name ends in `Options` or `Request`, plus
-`FrameCommitMeta`. `OPTION_KEY_LISTS` maps these eight names to their keys:
+`FrameCommitMeta`. `OPTION_KEY_LISTS` maps these eleven names to their keys:
 
 | Type | Checked by |
 |------|------------|
 | `DicomwebClientOptions` | `new DicomwebClient` |
+| `DicomwebBoundedDeliveryOptions` | `new DicomwebClient` |
 | `QidoSearchOptions` | `searchStudies`, `searchSeries` and `searchInstances` |
+| `DicomwebProviderOptions` | `new DicomwebProvider` |
 | `PointerDispatchOptions` | `createPointerDispatch` |
 | `CursorControllerOptions` | `createCursorController` |
 | `WadoInstanceRequest` | `postWadoInstance` |
 | `KeyObjectRequest` | `writeKeyObject` |
 | `SecondaryCaptureRequest` | `writeSecondaryCapture` |
 | `FrameCommitMeta` | `writeFrame` with a ticketed sink, and `acceptTransferredFrame` |
+| `ResidentFrameRequest` | `frameResident` |
 
 Records such as `HandoffMeta`, `StackFrameKey` and `PackedCommand` are not
 checked.
@@ -163,6 +166,18 @@ a new field fails `npm run typecheck` until its list names it.
 `.ts` file in `packages/core/src` for an exported `*Options` or `*Request`
 type, adds `FrameCommitMeta`, and expects exactly the names in
 `OPTION_KEY_LISTS`. A new such type with no key list fails that test.
+
+## The DICOMweb viewer provider
+
+F-245 adds one flat core module, `packages/core/src/dicomweb-viewer.ts`,
+exported from the package index. `DicomwebProvider` composes on the existing
+`DicomwebClient` and adds typed QIDO envelopes and one staged instance.
+`DicomwebProviderOptions` is in `OPTION_KEY_LISTS` as
+`DICOMWEB_PROVIDER_OPTION_KEYS`, so `new DicomwebProvider` refuses an unknown
+key like every other entry point. The legacy `DicomwebClient` surface, its
+option keys, its `Promise<void>` returns and `postWadoInstance` are
+unchanged. The envelope, receipt and staging contract are recorded in
+`docs/lld/dicomweb.md`.
 
 ## Scene and stack viewport
 

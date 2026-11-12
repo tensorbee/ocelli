@@ -4,7 +4,7 @@
 //! explicit representation kind, then projects them into the same metadata
 //! and Part 10 types used by the rest of the crate.
 
-use std::{fmt, ops::Range, str::FromStr};
+use std::{cell::Cell, fmt, ops::Range, str::FromStr};
 
 use dicom_core::{PrimitiveValue, VR};
 use serde::{
@@ -14,7 +14,10 @@ use serde::{
 use serde_json::{Map, Number, Value};
 use uriparse::URIReference;
 
-use crate::{MetadataElement, MetadataSet, ParseError, ParsedDicom, PersonName, Tag, parse_part10};
+use crate::{
+    MetadataElement, MetadataSet, ParseError, ParseLimits, ParsedDicom, PersonName, Tag,
+    parse_part10, parse_part10_with_limits,
+};
 
 /// The representation selected and validated by the transport layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +155,25 @@ pub enum SourceError {
     /// One DICOM Part 10 payload is invalid.
     #[error("DICOM Part 10 response payload is invalid")]
     InvalidPart10 { part: usize, error: ParseError },
+    /// A response exceeds a configured size limit.
+    #[error("DICOM response exceeds a size limit")]
+    SizeLimit,
+    /// A response uses an unsupported representation.
+    #[error("DICOM response uses an unsupported representation")]
+    UnsupportedRepresentation,
+}
+
+/// Patient-safe response limits supplied by the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceResponseLimits {
+    /// Maximum encoded body size in bytes.
+    pub encoded_body_max: usize,
+    /// Maximum decoded size in bytes.
+    pub decoded_max: usize,
+    /// Maximum number of multipart parts.
+    pub max_parts: usize,
+    /// Maximum number of QIDO rows.
+    pub max_rows: usize,
 }
 
 /// A transport-neutral source of query metadata, instances, and frame bytes.
@@ -168,17 +190,71 @@ pub trait SeriesSource {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DicomwebSource;
 
+impl DicomwebSource {
+    /// Consume borrowed response bytes against explicit limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SourceError::UnsupportedRepresentation`] unless `kind` is
+    /// [`SourceResponseKind::QidoJson`] or [`SourceResponseKind::WadoRsInstances`].
+    /// Returns [`SourceError::SizeLimit`] when the encoded body, decoded data
+    /// sets, or part count exceed the supplied limits, and
+    /// [`SourceError::InvalidPart10`] with the failing part index for
+    /// structural Part 10 failures.
+    pub fn consume_borrowed(
+        &self,
+        raw: &[u8],
+        kind: &SourceResponseKind,
+        limits: &SourceResponseLimits,
+    ) -> Result<SourceBatch, SourceError> {
+        if raw.len() > limits.encoded_body_max {
+            return Err(SourceError::SizeLimit);
+        }
+        match kind {
+            SourceResponseKind::QidoJson => {
+                parse_qido_json(raw, Some(limits.max_rows)).map(SourceBatch::Query)
+            }
+            SourceResponseKind::WadoRsInstances { boundary } => {
+                let parts = parse_multipart(raw, boundary, Some(limits.max_parts))?;
+                let mut instances = Vec::with_capacity(parts.len());
+                for (index, part) in parts.iter().enumerate() {
+                    if !media_type_is(&part.media_type, "application/dicom") {
+                        return Err(SourceError::InvalidPartMediaType { part: index });
+                    }
+                    let bytes = raw
+                        .get(part.range.clone())
+                        .ok_or(SourceError::InvalidMultipart)?;
+                    instances.push(
+                        parse_part10_with_limits(
+                            bytes,
+                            &ParseLimits {
+                                decoded_dataset_max: limits.decoded_max,
+                            },
+                        )
+                        .map_err(|error| match error {
+                            ParseError::SizeLimit => SourceError::SizeLimit,
+                            error => SourceError::InvalidPart10 { part: index, error },
+                        })?,
+                    );
+                }
+                Ok(SourceBatch::Instances(instances))
+            }
+            _ => Err(SourceError::UnsupportedRepresentation),
+        }
+    }
+}
+
 impl SeriesSource for DicomwebSource {
     fn consume(&self, response: SourceResponse) -> Result<SourceBatch, SourceError> {
         match response.kind {
             SourceResponseKind::QidoJson => {
-                parse_qido_json(&response.bytes).map(SourceBatch::Query)
+                parse_qido_json(&response.bytes, None).map(SourceBatch::Query)
             }
             SourceResponseKind::WadoUriPart10 => parse_part10(&response.bytes)
                 .map(|object| SourceBatch::Instances(vec![object]))
                 .map_err(|error| SourceError::InvalidPart10 { part: 0, error }),
             SourceResponseKind::WadoRsInstances { boundary } => {
-                let parts = parse_multipart(&response.bytes, &boundary)?;
+                let parts = parse_multipart(&response.bytes, &boundary, None)?;
                 let mut instances = Vec::with_capacity(parts.len());
                 for (index, part) in parts.iter().enumerate() {
                     if !media_type_is(&part.media_type, "application/dicom") {
@@ -199,7 +275,7 @@ impl SeriesSource for DicomwebSource {
                 boundary,
                 media_type,
             } => {
-                let parts = parse_multipart(&response.bytes, &boundary)?;
+                let parts = parse_multipart(&response.bytes, &boundary, None)?;
                 let mut frames = Vec::with_capacity(parts.len());
                 for (index, part) in parts.into_iter().enumerate() {
                     if !media_type_is(&part.media_type, &media_type) {
@@ -230,7 +306,11 @@ struct PartHeaders {
     content_length: Option<usize>,
 }
 
-fn parse_multipart(bytes: &[u8], boundary: &str) -> Result<Vec<MultipartPart>, SourceError> {
+fn parse_multipart(
+    bytes: &[u8],
+    boundary: &str,
+    max_parts: Option<usize>,
+) -> Result<Vec<MultipartPart>, SourceError> {
     if !valid_boundary(boundary) {
         return Err(SourceError::InvalidMultipartBoundary);
     }
@@ -284,6 +364,9 @@ fn parse_multipart(bytes: &[u8], boundary: &str) -> Result<Vec<MultipartPart>, S
             .is_some_and(|length| length != payload_end - payload_start)
         {
             return Err(SourceError::InvalidMultipart);
+        }
+        if max_parts.is_some_and(|max| parts.len() >= max) {
+            return Err(SourceError::SizeLimit);
         }
         parts.push(MultipartPart {
             media_type: headers.media_type,
@@ -426,9 +509,28 @@ fn media_type_parameter<'a>(media_type: &'a str, requested: &str) -> Option<&'a 
     })
 }
 
-fn parse_qido_json(bytes: &[u8]) -> Result<Vec<MetadataSet>, SourceError> {
-    let DuplicateCheckedValue(value) =
-        serde_json::from_slice(bytes).map_err(|_| SourceError::InvalidJson)?;
+fn parse_qido_json(bytes: &[u8], max_rows: Option<usize>) -> Result<Vec<MetadataSet>, SourceError> {
+    let DuplicateCheckedValue(value) = match max_rows {
+        None => serde_json::from_slice(bytes).map_err(|_| SourceError::InvalidJson)?,
+        Some(max_rows) => {
+            let limit_hit = Cell::new(false);
+            let visitor = DuplicateCheckedVisitor {
+                max_rows: Some(max_rows),
+                limit_hit: Some(&limit_hit),
+            };
+            let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+            let value =
+                serde::Deserializer::deserialize_any(&mut deserializer, visitor).map_err(|_| {
+                    if limit_hit.get() {
+                        SourceError::SizeLimit
+                    } else {
+                        SourceError::InvalidJson
+                    }
+                })?;
+            deserializer.end().map_err(|_| SourceError::InvalidJson)?;
+            value
+        }
+    };
     let rows = value.as_array().ok_or(SourceError::InvalidJsonRoot)?;
     rows.iter()
         .map(|row| {
@@ -446,13 +548,19 @@ impl<'de> Deserialize<'de> for DuplicateCheckedValue {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(DuplicateCheckedVisitor)
+        deserializer.deserialize_any(DuplicateCheckedVisitor {
+            max_rows: None,
+            limit_hit: None,
+        })
     }
 }
 
-struct DuplicateCheckedVisitor;
+struct DuplicateCheckedVisitor<'a> {
+    max_rows: Option<usize>,
+    limit_hit: Option<&'a Cell<bool>>,
+}
 
-impl<'de> Visitor<'de> for DuplicateCheckedVisitor {
+impl<'de> Visitor<'de> for DuplicateCheckedVisitor<'_> {
     type Value = DuplicateCheckedValue;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -503,6 +611,14 @@ impl<'de> Visitor<'de> for DuplicateCheckedVisitor {
     {
         let mut values = Vec::new();
         while let Some(DuplicateCheckedValue(value)) = sequence.next_element()? {
+            if let Some(max_rows) = self.max_rows
+                && values.len() >= max_rows
+            {
+                if let Some(limit_hit) = self.limit_hit {
+                    limit_hit.set(true);
+                }
+                return Err(de::Error::custom("row limit exceeded"));
+            }
             values.push(value);
         }
         Ok(DuplicateCheckedValue(Value::Array(values)))

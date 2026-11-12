@@ -67,7 +67,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, changed.mjs, marks.mjs, conformance.mjs colour.mjs and auto.mjs (F-208, F-209, F-226, F-213, F-224, F-215, F-225, F-239, F-227)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-224, F-215, F-225, F-239, F-227, F-245)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -197,9 +197,17 @@ run_gate() {
     # reference line check follows, then F-226's forget check: the process
     # forgets the folder the page left, a late reply does not post the old
     # file again, and leaving the page forgets the folder open. F-224's
-    # changed-file check is last: a file rewritten on disk after the folder
+    # changed-file check follows: a file rewritten on disk after the folder
     # was opened is refused rather than shown, choosing the folder again
-    # shows the new bytes, and the probe reads one byte a file. Chained on
+    # shows the new bytes, and the probe reads one byte a file. F-245's
+    # dicomweb.mjs check follows: a synthetic DICOMweb upstream is browsed
+    # from the page, a refused and a validated instance leave the local image
+    # untouched, a pending fetch that a local source change cancels never
+    # labels that changed image, and the served More row states the partial
+    # status. F-245's launcher.mjs check is last: the page is served through
+    # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
+    # Chromium, is byte-identical to the native start, and the owned stop
+    # leaves the port closed. Chained on
     # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
     # the viewer, so it is outside the floor. The CI step that runs it is the
     # `viewer-browser` job, which installs both.
@@ -218,7 +226,9 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/marks.mjs &&
                  node examples/folder-viewer/tests/browser/conformance.mjs &&
                  node examples/folder-viewer/tests/browser/colour.mjs &&
-                 node examples/folder-viewer/tests/browser/auto.mjs ;;
+                 node examples/folder-viewer/tests/browser/auto.mjs &&
+                 node examples/folder-viewer/tests/browser/dicomweb.mjs &&
+                 node examples/folder-viewer/tests/browser/launcher.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
@@ -234,6 +244,7 @@ run_gate() {
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
+                   tools/bench/tests/folder_viewer_dev_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs \
                    tools/bench/tests/viewer_work_test.mjs \
                    tools/bench/tests/viewer_colour_frame_test.mjs \

@@ -280,8 +280,8 @@ In order, `vitest run` over `packages/*/src/**/*.test.ts` and
 `packages/*/src/**/*.test.tsx`, then `scripts/package_check.py`, then
 `scripts/viewer_build_check.py`, then the unreachable-injection table. The component
 test opts into jsdom with a vitest environment comment, so the rest of the
-suite keeps the default environment. `npm run dev` starts with no session and
-shows the absent state.
+suite keeps the default environment. `npm run dev:boundary-demo` starts with
+no session and shows the absent state.
 
 `vitest.config.ts` sets `passWithNoTests: false`. Vitest's default is to pass
 an empty run, and this project's rule is that a check which could not run must

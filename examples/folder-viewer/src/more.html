@@ -174,7 +174,7 @@
   <tbody>
     <tr class="group"><th colspan="5" scope="rowgroup">Study workflows and interoperability</th></tr>
     <tr data-features="F-257"><th scope="row">Prior studies and hanging layouts</th><td>Host application workflow</td><td>Source and layout foundations</td><td><span class="viewer-state none">Not yet</span>Prior-study selection is missing</td><td class="delivery">S50: F-257</td></tr>
-    <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state none">Not yet</span>Images currently opens local folders</td><td class="delivery">S47: F-245</td></tr>
+    <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state part">Partial</span>The viewer searches studies, series and instances over DICOMweb and fetches one instance the native backend validates, remote image display is not available yet, and local folders open as before</td><td class="delivery">S47: F-245</td></tr>
     <tr data-features="F-249"><th scope="row">Metadata browser</th><td>Metadata APIs. Browser UI belongs to the host</td><td>Typed metadata built</td><td><span class="viewer-state part">Partial</span>Headers are browsable and filterable</td><td class="delivery">S48: F-249</td></tr>
     <tr data-features="F-250"><th scope="row">Metadata compare and copy</th><td>Host application workflow</td><td>Metadata foundations built</td><td><span class="viewer-state none">Not yet</span>No compare or copy workflow</td><td class="delivery">S48: F-250</td></tr>
     <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Four browser settings saved</td><td><span class="viewer-state part">Partial</span>General tool, window and layout preferences remain</td><td class="delivery">S47: F-205</td></tr>
@@ -341,7 +341,7 @@ for change in scene.set_point(1, point)? {
 }</code></pre>
 </details>
     <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
-    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>npm run dev</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
+    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>dev:boundary-demo</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
 
   <section class="feature" id="mpr">
@@ -502,7 +502,7 @@ for (tag, element) in metadata.iter() {
 }
 let modality = metadata.get(Tag(0x0008, 0x0060));</code></pre>
 </details>
-    <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The example viewer reads Metadata browser unavailable.</p>
+    <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The boundary demo reads Metadata browser unavailable.</p>
   </section>
 
   <section class="feature" id="conformance">

@@ -1,6 +1,6 @@
 # The benchmark harness
 
-**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-224, F-225, F-227, F-239, F-240, F-243
+**F-IDs that contributed:** F-006, F-023, F-024, F-026, F-038, F-039, F-050, F-101, F-X003, F-X014, F-111, F-216, F-223, F-224, F-225, F-227, F-239, F-240, F-243, F-245
 **Last updated:** 2026-11-11
 
 HLD `docs/hld/23-performance-rules.md` section 26 ends with a rule that names an
@@ -706,6 +706,18 @@ frame budget, so the run also reports that plain timer ceiling.
 F-216 delivers `viewer.open`, `viewer.first_image`, `viewer.scroll_rate`,
 `viewer.window_step` and `viewer.resident_memory`. `subject_story` on each
 of those rows names F-216.
+
+F-245 adds no subject and no timing axis. The five registered subjects keep
+their definitions, runners, thresholds and bands. The F-245 plan appends a
+performance acquisition procedure, and both its runs are
+`bin/ocelli.sh bench viewer.open viewer.first_image viewer.window_step
+viewer.scroll_rate viewer.resident_memory --compare --out` into a fresh
+private directory, on the same host class and instrument, with no
+`--accept` and no baseline or tolerance edit. The measured path is the
+existing canonical local path only. Remote search and staging are not
+measured, and no remote memory or timing claim exists. The DICOMweb workflow
+is proved by `examples/folder-viewer/tests/browser/dicomweb.mjs`, which is a
+correctness suite and measures nothing.
 
 The synthetic Part 10 files are written under `tools/bench/out/`, which is
 ignored. They are not staged.
