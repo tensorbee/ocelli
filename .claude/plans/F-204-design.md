@@ -1675,3 +1675,37 @@ and the browser Tests row cover all seven, with ratio 3 in the list of
 ratios. In the 1600 by 1000 cell, AC20's illustrative floor is 0.0390625
 and its extent 160 device pixels, which the suite computes from the
 measured cell.
+
+## Lead amendment after implementation review pass 1, 2026-11-12
+
+This section is authoritative over decision 10 and every row it touches.
+
+**The one-to-one mode draws into a device-sized backing, as cornerstone3D
+5.8.2 does.** The review measured that a stored-size canvas scaled by CSS is
+resampled on a ratio 2 display whenever a stored extent is odd, because the
+box is a half CSS pixel (fixture B at 64.5 CSS px matched 2145 of 8385
+bytes), while the corner reads `Zoom 1:1`. That is below the floor:
+cornerstone sizes its backing as `Math.round(clientWidth * dpr)`
+(`ContextPoolRenderingEngine.js` about 131 to 137) and maps texels at device
+resolution. While the mode holds, the viewport's canvas element is sized in
+whole CSS pixels to its cell, its backing store is that box times the device
+pixel ratio, and the page writes stored pixels one to one into backing
+pixels at an integer device offset that carries the centring, the pan and
+the snap, with rotation and flips applied by index, never by a CSS
+transform. Where the box times the ratio is not a whole number, the box is
+chosen as the largest whole-CSS-pixel box whose product is a whole number
+of device pixels, or the mode is refused by name for that cell size, and the
+plan's tests say which. Outside the mode the existing stored-size canvas and
+its CSS scaling are unchanged. The review's probe found this backing
+byte-exact at ratios 1.25, 1.5 and 2 for 128 by 96 and 129 by 65.
+
+**Every byte row is restored.** AC3 runs P and B at ratios 1, 1.25, 1.5 and
+2 and the mid-pan, and AC19 runs its row count, row order and column
+subsample on D and D-prime, each with an exact integer crop offset, never a
+search window. AC2 asserts an observed painted origin, not a prediction.
+Departures (a) to (c) of the implementation report are withdrawn.
+
+**Truthful limit.** The suite runs under DevTools device scale emulation.
+README and More say the mode is verified byte for byte under emulated
+ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, and the More row moves to
+Implemented only when every restored byte row passes.
