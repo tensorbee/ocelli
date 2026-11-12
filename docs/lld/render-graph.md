@@ -103,10 +103,11 @@ surface-bound viewport is excluded from the grouping, from every
 first-into-target decision and from the co-target dirty marking, and the
 graph enforces that rather than trusting the caller: the texture it
 acquires is its own, so no viewport sharing its registered view is marked
-or held back by it, and its staleness decides only its acquired texture.
-The marking runs once per tick, after the frame is known to encode and before
-the surface textures are acquired, so a marked surface viewport acquires in
-the same frame. A tick that returns before the encode marks nothing, and
+or held back by it, and its staleness decides only whether it draws. The
+first pass into an acquired surface texture clears it, because an
+acquired texture's contents are undefined. The marking runs once per
+tick, after the frame is known to encode and before the surface textures
+are acquired. A tick that returns before the encode marks nothing, and
 the target keeps the composite of the last encoded frame. A slab's
 staleness is derived, its stamp's staged pair against the pass's recorded
 pair, and a stack's or a caller view's is the content flag a rescale change

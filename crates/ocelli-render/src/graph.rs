@@ -2392,7 +2392,9 @@ impl RenderGraph {
     /// A bound viewport draws into the texture it acquires, so the graph
     /// groups it with no other viewport: no viewport sharing its registered
     /// view is marked or held back by its staleness, and its staleness
-    /// decides only the texture it acquires.
+    /// decides only whether it draws. The first pass into the acquired
+    /// texture clears it, because an acquired texture's contents are
+    /// undefined.
     ///
     /// # Errors
     ///
@@ -4626,6 +4628,21 @@ impl RenderGraph {
             self.discard_frame_textures();
             return FrameOutcome::DeviceLost;
         }
+        // The acquisition and the colour attachment read the attached
+        // surface and the grouping reads the bound flag, so an attached
+        // surface must be marked bound. `bind_surface` writes both together
+        // and the dead-device rebuild clears both together, which holds the
+        // reverse everywhere but the surface grouping fixture, where the
+        // flag is placed without an object by the plan's own sanction.
+        debug_assert!(self.surfaces.iter().enumerate().all(|(index, attached)| {
+            attached.is_none()
+                || self
+                    .registry
+                    .states
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|state| state.surface_bound)
+        }));
         let mut first_unavailable: Option<ViewportId> = None;
         let mut any_encodable = false;
         for (index, state) in self.registry.states.iter().enumerate() {
@@ -4681,12 +4698,11 @@ impl RenderGraph {
     ///
     /// A surface-bound viewport is skipped both ways. It draws into the
     /// texture it acquires, which no other viewport renders into, so its
-    /// staleness marks no co-target and no viewport sharing its registered
-    /// view is marked by it.
+    /// staleness marks no co-target, and no co-target's staleness marks it.
     ///
     /// This runs after the frame is known to encode and before the surface
-    /// textures are acquired, so a marked surface viewport acquires in the
-    /// same frame. A tick that returns before the encode marks nothing.
+    /// textures are acquired. A tick that returns before the encode marks
+    /// nothing.
     fn mark_shared_targets_stale(&mut self) {
         let RenderGraph { registry, gpu, .. } = self;
         for index in 0..gpu.len() {
@@ -4799,31 +4815,29 @@ impl RenderGraph {
             // with a rescale the pass no longer records. A slab's staleness
             // is derived from its stamp's staged pair, never stored, so it
             // cannot outlive a return to the staged pair. The pass still
-            // begins: when any viewport on its target is stale, the first
-            // pass encoded into the target this frame clears it and every
-            // later pass loads, so the fresh viewports recomposite beneath
-            // the stale one. A target with no stale viewport keeps the state
-            // table's rule: a slab loads, everything else clears.
+            // begins, and the load op below decides what it reads. The load
+            // op's rule is `frame_load_op`'s, which documents it once.
             let stale = viewport_is_stale(registry, gpu, index);
             let bound = registry
                 .states
                 .get(index)
                 .and_then(Option::as_ref)
                 .is_some_and(|state| state.surface_bound);
-            // A surface-bound viewport draws into the texture it acquires
-            // this frame, which no other viewport renders into, so its pass
-            // is the first and only pass on that target and its own
-            // staleness decides the load. Every other viewport groups
-            // through its registered view.
-            let (stale_target, first_into_target) = if bound {
-                (stale, true)
+            // The grouping answers belong to the registered texture. A bound
+            // viewport draws into the texture it acquires, which no other
+            // viewport renders into, so the grouping answers nothing for it
+            // and the bound branch of the load op decides alone.
+            let load = if bound {
+                frame_load_op(true, false, false, key.pass)
             } else {
-                (target_is_stale(registry, gpu, index), {
+                let stale_target = target_is_stale(registry, gpu, index);
+                let first_into_target = {
                     let texture = slot.target.texture();
                     !slots_on_texture(registry, gpu, texture)
                         .take_while(|other| *other < index)
                         .any(|other| frame_passes.get(other).copied().unwrap_or(false))
-                })
+                };
+                frame_load_op(false, stale_target, first_into_target, key.pass)
             };
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
             let surface_view = frame_textures
@@ -4849,17 +4863,7 @@ impl RenderGraph {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: if stale_target {
-                                if first_into_target {
-                                    wgpu::LoadOp::Clear(wgpu::Color::BLACK)
-                                } else {
-                                    wgpu::LoadOp::Load
-                                }
-                            } else if key.pass == PassKind::Slab {
-                                wgpu::LoadOp::Load
-                            } else {
-                                wgpu::LoadOp::Clear(wgpu::Color::BLACK)
-                            },
+                            load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -5088,6 +5092,43 @@ fn target_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize) -
     };
     let texture = slot.target.texture();
     slots_on_texture(registry, gpu, texture).any(|other| viewport_is_stale(registry, gpu, other))
+}
+
+/// The load op for one frame pass, from the decisions the frame computed.
+///
+/// A bound viewport draws into the surface texture it acquired this frame.
+/// The acquired texture's contents are undefined, and no other viewport
+/// renders into it, so the bound viewport's pass is the first pass into its
+/// target and clears, whatever the pass's staleness or kind. The bound
+/// branch reads neither grouping answer, so the caller passes two false
+/// placeholders for it. A later pass into an acquired texture in the same
+/// frame may load what the first pass drew, but none can arise today,
+/// because the grouping excludes a bound viewport in both directions.
+///
+/// For an unbound viewport the two grouping answers decide. When the target
+/// holds a stale viewport this frame, the first pass encoded into it clears
+/// and every later pass loads, so the fresh viewports recomposite beneath
+/// the stale one. A target with no stale viewport keeps the state table's
+/// rule: a slab loads, every other pass kind clears.
+fn frame_load_op(
+    bound: bool,
+    stale_target: bool,
+    first_into_target: bool,
+    pass: PassKind,
+) -> wgpu::LoadOp<wgpu::Color> {
+    if bound {
+        wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+    } else if stale_target {
+        if first_into_target {
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+        } else {
+            wgpu::LoadOp::Load
+        }
+    } else if pass == PassKind::Slab {
+        wgpu::LoadOp::Load
+    } else {
+        wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+    }
 }
 
 fn voi_of(pass: &Pass) -> VoiParams {
@@ -5939,6 +5980,54 @@ mod tests {
         ));
     }
 
+    /// The load op clears the first pass into an acquired surface texture.
+    ///
+    /// The lead amendment after implementation review passes 4 and 5: the
+    /// first pass to draw into a freshly acquired surface texture in a
+    /// frame clears it, because an acquired texture's contents are
+    /// undefined. A bound viewport's pass is that first pass, so neither
+    /// its staleness nor its kind can turn the clear into a load. The
+    /// first two bound rows pass the exact arguments the encode path
+    /// passes, two false placeholders for grouping answers it never
+    /// computed, so the old choice, where a fresh bound slab loaded, is
+    /// red on the first row. The third bound row pins the branch against
+    /// a staleness the encode path never supplies for a bound viewport.
+    /// The unbound rows are the shared-target rule of the pass 2
+    /// amendment and the state table.
+    #[test]
+    fn the_load_op_clears_the_first_pass_into_an_acquired_texture() {
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let load = wgpu::LoadOp::Load;
+        assert_eq!(
+            super::frame_load_op(true, false, false, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(true, false, false, PassKind::Stack),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(true, true, false, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(false, true, true, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(false, true, false, PassKind::Stack),
+            load
+        );
+        assert_eq!(
+            super::frame_load_op(false, false, true, PassKind::Slab),
+            load
+        );
+        assert_eq!(
+            super::frame_load_op(false, false, false, PassKind::Stack),
+            clear
+        );
+    }
+
     /// PS3.3 values stay `f32` after `textureLoad`. `Rgba8Unorm` is not a
     /// candidate. Tier A does not substitute when `R32Float` cannot be sampled.
     #[test]
@@ -6265,22 +6354,27 @@ mod route_tests {
 /// pointer, which needs an Objective-C runtime dependency the plan does not
 /// name, and fabricating the pointer is undefined behaviour behind
 /// `SurfaceTargetUnsafe`, which is `unsafe`. The fixture therefore places
-/// the one decision state `bind_surface` writes, `SlotState::surface_bound`,
+/// the one decision state the grouping reads, `SlotState::surface_bound`,
 /// through the graph's own registry, and holds no bound object. That is the
 /// narrowest real seam that exercises the state on the real frame path.
-/// With the state present and no object, the viewport's pass falls back to
-/// its registered view, which is the encode the reviewed failure describes
-/// for the viewport that goes first.
+/// `bind_surface` also writes the attached surface itself, which decides
+/// the acquisition and the colour attachment, and this fixture does not
+/// exercise that choice. With the state present and no object, the
+/// viewport's pass falls back to its registered view, which is the encode
+/// the reviewed failure describes for the viewport that goes first.
 #[cfg(test)]
 mod surface_grouping_tests {
     use crate::caps::TierRequest;
     use crate::gpu::GpuContext;
-    use crate::graph::{BlendMode, FrameOutcome, Pass, RenderGraph, StackPass, ViewportId};
+    use crate::graph::{
+        BlendMode, FrameOutcome, Pass, RenderGraph, SlabPass, StackPass, ViewportId,
+    };
     use crate::voi::VoiParams;
     use ocelli_pixel::{
         LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
         VoiFunction, VoiTransform,
     };
+    use ocelli_volume::{PlaneSample, SlabImage};
 
     fn from_bits(bits: u32) -> f32 {
         f32::from_bits(bits)
@@ -6454,16 +6548,19 @@ mod surface_grouping_tests {
     /// viewport last, so T holds its 0.04833984375 composite.
     ///
     /// `set_voi` with pair B (`0x3D47EF8C`, `0xC52D91AC`, window centre
-    /// `0xC5265588` width 2.0) makes the stored viewport stale. The bound
-    /// viewport is in no grouping, so it is not marked dirty and does not
-    /// encode, and the stale viewport's pass is the first into T, which
-    /// clears to `0.0, 0.0, 0.0, 1.0` on `Rgba32Float`. A grouping that
-    /// keeps the bound viewport marks it dirty, its pass encodes first and
-    /// the stale pass loads instead of clearing, which is the reviewed
-    /// failure. The fresh upload then re-pre-applies with the recorded
-    /// pair, staged `0xC52654C0`, displayed 133.7255859375, normalized
-    /// 0.5244140625. The bound viewport's own rescale change marks no
-    /// co-target, so only its clear-only pass encodes.
+    /// `0xC5265588` width 2.0) makes the stored viewport stale. A
+    /// window-only `set_voi` with the bound viewport's own pair A marks
+    /// it dirty, not stale, in the same tick as the rescale change, which
+    /// is the production pan. Its pass encodes first, so the
+    /// first-into-target decision must not read it: a grouping that keeps
+    /// the bound viewport makes the stale pass load the 1.0 the bound
+    /// viewport just drew instead of clearing to `0.0, 0.0, 0.0, 1.0` on
+    /// `Rgba32Float`. The fresh upload then re-pre-applies with the
+    /// recorded pair, staged `0xC52654C0`, displayed 133.7255859375,
+    /// normalized 0.5244140625. A rescale change back to pair A with the
+    /// bound viewport clean marks no co-target: the bound viewport does
+    /// not encode. The bound viewport's own rescale change marks no
+    /// co-target either, so only its clear-only pass encodes.
     #[test]
     #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
     fn a_surface_bound_viewport_groups_with_nothing_on_its_registered_target() {
@@ -6563,16 +6660,23 @@ mod surface_grouping_tests {
             got = composited[0]
         );
 
+        // A window-only `set_voi` with the viewport's own pair A marks the
+        // bound viewport dirty, not stale, which is the production pan: a
+        // pan and a co-target's rescale change in one tick. Its pass
+        // encodes first, so the first-into-target decision must not read
+        // it. Under the unfiltered grouping the stale pass would load the
+        // 1.0 the bound viewport just drew instead of clearing.
+        assert!(graph.set_voi(&context, bound, &pair_a).is_ok());
         // The rescale change makes the stored viewport stale. The bound
         // viewport draws into the texture it acquires, so it is in no
-        // grouping: it is not marked, does not encode, and the stale
-        // viewport's pass is the first into T, which clears.
+        // grouping: it is not marked, and the stale viewport's pass is
+        // the first into T among the grouped viewports, which clears.
         assert!(graph.set_voi(&context, stored, &pair_b).is_ok());
         assert_eq!(
             graph.tick(&context),
             FrameOutcome::Submitted {
-                viewports: 1,
-                passes: 1
+                viewports: 2,
+                passes: 2
             }
         );
         let cleared = read_target(&context, &texture);
@@ -6607,8 +6711,49 @@ mod surface_grouping_tests {
             got = fresh[0]
         );
 
+        // A rescale change back to pair A with the bound viewport clean
+        // again. The stale co-target must not mark it: the bound viewport
+        // does not encode, so the frame is the stale viewport alone.
+        assert!(graph.set_voi(&context, stored, &pair_a).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let restaled = read_target(&context, &texture);
+        assert_eq!(
+            restaled[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the restaled target did not clear: {got}",
+            got = restaled[0]
+        );
+
+        // The recovery upload, so the last frame's target holds no stale
+        // viewport. The recorded pair is pair A, so the staged value is
+        // `0x44E7C30E` again and the readback is its 0.04833984375.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let recovered = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(recovered[0], 0.048_339_844_f32),
+            "the recovered composite is not the pair-A display: {got}",
+            got = recovered[0]
+        );
+
         // The bound viewport's own rescale change marks no co-target: only
-        // its clear-only pass encodes, and the stored viewport stays clean.
+        // its clear-only pass encodes, and the stored viewport does not.
         assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
         assert_eq!(
             graph.tick(&context),
@@ -6626,6 +6771,201 @@ mod surface_grouping_tests {
             0.0_f32.to_bits(),
             "the bound viewport's clear-only pass did not clear its target: {got}",
             got = rebound_target[0]
+        );
+    }
+
+    /// **The same rule for a surface-bound slab, whose staleness is derived.**
+    ///
+    /// A slab viewport carries the decision state and a stack viewport
+    /// shares its registered view. The slab stages pair A's mean of 2371.5
+    /// and 2372.5, the shader-order mean `0x44E7C30E`, which pair A's
+    /// window displays 12.32666015625, the red channel 0.04833984375, as
+    /// AC10 pins. The first frame draws both, the registration order
+    /// putting the stack last, so T holds 0.04833984375.
+    ///
+    /// The pan and the rescale change in one tick: the slab's pass encodes
+    /// first and the stale stack's pass must clear, not load what the slab
+    /// drew, which is the unfiltered-grouping kill on the slab path. After
+    /// the recovery, `set_voi` with pair B on the slab makes it stale
+    /// through its stamp's staged pair against the recorded pair, and its
+    /// clear-only pass is the first and only pass on its target, so the
+    /// readback is the clear colour. Under a forced-false staleness the
+    /// slab pass would load instead, which is the mutant this frame kills.
+    /// The stack does not encode, so the slab's staleness marks no
+    /// co-target.
+    #[test]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn a_surface_bound_slab_groups_with_nothing_and_clears_when_stale() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // One texture T, two views: the shared registered target.
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping slab target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let bound_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stale_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xC526_5588, 0x4000_0000);
+
+        let registered = graph.register(
+            &context,
+            bound_view,
+            // A slab pass reads its staged value texture, so this source is
+            // never sampled.
+            float_source(context.device(), context.queue(), 0.0),
+            Pass::Slab(SlabPass {
+                blend: BlendMode::Average,
+                voi: params(&pair_a),
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(bound) = registered else { return };
+        assert_eq!(bound, ViewportId(0));
+        // The state `bind_surface` writes for a bound viewport. No bound
+        // object can exist in this harness, so the pass falls back to the
+        // registered view.
+        if let Some(Some(state)) = graph
+            .registry
+            .states
+            .get_mut(usize::try_from(bound.0).unwrap_or(usize::MAX))
+        {
+            state.surface_bound = true;
+        }
+
+        let stored = graph.register_stored(
+            &context,
+            &adapter,
+            stale_view,
+            1,
+            1,
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(stored.is_ok());
+        let Ok(stored) = stored else { return };
+        assert_eq!(stored, ViewportId(1));
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+
+        let image = SlabImage {
+            width: 1,
+            height: 1,
+            step_mm: 2.5,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: 2,
+            samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+        };
+        assert!(
+            graph
+                .show_slab(&context, &adapter, bound, &image, BlendMode::Average)
+                .is_ok()
+        );
+
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let composited = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(composited[0], 0.048_339_844_f32),
+            "the first frame is not the stack's composite: {got}",
+            got = composited[0]
+        );
+
+        // The pan and the rescale change in one tick: the slab draws its
+        // composite first and the stale stack's pass clears over it.
+        assert!(graph.set_voi(&context, bound, &pair_a).is_ok());
+        assert!(graph.set_voi(&context, stored, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let cleared = read_target(&context, &texture);
+        assert_eq!(
+            cleared[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the shared target did not clear: {got}",
+            got = cleared[0]
+        );
+
+        // The fresh upload re-pre-applies and the stack draws its new
+        // composite into T.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let fresh = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(fresh[0], 0.524_414_06_f32),
+            "the stack did not draw its fresh composite: {got}",
+            got = fresh[0]
+        );
+
+        // Pair B on the slab: the staged pair is still pair A, so the
+        // derived staleness holds and the clear-only pass is the first and
+        // only pass on its target this frame. Under a forced-false
+        // staleness the slab pass would load the stack's composite instead.
+        assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let restaled = read_target(&context, &texture);
+        assert_eq!(
+            restaled[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the stale bound slab did not clear its target: {got}",
+            got = restaled[0]
         );
     }
 }
