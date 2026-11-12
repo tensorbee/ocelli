@@ -67,7 +67,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs, preferences.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245, F-205)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -209,7 +209,13 @@ run_gate() {
     # from the page, a refused and a validated instance leave the local image
     # untouched, a pending fetch that a local source change cancels never
     # labels that changed image, and the served More row states the partial
-    # status. F-245's launcher.mjs check is last: the page is served through
+    # status. F-205's preferences.mjs check follows: the five validated
+    # choices migrate and win, every refused shape and field names its
+    # sentence, the stored default applies once per series load behind the
+    # first-paint hold, a second port is a different origin, and the origin
+    # holds only the five allowed keys beside dcmjs's own loglevel write.
+    # F-245's launcher.mjs check is
+    # last: the page is served through
     # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
     # Chromium, is byte-identical to the native start, and the owned stop
     # leaves the port closed. Chained on
@@ -234,6 +240,7 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/colour.mjs &&
                  node examples/folder-viewer/tests/browser/auto.mjs &&
                  node examples/folder-viewer/tests/browser/dicomweb.mjs &&
+                 node examples/folder-viewer/tests/browser/preferences.mjs &&
                  node examples/folder-viewer/tests/browser/launcher.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \

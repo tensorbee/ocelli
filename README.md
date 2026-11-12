@@ -391,8 +391,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Recommended Display Frame Rate or Cine Rate the local process refuses, or a file
    whose frames this page could not read. A step that takes longer than the
    interval is not skipped, so play can run slower than the file asks, and the
-   line says so. The FPS control runs from 1 to 30, starts at 10 and is kept
-   in this browser.
+   line says so. The FPS control runs from 1 to 30 and starts at 10.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
    W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`,
@@ -454,7 +453,20 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    right button zooming. Window on left starts on W/L, with the middle button
    panning and the right button zooming. Control with the left button pans in
    all three. The browser keeps the profile for this address, so a kept
-   profile returns after a restart only on the same `OCELLI_PORT`. A pinch, or
+   profile returns after a restart only on the same `OCELLI_PORT`. What this
+   browser keeps is five validated choices: the mouse profile, the play
+   rate, whether each of the two side columns is hidden, a default window
+   preset and nothing else. The Default preset control in the WINDOW section
+   starts every newly opened series at that preset when the image is a CT
+   whose preset rows are choosable, once per series load. Reset returns the
+   file's own window and the preset does not come back until the next
+   series load. An MR, a colour image or a file with a VOI LUT Sequence
+   takes no preset, and a stored preset the viewer does not offer is named
+   in the line under the image and skipped. A choice the browser did not
+   keep, or a stored choice it could not use, is named in that line too,
+   never applied quietly. The choices live beside the four keys an older
+   version of the viewer reads, which stay current, so the two can be used
+   side by side. A pinch, or
    Ctrl with the wheel, zooms at the pointer. A sideways
    swipe does not change the image. Zoom keeps the image aspect ratio. The
    viewport clips an image that is larger than the pane.

@@ -175,6 +175,10 @@ async function startSyntheticDicomweb({ origin, study, series, instances }) {
 
 const BOUNDARY = "synthetic-dicomweb-boundary-f245";
 
+// F-205's preferences.mjs opens the same synthetic upstream for its
+// whole-origin sweep, so the starter is exported beside this suite's own use.
+export { startSyntheticDicomweb };
+
 // The panel line a release leaves behind. Asserted by exact equality after
 // every release, so a status that outlives its request fails the suite.
 const REMOTE_IDLE = "The DICOMweb panel is idle.";

@@ -587,6 +587,11 @@ const config = tseslint.config(
         seriesOf: "readonly",
         cacheKey: "readonly",
         PLAIN_VIEW: "readonly",
+        // F-205's preferences.mjs spies on the page's storage accessor,
+        // reads the whole origin's stores and counts the page's greys.
+        Storage: "readonly",
+        indexedDB: "readonly",
+        caches: "readonly",
       },
     },
   },

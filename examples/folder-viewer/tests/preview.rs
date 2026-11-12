@@ -426,12 +426,15 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
         return Err("the letters sentence does not name Patient Orientation".to_owned());
     }
     // F-213 AC12. The window rows come from the inspect reply, so the page
-    // holds no preset token, no preset number and no modality test of its
-    // own. Bare 1 to 9 choose a row and never the layout.
+    // holds no preset number and no modality test of its own. Bare 1 to 9
+    // choose a row and never the layout. F-205 adds the preset tokens to the
+    // page as the stored default preset's closed set, which is a preference
+    // value and not a window row, so the token check here is gone and
+    // F-205's own agreement test pins those tokens against the process.
     // F-215 names the template, TID 1500, which is not a window, so the
     // number is looked for with every "TID 1500" taken out first.
     let windowless = page.replace("TID 1500", "TID");
-    for held in ["data-preset", "-600", "1500", "\"CT\"", "soft_tissue"] {
+    for held in ["data-preset", "-600", "1500", "\"CT\""] {
         if windowless.contains(held) {
             return Err(format!("the page keeps a window of its own: {held}"));
         }
@@ -885,16 +888,18 @@ fn the_page_offers_mouse_profiles() -> Result<(), String> {
         ],
         "AC2",
     )?;
-    // AC4. A stored value is used only when it is one of the allowed ids, so
+    // AC4. A stored value is used only when it is one of the closed sets, so
     // `radiant` or `constructor` gives `ocelli` and is never used as a key.
+    // F-205 amends the call-site pins to the schema's resolved values and
+    // replaces the quiet fallback with the validator's named refusal.
     require(
         &page,
         &[
-            "let activeProfile = readPreference(MOUSE_KEY, PROFILE_IDS, \"ocelli\");",
-            "return allowed.includes(stored) ? stored : fallback;",
+            "let activeProfile = prefs.values.mouseProfile;",
+            "else sentences.push(PREFS_REFUSALS[field]);",
             "const MOUSE_KEY = \"ocelli.mouse\";",
             "const FPS_KEY = \"ocelli.fps\";",
-            "fpsInput.value = readPreference(FPS_KEY, FPS_VALUES, \"10\");",
+            "fpsInput.value = String(prefs.values.cineFps);",
             "This browser did not keep the choice. It applies until you reload.",
         ],
         "AC4",
@@ -930,6 +935,214 @@ fn the_page_offers_mouse_profiles() -> Result<(), String> {
         return Err("pointerMode still has the one fixed binding".to_owned());
     }
     Ok(())
+}
+
+#[test]
+fn the_page_stores_the_validated_preference_document() -> Result<(), String> {
+    // F-205 AC1. One versioned document holds the page's kept choices, and
+    // every field is one of a closed set, so no free text, path, URL or
+    // identifier is ever stored. The sentences are typed here from the plan,
+    // never read back from the page's own constants.
+    let page = served_page("/")?;
+    require(
+        &page,
+        &[
+            "const PREFS_KEY = \"ocelli.prefs\";",
+            "const PREFS_VERSION = 1;",
+            "const PREFS_FIELDS = [\"mouseProfile\", \"cineFps\", \"hideSeries\", \"hideInspector\", \"defaultPreset\"];",
+            "const PREFS_DEFAULTS = Object.freeze({ mouseProfile: \"ocelli\", cineFps: 10, hideSeries: false, hideInspector: false, defaultPreset: \"none\" });",
+            "const PREFS_LEGACY_KEYS = Object.freeze({ mouseProfile: MOUSE_KEY, cineFps: FPS_KEY, hideSeries: \"ocelli.no-series\", hideInspector: \"ocelli.no-inspector\" });",
+            "const DEFAULT_PRESETS = Object.freeze([\"none\", \"soft_tissue\", \"lung\", \"bone\"]);",
+            "<p id=\"prefs-note\" class=\"note-text\" hidden></p>",
+            "<select id=\"default-preset\" aria-label=\"Default preset\">",
+            "<option value=\"none\">None</option>",
+            "<option value=\"soft_tissue\">Soft tissue</option>",
+            "<option value=\"lung\">Lung</option>",
+            "<option value=\"bone\">Bone</option>",
+        ],
+        "F-205 AC1",
+    )?;
+    // AC5. The refusal sentences, one per field, and the whole-document and
+    // partial-write sentences, typed from the plan.
+    require(
+        &page,
+        &[
+            "The saved mouse profile is not one this viewer knows, so the Ocelli profile is used.",
+            "The saved play rate is not a whole number from 1 to 30, so 10 is used.",
+            "The saved series column choice is not readable, so the series list is shown.",
+            "The saved tools column choice is not readable, so the tools column is shown.",
+            "The saved default preset is not one this viewer knows, so no default preset is applied.",
+            "The saved preferences could not be used, so the viewer's usual choices apply and the saved document is left unchanged.",
+            "The saved default preset is not offered on this image, so it is not applied.",
+            "The choice was kept in this browser, but the copy that older versions of this viewer read was not updated.",
+            "This browser did not keep the play rate. It applies until you reload.",
+            "This browser did not keep the series column choice. It applies until you reload.",
+            "This browser did not keep the tools column choice. It applies until you reload.",
+            "This browser did not keep the default preset. It applies until you reload.",
+        ],
+        "F-205 AC5",
+    )?;
+    // The closed sets, enforced on every read and every write. An integer
+    // from 1 to 30 is the page's own FPS_VALUES range as numbers.
+    let valid = function_body(&page, "prefValueValid")?;
+    for needle in [
+        "typeof value === \"string\" && PROFILE_IDS.includes(value)",
+        "Number.isInteger(value) && value >= 1 && value <= 30",
+        "typeof value === \"boolean\"",
+        "typeof value === \"string\" && DEFAULT_PRESETS.includes(value)",
+    ] {
+        if !valid.contains(needle) {
+            return Err(format!("the closed sets lack {needle}"));
+        }
+    }
+    // The document as stored carries the version and exactly the five fields
+    // in order, so an unknown field cannot survive a write.
+    let stored = function_body(&page, "prefsDocumentJSON")?;
+    for needle in [
+        "version: PREFS_VERSION,",
+        "mouseProfile: values.mouseProfile,",
+        "cineFps: values.cineFps,",
+        "hideSeries: values.hideSeries,",
+        "hideInspector: values.hideInspector,",
+        "defaultPreset: values.defaultPreset",
+    ] {
+        if !stored.contains(needle) {
+            return Err(format!("the stored document lacks {needle}"));
+        }
+    }
+    // The refused shapes are one case: anything that is not a usable version
+    // 1 object, checked before any field is read.
+    let parse = function_body(&page, "parsePrefsDocument")?;
+    for needle in [
+        "if (raw == null) return null;",
+        "if (parsed === null || typeof parsed !== \"object\" || Array.isArray(parsed)) return null;",
+        "if (parsed.version !== PREFS_VERSION) return null;",
+    ] {
+        if !parse.contains(needle) {
+            return Err(format!(
+                "the document read does not refuse whole on {needle}"
+            ));
+        }
+    }
+    // The two raw helpers stay the page's only storage accessors, and the
+    // schema layer above them owns the re-read on change.
+    let save = function_body(&page, "savePreference")?;
+    if !save.contains("const raw = readPreference(PREFS_KEY);")
+        || !save.contains("const current = parsePrefsDocument(raw);")
+    {
+        return Err("the save does not re-read the document inside the helper".to_owned());
+    }
+    if !save.contains("const refused = raw != null && current === null;") {
+        return Err("a refused document is not written".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn the_page_applies_the_stored_default_once_per_series_load() -> Result<(), String> {
+    // F-205 AC10, AC16 and AC17, on the page text. The apply runs after the
+    // viewport moves, carries propagate false, and holds the first paint
+    // until its own trial settles.
+    let page = served_page("/")?;
+    let load = function_body(&page, "loadSeries")?;
+    for needle in [
+        "vp.presetNotOffered = false;",
+        "const trialToken = storedDefaultTrial(vp, next);",
+        "vp.paintHold = trialToken == null ? null : vp.loadToken;",
+        "chooseWindow(vp, { preset: trialToken }, { propagate: false })",
+    ] {
+        if !load.contains(needle) {
+            return Err(format!("the series load lacks {needle}"));
+        }
+    }
+    if load.find("const drawing = showIndex(") < load.find("vp.paintHold =") {
+        return Err("the index is shown before the hold is set".to_owned());
+    }
+    let trial = function_body(&page, "storedDefaultTrial")?;
+    for needle in [
+        "if (listed.voiLuts.length > 0 || !(image.info && image.info.monochrome)) return null;",
+        "if (listed.presets.length) vp.presetNotOffered = true;",
+    ] {
+        if !trial.contains(needle) {
+            return Err(format!("the trial guard lacks {needle}"));
+        }
+    }
+    // The hold covers every paint site, and requests still go out.
+    if function_body(&page, "paintHeld")?.trim().is_empty() {
+        return Err("the hold has no check".to_owned());
+    }
+    let held_paints = page.matches("!paintHeld(vp)").count();
+    if held_paints < 4 {
+        return Err(format!(
+            "{held_paints} paint sites wait for the hold, 4 wanted"
+        ));
+    }
+    if !page.contains("if (propagate) copyWindow(vp);") {
+        return Err("the apply propagates to the linked viewports".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
+fn the_page_default_preset_tokens_match_the_process() -> Result<(), String> {
+    // F-205 AC13. The page's tokens are the process's own, read from
+    // `preset_token` in the preview source, so a typo fails here before any
+    // request carries it.
+    let page = served_page("/")?;
+    let found = quoted_tokens(&page, "const DEFAULT_PRESETS = Object.freeze([")?;
+    let want = [
+        "none".to_owned(),
+        "soft_tissue".to_owned(),
+        "lung".to_owned(),
+        "bone".to_owned(),
+    ];
+    if found != want {
+        return Err(format!("the page reads {found:?} as preset tokens"));
+    }
+    let source = include_str!("../src/preview.rs");
+    let at = source
+        .find("const fn preset_token(preset: WindowPreset) -> &'static str {")
+        .ok_or_else(|| "the preview has no preset_token".to_owned())?;
+    let rest = source.get(at..).unwrap_or_default();
+    let end = rest
+        .find("\n}")
+        .ok_or_else(|| "preset_token does not close".to_owned())?;
+    let body = rest.get(..end).unwrap_or_default();
+    let mut tokens = Vec::new();
+    for line in body.lines() {
+        let trim = line.trim();
+        if let Some(token) = trim.strip_prefix("WindowPreset::") {
+            let named = token
+                .split_once("=>")
+                .and_then(|(_, value)| value.trim().strip_prefix('"'))
+                .and_then(|value| value.strip_suffix("\","));
+            match named {
+                Some(token) => tokens.push(token.to_owned()),
+                None => return Err(format!("preset_token reads {trim}")),
+            }
+        }
+    }
+    if tokens != want[1..] {
+        return Err(format!("the process reads {tokens:?} as preset tokens"));
+    }
+    Ok(())
+}
+
+/// The quoted strings between `start` and the next `]` of `text`.
+fn quoted_tokens(text: &str, start: &str) -> Result<Vec<String>, String> {
+    let at = text.find(start).ok_or_else(|| format!("no {start}"))?;
+    let rest = text.get(at + start.len()..).unwrap_or_default();
+    let end = rest
+        .find(']')
+        .ok_or_else(|| format!("{start} does not close"))?;
+    Ok(rest
+        .get(..end)
+        .unwrap_or_default()
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect())
 }
 
 #[test]
@@ -1010,17 +1223,22 @@ fn play_uses_the_file_frame_time() -> Result<(), String> {
 }
 
 #[test]
-fn more_says_the_page_keeps_four_choices() -> Result<(), String> {
-    // AC11 keeps four choices. The operator now defines status by the viewer,
-    // so those persisted settings make Preferences partial.
+fn more_says_what_the_page_keeps() -> Result<(), String> {
+    // F-205 AC14. Five validated choices are kept, with the refusal behavior
+    // named and the gaps listed. The operator defines status by the viewer,
+    // so Preferences stays partial while per-key tool bindings and hanging
+    // layouts remain.
     let more = served_page("/more")?;
     require(
         &more,
         &[
-            "The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages.",
+            "The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset.",
+            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
             "<li><a href=\"#preferences\">Preferences</a><span class=\"mark\">partial</span></li>",
+            "Configurable APIs. Persistence belongs to the host",
+            "S47: F-205",
         ],
-        "AC11",
+        "F-205 AC14",
     )?;
     let use_book = served_page("/use")?;
     require(
@@ -5184,9 +5402,10 @@ fn the_page_keys_pixels_by_file_and_probes_for_changes() -> Result<(), String> {
         return Err("the change handler resets the input before it copies the files".to_owned());
     }
     // A series selection in the active viewport probes, and so do focus and
-    // a return to a visible page.
+    // a return to a visible page. F-205 repaints the preset note beside the
+    // probe, so the probe line now sits in the block with it.
     if !function_body(page, "loadSeries")?
-        .contains("if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);")
+        .contains("if (vp.cell === activeCell) {\n    probeAfterSeriesDraw(vp, drawing);\n    paintPrefsNote();\n  }")
     {
         return Err("a series selection does not probe".to_owned());
     }
