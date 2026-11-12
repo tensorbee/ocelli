@@ -200,7 +200,8 @@ run_gate() {
     # corners.mjs check follows window.mjs: the acquisition corner lines
     # name the shown frame's own values, a repaint with the next image's
     # reply held paints the scan values and never a previous frame's
-    # facts, and the stored -12.50 prints as -12.5. F-224's
+    # facts, the stored -12.50 prints as -12.5, and an enhanced MR names
+    # its own TR and TE from its reply headers. F-224's
     # changed-file check follows: a file rewritten on disk after the folder
     # was opened is refused rather than shown, choosing the folder again
     # shows the new bytes, and the probe reads one byte a file. F-245's

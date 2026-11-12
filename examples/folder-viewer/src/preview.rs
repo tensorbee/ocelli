@@ -219,11 +219,9 @@ impl AutoSource {
 
 /// The five acquisition tokens of one frame and the mAs link that answered.
 ///
-/// PS3.3 2026c C.7.6.2, C.8.2.1, C.8.3.1, C.8.15.3.8 and C.8.13.5.4,
-/// resolved for the shown frame under the precedence rule. The tokens are
-/// boxed behind [`FrameFacts::corners`], so a frame the cache stores pays
-/// one word for them and the tokens' own bytes ride the heap the way the
-/// edge letters' do.
+/// PS3.3 2026c C.7.6.2, C.7.6.16.2.1, C.8.2.1, C.8.3.1, C.8.15.3.8,
+/// C.8.15.3.9, C.8.13.5.2 and C.8.13.5.4, resolved for the shown frame
+/// under the precedence rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CornerTokens {
     /// Slice Thickness of the shown frame, top level or the Pixel Measures
@@ -284,8 +282,12 @@ pub struct FrameFacts {
     /// `ImageOrientationPatient` or `PatientOrientation`, the attribute the
     /// letters came from, or empty when there are no letters.
     pub edge_source: &'static str,
-    /// The acquisition tokens of the shown frame, or `None` when the frame
-    /// has none of the five fields at any level.
+    /// The acquisition tokens of the shown frame, or `None` when no field
+    /// yields a token at any level, which includes a field that is present
+    /// but unusable, stopped by the top-level rule, or inside a malformed
+    /// group. Boxed, because the frame cache charges [`HeldFrame`] by its
+    /// struct size and the tokens' own bytes then ride the heap the way
+    /// the edge letters' do.
     pub corners: Option<Box<CornerTokens>>,
 }
 

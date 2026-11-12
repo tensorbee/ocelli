@@ -5876,12 +5876,12 @@ const ENHANCED_MR_CLASS: &str = "1.2.840.10008.5.1.4.1.1.4.1";
 
 /// One encoded element in the header form its VR requires.
 ///
-/// PS3.5 7.1.2: OB, OD, OF, OL, OV, OW, SQ and UC, UR, UT carry the
+/// PS3.5 7.1.2: OB, OD, OF, OL, OV, OW, SQ, UC, UR, UT and UN carry the
 /// 12-byte header, everything else the short one. An OD element written
 /// short would be misread as a four-byte length.
 fn element_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
     match &vr {
-        b"OB" | b"OD" | b"OF" | b"OL" | b"OV" | b"OW" | b"SQ" | b"UC" | b"UR" | b"UT" => {
+        b"OB" | b"OD" | b"OF" | b"OL" | b"OV" | b"OW" | b"SQ" | b"UC" | b"UR" | b"UT" | b"UN" => {
             long_le(tag, vr, value)
         }
         _ => short_le(tag, vr, value),
@@ -6525,6 +6525,34 @@ fn the_mas_chain_reads_its_three_links() -> Result<(), String> {
         "non-text Exposure falls through",
         "5.5",
         grey_header(&binary, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_repetition_time_reads_its_group_and_the_top_level() -> Result<(), String> {
+    // D1. PS3.3 2026c C.8.13.5.2 Table C.8-89: Repetition Time (0018,0080)
+    // is Type 1C, DS, in the MR Timing and Related Parameters Sequence
+    // (0018,9112), one item. An enhanced MR that stores it only in the
+    // shared item answers the grey reply with the stored token, so a read
+    // aimed at the wrong sequence or a dropped header is red here.
+    let group = enhanced_mr(&[mr_timing(*b"DS", &text_pad("500"))?], &[vec![]], &[])?;
+    header_is(
+        "group repetition time",
+        "500",
+        grey_header(&group, "", "X-Ocelli-Repetition-Time")?,
+    )?;
+    // AC3. A top-level Repetition Time, PS3.3 2026c C.8.3.1 Table C.8-4,
+    // wins over the group value behind it, the story row's rule.
+    let top_level = enhanced_mr(
+        &[mr_timing(*b"DS", &text_pad("500"))?],
+        &[vec![]],
+        &[planted_text((0x0018, 0x0080), *b"DS", "250")],
+    )?;
+    header_is(
+        "top-level repetition time",
+        "250",
+        grey_header(&top_level, "", "X-Ocelli-Repetition-Time")?,
     )?;
     Ok(())
 }

@@ -17,6 +17,12 @@
 //               200 mAs, and never the enhanced frame's facts.
 //   classic     released, the corner prints the same values from the reply
 //               headers, through `Number`, so -12.5 and never -12.50.
+//   mr          the third series, an enhanced MR of one frame whose
+//               per-frame MR Timing Sequence names Repetition Time 500 and
+//               whose per-frame MR Echo Sequence names Effective Echo Time
+//               30, must name its own TR and TE lines. They come only from
+//               the reply headers, so a header name the page mistypes or a
+//               swapped repetitionTime and echoTime leaves them out.
 //
 // The files are written by this script into a temporary folder, carry no
 // patient attributes, and are removed afterwards. It starts the viewer with
@@ -33,8 +39,8 @@ import { fileURLToPath } from "node:url";
 import { ensureViewerBinary, longEl, shortEl, startViewer } from "../../../../tools/bench/src/viewer_work.mjs";
 import { loadPlaywright, stopByPid } from "./aspect.mjs";
 
-/** The classic CT and the enhanced CT of the folder. */
-const FILES = ["a-classic.dcm", "b-enhanced.dcm"];
+/** The classic CT, the enhanced CT and the enhanced MR of the folder. */
+const FILES = ["a-classic.dcm", "b-enhanced.dcm", "c-enhanced-mr.dcm"];
 
 /** What each reading must and must not name. */
 export const WANTED = {
@@ -52,6 +58,7 @@ export const WANTED = {
     no: ["Thickness 5 mm", "Thickness 4 mm", "Thickness 3 mm", "Thickness 2 mm"],
   },
   classic: { yes: ["Thickness -12.5 mm", "120 kVp", "200 mAs"], no: ["-12.50"] },
+  mr: { yes: ["TR 500 ms", "TE 30 ms"], no: [] },
 };
 
 export function cornerProblems(seen) {
@@ -104,7 +111,7 @@ function item(content) {
 
 /** The encoded element, in the long form the VRs of PS3.5 7.1.2 require. */
 function elementOf({ group, element, vr, value }) {
-  return ["OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UR", "UT"].includes(vr)
+  return ["OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UR", "UT", "UN"].includes(vr)
     ? longEl(group, element, vr, value)
     : shortEl(group, element, vr, value);
 }
@@ -239,6 +246,67 @@ export function enhancedCT({ series, sop, number, thicknesses }) {
   ]);
 }
 
+/**
+ * One enhanced MR of one frame whose per-frame item carries the MR Timing
+ * and Related Parameters Sequence with Repetition Time and the MR Echo
+ * Sequence with Effective Echo Time, PS3.3 2026c C.8.13.5.2 Table C.8-89
+ * and C.8.13.5.4 Table C.8-91, and nothing at the top level.
+ */
+export function enhancedMR({ series, sop, number, timing, echo }) {
+  const sopClass = "1.2.840.10008.5.1.4.1.1.4.1";
+  const rescaleGroup = longEl(
+    0x0028,
+    0x9145,
+    "SQ",
+    item(Buffer.concat([
+      shortEl(0x0028, 0x1052, "DS", text("0")),
+      shortEl(0x0028, 0x1053, "DS", text("1")),
+    ])),
+  );
+  const shared = { group: 0x5200, element: 0x9229, vr: "SQ", value: item(rescaleGroup) };
+  const seconds = Buffer.alloc(8);
+  seconds.writeDoubleLE(echo);
+  const perFrameItem = item(Buffer.concat([
+    longEl(
+      0x0018,
+      0x9112,
+      "SQ",
+      item(shortEl(0x0018, 0x0080, "DS", text(timing))),
+    ),
+    longEl(0x0018, 0x9114, "SQ", item(shortEl(0x0018, 0x9082, "FD", seconds))),
+  ]));
+  const perFrame = { group: 0x5200, element: 0x9230, vr: "SQ", value: perFrameItem };
+  const pixels = Buffer.alloc(PIXELS * PIXELS * 2);
+  for (let at = 0; at < PIXELS * PIXELS; at += 1) pixels.writeUInt16LE(1000, at * 2);
+  return Buffer.concat([
+    Buffer.alloc(128),
+    Buffer.from("DICM"),
+    shortEl(0x0002, 0x0000, "UL", u32(meta(sopClass, sop).length)),
+    meta(sopClass, sop),
+    ...ordered([
+      { group: 0x0008, element: 0x0016, vr: "UI", value: uid(sopClass) },
+      { group: 0x0008, element: 0x0060, vr: "CS", value: text("MR") },
+      { group: 0x0020, element: 0x000e, vr: "UI", value: uid(series) },
+      { group: 0x0020, element: 0x0011, vr: "IS", value: text(String(number)) },
+      { group: 0x0020, element: 0x0013, vr: "IS", value: text("1") },
+      { group: 0x0028, element: 0x0002, vr: "US", value: u16(1) },
+      { group: 0x0028, element: 0x0004, vr: "CS", value: text("MONOCHROME2") },
+      { group: 0x0028, element: 0x0008, vr: "IS", value: text("1") },
+      { group: 0x0028, element: 0x0010, vr: "US", value: u16(PIXELS) },
+      { group: 0x0028, element: 0x0011, vr: "US", value: u16(PIXELS) },
+      { group: 0x0028, element: 0x0100, vr: "US", value: u16(16) },
+      { group: 0x0028, element: 0x0101, vr: "US", value: u16(16) },
+      { group: 0x0028, element: 0x0102, vr: "US", value: u16(15) },
+      { group: 0x0028, element: 0x0103, vr: "US", value: u16(0) },
+      { group: 0x0028, element: 0x1050, vr: "DS", value: text("40") },
+      { group: 0x0028, element: 0x1051, vr: "DS", value: text("400") },
+      shared,
+      perFrame,
+      { group: 0x7fe0, element: 0x0010, vr: "OW", value: pixels },
+    ]),
+  ]);
+}
+
 function corner(page) {
   return page.evaluate(() => {
     const cell = document.querySelector(".cell.active");
@@ -274,7 +342,7 @@ export async function observeCorners(url, chromium, folder) {
     await page.goto(url);
     await page.locator("#folder").setInputFiles(folder);
     await page.waitForFunction(
-      () => (document.getElementById("status").textContent || "").startsWith("2 series."),
+      () => (document.getElementById("status").textContent || "").startsWith("3 series."),
     );
     await settle(page, "Thickness 2 mm");
     const seen = { frame0: await corner(page) };
@@ -310,6 +378,12 @@ export async function observeCorners(url, chromium, folder) {
     release();
     await settle(page, "Thickness -12.5 mm");
     seen.classic = await corner(page);
+    // The enhanced MR's TR and TE come only from its reply headers, so
+    // their corner lines prove the page parsed both header names and read
+    // each into its own key.
+    await page.locator("#series-list button", { hasText: "#3" }).click();
+    await settle(page, "TR 500 ms");
+    seen.mr = await corner(page);
     return seen;
   } finally {
     await browser.close();
@@ -343,6 +417,13 @@ async function main() {
       sop: "2.25.21312",
       number: 2,
       thicknesses: ["2.0", "3.0", "4.0", "5.0"],
+    }));
+    writeFileSync(join(folder, FILES[2]), enhancedMR({
+      series: "2.25.21303",
+      sop: "2.25.21313",
+      number: 3,
+      timing: "500",
+      echo: 30,
     }));
     seen = await run((url) => observeCorners(url, chromium, folder));
   } finally {
