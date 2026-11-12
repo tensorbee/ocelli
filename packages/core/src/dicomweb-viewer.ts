@@ -376,9 +376,10 @@ export type OwnedEncodedInstance = { body: ArrayBuffer; metadata: StagedMetadata
 
 // Test-only peeker type. It is registered under vitest's in-source testing
 // by the static block in DicomwebProvider and read by that module's own
-// test block at the foot of this file. It never appears in the emitted
-// declaration file.
-type StagedBodyPeek = (provider: DicomwebProvider) => OwnedEncodedInstance | null;
+// test block at the foot of this file. It reports only whether a staged
+// body is held, never the body, its bytes or its length. It never appears
+// in the emitted declaration file.
+type StagedBodyPeek = (provider: DicomwebProvider) => boolean;
 
 function decodeInstanceMetadata(
   bytes: Uint8Array,
@@ -1342,14 +1343,14 @@ export class DicomwebProvider {
   // current generation, which every intent and cancel advances, so no
   // public reader can separate a released body from a stale one. Under
   // vitest's in-source testing this block registers a peeker that reports
-  // the staged body with no gate. The guard is undefined in every other
-  // context, so the built module carries the block inert and nothing
+  // only whether a staged body is held. The guard is undefined in every
+  // other context, so the built module carries the block inert and nothing
   // registers on it.
   static {
     if (import.meta.vitest) {
       (DicomwebProvider as unknown as { __stagedBodyPeek?: StagedBodyPeek }).__stagedBodyPeek = (
         provider: DicomwebProvider,
-      ): OwnedEncodedInstance | null => provider.#staged;
+      ): boolean => provider.#staged !== null;
     }
   }
 }
@@ -1357,13 +1358,13 @@ export class DicomwebProvider {
 // The release of the staged body is observable only inside the class, so
 // the release tests live here under vitest's in-source testing. The public
 // readers gate on the generation every release advances, so they cannot
-// show the release itself. These tests prove both internal release lines
-// and the override contract: an override of releaseStaged can neither
-// observe nor block an internal release.
+// show the release itself. These tests prove all three internal release
+// lines and the override contract: an override of releaseStaged can
+// neither observe nor block an internal release.
 if (import.meta.vitest) {
   const { it, afterEach, expect, vi } = import.meta.vitest;
 
-  const peekStagedBody = (provider: DicomwebProvider): OwnedEncodedInstance | null => {
+  const holdsStagedBody = (provider: DicomwebProvider): boolean => {
     const peek = (DicomwebProvider as unknown as { __stagedBodyPeek?: StagedBodyPeek }).__stagedBodyPeek;
     if (peek === undefined) {
       throw new Error("the staged body peeker did not register");
@@ -1383,17 +1384,22 @@ if (import.meta.vitest) {
 
   // One provider whose upstream serves `raw` as one synthetic multipart
   // instance and whose native route echoes the posted body in its receipt,
-  // the same shapes the unit suite's richer fixtures use.
+  // the same shapes the unit suite's richer fixtures use. An explicit
+  // `upstream` replaces the always-succeeding default, for tests that need
+  // an upstream which refuses or fails.
   function stagedProvider<C extends typeof DicomwebProvider>(
     raw: Uint8Array,
     boundary: string,
     ctor: C = DicomwebProvider as C,
+    upstream: typeof fetch | null = null,
   ): InstanceType<C> {
-    const upstreamFetch: typeof fetch = async () =>
-      new Response(raw.slice(), {
-        status: 200,
-        headers: { "Content-Type": `multipart/related; type="application/dicom"; boundary=${boundary}` },
-      });
+    const upstreamFetch: typeof fetch =
+      upstream ??
+      (async () =>
+        new Response(raw.slice(), {
+          status: 200,
+          headers: { "Content-Type": `multipart/related; type="application/dicom"; boundary=${boundary}` },
+        }));
     const nativeFetch: typeof fetch = async (_input, init) => {
       // The provider posts the staged instance as one ArrayBuffer body.
       const body = new Uint8Array((init?.body ?? new ArrayBuffer(0)) as ArrayBuffer);
@@ -1431,7 +1437,7 @@ if (import.meta.vitest) {
       const staged = await provider.fetchSelectedInstance(IDENTITY);
       expect(staged.byteLength).toBe(4);
       provider.cancelPending();
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
       expect(provider.readStagedInfo()).toBeNull();
     } finally {
       provider.dispose();
@@ -1446,9 +1452,58 @@ if (import.meta.vitest) {
       const pending = provider.fetchSelectedInstance(IDENTITY);
       // The intent releases before the newer fetch stages, so this read
       // sits between the two and cannot be satisfied by the newer staging.
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
       const settled = await pending;
       expect(settled.generation).toBe(staged.generation + 1);
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it("releases the prior body when a newer intent begins even when an override of releaseStaged forgets super", async () => {
+    class OverrideWithoutSuper extends DicomwebProvider {
+      override releaseStaged(): void {
+        // A consumer override that releases nothing.
+      }
+    }
+    // The upstream serves one body and then fails, so the newer intent
+    // never stages and the release the test sees can only come from the
+    // intent itself.
+    let served = false;
+    const upstream: typeof fetch = async () => {
+      if (served) {
+        throw new TypeError("upstream failed");
+      }
+      served = true;
+      return new Response(new Uint8Array([4, 6, 4, 9]).slice(), {
+        status: 200,
+        headers: {
+          "Content-Type": `multipart/related; type="application/dicom"; boundary=f245-insource-intent-failure`,
+        },
+      });
+    };
+    const provider = stagedProvider(
+      new Uint8Array([4, 6, 4, 9]),
+      "f245-insource-intent-failure",
+      OverrideWithoutSuper,
+      upstream,
+    );
+    try {
+      const staged = await provider.fetchSelectedInstance(IDENTITY);
+      expect(staged.byteLength).toBe(4);
+      const failing = provider.fetchSelectedInstance(IDENTITY);
+      // The intent releases before the newer fetch fails, so this read
+      // sits after the release and before any newer staging, which never
+      // comes.
+      expect(holdsStagedBody(provider)).toBe(false);
+      let rejected = false;
+      try {
+        await failing;
+      } catch {
+        rejected = true;
+      }
+      expect(rejected).toBe(true);
+      expect(holdsStagedBody(provider)).toBe(false);
     } finally {
       provider.dispose();
     }
@@ -1465,24 +1520,29 @@ if (import.meta.vitest) {
       const staged = await provider.fetchSelectedInstance(IDENTITY);
       expect(staged.byteLength).toBe(5);
       provider.cancelPending();
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
     } finally {
       provider.dispose();
     }
   });
 
-  it("releases on dispose even when an override of releaseStaged forgets super", async () => {
-    class OverrideWithoutSuper extends DicomwebProvider {
+  it("releases on dispose even when overrides of releaseStaged and cancelPending forget super", async () => {
+    class OverridesWithoutSuper extends DicomwebProvider {
       override releaseStaged(): void {
         // A consumer override that releases nothing.
       }
+      override cancelPending(): void {
+        // A consumer override that cancels nothing.
+      }
     }
-    const provider = stagedProvider(new Uint8Array([1, 6, 1, 8]), "f245-insource-dispose", OverrideWithoutSuper);
+    const provider = stagedProvider(new Uint8Array([1, 6, 1, 8]), "f245-insource-dispose", OverridesWithoutSuper);
     try {
       const staged = await provider.fetchSelectedInstance(IDENTITY);
       expect(staged.byteLength).toBe(4);
+      // Both overridable members are blocked, so the release dispose shows
+      // here is its own internal one and cannot come from either of them.
       provider.dispose();
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
     } finally {
       provider.dispose();
     }
@@ -1499,7 +1559,7 @@ if (import.meta.vitest) {
       const staged = await provider.fetchSelectedInstance(IDENTITY);
       expect(staged.byteLength).toBe(3);
       provider.dispose();
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
     } finally {
       provider.dispose();
     }
@@ -1518,7 +1578,7 @@ if (import.meta.vitest) {
       await provider.fetchSelectedInstance(IDENTITY);
       provider.cancelPending();
       expect(provider.routed).toBe(0);
-      expect(peekStagedBody(provider)).toBeNull();
+      expect(holdsStagedBody(provider)).toBe(false);
     } finally {
       provider.dispose();
     }
