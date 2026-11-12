@@ -288,7 +288,7 @@ const UNION_LAST: i32 = 65_535;
 /// # Errors
 ///
 /// [`RouteError::RangeOutside`] for an illegal container.
-pub fn check_container(route: StoredRoute) -> Result<(), RouteError> {
+pub(crate) fn check_container(route: StoredRoute) -> Result<(), RouteError> {
     let StoredRoute::Tabled { first, count } = route else {
         return Ok(());
     };
@@ -403,8 +403,24 @@ mod tests {
                 && !VOI_WGSL.contains("@compute"),
             "voi.wgsl grew an entry point, so it no longer composes"
         );
-        assert!(!VOI_WGSL.contains("@binding(3)"));
         assert!(!VOI_WGSL.contains("var<storage"));
+        // No binding above the reserved set, not merely no binding 3: a
+        // `@binding(4)` would collide with the consumer just the same. The
+        // reserved set is 0, the section 18.4 uniform, and 1 and 2, the
+        // route uniform and the folded table.
+        let highest = VOI_WGSL
+            .match_indices("@binding(")
+            .filter_map(|(at, _)| {
+                let rest = VOI_WGSL.get(at + "@binding(".len()..)?;
+                let end = rest.find(')')?;
+                rest[..end].parse::<u32>().ok()
+            })
+            .max()
+            .unwrap_or(0);
+        assert!(
+            highest <= 2,
+            "voi.wgsl binds {highest}, past the reserved 0, 1 and 2"
+        );
         // The DECLARATIONS, not the binding attributes, which the file's own
         // header also names in prose when it explains what it reserves.
         assert_eq!(

@@ -393,7 +393,10 @@ pub enum GraphError {
 /// `TEXTURE_BINDING` and `COPY_DST`. Tier A reports
 /// [`UploadError::FormatUnavailable`] when it does not. Tier B may then use
 /// `Rg32Float` and, only if that also lacks those usages, `Rgba32Float`.
-/// `Rgba8Unorm` is not a candidate.
+/// `Rgba8Unorm` is not a candidate. A folded modality table follows the
+/// selection where an adapter is available, and falls back to this
+/// constant in `register` and `rebind`, which hold no adapter and whose
+/// caller cannot be asked.
 pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 /// Colour table format. Height 1. Not a stored-sample candidate.
@@ -1076,12 +1079,9 @@ struct SlotState {
     effective: EffectiveRoute,
     /// What the texture currently holds.
     content: ContentKind,
-    /// The rescale pair staged pre-applied content was computed with.
-    /// Absent while the content is raw.
-    staged: Option<(f32, f32)>,
     /// Whether staged content was computed with a rescale the pass no
     /// longer records. Only stack and caller-view content carries this
-    /// flag; a slab's staleness is derived from its stamp instead.
+    /// flag. A slab's staleness is derived from its stamp instead.
     content_stale: bool,
     /// The format the folded table was created with. Absent on a
     /// pre-applied route, which binds the 1x1 stand-in.
@@ -1134,6 +1134,30 @@ fn route_decision(pass: &Pass, route: StoredRoute) -> Result<(), RouteError> {
         Pass::Slab(_) | Pass::SegOverlay(_) => Err(RouteError::PassRefusesTable),
         Pass::Stack(_) | Pass::VolumeRaycast(_) => check_container(route),
     }
+}
+
+/// The content half of a colour selection, one check for every caller.
+///
+/// A palette is indexed by the stored sample, so it is refused wherever the
+/// bytes are or will be modality values: on a declared-`PreApplied`
+/// viewport before any upload, and on staged pre-applied content. A
+/// non-palette table is indexed by the display value, so it is refused on
+/// raw fractional content, which has no correct stage 1 path in the shader.
+/// The device refusal keeps the previous binding either way.
+fn colour_decision(
+    palette: bool,
+    declared_pre_applied: bool,
+    content: ContentKind,
+) -> Result<(), GraphError> {
+    if palette && (declared_pre_applied || content == ContentKind::PreApplied) {
+        // The palette would index modality values as raw.
+        return Err(GraphError::ColourUnavailable);
+    }
+    if !palette && content == ContentKind::RawFractional {
+        // Raw fractional samples have no correct stage 1 path here.
+        return Err(GraphError::ColourUnavailable);
+    }
+    Ok(())
 }
 
 /// Whether a volume ray's derived container agrees with the declaration.
@@ -1378,7 +1402,6 @@ impl Registry {
                     route,
                     effective,
                     content,
-                    staged: None,
                     content_stale: false,
                     table_format: None,
                     colour: None,
@@ -2073,7 +2096,8 @@ impl RenderGraph {
     ) -> Result<ViewportId, GraphError> {
         route_decision(&pass, route).map_err(|_| GraphError::RouteInvalid)?;
         let voi = voi_of(&pass);
-        let id = self.registry.register(pass, route)?;
+        // The slot is created before the registry is occupied, so a failed
+        // creation leaves no half state: no id is issued and no state exists.
         let slot = self
             .create_gpu_slot(
                 ctx,
@@ -2083,9 +2107,13 @@ impl RenderGraph {
                 None,
                 None,
                 route,
+                // No adapter is available to a caller-view registration, so
+                // the table uses the preferred format, which the selection
+                // doc names as preferred on every tier.
                 STORED_FORMAT,
             )
             .map_err(|_| GraphError::RouteInvalid)?;
+        let id = self.registry.register(pass, route)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2138,6 +2166,30 @@ impl RenderGraph {
             ctx.device().limits().max_texture_dimension_2d,
         )?;
         let voi = voi_of(&pass);
+        let texture = create_stored_texture(ctx.device(), upload, format);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stored = StoredTexture {
+            texture,
+            width: upload.width(),
+            height: upload.height(),
+            format,
+        };
+        // The slot is created before the registry is occupied, so a failed
+        // creation leaves no half state: no id is issued and no state exists.
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                view,
+                (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
+                Some(stored),
+                None,
+                route,
+                // The table, real or stand-in, uses the format the
+                // adapter's own selection chose.
+                format,
+            )
+            .map_err(|_| UploadError::RouteInvalid)?;
         let id = self
             .registry
             .register(pass, route)
@@ -2149,26 +2201,6 @@ impl RenderGraph {
                 state.table_format = Some(format);
             }
         }
-        let texture = create_stored_texture(ctx.device(), upload, format);
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let stored = StoredTexture {
-            texture,
-            width: upload.width(),
-            height: upload.height(),
-            format,
-        };
-        let slot = self
-            .create_gpu_slot(
-                ctx,
-                target,
-                view,
-                (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
-                Some(stored),
-                None,
-                route,
-                table_format_of(route, format),
-            )
-            .map_err(|_| UploadError::RouteInvalid)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2178,8 +2210,9 @@ impl RenderGraph {
         Ok(id)
     }
 
-    // One argument per GPU object the slot owns, which is what a creation
-    // function names.
+    // The arguments are the recorded state a slot is built from, the same
+    // values the registry keeps, so a rebuild after device loss can supply
+    // them again without reading live state.
     #[allow(clippy::too_many_arguments)]
     fn create_gpu_slot(
         &self,
@@ -2485,7 +2518,6 @@ impl RenderGraph {
                 StoredRoute::Tabled { .. } => ContentKind::RawIntegral,
                 StoredRoute::PreApplied => ContentKind::PreApplied,
             };
-            state.staged = None;
             state.content_stale = false;
             state.dirty = Dirty::full();
         }
@@ -2498,6 +2530,9 @@ impl RenderGraph {
                 None,
                 colour,
                 route,
+                // No adapter is available to a caller-view rebind, so the
+                // table uses the preferred format, which the selection doc
+                // names as preferred on every tier.
                 STORED_FORMAT,
             )
             .map_err(|_| GraphError::RouteInvalid)?;
@@ -2585,7 +2620,6 @@ impl RenderGraph {
                 StoredRoute::Tabled { .. } => ContentKind::RawIntegral,
                 StoredRoute::PreApplied => ContentKind::PreApplied,
             };
-            state.staged = None;
             state.content_stale = false;
             state.dirty = Dirty::full();
         }
@@ -2598,7 +2632,10 @@ impl RenderGraph {
                 Some(stored),
                 colour,
                 route,
-                table_format_of(route, table_format.unwrap_or(STORED_FORMAT)),
+                // The remembered table format for a tabled route, and the
+                // remembered stored format for a pre-applied one, whose
+                // stand-in follows the same selection.
+                table_format.unwrap_or(format),
             )
             .map_err(|_| UploadError::RouteInvalid)?;
         if let Some(held) = self
@@ -2709,27 +2746,17 @@ impl RenderGraph {
                 (voi.slope, voi.intercept),
             )
         };
-        let rescale_changed = old_pair != (params.slope, params.intercept);
+        // As bits, like the slab stamp's staged pair and the fusion stamp's:
+        // `0.0` and `-0.0` are equal values and different recorded pairs.
+        let rescale_changed = (old_pair.0.to_bits(), old_pair.1.to_bits())
+            != (params.slope.to_bits(), params.intercept.to_bits());
         let written = match effective {
             EffectiveRoute::PreApplied => params.with_identity_rescale(),
             EffectiveRoute::Tabled => params,
         };
-        let slot = self
-            .gpu
-            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
-            .and_then(Option::as_ref)
-            .ok_or(GraphError::ViewportNotRebound)?;
-        ctx.queue()
-            .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&written));
-        if let Some(state) = self.registry.state_mut(id) {
-            match &mut state.pass {
-                Pass::Stack(stack) => stack.voi = params,
-                Pass::VolumeRaycast(volume) => volume.voi = params,
-                Pass::Slab(slab) => slab.voi = params,
-                Pass::SegOverlay(_) => {}
-            }
-            state.dirty.voi = true;
-        }
+        // The table is refilled before the uniform is written, so a failed
+        // refill leaves the old uniform over the old table, one consistent
+        // old frame, instead of new uniform bytes over old table entries.
         if matches!(declared, StoredRoute::Tabled { .. }) && rescale_changed {
             let slot = self
                 .gpu
@@ -2746,13 +2773,24 @@ impl RenderGraph {
                 table_format,
             )?;
             self.modality_uploads += 1;
-            if content == ContentKind::PreApplied
-                && let Some(state) = self.registry.state_mut(id)
-            {
-                state.content_stale = true;
-            }
         }
-        if matches!(declared, StoredRoute::PreApplied) && rescale_changed {
+        let slot = self
+            .gpu
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(GraphError::ViewportNotRebound)?;
+        ctx.queue()
+            .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&written));
+        if let Some(state) = self.registry.state_mut(id) {
+            match &mut state.pass {
+                Pass::Stack(stack) => stack.voi = params,
+                Pass::VolumeRaycast(volume) => volume.voi = params,
+                Pass::Slab(slab) => slab.voi = params,
+                Pass::SegOverlay(_) => {}
+            }
+            state.dirty.voi = true;
+        }
+        if content == ContentKind::PreApplied && rescale_changed {
             // The raw samples are gone and the texture holds modality values
             // computed with the old pair. Refusing here would pin the old
             // rescale forever, because the recorded chain is the only thing
@@ -2762,6 +2800,48 @@ impl RenderGraph {
                 && !matches!(state.pass, Pass::Slab(_))
             {
                 state.content_stale = true;
+            }
+        }
+        // A stale slab's pass loads and draws nothing, so every viewport
+        // compositing into the same target must redraw beneath it on that
+        // frame, or the old slab pixels survive the frame. The marking runs
+        // when the recorded pair moves away from the staged pair, which is
+        // the moment the next frame's derived staleness becomes true. The
+        // targets are compared through their textures, because two views of
+        // one texture are different view objects.
+        if rescale_changed {
+            let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+            let is_slab = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|state| matches!(state.pass, Pass::Slab(_)));
+            let staged = self
+                .gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.slab.as_ref())
+                .map(|binding| binding.stamp.staged);
+            if is_slab
+                && staged.is_some_and(|staged| {
+                    staged != (params.slope.to_bits(), params.intercept.to_bits())
+                })
+                && let Some(slot) = self.gpu.get(index).and_then(Option::as_ref)
+            {
+                let texture = slot.target.texture();
+                for (other, held) in self.gpu.iter().enumerate() {
+                    let Some(other_slot) = held else {
+                        continue;
+                    };
+                    if other != index
+                        && other_slot.target.texture() == texture
+                        && let Some(state) =
+                            self.registry.states.get_mut(other).and_then(Option::as_mut)
+                    {
+                        state.dirty.data = true;
+                    }
+                }
             }
         }
         Ok(())
@@ -3004,14 +3084,7 @@ impl RenderGraph {
             return Err(GraphError::ViewportNotRebound);
         }
         let palette = lut.mode() == 2;
-        if palette && (declared_pre_applied || content == ContentKind::PreApplied) {
-            // The palette would index modality values as raw.
-            return Err(GraphError::ColourUnavailable);
-        }
-        if !palette && content == ContentKind::RawFractional {
-            // Raw fractional samples have no correct stage 1 path here.
-            return Err(GraphError::ColourUnavailable);
-        }
+        colour_decision(palette, declared_pre_applied, content)?;
         let features = adapter
             .wgpu_adapter()
             .get_texture_format_features(COLOUR_LUT_FORMAT);
@@ -3275,7 +3348,6 @@ impl RenderGraph {
                     kind, flip_back, ..
                 } => {
                     state.content = *kind;
-                    state.staged = None;
                     state.content_stale = false;
                     if *flip_back {
                         state.effective = EffectiveRoute::Tabled;
@@ -3283,7 +3355,6 @@ impl RenderGraph {
                 }
                 UploadContent::PreApplied { flip, .. } => {
                     state.content = ContentKind::PreApplied;
-                    state.staged = Some((voi.slope, voi.intercept));
                     state.content_stale = false;
                     if *flip {
                         state.effective = EffectiveRoute::PreApplied;
@@ -4700,8 +4771,10 @@ impl RenderGraph {
             // with a rescale the pass no longer records. A slab's staleness
             // is derived from its stamp's staged pair, never stored, so it
             // cannot outlive a return to the staged pair. The pass still
-            // begins, with a clear that overrides the slab's load, so the
-            // readback is the clear colour and never a preserved old frame.
+            // begins: one that shares its target with another viewport
+            // loads, so the base layer's pixels survive the frame, and one
+            // that owns its target clears, which is the state table's
+            // readback.
             let stale = match key.pass {
                 PassKind::Slab => {
                     let recorded = {
@@ -4746,10 +4819,16 @@ impl RenderGraph {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: if stale || key.pass != PassKind::Slab {
-                                wgpu::LoadOp::Clear(wgpu::Color::BLACK)
-                            } else {
+                            load: if stale {
+                                if target_is_shared(gpu, index) {
+                                    wgpu::LoadOp::Load
+                                } else {
+                                    wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                                }
+                            } else if key.pass == PassKind::Slab {
                                 wgpu::LoadOp::Load
+                            } else {
+                                wgpu::LoadOp::Clear(wgpu::Color::BLACK)
                             },
                             store: wgpu::StoreOp::Store,
                         },
@@ -4914,6 +4993,25 @@ fn gpu_binding_ready(kind: PassKind, slot: Option<&GpuSlot>) -> bool {
     }
 }
 
+/// Whether another registered viewport renders into the same target texture.
+///
+/// Two views of one texture are different view objects, so the comparison
+/// goes through the texture each view names, which wgpu compares by
+/// resource identity. A stale pass on a shared target must not clear,
+/// because the clear would destroy the base layer's pixels in that target.
+fn target_is_shared(gpu: &[Option<GpuSlot>], index: usize) -> bool {
+    let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    let texture = slot.target.texture();
+    gpu.iter().enumerate().any(|(other, held)| {
+        other != index
+            && held
+                .as_ref()
+                .is_some_and(|other_slot| other_slot.target.texture() == texture)
+    })
+}
+
 fn voi_of(pass: &Pass) -> VoiParams {
     match pass {
         Pass::Stack(stack) => stack.voi,
@@ -4984,8 +5082,8 @@ fn pre_apply_slab(image: &SlabImage, slope: f32, intercept: f32) -> SlabImage {
     applied
 }
 
-// One argument per resource the staging binds, which is what a staging
-// function names.
+// The arguments are the recorded state the staging binds from, the same
+// values the registry keeps, so a re-stage can supply them again.
 #[allow(clippy::too_many_arguments)]
 fn stage_slab(
     ctx: &GpuContext,
@@ -5351,20 +5449,6 @@ fn colour_texture_for(
     let texture = create_colour_texture(device, 1);
     write_colour_lut(queue, &texture, &[0, 0, 0, 255], 1);
     texture
-}
-
-/// The float format the folded table is created with.
-///
-/// `register_stored` asks the adapter for the preserving order and remembers
-/// it, so its table follows `selected_stored_format`'s precedent on that
-/// tier. `register` and the rebinds hold no adapter, so they use the
-/// preferred [`STORED_FORMAT`], which the stored-sample doc names as
-/// preferred on every tier.
-fn table_format_of(route: StoredRoute, remembered: wgpu::TextureFormat) -> wgpu::TextureFormat {
-    match route {
-        StoredRoute::Tabled { .. } => remembered,
-        StoredRoute::PreApplied => STORED_FORMAT,
-    }
 }
 
 /// The route uniform and the folded table one viewport binds at group 0.
@@ -5853,7 +5937,7 @@ mod tests {
 #[cfg(test)]
 mod route_tests {
     use super::{
-        ContentKind, EffectiveRoute, RouteError, SlabPass, StackPass, StoredRoute,
+        ContentKind, EffectiveRoute, Registry, RouteError, SlabPass, StackPass, StoredRoute,
         brick_slot_count, modality_table_height, route_decision,
     };
     use crate::graph::{BlendMode, Pass, SegPass};
@@ -5966,23 +6050,130 @@ mod route_tests {
         assert_eq!(modality_table_height(1), 1);
     }
 
-    /// The content and effective routes start at the declaration.
+    /// The starting state a registration records comes from the declaration.
+    ///
+    /// A `Tabled` route starts table-served over raw integral content and a
+    /// `PreApplied` route starts pre-applied. Red under a mutation that
+    /// flips either mapping, which is the starting point every flip and
+    /// flip-back row builds on.
     #[test]
     fn the_declared_route_maps_to_its_starting_state() {
-        let tabled = StoredRoute::Tabled {
-            first: 0,
-            count: 256,
-        };
-        assert!(matches!(
-            tabled,
+        let stack = Pass::Stack(StackPass {
+            voi: crate::voi::VoiParams {
+                center: 0.0,
+                width: 1.0,
+                slope: 1.0,
+                intercept: 0.0,
+                ymin: 0.0,
+                ymax: 255.0,
+                fn_kind: 1,
+                invert: 0,
+            },
+            blend: BlendMode::Composite,
+        });
+        let mut registry = Registry::new(2);
+        let tabled = match registry.register(
+            stack,
             StoredRoute::Tabled {
                 first: 0,
-                count: 256
-            }
-        ));
-        // The mapping is a match on the declaration, so the arms are pinned
-        // by construction; this asserts the discriminants stay distinct.
-        assert_ne!(ContentKind::RawIntegral, ContentKind::RawFractional);
-        assert_ne!(EffectiveRoute::Tabled, EffectiveRoute::PreApplied);
+                count: 256,
+            },
+        ) {
+            Ok(id) => id,
+            Err(_) => unreachable!("the tabled registration fits"),
+        };
+        let tabled_state = registry
+            .states
+            .get(usize::try_from(tabled.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .unwrap_or_else(|| unreachable!("the tabled viewport is registered"));
+        assert_eq!(
+            tabled_state.effective,
+            EffectiveRoute::Tabled,
+            "a declared-Tabled viewport starts on the table"
+        );
+        assert_eq!(
+            tabled_state.content,
+            ContentKind::RawIntegral,
+            "a declared-Tabled viewport starts raw integral"
+        );
+        let pre = registry
+            .register(
+                Pass::Stack(StackPass {
+                    voi: crate::voi::VoiParams {
+                        center: 0.0,
+                        width: 1.0,
+                        slope: 1.0,
+                        intercept: 0.0,
+                        ymin: 0.0,
+                        ymax: 255.0,
+                        fn_kind: 1,
+                        invert: 0,
+                    },
+                    blend: BlendMode::Composite,
+                }),
+                StoredRoute::PreApplied,
+            )
+            .unwrap_or_else(|_| unreachable!("the pre-applied registration fits"));
+        let pre_state = registry
+            .states
+            .get(usize::try_from(pre.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .unwrap_or_else(|| unreachable!("the pre-applied viewport is registered"));
+        assert_eq!(
+            pre_state.effective,
+            EffectiveRoute::PreApplied,
+            "a declared-PreApplied viewport starts pre-applied"
+        );
+        assert_eq!(
+            pre_state.content,
+            ContentKind::PreApplied,
+            "a declared-PreApplied viewport starts with pre-applied content"
+        );
+    }
+
+    /// **AC9's colour refusals, floor-runnable.**
+    ///
+    /// A palette is refused wherever the bytes are or will be modality
+    /// values, before any upload and on staged content, and a non-palette
+    /// table is refused on raw fractional content. Red under a mutation
+    /// that drops either refusal arm, which is the guard
+    /// `select_colour_lut` runs before any byte is written.
+    #[test]
+    fn the_colour_refusals_keep_their_error_shape() {
+        use super::colour_decision;
+        // A palette on a declared-PreApplied viewport, before any upload.
+        assert_eq!(
+            colour_decision(true, true, ContentKind::PreApplied),
+            Err(super::GraphError::ColourUnavailable),
+            "the palette would index the modality values every upload stages"
+        );
+        // A palette on staged pre-applied content.
+        assert_eq!(
+            colour_decision(true, false, ContentKind::PreApplied),
+            Err(super::GraphError::ColourUnavailable),
+            "the palette would index modality values as raw"
+        );
+        // A non-palette on raw fractional content, which only a palette
+        // colour mode keeps.
+        assert_eq!(
+            colour_decision(false, false, ContentKind::RawFractional),
+            Err(super::GraphError::ColourUnavailable),
+            "raw fractional samples have no correct stage 1 path in the shader"
+        );
+        // The positive controls: a palette on raw integral content, and a
+        // non-palette on pre-applied or raw integral content.
+        assert_eq!(
+            colour_decision(true, false, ContentKind::RawIntegral),
+            Ok(())
+        );
+        assert_eq!(
+            colour_decision(false, true, ContentKind::RawIntegral),
+            Ok(())
+        );
+        assert_eq!(
+            colour_decision(false, false, ContentKind::PreApplied),
+            Ok(())
+        );
     }
 }

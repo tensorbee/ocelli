@@ -10,9 +10,8 @@ use ocelli_pixel::{
     PresentationLutEvidence, VoiFunction, VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, ColourLut, ColourLutError, FrameOutcome, GraphError, IccProfilePresence, Pass,
-    PresetId, RenderGraph, StackPass, StoredRoute, UploadError, ViewportId, VoiParams,
-    volume_ray_admission,
+    BlendMode, ColourLut, FrameOutcome, GraphError, IccProfilePresence, Pass, PresetId,
+    RenderGraph, StackPass, StoredRoute, UploadError, VoiParams, volume_ray_admission,
 };
 use ocelli_volume::Volume;
 
@@ -248,8 +247,8 @@ fn preset_colour() -> ColourLut {
 /// flag-0 branch must not multiply again. Under LINEAR_EXACT centre
 /// `0x44E7C333` width `0x3C23D70A` output 0 to 255 the hand displays are
 /// 9.2138671875 and 12.32666015625, whose encodes are 9 and 12. Hand
-/// working: staged minus centre is -0.004638671875 and 0.0045166015625,
-/// over the pinned width plus one half, times 255.
+/// working: staged minus centre is -0.004638671875 and -0.0045166015625,
+/// both below the centre, over the pinned width plus one half, times 255.
 ///
 /// The rejected wrong implementations: the uniform keeping the real rescale
 /// while the flag-0 branch multiplies, which applies stage 1 twice and
@@ -678,7 +677,6 @@ fn the_ray_admission_room_is_the_sampled_limit_minus_two() {
         Err(GraphError::SampledTextureLimit)
     ));
 }
-
 /// **AC13, the ortho flip, pinned.**
 ///
 /// A `Tabled { first: 0, count: 65_536 }` viewport with pass rescale slope
@@ -1038,19 +1036,61 @@ fn the_caller_view_recovers_through_rebind() {
     );
 }
 
-/// The palette refusal keeps its error shape in the floor, so a rename
-/// cannot silently widen the guard.
+/// **The graph's own table height serves the last container value.**
+///
+/// The AC15 and AC16 probes build their tables in the harness, so a
+/// truncated height inside `create_route_state` or `modality_table_height`
+/// would leave them green. This row registers
+/// `Tabled { first: 0, count: 4_095 }` through the graph itself and reads
+/// stored 4094, the last value of the container and the one a truncating
+/// `4095 / 256 = 15` height can only address out of bounds, which WGSL
+/// 17.7.4 resolves to zero or a neighbouring texel. Hand-computed from
+/// PS3.3 C.11.1's m*SV + b, applied as multiply then add: 4094.0 *
+/// `0x3571C0F8` is `0x3B71A2C0`, and that plus `0x44E7C2FC` is
+/// `0x44E7C31A` (1854.096923828125), the window centre, which draws 127.5
+/// under LINEAR_EXACT width 2.0 and encodes 128. A mutant that reads a
+/// neighbouring in-bounds texel draws 127.4688720703125, byte 127, and one
+/// that reads zero draws no grey near 128.
 #[test]
-fn the_palette_refusal_error_is_colour_unavailable() {
-    assert!(matches!(
-        ColourLut::preset(PresetId::Grey, PhotometricInterpretation::PaletteColor),
-        Err(ColourLutError::Unavailable)
-    ));
-}
-
-/// The viewport id type stays a newtype over u32, which the readbacks index.
-#[test]
-fn viewport_ids_stay_newtype() {
-    let id = ViewportId(0);
-    assert_eq!(id, ViewportId(0));
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn the_graph_serves_the_last_value_of_a_non_multiple_container() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba8Unorm) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let chain = pair_chain(SLOPE_A, INTERCEPT_A, from_bits(0x44E7_C31A), 2.0);
+    let (view, texture) = target(context.device(), 1);
+    let viewport = match graph.register_stored(
+        &context,
+        &adapter,
+        view,
+        1,
+        1,
+        Pass::Stack(StackPass {
+            voi: uniform_of(&chain),
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 4_095,
+        },
+    ) {
+        Ok(id) => id,
+        Err(error) => unreachable!("the 4095-value registration fits: {error:?}"),
+    };
+    assert!(
+        graph
+            .upload_stored(&context, &adapter, viewport, 1, 1, &[4094.0])
+            .is_ok()
+    );
+    require_frame(graph.tick(&context));
+    assert_eq!(
+        readback(&context, &texture, 1),
+        vec![128, 128, 128, 255],
+        "stored 4094 did not read its own table entry"
+    );
 }

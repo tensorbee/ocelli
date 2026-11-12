@@ -362,8 +362,9 @@ pub struct StageOnePairs {
     pub format: wgpu::TextureFormat,
     /// Stored 2371.0 and 2372.0 through pair A's table, under LINEAR_EXACT
     /// centre `0x44E7C30D` width `0x38FFFFD5` output 0 to 255. Exactly 0.0
-    /// and 255.0 when the table holds `ocelli_pixel::modality`'s bits.
-    pub cancellation_pair: [f32; 2],
+    /// and 255.0 when the table holds `ocelli_pixel::modality`'s bits: the
+    /// window's two ends, which is the pair the F-227 defect hides.
+    pub window_ends: [f32; 2],
     /// Stored 56893.0 through pair B's table, under LINEAR_EXACT centre
     /// `0xBC9A0000` width `0x39D1B717` output 0 to 255. Exactly 127.5, the
     /// window centre. The fused bits `0xBC990748` draw 203.1064453125 here.
@@ -374,7 +375,7 @@ pub struct StageOnePairs {
 /// displays back.
 ///
 /// Two viewports, because the pairs need different extents and different
-/// tables. Both declare the full signed 16-bit container, so the whole
+/// tables. Both declare the full unsigned 16-bit container, so the whole
 /// probe is the folded-table route. The displays come back on the 0 to 255
 /// scale, the same normalization `read_section_18_3` reads.
 ///
@@ -460,7 +461,7 @@ pub fn read_stage_one_pairs(
     let format = remembered_or_stored(adapter, ctx.caps().tier)?;
     Ok(StageOnePairs {
         format,
-        cancellation_pair: pair_array,
+        window_ends: pair_array,
         cancellation_single: single_row.first().copied().unwrap_or(f32::NAN),
     })
 }

@@ -1137,7 +1137,7 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
     // here and none is needed for that. Asking for the derived bind group
     // layout confirms NOTHING further, measured in the F-041 review's second
     // pass, so it is not asked for. What watches the binding set is
-    // `voi::tests::the_shader_is_composable_and_reserves_only_binding_zero`,
+    // `voi::tests::the_shader_is_composable_and_reserves_bindings_zero_one_and_two`,
     // which reads the text and runs in the floor.
     drop(pipeline);
 }
@@ -1149,8 +1149,8 @@ fn fs_main(@builtin(position) at : vec4<f32>) -> @location(0) vec4<f32> {
 /// exactly `0x44E7C30D` and `0x44E7C30E`, `ocelli_pixel::modality`'s own
 /// two-rounding bits: PS3.3 C.11.1's output units are m*SV + b, applied as
 /// multiply then add. Hand-computed with struct pack round-trips: 2371.0 *
-/// `0x3571C0F8` is `0x44E7C30C`, and `0x44E7C30C + 0x44E7C2FC` is
-/// `0x44E7C30D`; 2372.0 * slope is `0x44E7C30D`, and that plus the
+/// `0x3571C0F8` is `0x3B0BF0E4`, and `0x3B0BF0E4 + 0x44E7C2FC` is
+/// `0x44E7C30D`. 2372.0 * slope is `0x3B0C0000`, and that plus the
 /// intercept is `0x44E7C30E`. A table computed with `f32::mul_add` holds
 /// `0x44E7C30D` for both, and today's uniform route fuses the same way.
 ///

@@ -143,7 +143,7 @@ pub use tier_b::{
 };
 pub use voi::{
     MODALITY_FOLD, ModalityRoute, RouteError, StoredRoute, VOI_WGSL, VoiParams, VoiParamsError,
-    check_container, fill_modality_table,
+    fill_modality_table,
 };
 
 /// The crate's own name. The scaffold test asserts it matches Cargo's, which

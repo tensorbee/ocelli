@@ -189,8 +189,8 @@ fn native_gl_stage_one_pairs_or_a_recorded_miss() {
                 ocelli_render::stored_format_name(pairs.format)
             );
             assert_ne!(pairs.format, wgpu::TextureFormat::Rgba8Unorm);
-            let low = pairs.cancellation_pair.first().copied().unwrap_or(f32::NAN);
-            let high = pairs.cancellation_pair.get(1).copied().unwrap_or(f32::NAN);
+            let low = pairs.window_ends.first().copied().unwrap_or(f32::NAN);
+            let high = pairs.window_ends.get(1).copied().unwrap_or(f32::NAN);
             assert_close(low, 0.0);
             assert_close(high, 255.0);
             assert_close(pairs.cancellation_single, 127.5);
