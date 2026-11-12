@@ -22,7 +22,7 @@ use crate::graph::{
     BlendMode, FrameOutcome, GraphError, Pass, RenderGraph, StackPass, UploadError,
 };
 use crate::probe::ResolvedAdapter;
-use crate::voi::VoiParams;
+use crate::voi::{StoredRoute, VoiParams};
 
 /// Stored inputs for the section 18.3 rows, in order.
 const INPUT_LOW: f32 = -160.0;
@@ -121,6 +121,10 @@ pub fn read_section_18_3(
             voi,
             blend: BlendMode::Composite,
         }),
+        StoredRoute::Tabled {
+            first: -32_768,
+            count: 65_536,
+        },
     ) {
         Ok(viewport) => viewport,
         Err(UploadError::FormatUnavailable) => return Err(Section183Error::Unavailable),
@@ -347,6 +351,242 @@ fn read_units(ctx: &GpuContext, texture: &wgpu::Texture) -> Result<[f32; 4], Sec
             return Err(Section183Error::Readback("short texel".to_owned()));
         };
         *slot = f32::from_le_bytes(array);
+    }
+    Ok(units)
+}
+
+/// The F-227 stage-1 pairs through the folded table, on the resolved adapter.
+#[derive(Debug, Clone, Copy)]
+pub struct StageOnePairs {
+    /// The stored-sample format the graph selected.
+    pub format: wgpu::TextureFormat,
+    /// Stored 2371.0 and 2372.0 through pair A's table, under LINEAR_EXACT
+    /// centre `0x44E7C30D` width `0x38FFFFD5` output 0 to 255. Exactly 0.0
+    /// and 255.0 when the table holds `ocelli_pixel::modality`'s bits: the
+    /// window's two ends, which is the pair the F-227 defect hides.
+    pub window_ends: [f32; 2],
+    /// Stored 56893.0 through pair B's table, under LINEAR_EXACT centre
+    /// `0xBC9A0000` width `0x39D1B717` output 0 to 255. Exactly 127.5, the
+    /// window centre. The fused bits `0xBC990748` draw 203.1064453125 here.
+    pub cancellation_single: f32,
+}
+
+/// Drive the two F-227 pairs through the graph's tabled route and read the
+/// displays back.
+///
+/// Two viewports, because the pairs need different extents and different
+/// tables. Both declare the full unsigned 16-bit container, so the whole
+/// probe is the folded-table route. The displays come back on the 0 to 255
+/// scale, the same normalization `read_section_18_3` reads.
+///
+/// # Errors
+///
+/// [`Section183Error`], with the same meanings as [`read_section_18_3`].
+pub fn read_stage_one_pairs(
+    ctx: &mut GpuContext,
+    adapter: &ResolvedAdapter,
+) -> Result<StageOnePairs, Section183Error> {
+    if ctx.caps().tier == Tier::Cpu {
+        return Err(Section183Error::TierC);
+    }
+    let features = adapter
+        .wgpu_adapter()
+        .get_texture_format_features(COLOUR_FORMAT);
+    let needed = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+    if !features.allowed_usages.contains(needed) {
+        return Err(Section183Error::Unavailable);
+    }
+    let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C30D, 0x38FF_FFD5)?;
+    let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xBC9A_0000, 0x39D1_B717)?;
+    let mut graph = match RenderGraph::new(ctx, 2, COLOUR_FORMAT) {
+        Ok(graph) => graph,
+        Err(GraphError::TierCUnavailable) => return Err(Section183Error::TierC),
+        Err(error) => return Err(Section183Error::Readback(error.to_string())),
+    };
+    let route = StoredRoute::Tabled {
+        first: 0,
+        count: 65_536,
+    };
+    let (view_a, target_a) = pair_target(ctx.device(), 2, "ocelli stage one pair a");
+    let voi_a = uniform_of(&pair_a)?;
+    let viewport_a = match graph.register_stored(
+        ctx,
+        adapter,
+        view_a,
+        2,
+        1,
+        Pass::Stack(StackPass {
+            voi: voi_a,
+            blend: BlendMode::Composite,
+        }),
+        route,
+    ) {
+        Ok(viewport) => viewport,
+        Err(UploadError::FormatUnavailable) => return Err(Section183Error::Unavailable),
+        Err(error) => return Err(Section183Error::Readback(error.to_string())),
+    };
+    graph
+        .upload_stored(ctx, adapter, viewport_a, 2, 1, &[2371.0, 2372.0])
+        .map_err(|error| Section183Error::Readback(error.to_string()))?;
+    require_frame(graph.tick(ctx))?;
+    let pair_row = read_row(ctx, &target_a, 2)?;
+    let pair_array = [
+        pair_row.first().copied().unwrap_or(f32::NAN),
+        pair_row.get(1).copied().unwrap_or(f32::NAN),
+    ];
+
+    let (view_b, target_b) = pair_target(ctx.device(), 1, "ocelli stage one pair b");
+    let voi_b = uniform_of(&pair_b)?;
+    let viewport_b = match graph.register_stored(
+        ctx,
+        adapter,
+        view_b,
+        1,
+        1,
+        Pass::Stack(StackPass {
+            voi: voi_b,
+            blend: BlendMode::Composite,
+        }),
+        route,
+    ) {
+        Ok(viewport) => viewport,
+        Err(UploadError::FormatUnavailable) => return Err(Section183Error::Unavailable),
+        Err(error) => return Err(Section183Error::Readback(error.to_string())),
+    };
+    graph
+        .upload_stored(ctx, adapter, viewport_b, 1, 1, &[56_893.0])
+        .map_err(|error| Section183Error::Readback(error.to_string()))?;
+    require_frame(graph.tick(ctx))?;
+    let single_row = read_row(ctx, &target_b, 1)?;
+    let format = remembered_or_stored(adapter, ctx.caps().tier)?;
+    Ok(StageOnePairs {
+        format,
+        window_ends: pair_array,
+        cancellation_single: single_row.first().copied().unwrap_or(f32::NAN),
+    })
+}
+
+/// A chain over one rescale pair and one pinned LINEAR_EXACT window.
+fn pair_chain(
+    slope: u32,
+    intercept: u32,
+    center: u32,
+    width: u32,
+) -> Result<LutChain, Section183Error> {
+    let modality = ModalityTransform::new(
+        None,
+        Some(f32::from_bits(slope)),
+        Some(f32::from_bits(intercept)),
+    )
+    .map_err(|error| Section183Error::Readback(format!("{error:?}")))?;
+    let voi = VoiTransform::new(
+        None,
+        &[f32::from_bits(center)],
+        &[f32::from_bits(width)],
+        0,
+        VoiFunction::LinearExact,
+        0.0,
+        255.0,
+    )
+    .map_err(|error| Section183Error::Readback(format!("{error:?}")))?;
+    LutChain::new(
+        modality,
+        voi,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    )
+    .map_err(|error| Section183Error::Readback(format!("{error:?}")))
+}
+
+fn uniform_of(chain: &LutChain) -> Result<VoiParams, Section183Error> {
+    VoiParams::from_chain(chain).map_err(|error| Section183Error::Readback(format!("{error:?}")))
+}
+
+fn pair_target(
+    device: &wgpu::Device,
+    width: u32,
+    label: &str,
+) -> (wgpu::TextureView, wgpu::Texture) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: COLOUR_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (view, texture)
+}
+
+/// Displays of one row, read through a mapped buffer on the 0 to 255 scale.
+fn read_row(
+    ctx: &GpuContext,
+    texture: &wgpu::Texture,
+    width: u32,
+) -> Result<Vec<f32>, Section183Error> {
+    let device = ctx.device();
+    let row_bytes = 256_u32;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("ocelli stage one readback"),
+        size: u64::from(row_bytes),
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("ocelli stage one readback"),
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row_bytes),
+                rows_per_image: Some(1),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    ctx.queue().submit(std::iter::once(encoder.finish()));
+    let slice = buffer.slice(..);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    await_map(device, &receiver)?;
+    let data = slice
+        .get_mapped_range()
+        .map_err(|error| Section183Error::Readback(format!("{error:?}")))?;
+    let bytes: &[u8] = &data;
+    let mut units = Vec::new();
+    for index in 0..usize::try_from(width).unwrap_or(0) {
+        let start = index.saturating_mul(16);
+        let Some(end) = start.checked_add(4) else {
+            return Err(Section183Error::Readback("readback offset".to_owned()));
+        };
+        let Some(chunk) = bytes.get(start..end) else {
+            return Err(Section183Error::Readback("short map".to_owned()));
+        };
+        let Ok(array) = <[u8; 4]>::try_from(chunk) else {
+            return Err(Section183Error::Readback("short texel".to_owned()));
+        };
+        units.push(f32::from_le_bytes(array) * 255.0);
     }
     Ok(units)
 }

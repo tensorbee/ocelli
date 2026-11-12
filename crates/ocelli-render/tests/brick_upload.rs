@@ -23,8 +23,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, BrickPlan, BrickUploadError, Pass, RenderGraph, StackPass, Tier, VoiParams,
-    brick_bytes_match, brick_format, brick_plan,
+    BlendMode, BrickPlan, BrickUploadError, Pass, RenderGraph, StackPass, StoredRoute, Tier,
+    VoiParams, brick_bytes_match, brick_format, brick_plan,
 };
 
 fn binding(usages: wgpu::TextureUsages) -> wgpu::TextureFormatFeatures {
@@ -470,6 +470,7 @@ fn a_brick_upload_matches_the_ramp_and_a_window_does_not_reupload() {
             voi: params(&linear),
             blend: BlendMode::Composite,
         }),
+        StoredRoute::PreApplied,
     );
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };

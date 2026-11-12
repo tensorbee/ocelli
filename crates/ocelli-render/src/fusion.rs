@@ -16,7 +16,7 @@ use crate::colour::{byte_from_channel, display_index};
 use crate::gpu::GpuContext;
 use crate::graph::{Dirty, TABLE_INDEX_WGSL, Upload, aligned_row_bytes};
 use crate::probe::ResolvedAdapter;
-use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
+use crate::voi::{MODALITY_FOLD, ModalityRoute, VOI_WGSL, VoiParams, VoiParamsError};
 
 const FUSION_WGSL: &str = include_str!("../shaders/fusion.wgsl");
 const TABLE_LAST: u32 = 255;
@@ -510,6 +510,10 @@ pub(crate) struct FusionGpu {
     output: wgpu::TextureView,
     pet_voi: wgpu::Buffer,
     ct_voi: wgpu::Buffer,
+    /// Kept alive so the bind groups' route binding stays valid.
+    _route: wgpu::Buffer,
+    /// Kept alive so the bind groups' stand-in table binding stays valid.
+    _table: wgpu::Texture,
     pet_params: wgpu::Buffer,
     ct_params: wgpu::Buffer,
     pet_stored: wgpu::Texture,
@@ -628,9 +632,38 @@ impl FusionGpu {
             label: Some("ocelli fusion"),
             source: wgpu::ShaderSource::Wgsl(fusion_module().into()),
         });
+        // Both volumes pre-apply stage 1 at plane packing, so the route flag
+        // is 0 and the table is a 1x1 stand-in that nothing reads.
+        let route = uniform_buffer(
+            device,
+            "ocelli fusion route",
+            bytemuck::bytes_of(&ModalityRoute {
+                tabled: 0,
+                first: 0,
+                fold: MODALITY_FOLD,
+                pad: 0,
+            }),
+        );
+        let table = texture_2d(
+            device,
+            "ocelli fusion modality table",
+            1,
+            1,
+            wgpu::TextureFormat::R32Float,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
+        // Group 0: the VOI uniform at 0, the route uniform and the stand-in
+        // table at the bindings `voi.wgsl` reserves, and FusionParams at 3.
+        // Both volumes are pre-applied at plane packing, so the flag is 0.
+        let table_view = table.create_view(&wgpu::TextureViewDescriptor::default());
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli fusion uniform"),
-            entries: &[uniform_entry(0), uniform_entry(1)],
+            entries: &[
+                uniform_entry(0),
+                uniform_entry(1),
+                float_entry(2),
+                uniform_entry(3),
+            ],
         });
         let source_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli fusion source"),
@@ -742,12 +775,12 @@ impl FusionGpu {
         let pet_voi = uniform_buffer(
             device,
             "ocelli fusion pet voi",
-            bytemuck::bytes_of(&uniforms.voi_b),
+            bytemuck::bytes_of(&uniforms.voi_b.with_identity_rescale()),
         );
         let ct_voi = uniform_buffer(
             device,
             "ocelli fusion ct voi",
-            bytemuck::bytes_of(&uniforms.voi_a),
+            bytemuck::bytes_of(&uniforms.voi_a.with_identity_rescale()),
         );
         let pet_params = uniform_buffer(
             device,
@@ -762,8 +795,22 @@ impl FusionGpu {
         let pet_window = pet_target.create_view(&wgpu::TextureViewDescriptor::default());
         let output = output_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_view = front_dummy.create_view(&wgpu::TextureViewDescriptor::default());
-        let window_uniforms = bind_uniforms(device, &uniform_layout, &pet_voi, &pet_params);
-        let fuse_uniforms = bind_uniforms(device, &uniform_layout, &ct_voi, &ct_params);
+        let window_uniforms = bind_uniforms(
+            device,
+            &uniform_layout,
+            &pet_voi,
+            &route,
+            &table_view,
+            &pet_params,
+        );
+        let fuse_uniforms = bind_uniforms(
+            device,
+            &uniform_layout,
+            &ct_voi,
+            &route,
+            &table_view,
+            &ct_params,
+        );
         let window_sources = bind_sources(
             device,
             &source_layout,
@@ -791,6 +838,8 @@ impl FusionGpu {
             output,
             pet_voi,
             ct_voi,
+            _route: route,
+            _table: table,
             pet_params,
             ct_params,
             pet_stored,
@@ -904,6 +953,14 @@ fn same_samples(held: &FusionStamp, next: &FusionStamp) -> bool {
         && held.geometry_a == next.geometry_a
         && held.geometry_b == next.geometry_b
         && held.plane == next.plane
+        // A rescale change re-packs the planes, because the staged bytes
+        // were computed with the old pair. The pairs are compared as bits,
+        // because a changed pair is a bit change and nothing here wants an
+        // epsilon.
+        && held.voi_a.slope.to_bits() == next.voi_a.slope.to_bits()
+        && held.voi_a.intercept.to_bits() == next.voi_a.intercept.to_bits()
+        && held.voi_b.slope.to_bits() == next.voi_b.slope.to_bits()
+        && held.voi_b.intercept.to_bits() == next.voi_b.intercept.to_bits()
 }
 
 fn params_of(opacity_pet: f32, opacity_ct: f32, table: Option<&[Rgb]>) -> FusionParams {
@@ -980,6 +1037,22 @@ fn prepare_plane_samples(
         &mut ct_samples,
         &mut ct_mask,
     )?;
+    // Stage 1 on the CPU, per volume: pet through chain_b's rescale and ct
+    // through chain_a's, in place on the Vecs above. A presence-0 texel is
+    // skipped and stays at 0.0, which keeps the shader header's invariant
+    // that a stored plane holds 0 where presence is 0.
+    let voi_b = VoiParams::from_chain(request.chain_b)?;
+    let voi_a = VoiParams::from_chain(request.chain_a)?;
+    for (sample, present) in pet_samples.iter_mut().zip(&pet_mask) {
+        if *present != 0.0 {
+            *sample = ocelli_pixel::modality(Stored(*sample), voi_b.slope, voi_b.intercept).0;
+        }
+    }
+    for (sample, present) in ct_samples.iter_mut().zip(&ct_mask) {
+        if *present != 0.0 {
+            *sample = ocelli_pixel::modality(Stored(*sample), voi_a.slope, voi_a.intercept).0;
+        }
+    }
     let raw = width.checked_mul(texel_bytes).ok_or(FusionError::Plane)?;
     let row_bytes = aligned_row_bytes(raw).ok_or(FusionError::Plane)?;
     Ok(PreparedPlanes {
@@ -1080,8 +1153,18 @@ fn write_plane(
 }
 
 fn commit_uniforms(queue: &wgpu::Queue, view: &FusionGpu, uniforms: &PreparedUniforms) {
-    queue.write_buffer(&view.ct_voi, 0, bytemuck::bytes_of(&uniforms.voi_a));
-    queue.write_buffer(&view.pet_voi, 0, bytemuck::bytes_of(&uniforms.voi_b));
+    // The planes hold modality values, so the uniform's rescale is identity
+    // while FusionStamp keeps the real pair for comparison.
+    queue.write_buffer(
+        &view.ct_voi,
+        0,
+        bytemuck::bytes_of(&uniforms.voi_a.with_identity_rescale()),
+    );
+    queue.write_buffer(
+        &view.pet_voi,
+        0,
+        bytemuck::bytes_of(&uniforms.voi_b.with_identity_rescale()),
+    );
     queue.write_buffer(&view.pet_params, 0, bytemuck::bytes_of(&uniforms.pet));
     queue.write_buffer(&view.ct_params, 0, bytemuck::bytes_of(&uniforms.ct));
 }
@@ -1342,6 +1425,8 @@ fn bind_uniforms(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     voi: &wgpu::Buffer,
+    route: &wgpu::Buffer,
+    table_view: &wgpu::TextureView,
     params: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1354,6 +1439,14 @@ fn bind_uniforms(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
+                resource: route.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(table_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
                 resource: params.as_entire_binding(),
             },
         ],

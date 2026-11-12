@@ -20,7 +20,7 @@ use ocelli_pixel::{
 use ocelli_render::{
     BlendMode, ClipPlane, FrameOutcome, GraphError, OpacityError, OpacityPreset, OpacityTable,
     Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph, ShadeError, ShadeWeights,
-    Tier, VOI_WGSL, ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource,
+    StoredRoute, Tier, VOI_WGSL, ViewportId, VoiParams, VolumeBrick, VolumePass, VolumeRaySource,
     sampled_texture_limit, volume_ray_admission, volume_ray_module,
 };
 use ocelli_volume::{Level, SlicePresence, Volume, VoxelKind, VoxelStore};
@@ -120,18 +120,23 @@ fn volume_raycast_has_no_cpu_image() {
     let cpu_ray: Result<(), GraphError> = volume_ray_admission(Tier::Cpu, 1, 16);
     assert!(matches!(cpu_ray, Err(GraphError::TierCUnavailable)));
     assert!(volume_ray_admission(Tier::A, 1, 16).is_ok());
-    // Two bricks fit in a limit of 16 and still leave one binding for residency.
+    // Two bricks fit in a limit of 16 and still leave two bindings, for the
+    // residency texture and the folded modality table.
     assert!(volume_ray_admission(Tier::A, 2, 16).is_ok());
-    assert!(volume_ray_admission(Tier::B, 1, 2).is_ok());
-    // A cap of 0 refuses before a shader runs. A limit of 1 has no room for
-    // both a brick and the residency texture. A full limit of 16 cannot take
-    // 16 bricks, because residency is the extra sampled binding.
+    // A cap of 0 refuses before a shader runs. A limit of 1 or 2 has no room
+    // for a brick beside the residency texture and the modality table. A full
+    // limit of 16 cannot take 16 bricks, because those two are the extra
+    // sampled bindings.
     assert!(matches!(
         volume_ray_admission(Tier::A, 1, 0),
         Err(ocelli_render::GraphError::SampledTextureLimit)
     ));
     assert!(matches!(
         volume_ray_admission(Tier::B, 1, 1),
+        Err(ocelli_render::GraphError::SampledTextureLimit)
+    ));
+    assert!(matches!(
+        volume_ray_admission(Tier::B, 1, 2),
         Err(ocelli_render::GraphError::SampledTextureLimit)
     ));
     assert!(matches!(
@@ -503,6 +508,10 @@ fn draw_ray_table(
             axis: RayAxis::Slice,
             from_far,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -588,6 +597,10 @@ fn a_replaced_brick_is_not_sampled_until_the_ray_is_bound_again() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -767,6 +780,10 @@ fn two_ready_bricks_both_contribute() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -849,6 +866,10 @@ fn set_opacity_does_not_upload_bricks() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -1040,6 +1061,10 @@ fn draw_centre(samples: [u16; 3], weights: Option<&ShadeWeights>) -> Option<[f32
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 65_536,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -1149,6 +1174,10 @@ fn light_against_the_gradient_zeroes_the_colour() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 65_536,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -1281,6 +1310,10 @@ fn draw_clip(samples: &[u8], spacing_z: f64, planes: Option<&[ClipPlane]>) -> Op
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),
@@ -1420,6 +1453,10 @@ fn a_refused_plane_list_keeps_the_clipped_colour() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("one viewport fits"),

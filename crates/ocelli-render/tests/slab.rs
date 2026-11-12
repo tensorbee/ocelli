@@ -9,10 +9,11 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, SlabError,
-    SlabPass, StackPass, Tier, VOI_WGSL, ViewportId, VoiParams, fragment_keys_for, present_slab,
-    slab_blend_code, slab_compile_list, slab_module,
+    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, SegPass,
+    SlabError, SlabPass, StackPass, StoredRoute, Tier, VOI_WGSL, ViewportId, VoiParams,
+    fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
 };
+use ocelli_seg::{LabelColourLut, LabelGrid, LabelStyle, Representation, Rgba8};
 use ocelli_volume::{PlaneSample, SlabImage};
 
 fn bad_extent() -> SlabImage {
@@ -254,11 +255,14 @@ fn params(chain: &LutChain) -> VoiParams {
     }
 }
 
-fn colour_target(device: &wgpu::Device) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Texture) {
+fn colour_target(
+    device: &wgpu::Device,
+    width: u32,
+) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Texture) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("slab shared target"),
         size: wgpu::Extent3d {
-            width: 1,
+            width,
             height: 1,
             depth_or_array_layers: 1,
         },
@@ -316,7 +320,11 @@ fn dummy_source(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView
     float_source(device, queue, 0.0)
 }
 
-fn read_pixel(context: &ocelli_render::GpuContext, target: &wgpu::Texture) -> [f32; 4] {
+fn read_row(
+    context: &ocelli_render::GpuContext,
+    target: &wgpu::Texture,
+    width: u32,
+) -> Vec<[f32; 4]> {
     let device = context.device();
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("slab readback"),
@@ -343,7 +351,7 @@ fn read_pixel(context: &ocelli_render::GpuContext, target: &wgpu::Texture) -> [f
             },
         },
         wgpu::Extent3d {
-            width: 1,
+            width,
             height: 1,
             depth_or_array_layers: 1,
         },
@@ -360,23 +368,41 @@ fn read_pixel(context: &ocelli_render::GpuContext, target: &wgpu::Texture) -> [f
     });
     let _ = receiver.recv();
     let Ok(data) = slice.get_mapped_range() else {
-        return [f32::NAN, f32::NAN, f32::NAN, f32::NAN];
+        return Vec::new();
     };
-    let mut pixel = [f32::NAN, f32::NAN, f32::NAN, f32::NAN];
-    for (lane, cell) in pixel.iter_mut().enumerate() {
-        let start = lane.saturating_mul(4);
-        let Some(end) = start.checked_add(4) else {
-            return pixel;
-        };
-        let Some(chunk) = data.get(start..end) else {
-            return pixel;
-        };
-        let Ok(array) = <[u8; 4]>::try_from(chunk) else {
-            return pixel;
-        };
-        *cell = f32::from_le_bytes(array);
+    let mut pixels = Vec::new();
+    for index in 0..usize::try_from(width).unwrap_or(0) {
+        let mut pixel = [f32::NAN, f32::NAN, f32::NAN, f32::NAN];
+        for (lane, cell) in pixel.iter_mut().enumerate() {
+            let start = index
+                .saturating_mul(16)
+                .saturating_add(lane.saturating_mul(4));
+            let Some(end) = start.checked_add(4) else {
+                continue;
+            };
+            let Some(chunk) = data.get(start..end) else {
+                continue;
+            };
+            let Ok(array) = <[u8; 4]>::try_from(chunk) else {
+                continue;
+            };
+            *cell = f32::from_le_bytes(array);
+        }
+        pixels.push(pixel);
     }
-    pixel
+    pixels
+}
+
+fn read_pixel(context: &ocelli_render::GpuContext, target: &wgpu::Texture) -> [f32; 4] {
+    read_row(context, target, 1)
+        .first()
+        .copied()
+        .unwrap_or([f32::NAN; 4])
+}
+
+/// One pixel of a `read_row` result, or all NaN past the row's end.
+fn row_pixel(row: &[[f32; 4]], index: usize) -> [f32; 4] {
+    row.get(index).copied().unwrap_or([f32::NAN; 4])
 }
 
 #[test]
@@ -402,6 +428,7 @@ fn one_submit_for_a_slab_and_a_stack() {
             voi,
             blend: BlendMode::Composite,
         }),
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("the stack viewport fits"),
@@ -416,6 +443,7 @@ fn one_submit_for_a_slab_and_a_stack() {
             blend: BlendMode::Mip,
             voi,
         }),
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
@@ -456,7 +484,7 @@ fn an_absent_slab_pixel_is_not_painted_zero() {
     };
     let chain = exact_chain();
     let voi = params(&chain);
-    let (stack_view, slab_view, texture) = colour_target(context.device());
+    let (stack_view, slab_view, texture) = colour_target(context.device(), 1);
     let stack_source = float_source(context.device(), context.queue(), 200.0);
     match graph.register(
         &context,
@@ -466,6 +494,7 @@ fn an_absent_slab_pixel_is_not_painted_zero() {
             voi,
             blend: BlendMode::Composite,
         }),
+        StoredRoute::PreApplied,
     ) {
         Ok(_) => {}
         Err(_) => unreachable!("the stack viewport fits"),
@@ -479,6 +508,7 @@ fn an_absent_slab_pixel_is_not_painted_zero() {
             blend: BlendMode::Composite,
             voi,
         }),
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
@@ -549,6 +579,7 @@ fn slab_blend_readback_follows_one_voi_after_the_stored_reduction() {
             blend: BlendMode::Composite,
             voi,
         }),
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
@@ -634,4 +665,825 @@ fn single_target(device: &wgpu::Device) -> (wgpu::TextureView, wgpu::Texture) {
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (view, texture)
+}
+
+/// The pair-A staged values under AC8's window: LINEAR_EXACT centre
+/// `0x44E7C333` width `0x3C23D70A` output 0 to 255.
+const AC8_WINDOW: (u32, u32) = (0x44E7_C333, 0x3C23_D70A);
+
+/// The F-227 rescale pairs, pinned as bits.
+const SLOPE_A: u32 = 0x3571_C0F8;
+const INTERCEPT_A: u32 = 0x44E7_C2FC;
+const SLOPE_B: u32 = 0x3D47_EF8C;
+const INTERCEPT_B: u32 = 0xC52D_91AC;
+
+fn from_bits(bits: u32) -> f32 {
+    f32::from_bits(bits)
+}
+
+fn pair_chain(slope: u32, intercept: u32, center: u32, width: u32) -> LutChain {
+    let modality = ModalityTransform::new(None, Some(from_bits(slope)), Some(from_bits(intercept)));
+    let voi = VoiTransform::new(
+        None,
+        &[from_bits(center)],
+        &[from_bits(width)],
+        0,
+        VoiFunction::LinearExact,
+        0.0,
+        255.0,
+    );
+    assert!(modality.is_ok() && voi.is_ok());
+    let (Ok(modality), Ok(voi)) = (modality, voi) else {
+        unreachable!("asserted immediately above")
+    };
+    let built = LutChain::new(
+        modality,
+        voi,
+        PhotometricInterpretation::Monochrome2,
+        PresentationLutEvidence::Absent,
+    );
+    assert!(built.is_ok());
+    match built {
+        Ok(chain) => chain,
+        Err(_) => unreachable!("asserted immediately above"),
+    }
+}
+
+/// **AC10, the slab average on a pre-applied viewport, pinned.**
+///
+/// A 1x1x2 `SlabImage` with samples 2371.5 and 2372.5 stages as
+/// `0x44E7C30D` and `0x44E7C30E`, the graph's CPU stage 1 with the pass's
+/// pair A. The shader mean of those two, summed in its own order as
+/// `(0 + a1 + a2) / 2`, is `0x44E7C30E` exactly, the ties-to-even
+/// neighbour. Under AC8's window the display is the f32 `0x41453A00`
+/// (12.32666015625), hand-computed from the pinned bits: staged minus
+/// centre is -0.004638671875 and -0.0045166015625, both below the centre,
+/// over the pinned width plus one half, times 255. The readback red
+/// channel is the display normalized over 255, asserted within 2 ULP the
+/// way the normalization rows above assert. Staging raw samples would draw
+/// the mean of raw, 2372.0, and 255. Leaving the uniform's real rescale
+/// live with a multiplying flag-0 branch would draw 0.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn the_slab_average_reduces_pre_applied_modality_values() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let chain = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let voi = params(&chain);
+    let (view, texture) = single_target(context.device());
+    let source = dummy_source(context.device(), context.queue());
+    let slab = match graph.register(
+        &context,
+        view,
+        source,
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the slab viewport fits"),
+    };
+    let image = SlabImage {
+        width: 1,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 2,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let pixel = read_pixel(&context, &texture);
+    let expected_red = 0.048_339_844_f32;
+    assert!(
+        within_two_ulp(pixel[0], expected_red),
+        "red {got} is not within 2 ULP of {expected_red}",
+        got = pixel[0]
+    );
+    assert_eq!(pixel[3].to_bits(), 1.0_f32.to_bits());
+}
+
+/// **AC18, the stale slab recovers, pinned.**
+///
+/// The first fixture stages pair A, marks it stale with pair B's chain, and
+/// reads the clear colour, because the slab pass's load op is overridden to
+/// a clear for a stale viewport. A second `show_slab` of the same image
+/// re-stages, because the stamp now carries the staged pair, and the
+/// pair-B mean `0xC5265524` draws 130.61279296875, the red channel f32
+/// `0x3F032000`. The second fixture runs pair A, `set_voi` B, `set_voi` A
+/// with AC8's window, then `show_slab` of the same image, and reads the
+/// pair-A mean `0x44E7C30E`, so a stale state that survived a return to the
+/// staged pair would fail.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn the_stale_slab_clears_and_recovers_on_a_restage() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let (view, texture) = single_target(context.device());
+    let source = dummy_source(context.device(), context.queue());
+    let slab = match graph.register(
+        &context,
+        view,
+        source,
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the slab viewport fits"),
+    };
+    let image = SlabImage {
+        width: 1,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 2,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let pixel = read_pixel(&context, &texture);
+    let expected_red = 0.048_339_844_f32;
+    assert!(
+        within_two_ulp(pixel[0], expected_red),
+        "the pair-A mean did not draw: {got} against {expected_red}",
+        got = pixel[0]
+    );
+
+    // Pair B's chain: rescale `0x3D47EF8C` / `0xC52D91AC`, window centre
+    // `0xC5265588` width 2.0. The staged pair differs, so the slab is stale
+    // and the next frame is a clear-only pass.
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, slab, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let cleared = read_pixel(&context, &texture);
+    assert_eq!(cleared[0].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[1].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[2].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+
+    // The same image re-stages, because the stamp carries the staged pair.
+    // The pair-B staged values are `0xC5265588` and `0xC52654C0`, whose
+    // shader-order mean is `0xC5265524` (-2661.3212890625), displayed
+    // 130.61279296875 under pair B's window, the red channel 0x3F032000.
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let recovered = read_pixel(&context, &texture);
+    let expected_b = 0.512_207_03_f32;
+    assert!(
+        within_two_ulp(recovered[0], expected_b),
+        "the re-staged mean did not draw the pinned red 0.51220703125: {got} against {expected_b}",
+        got = recovered[0]
+    );
+}
+
+/// **AC18's second fixture: a return to the staged pair is not stale.**
+///
+/// Pair A stages, `set_voi` B marks the derived stale state, `set_voi` back
+/// to pair A clears it with no re-stage, and `show_slab` of the same image
+/// early-returns while marking data dirty, so the frame draws the pair-A
+/// staged mean `0x44E7C30E` under AC8's window again.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_return_to_the_staged_pair_is_not_stale() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let (view, texture) = single_target(context.device());
+    let source = dummy_source(context.device(), context.queue());
+    let slab = match graph.register(
+        &context,
+        view,
+        source,
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the slab viewport fits"),
+    };
+    let image = SlabImage {
+        width: 1,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 2,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, slab, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let cleared = read_pixel(&context, &texture);
+    assert_eq!(cleared[0].to_bits(), 0.0_f32.to_bits());
+    // Back to pair A: the staged pair matches again, so the state is not
+    // stale, and the next show_slab re-draws the pair-A mean.
+    let back = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    assert!(graph.set_voi(&context, slab, &back).is_ok());
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let pixel = read_pixel(&context, &texture);
+    let expected_red = 0.048_339_844_f32;
+    assert!(
+        within_two_ulp(pixel[0], expected_red),
+        "a stale state survived the return to the staged pair: {got} against {expected_red}",
+        got = pixel[0]
+    );
+}
+
+/// **The lead amendment's shared-target fixture: a stale slab never wipes a
+/// base layer in the same target.**
+///
+/// A stack and a slab are registered on two views of one texture, the
+/// compositing shape `an_absent_slab_pixel_is_not_painted_zero` pins. The
+/// slab stages pair A over the stack and draws first. `set_voi` with pair B
+/// makes the slab stale, and the next frame's slab pass must load and draw
+/// nothing while the stack redraws beneath it: the readback is the stack's
+/// 200.0 display, not the clear colour and not the old slab values. A stale
+/// slab pass that clears instead wipes the stack's pixels, which is the
+/// defect this fixture is red against. A second `show_slab` of the same
+/// image re-stages with pair B and recovers on the shared target too.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_stale_slab_leaves_the_base_layer_in_the_shared_target_intact() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let (stack_view, slab_view, texture) = colour_target(context.device(), 1);
+    let stack_source = float_source(context.device(), context.queue(), 200.0);
+    match graph.register(
+        &context,
+        stack_view,
+        stack_source,
+        Pass::Stack(StackPass {
+            voi: params(&exact_chain()),
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(_) => {}
+        Err(_) => unreachable!("the stack viewport fits"),
+    };
+    let slab_source = dummy_source(context.device(), context.queue());
+    let slab = match graph.register(
+        &context,
+        slab_view,
+        slab_source,
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the slab viewport fits"),
+    };
+    let image = SlabImage {
+        width: 1,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 2,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    // The slab drew over the stack: the pair-A staged mean, 12.32666015625
+    // under AC8's window, normalized over 255.
+    let composited = read_pixel(&context, &texture);
+    let staged_mean = 0.048_339_844_f32;
+    assert!(
+        within_two_ulp(composited[0], staged_mean),
+        "the slab did not draw over the stack: {got} against {staged_mean}",
+        got = composited[0]
+    );
+
+    // Pair B makes the slab stale. The stack is marked dirty, redraws
+    // beneath the load-and-no-draw slab pass, and its pixel survives.
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, slab, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let base = read_pixel(&context, &texture);
+    let stack_display = 200.0_f32 / 255.0;
+    assert!(
+        within_two_ulp(base[0], stack_display),
+        "the stale slab wiped the shared target: {got} against the stack's {stack_display}",
+        got = base[0]
+    );
+    assert_eq!(base[1].to_bits(), base[0].to_bits());
+    assert_eq!(base[2].to_bits(), base[0].to_bits());
+    assert_eq!(base[3].to_bits(), 1.0_f32.to_bits());
+
+    // The same image re-stages with pair B, whose mean is `0xC5265524`,
+    // displayed 130.61279296875, the red channel 0x3F032000. Only the slab
+    // re-stages, so only it encodes.
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let recovered = read_pixel(&context, &texture);
+    let recovered_mean = 0.512_207_03_f32;
+    assert!(
+        within_two_ulp(recovered[0], recovered_mean),
+        "the re-staged slab did not draw over the base: {got} against {recovered_mean}",
+        got = recovered[0]
+    );
+}
+
+/// **The pass 2 amendment's first fixture: a stale stack clears for a fresh
+/// slab on the shared target.**
+///
+/// A stack and a slab are registered on two views of one 2x1 texture. The
+/// stack stages pair A's modality values `0x44E7C30D` and `0x44E7C30E`
+/// (PS3.3 C.11.1, m*SV + b applied as multiply then add) and draws
+/// 0.0361328125 and 0.04833984375, the encodes of 9.2138671875 and
+/// 12.32666015625 under LINEAR_EXACT centre `0x44E7C333` width
+/// `0x3C23D70A` (PS3.3 C.11.2.1.3.2). The slab stages `0x44E7C30D` at
+/// pixel 0 and is absent at pixel 1, so the first frame reads 0.0361328125
+/// over the slab and 0.04833984375 over the bare stack. `set_voi` with
+/// pair B makes the stack stale. The shared-target rule marks the slab
+/// dirty: the stack's pass is the first encoded into the target that
+/// frame, so it clears and draws nothing, and the fresh slab loads and
+/// redraws pixel 0. The readback is 0.0361328125 and the clear colour, not
+/// the old frame's 0.04833984375 stack pixel, which is what a stale pass
+/// that loads leaves behind.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_stale_stack_clears_for_a_fresh_slab_on_the_shared_target() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let (stack_view, slab_view, texture) = colour_target(context.device(), 2);
+    let stack = match graph.register_stored(
+        &context,
+        &adapter,
+        stack_view,
+        2,
+        1,
+        Pass::Stack(StackPass {
+            voi: params(&pair_a),
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the stack viewport fits"),
+    };
+    let slab_source = dummy_source(context.device(), context.queue());
+    let slab = match graph.register(
+        &context,
+        slab_view,
+        slab_source,
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the slab viewport fits"),
+    };
+    assert!(
+        graph
+            .upload_stored(&context, &adapter, stack, 2, 1, &[2371.5, 2372.5])
+            .is_ok()
+    );
+    let image = SlabImage {
+        width: 2,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 1,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Absent],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, slab, &image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let composited = read_row(&context, &texture, 2);
+    let slab_pixel = row_pixel(&composited, 0);
+    let stack_pixel = row_pixel(&composited, 1);
+    assert!(
+        within_two_ulp(slab_pixel[0], 0.036_132_813_f32),
+        "the slab did not draw over the stack: {got}",
+        got = slab_pixel[0]
+    );
+    assert!(
+        within_two_ulp(stack_pixel[0], 0.048_339_844_f32),
+        "the bare stack pixel is wrong: {got}",
+        got = stack_pixel[0]
+    );
+
+    // Pair B makes the stack stale. The slab is marked dirty, the stack's
+    // pass is the first into the target and clears, and the fresh slab
+    // redraws pixel 0 over the clear.
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, stack, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let recomposited = read_row(&context, &texture, 2);
+    let fresh_slab = row_pixel(&recomposited, 0);
+    let cleared = row_pixel(&recomposited, 1);
+    assert!(
+        within_two_ulp(fresh_slab[0], 0.036_132_813_f32),
+        "the fresh slab did not redraw: {got}",
+        got = fresh_slab[0]
+    );
+    assert!(
+        within_two_ulp(cleared[0], 0.0_f32),
+        "the stale stack left its old frame: {got}",
+        got = cleared[0]
+    );
+    assert_eq!(fresh_slab[3].to_bits(), 1.0_f32.to_bits());
+    assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+}
+
+/// **The pass 2 amendment's second fixture: two slabs on one target with
+/// no stack, one stale, read only the fresh slab's pixels.**
+///
+/// Two slabs share one 2x1 texture. The first stages `0x44E7C30D` and
+/// `0x44E7C30E`, the second stages `0x44E7C30D` at pixel 0 and is absent
+/// at pixel 1, so the first frame reads 0.0361328125 and 0.04833984375.
+/// `set_voi` with pair B makes the first slab stale, because its stamp's
+/// staged pair A differs from the recorded pair B. The rule marks the
+/// second slab dirty, the stale first pass clears the target as the first
+/// pass encoded into it, and the fresh slab redraws pixel 0. The readback
+/// is 0.0361328125 and the clear colour. A stale pass that loads on a
+/// shared target keeps the stale 0.04833984375 composite at pixel 1.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn two_slabs_on_one_target_keep_only_the_fresh_pixels_when_one_is_stale() {
+    let Some((adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, AC8_WINDOW.0, AC8_WINDOW.1);
+    let (stale_view, fresh_view, texture) = colour_target(context.device(), 2);
+    let stale = match graph.register(
+        &context,
+        stale_view,
+        dummy_source(context.device(), context.queue()),
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the stale slab viewport fits"),
+    };
+    let fresh = match graph.register(
+        &context,
+        fresh_view,
+        dummy_source(context.device(), context.queue()),
+        Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: params(&pair_a),
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the fresh slab viewport fits"),
+    };
+    let stale_image = SlabImage {
+        width: 2,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 1,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+    };
+    let fresh_image = SlabImage {
+        width: 2,
+        height: 1,
+        step_mm: 2.5,
+        index_step: [0.0, 0.0, 1.0],
+        sample_count: 1,
+        samples: vec![PlaneSample::Present(2371.5), PlaneSample::Absent],
+    };
+    assert!(
+        graph
+            .show_slab(&context, &adapter, stale, &stale_image, BlendMode::Average)
+            .is_ok()
+    );
+    assert!(
+        graph
+            .show_slab(&context, &adapter, fresh, &fresh_image, BlendMode::Average)
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let composited = read_row(&context, &texture, 2);
+    let fresh_over_stale = row_pixel(&composited, 0);
+    let stale_pixel = row_pixel(&composited, 1);
+    assert!(
+        within_two_ulp(fresh_over_stale[0], 0.036_132_813_f32),
+        "the fresh slab did not draw over the stale one: {got}",
+        got = fresh_over_stale[0]
+    );
+    assert!(
+        within_two_ulp(stale_pixel[0], 0.048_339_844_f32),
+        "the stale slab pixel is wrong: {got}",
+        got = stale_pixel[0]
+    );
+
+    // Pair B makes the first slab stale. The second is marked dirty, the
+    // stale first pass clears as the first pass into the target, and only
+    // the fresh slab's pixels survive.
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, stale, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let recomposited = read_row(&context, &texture, 2);
+    let fresh_only = row_pixel(&recomposited, 0);
+    let cleared = row_pixel(&recomposited, 1);
+    assert!(
+        within_two_ulp(fresh_only[0], 0.036_132_813_f32),
+        "the fresh slab did not survive: {got}",
+        got = fresh_only[0]
+    );
+    assert!(
+        within_two_ulp(cleared[0], 0.0_f32),
+        "the stale composite survived: {got}",
+        got = cleared[0]
+    );
+    assert_eq!(fresh_only[3].to_bits(), 1.0_f32.to_bits());
+    assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+}
+
+/// **The per-frame pass reset: a viewport that stops encoding holds nothing
+/// open.**
+///
+/// A SegOverlay at index 0 and a stack at index 1 are registered on two
+/// views of one texture. `show_labelmap` stages the overlay's presenter
+/// bytes, so both viewports encode the first frame and the outcome counts
+/// two passes: the overlay draws its one labelled texel, the fill colour
+/// `[10, 20, 30, 128]` from the one-entry table, and the stack's pass, a
+/// Stack pass with no stale viewport on the target, then clears and draws
+/// its source 200.0 under its own LINEAR_EXACT window, centre 127.5 and
+/// width 255, output 0 to 255 (PS3.3 C.11.2.1.3.2), ((200 - 127.5) / 255 +
+/// 0.5) * 255 = 200.0, the grey 200/255. The readback is that grey.
+///
+/// `set_representation(overlay, Contour)` drops the overlay's labelmap
+/// binding, so the overlay is dirty and cannot encode the second frame,
+/// and `set_voi(stack, pair B)` marks the stack's pre-applied content
+/// stale. The stack's pass is now the first encoded into the target this
+/// frame, so it clears and draws nothing: the readback is the clear
+/// colour, `0.0, 0.0, 0.0, 1.0` on the `Rgba32Float` target. A missing
+/// per-frame pass reset would let the overlay's first-frame flag survive,
+/// turn the stack's clear into a load, and leave the first-frame grey.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_stale_stack_clears_after_an_overlay_stops_encoding_on_the_shared_target() {
+    let Some((_adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let (overlay_view, stack_view, texture) = colour_target(context.device(), 1);
+    let overlay = match graph.register(
+        &context,
+        overlay_view,
+        dummy_source(context.device(), context.queue()),
+        Pass::SegOverlay(SegPass {
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the overlay viewport fits"),
+    };
+    let stack = match graph.register(
+        &context,
+        stack_view,
+        float_source(context.device(), context.queue(), 200.0),
+        Pass::Stack(StackPass {
+            voi: params(&exact_chain()),
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the stack viewport fits"),
+    };
+    assert_eq!(overlay, ViewportId(0));
+    assert_eq!(stack, ViewportId(1));
+    let grid = LabelGrid {
+        width: 1,
+        height: 1,
+        indices: vec![1],
+    };
+    let lut = LabelColourLut::from_segment_one(vec![Rgba8 {
+        r: 10,
+        g: 20,
+        b: 30,
+        a: 128,
+    }]);
+    assert!(
+        graph
+            .show_labelmap(
+                &context,
+                overlay,
+                &grid,
+                &lut,
+                LabelStyle {
+                    fill: true,
+                    outline: false,
+                },
+            )
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let first = read_pixel(&context, &texture);
+    let stack_grey = 200.0_f32 / 255.0;
+    assert!(
+        within_two_ulp(first[0], stack_grey),
+        "the first frame is not the stack's grey: {got} against {stack_grey}",
+        got = first[0]
+    );
+    assert_eq!(first[1].to_bits(), first[0].to_bits());
+    assert_eq!(first[2].to_bits(), first[0].to_bits());
+    assert_eq!(first[3].to_bits(), 1.0_f32.to_bits());
+
+    // The flip: the overlay loses its binding and the stack goes stale.
+    // Only the stack encodes, its pass is the first into the target, and
+    // the clear it begins with erases the first frame.
+    assert_eq!(
+        graph.set_representation(overlay, Representation::Contour),
+        Ok(())
+    );
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, stack, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let cleared = read_pixel(&context, &texture);
+    assert_eq!(cleared[0].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[1].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[2].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
 }
