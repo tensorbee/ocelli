@@ -287,8 +287,9 @@ pub struct FrameFacts {
     /// but unusable, stopped by the top-level rule, or inside a malformed
     /// group. Boxed, because the frame cache charges `HeldFrame` by its
     /// struct size and the tokens' own bytes then ride the heap the way
-    /// the edge letters' do. Tokens present leave about 136 bytes per held
-    /// frame uncharged, the measured `size_of::<CornerTokens>()`.
+    /// the edge letters' do. Tokens present leave the box's 136 bytes, the
+    /// measured `size_of::<CornerTokens>()`, and the token strings' own
+    /// bytes uncharged per held frame.
     pub corners: Option<Box<CornerTokens>>,
 }
 
