@@ -935,7 +935,7 @@
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
     <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
-    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. A choice it could not use or keep says so in the line under the image.</p>
+    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. A choice it could not use or keep says so in the line under the image, except the profile, which is named in the MOUSE section.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -1826,8 +1826,11 @@ window.addEventListener("storage", (event) => {
   prefs.sentences = resolved.sentences;
   // The other tab's write may have kept what this tab's failed write lost,
   // so the write-failure sentences go and the next failure re-sets them.
+  // The profile's own paragraph goes with them, because the profile this
+  // tab now holds is the document's.
   prefs.writeFailures = {};
   prefs.legacyPartial = false;
+  mouseUnsaved.hidden = true;
   activeProfile = prefs.values.mouseProfile;
   profileSelect.value = activeProfile;
   paintMouseKeys();
@@ -2240,19 +2243,22 @@ function loadPreferences() {
 // named field changes, so a tab that opened earlier cannot drop another
 // tab's field. A field whose re-read value is valid is kept as read, and a
 // field whose re-read value is invalid is written as this tab's value in
-// effect. The field being changed is written at the user's new value. A
-// successful document write rewrites all four legacy keys from the written
-// values. A refused document is never written: the change writes the changed
-// field's legacy key only, and a default preset change, which has no legacy
-// key, is kept nowhere. The result names whether the document and the
-// changed field's own legacy key hold the value, which for the default
-// preset is the document's success alone.
+// effect. The field being changed is written at the user's new value. The
+// merged document is only what is written: this session keeps applying its
+// own values, so a later write of another field never replaces an untouched
+// field's choice in effect. A successful document write rewrites all four
+// legacy keys from the written values. A refused document is never written:
+// the change writes the changed field's legacy key only, and a default
+// preset change, which has no legacy key, is kept nowhere. The result names
+// whether the document and the changed field's own legacy key hold the
+// value, which for the default preset is the document's success alone.
 function savePreference(field, value) {
   if (!prefValueValid(field, value)) return { document: false, legacy: false };
   const raw = readPreference(PREFS_KEY);
   const current = parsePrefsDocument(raw);
   const refused = raw != null && current === null;
-  const next = { ...prefs.values, [field]: value };
+  const inEffect = { ...prefs.values, [field]: value };
+  const next = { ...inEffect };
   if (current !== null) {
     for (const name of PREFS_FIELDS) {
       if (name !== field && prefValueValid(name, current[name])) next[name] = current[name];
@@ -2286,7 +2292,7 @@ function savePreference(field, value) {
     if (kept) delete prefs.writeFailures[field];
     else prefs.writeFailures[field] = true;
   }
-  prefs.values = next;
+  prefs.values = inEffect;
   paintPrefsNote();
   // What the reader keeps: the document's own success when it is usable,
   // because it wins on the next load, and the legacy key's success while the
@@ -2789,7 +2795,12 @@ function loadSeries(vp, key) {
     cancelDraft();
   }
   const previous = currentImage(vp);
-  const next = series.images[positions.get(key) || 0] || series.images[0];
+  // The shown image, resolved once through the wrap `showIndex` applies, so
+  // the stored-default trial is judged on the image the viewport will show.
+  const count = series.images.length;
+  const remembered = positions.get(key);
+  const shownAt = count ? ((Number.isInteger(remembered) ? remembered : 0) % count + count) % count : 0;
+  const next = series.images[shownAt] || series.images[0];
   if (previous && next && Boolean(previous.info.colour) !== Boolean(next.info.colour)) vp.invert = false;
   vp.loadToken += 1;
   vp.tileToken += 1;
@@ -2819,8 +2830,7 @@ function loadSeries(vp, key) {
   syncStage(vp);
   syncSeriesRows();
   clearLine(vp);
-  const remembered = positions.get(key);
-  const drawing = showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
+  const drawing = showIndex(vp, shownAt);
   if (trialToken != null) {
     const loadToken = vp.loadToken;
     // Every outcome releases the hold, and a release whose load was
@@ -4454,7 +4464,7 @@ async function refreshFrameWindows(image) {
   // asks again under its new key.
   for (const vp of shownViewports()) {
     if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
-    else if (vp.tileMode && tileImages(vp).includes(image)) paintTiles(vp);
+    else if (vp.tileMode && !paintHeld(vp) && tileImages(vp).includes(image)) paintTiles(vp);
   }
   syncWindowList();
 }

@@ -162,7 +162,9 @@ runs it. A custom `CARGO_TARGET_DIR` is honoured. The backend prints its
 address on stdout, an ephemeral port unless `OCELLI_PORT` is set, and opening
 that address shows the viewer. `SIGINT` or `SIGTERM` to the launcher stops
 the backend it started. The same page is served by
-`cargo run -p ocelli-folder-viewer`, which is the native path.
+`cargo run -p ocelli-folder-viewer`, which is the native path. The two paths
+share the choices the browser keeps only when they run on the same
+`OCELLI_PORT`, because the browser scopes them to the address.
 
 The page opens a local folder or the synthetic study, and with
 `OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set it
@@ -453,10 +455,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    right button zooming. Window on left starts on W/L, with the middle button
    panning and the right button zooming. Control with the left button pans in
    all three. The browser keeps the profile for this address, so a kept
-   profile returns after a restart only on the same `OCELLI_PORT`. What this
-   browser keeps is five validated choices: the mouse profile, the play
-   rate, whether each of the two side columns is hidden, a default window
-   preset and nothing else. The Default preset control in the WINDOW section
+   profile returns after a restart only on the same `OCELLI_PORT`. What
+   this browser keeps is five validated choices: the mouse profile, the
+   play rate, whether each of the two side columns is hidden and a default
+   window preset. The browser also holds the library's log level setting,
+   which dcmjs writes when the page loads the library, and nothing else.
+   The Default preset control in the WINDOW section
    starts every newly opened series at that preset when the image is a CT
    whose preset rows are choosable, once per series load. Reset returns the
    file's own window and the preset does not come back until the next
@@ -464,9 +468,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    takes no preset, and a stored preset the viewer does not offer is named
    in the line under the image and skipped. A choice the browser did not
    keep, or a stored choice it could not use, is named in that line too,
-   never applied quietly. The choices live beside the four keys an older
-   version of the viewer reads, which stay current, so the two can be used
-   side by side. A pinch, or
+   never applied quietly. The profile is the exception: its own failure is
+   named in the MOUSE section. The choices live beside the four keys an
+   older version of the viewer reads, which stay current, so an older
+   binary keeps working beside this one. A choice made in an older binary
+   between two runs of the new one is lost, because the document wins on
+   the next load and the two stores give no order to detect that. A pinch, or
    Ctrl with the wheel, zooms at the pointer. A sideways
    swipe does not change the image. Zoom keeps the image aspect ratio. The
    viewport clips an image that is larger than the pane.

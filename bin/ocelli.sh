@@ -214,14 +214,13 @@ run_gate() {
     # sentence, the stored default applies once per series load behind the
     # first-paint hold, a second port is a different origin, and the origin
     # holds only the five allowed keys beside dcmjs's own loglevel write.
-    # F-245's launcher.mjs check is
-    # last: the page is served through
-    # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
+    # F-245's launcher.mjs check is last: the page is served through the
+    # real npm launcher under a custom CARGO_TARGET_DIR, boots in
     # Chromium, is byte-identical to the native start, and the owned stop
-    # leaves the port closed. Chained on
-    # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
-    # the viewer, so it is outside the floor. The CI step that runs it is the
-    # `viewer-browser` job, which installs both.
+    # leaves the port closed. Chained on `&&` because a case arm returns
+    # the status of its last command. It needs that browser install and a
+    # release build of the viewer, so it is outside the floor. The CI step
+    # that runs it is the `viewer-browser` job, which installs both.
     viewer-browser)
                  if [ ! -d tools/bench/node_modules ]; then
                    echo "The benchmark harness's browser is not installed." >&2

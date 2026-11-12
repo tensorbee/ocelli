@@ -728,6 +728,47 @@ function partialWriteProblems(seen) {
   return problems;
 }
 
+// S4, review pass 1. A default preset whose document write failed stays in
+// effect for this session, and a later successful write of another field
+// never replaces it. The one-shot refusal refuses only the first write,
+// which is the preset document's, so the later rate write succeeds and its
+// merged write re-reads the document's still-valid none. The session keeps
+// applying Bone, which the CT load then applies at the corner.
+async function observeUntouchedInEffect(url, browser, folders) {
+  return withPage(browser, async (page) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(() => {
+      const original = Storage.prototype.setItem;
+      let refused = true;
+      Storage.prototype.setItem = function (key, value) {
+        if (refused) {
+          refused = false;
+          throw new Error("this browser refused the write");
+        }
+        return original.call(this, key, value);
+      };
+    });
+    await page.goto(url);
+    await page.locator("#default-preset").selectOption("bone");
+    await setRate(page, 20);
+    const note = await noteLines(page);
+    await openFolder(page, folders.two, "Bone");
+    const corner = await sample(page);
+    return { note, corner };
+  });
+}
+
+function untouchedInEffectProblems(seen) {
+  const problems = [];
+  if (!seen.note.lines.some((line) => line === "This browser did not keep the default preset. It applies until you reload.")) {
+    problems.push(`the failed preset write shows ${JSON.stringify(seen.note)}, not the not-kept sentence`);
+  }
+  if (seen.corner.corner !== "WW 1500  WL 300  Bone" || seen.corner.soft !== 83 || seen.corner.lung !== 0) {
+    problems.push(`the session kept ${JSON.stringify(seen.corner)}, not Bone with greys 83 and 0`);
+  }
+  return problems;
+}
+
 // AC15. Two pages in one context. A change is neither lost nor stale, the
 // in-helper re-read keeps the other tab's field, and the storage listener
 // refreshes without writing and keeps the tool and the running cine.
@@ -795,7 +836,9 @@ async function observeCrossTab(url, browser, folders) {
         await a.goto(url);
         await b.goto(url);
         await openFolder(a, folders.two, "Window 1");
-        await a.keyboard.press("w");
+        // A tool that is none of window-left's three bindings, start
+        // included, so a listener that applies a profile binding goes red.
+        await a.keyboard.press("l");
         await a.click("#play");
         await a.waitForTimeout(500);
         await b.locator("#mouse-profile").selectOption("window-left");
@@ -843,7 +886,11 @@ function crossTabProblems(seen) {
   if (after.profile !== "window-left") problems.push(`the listener did not refresh the profile: ${after.profile}`);
   if (after.rate !== "25") problems.push(`the listener did not refresh the rate: ${after.rate}`);
   if (after.rateLabel !== "25") problems.push(`the listener did not refresh the rate label: ${after.rateLabel}`);
-  if (!after.tool.includes("tool-wl")) problems.push(`the listener changed the active tool: ${JSON.stringify(after.tool)}`);
+  // The listener keeps the current tool, so the length tool A chose before
+  // the write survives, and the new profile's start tool does not appear.
+  if (!after.tool.includes("tool-length") || after.tool.includes("tool-wl")) {
+    problems.push(`the listener changed the active tool: ${JSON.stringify(after.tool)}`);
+  }
   const steps = after.steps;
   if (steps.length < 4) {
     problems.push(`the running cine recorded ${steps.length} steps, so its rate was not observed`);
@@ -853,7 +900,8 @@ function crossTabProblems(seen) {
     const early = gaps.filter((gap) => gap <= 75).length;
     if (!early) problems.push(`no cine step ran at the new 40 ms rate, gaps ${JSON.stringify(gaps)}`);
     if (late === gaps.length) problems.push(`every cine step kept the old 100 ms rate, gaps ${JSON.stringify(gaps)}`);
-  }  if (!own.includes("ocelli.prefs")) problems.push(`the positive control registered ${JSON.stringify(own)}, not the document key`);
+  }
+  if (!own.includes("ocelli.prefs")) problems.push(`the positive control registered ${JSON.stringify(own)}, not the document key`);
   return problems;
 }
 
@@ -974,6 +1022,13 @@ async function observeStoredDefault(url, browser, folders) {
     await page.keyboard.press("Shift+G");
     await page.waitForTimeout(300);
     await page.locator("#default-preset").selectOption("lung");
+    // The tile pass of the first open has settled before the baseline is
+    // read, so a paint counted after the click can only be the load's.
+    await page.waitForFunction(() => {
+      const labels = Array.from(document.querySelectorAll(".cell.active .tile-label"));
+      return labels.length === 4 && labels.every((node) => (node.textContent || "").includes("Window 1"));
+    }, null, { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(300);
     let release;
     const gate = new Promise((resolve) => { release = resolve; });
     let armed = true;
@@ -984,8 +1039,8 @@ async function observeStoredDefault(url, browser, folders) {
       }
       return route.continue();
     });
-    await page.locator("#series-list button", { hasText: "#1" }).first().click();
     const before = await page.evaluate(() => window.__tilePaints);
+    await page.locator("#series-list button", { hasText: "#1" }).first().click();
     await page.waitForTimeout(700);
     const held = await page.evaluate((b) => ({ before: b, tiles: window.__tilePaints, labels: Array.from(document.querySelectorAll(".cell.active .tile-label")).map((node) => node.textContent) }), before);
     release();
@@ -1024,6 +1079,62 @@ async function observeStoredDefault(url, browser, folders) {
     const paints = await page.evaluate(() => window.__paints);
     return { duringHold, mrShown, afterSwitch, released, paints };
   });
+  // Two CT series with both preset replies held. The first series' load is
+  // superseded, so releasing its reply first repaints nothing, and only the
+  // second release paints, at the second series' preset. A release that
+  // opens an older load's hold paints here.
+  seen.ctSupersede = await withPage(browser, async (page) => {
+    await plant(page, { "ocelli.prefs": documentJSON({ ...PLAIN_DOC, defaultPreset: "lung" }) });
+    await page.addInitScript(PAINT_PROBE);
+    const releases = [];
+    await page.route("**/preview", (route) => {
+      if (route.request().headers()["x-ocelli-window-preset"]) {
+        return new Promise((resolve) => releases.push(resolve)).then(() => route.continue());
+      }
+      return route.continue();
+    });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folders.trio);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").includes("series."), null, { timeout: 15000 });
+    await page.waitForTimeout(800);
+    const before = await page.evaluate(() => window.__paints);
+    await page.locator("#series-list button", { hasText: "#2" }).first().click();
+    await page.waitForTimeout(500);
+    await releases[0]();
+    await page.waitForTimeout(400);
+    const afterFirst = await page.evaluate((b) => ({ paints: window.__paints, labels: window.__paintLabels.slice(b) }), before);
+    await releases[1]();
+    await settle(page, "Lung");
+    const afterSecond = await page.evaluate((b) => ({ paints: window.__paints, labels: window.__paintLabels.slice(b) }), before);
+    return { afterFirst, afterSecond };
+  });
+  // A preset reply refused with a 500 ends the trial, and the hold releases
+  // all the same, so the file window paints. A release that only follows a
+  // commit paints nothing here.
+  seen.failedTrial = await withPage(browser, async (page) => {
+    await plant(page, { "ocelli.prefs": documentJSON({ ...PLAIN_DOC, defaultPreset: "lung" }) });
+    await page.addInitScript(PAINT_PROBE);
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let armed = true;
+    await page.route("**/preview", (route) => {
+      if (armed && route.request().headers()["x-ocelli-window-preset"]) {
+        armed = false;
+        return gate.then(() => route.fulfill({ status: 500, body: "the held trial was refused" }));
+      }
+      return route.continue();
+    });
+    await page.goto(url);
+    await page.locator("#folder").setInputFiles(folders.two);
+    await page.waitForFunction(() => (document.getElementById("status").textContent || "").includes("series."), null, { timeout: 15000 });
+    await page.waitForTimeout(800);
+    const held = await page.evaluate(() => ({ paints: window.__paints, labels: window.__paintLabels }));
+    release();
+    await settle(page, "Window 1");
+    const released = await page.evaluate(() => ({ paints: window.__paints, labels: window.__paintLabels }));
+    const corner = await sample(page);
+    return { held, released, corner };
+  });
   // A viewport scrolled to a non-zero index of another series still gets
   // the preset, which a pre-move apply refuses.
   seen.preMove = await withPage(browser, async (page) => {
@@ -1042,7 +1153,7 @@ async function observeStoredDefault(url, browser, folders) {
 
 function storedDefaultProblems(seen) {
   const problems = [];
-  const { main, hold, cacheHit, tiles, superseded, preMove } = seen;
+  const { main, hold, cacheHit, tiles, superseded, ctSupersede, failedTrial, preMove } = seen;
   if (main.applied.corner !== "WW 1500  WL -600  Lung" || main.applied.soft !== 236 || main.applied.lung !== 94) {
     problems.push(`the applied default shows ${JSON.stringify(main.applied)}, not Lung with greys 236 and 94`);
   }
@@ -1090,6 +1201,9 @@ function storedDefaultProblems(seen) {
   if (tiles.held.tiles !== tiles.held.before) {
     problems.push(`the tile-mode hold painted ${tiles.held.tiles - tiles.held.before} tiles, labels ${JSON.stringify(tiles.held.labels)}`);
   }
+  if (tiles.held.labels.some((label) => (label || "").includes("Lung"))) {
+    problems.push(`the tiles named the preset during the hold: ${JSON.stringify(tiles.held.labels)}`);
+  }
   if (!tiles.released.labels.every((label) => label.includes("Lung"))) {
     problems.push(`the released tiles read ${JSON.stringify(tiles.released.labels)}`);
   }
@@ -1101,6 +1215,27 @@ function storedDefaultProblems(seen) {
   }
   if (superseded.paints !== superseded.afterSwitch) {
     problems.push(`the released trial painted ${superseded.paints - superseded.afterSwitch} greys over the second series' outcome`);
+  }
+  if (ctSupersede.afterFirst.paints !== 0) {
+    problems.push(`releasing the superseded series painted ${ctSupersede.afterFirst.paints} greys, labels ${JSON.stringify(ctSupersede.afterFirst.labels)}`);
+  }
+  if (!ctSupersede.afterSecond.paints) {
+    problems.push("the second series' release painted nothing");
+  }
+  if (!ctSupersede.afterSecond.labels.length || !ctSupersede.afterSecond.labels[0].endsWith("  Lung")) {
+    problems.push(`the second series' first painted label is ${JSON.stringify(ctSupersede.afterSecond.labels[0])}, not Lung`);
+  }
+  if (failedTrial.held.paints !== 0) {
+    problems.push(`the refused trial painted ${failedTrial.held.paints} greys before its release`);
+  }
+  if (!failedTrial.released.paints) {
+    problems.push("the refused trial released nothing");
+  }
+  if (!failedTrial.released.labels.length || !failedTrial.released.labels[0].endsWith("  Window 1")) {
+    problems.push(`the refused trial's first painted label is ${JSON.stringify(failedTrial.released.labels[0])}, not the file window`);
+  }
+  if (failedTrial.corner.corner !== "WW 400  WL 40  Window 1" || failedTrial.corner.soft !== 128 || failedTrial.corner.lung !== 0) {
+    problems.push(`after the refused trial the corner is ${JSON.stringify(failedTrial.corner)}, not the file window`);
   }
   if (!preMove.corner.endsWith("  Lung") || preMove.soft !== 236 || preMove.lung !== 94) {
     problems.push(`the pre-moved viewport shows ${JSON.stringify(preMove)}, not Lung with greys 236 and 94`);
@@ -1290,8 +1425,18 @@ function notOfferedProblems(seen) {
 
 // AC9. The whole-origin invariant: the five allowed keys and nothing else,
 // after every control, a folder open and a DICOMweb open, with a planted
-// path in a known field written out as the value in effect.
+// path in a known field written out as the value in effect. Before any
+// library load the page's own writes hold no loglevel key, checked in a
+// page whose library import is held off, because dcmjs writes its own level
+// at import and the point here is what the page writes.
 async function observeWholeOrigin(url, browser, folders, study) {
+  const beforeLibrary = await withPage(browser, async (page) => {
+    await page.route("**/lib/**", (route) => route.abort());
+    await page.goto(url);
+    await openFolder(page, folders.two, "Window 1");
+    await setRate(page, 11);
+    return page.evaluate(() => Object.keys(document.defaultView.localStorage).sort());
+  });
   const swept = await withPage(browser, async (page) => {
     await page.goto(url);
     await page.locator("#mouse-profile").selectOption("window-left");
@@ -1305,6 +1450,7 @@ async function observeWholeOrigin(url, browser, folders, study) {
     await page.waitForFunction(() => Boolean(document.querySelector("#remote-list button")), null, { timeout: 20000 }).catch(() => {});
     return page.evaluate(async () => ({
       keys: Object.keys(document.defaultView.localStorage).sort(),
+      loglevel: document.defaultView.localStorage.getItem("loglevel"),
       session: document.defaultView.sessionStorage.length,
       databases: (await indexedDB.databases()).map((database) => database.name),
       caches: await caches.keys(),
@@ -1319,21 +1465,33 @@ async function observeWholeOrigin(url, browser, folders, study) {
     await setRate(page, 13);
     return stored(page);
   });
-  return { swept, planted };
+  return { beforeLibrary, swept, planted };
 }
 
 function wholeOriginProblems(seen) {
   const problems = [];
-  const { swept, planted } = seen;
+  const { beforeLibrary, swept, planted } = seen;
+  // Before any library load the page's own writes are the schema's keys
+  // alone, so a page write under loglevel fails here.
+  for (const key of beforeLibrary) {
+    if (!ALLOWED_KEYS.includes(key)) {
+      problems.push(`before any library load the origin holds ${JSON.stringify(beforeLibrary)}`);
+      break;
+    }
+  }
   // The page's own writes are exactly the five allowed keys. The one
   // foreign key on this tree is `loglevel`, written by dcmjs's own module
   // top level (its bundled loglevel persists the level at import, seen in
   // node_modules/dcmjs/build/dcmjs.es.js), which the DICOMweb provider
   // loads. It is not the page's store, so the sweep allows exactly that one
-  // name and refuses anything else.
+  // name, and its value must be one of loglevel's own level names.
+  const LOGLEVEL_LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "SILENT"];
   const extra = swept.keys.filter((key) => !ALLOWED_KEYS.includes(key));
   if (JSON.stringify(extra) !== JSON.stringify(["loglevel"])) {
     problems.push(`the origin holds ${JSON.stringify(swept.keys)}, not the five allowed keys plus only dcmjs's loglevel`);
+  }
+  if (!LOGLEVEL_LEVELS.includes(swept.loglevel)) {
+    problems.push(`dcmjs's loglevel holds ${JSON.stringify(swept.loglevel)}, not one of ${JSON.stringify(LOGLEVEL_LEVELS)}`);
   }
   for (const key of ALLOWED_KEYS) {
     if (!swept.keys.includes(key)) problems.push(`the origin does not hold ${key} after the interaction pass`);
@@ -1479,6 +1637,10 @@ async function main() {
     problems.push(...partialWriteProblems(partial));
     console.log("AC18: one blocked key names one partial sentence");
 
+    const inEffect = await observeUntouchedInEffect(origin, browser, folders);
+    problems.push(...untouchedInEffectProblems(inEffect));
+    console.log("S4: a failed preset write stays in effect past another field's write");
+
     const cross = await observeCrossTab(origin, browser, folders);
     problems.push(...crossTabProblems(cross));
     console.log("AC15: the two-page change survives, the listener refreshes without writing");
@@ -1501,7 +1663,7 @@ async function main() {
 
     const whole = await observeWholeOrigin(origin, browser, folders, study);
     problems.push(...wholeOriginProblems(whole));
-    console.log("AC9: the origin holds only the five allowed keys beside dcmjs's loglevel");
+    console.log("AC9: the origin holds only the five allowed keys beside dcmjs's loglevel, and the page writes no loglevel of its own");
 
     problems.push(...(await observePersistence(chromium, binary, folders, upstream)));
     console.log("AC7 and AC8: the choices survive a restart and a relaunch, the second origin does not");

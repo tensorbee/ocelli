@@ -427,14 +427,28 @@ fn the_page_offers_a_folder_picker() -> Result<(), String> {
     }
     // F-213 AC12. The window rows come from the inspect reply, so the page
     // holds no preset number and no modality test of its own. Bare 1 to 9
-    // choose a row and never the layout. F-205 adds the preset tokens to the
-    // page as the stored default preset's closed set, which is a preference
-    // value and not a window row, so the token check here is gone and
-    // F-205's own agreement test pins those tokens against the process.
+    // choose a row and never the layout. F-205 stores the preset tokens as
+    // the default preset's closed set and its four select options, which
+    // are preference values and not window rows, so those five lines are
+    // taken out and soft_tissue stays forbidden everywhere else: a
+    // hard-coded page window row still fails here, and F-205's own
+    // agreement test pins the tokens against the process.
     // F-215 names the template, TID 1500, which is not a window, so the
     // number is looked for with every "TID 1500" taken out first.
-    let windowless = page.replace("TID 1500", "TID");
-    for held in ["data-preset", "-600", "1500", "\"CT\""] {
+    let preference_lines = [
+        "const DEFAULT_PRESETS = Object.freeze([\"none\", \"soft_tissue\", \"lung\", \"bone\"]);",
+        "<option value=\"none\">None</option>",
+        "<option value=\"soft_tissue\">Soft tissue</option>",
+        "<option value=\"lung\">Lung</option>",
+        "<option value=\"bone\">Bone</option>",
+    ];
+    let windowless = page
+        .replace("TID 1500", "TID")
+        .lines()
+        .filter(|line| !preference_lines.iter().any(|skip| line.contains(skip)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for held in ["data-preset", "soft_tissue", "-600", "1500", "\"CT\""] {
         if windowless.contains(held) {
             return Err(format!("the page keeps a window of its own: {held}"));
         }
@@ -1178,6 +1192,20 @@ fn every_storage_access_is_guarded() -> Result<(), String> {
 }
 
 #[test]
+fn the_page_never_names_loglevel() -> Result<(), String> {
+    // F-205 review pass 1, D3. The one foreign key on the page's origin is
+    // `loglevel`, written by dcmjs's own module top level when the library
+    // loads. It is not the page's store, so the page text never names it,
+    // and the browser suite's sweeps hold the value and the pre-library
+    // state of that key.
+    let page = served_page("/")?;
+    if page.contains("loglevel") {
+        return Err("the page names loglevel, which is dcmjs's key and not the page's".to_owned());
+    }
+    Ok(())
+}
+
+#[test]
 fn play_uses_the_file_frame_time() -> Result<(), String> {
     let page = served_page("/")?;
     // AC10 and F-214 amendment 1. PS3.3 C.7.6.5.1.1 gives Frame Time as the
@@ -1233,7 +1261,7 @@ fn more_says_what_the_page_keeps() -> Result<(), String> {
         &more,
         &[
             "The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset.",
-            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
+            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly, except the profile, whose failure is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
             "<li><a href=\"#preferences\">Preferences</a><span class=\"mark\">partial</span></li>",
             "Configurable APIs. Persistence belongs to the host",
             "S47: F-205",
