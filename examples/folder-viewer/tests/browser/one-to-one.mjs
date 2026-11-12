@@ -390,7 +390,7 @@ async function capturePixels(page, cropW, cropH, expected) {
 }
 
 /** The located crop must match the stored pattern at every device pixel. */
-function byteProblems(name, got, want, columns, rows) {
+function byteProblems(name, got, want, columns) {
   const problems = [];
   const seen = [];
   for (let at = 0; at < want.length; at += 1) {
@@ -1082,10 +1082,17 @@ export async function observeBelowRatio(url, chromium, folder) {
       await page.waitForTimeout(400);
       await page.keyboard.press("\\");
       const entered = await view(page);
+      // The state table's scroll row: with the mode held on a suitable
+      // frame, a scroll to another suitable frame keeps the mode.
+      await page.keyboard.press("ArrowUp");
+      await page.waitForFunction(() => activeViewport().imageWidth === 128, null, { timeout: 20000 });
+      const keptOne = await view(page);
+      await page.keyboard.press("ArrowDown");
+      await page.waitForFunction(() => activeViewport().imageWidth === 2, null, { timeout: 20000 });
       await changeRatio(page, session, 3);
       await page.waitForTimeout(400);
       const dropped = await view(page);
-      return { refused, atTwo, backAtThree, afterScroll, entered, dropped };
+      return { refused, atTwo, backAtThree, afterScroll, entered, keptOne, dropped };
     });
   } finally {
     await browser.close();
@@ -1110,6 +1117,13 @@ export function belowRatioProblems(seen) {
   if (seen.afterScroll.cornerLast === REFUSAL) problems.push("after a scroll away and back the refusal reason is shown again");
   if (seen.entered.mode !== "one" || Math.abs(seen.entered.w * seen.entered.dpr - 2) > EXTENT_EPSILON) {
     problems.push(`the boundary control did not enter the mode at a 2 device pixel width (mode ${seen.entered && seen.entered.mode}, extent ${seen.entered ? (seen.entered.w * seen.entered.dpr).toFixed(3) : "none"})`);
+  }
+  if (!seen.keptOne) {
+    problems.push("the scroll keep case was not observed");
+    return problems;
+  }
+  if (seen.keptOne.mode !== "one") {
+    problems.push(`after the scroll to a suitable frame the mode is ${seen.keptOne.mode}, not the kept one (label ${JSON.stringify(seen.keptOne.label)}, image ${seen.keptOne.imageW} by ${seen.keptOne.imageH}, dpr ${seen.keptOne.dpr}, corner ${JSON.stringify(seen.keptOne.cornerLast)})`);
   }
   if (seen.dropped.mode !== "fit" || !/^\d+%$/.test(seen.dropped.label)) {
     problems.push(`back at ratio 3 the held mode did not drop to fit (mode ${seen.dropped && seen.dropped.mode}, label ${seen.dropped && JSON.stringify(seen.dropped.label)})`);

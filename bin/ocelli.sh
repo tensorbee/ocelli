@@ -211,9 +211,11 @@ run_gate() {
     # labels that changed image, and the served More row states the partial
     # status. F-204's one-to-one.mjs check follows: the drawn frame covers
     # one device pixel per stored pixel at ratios 1, 1.25, 1.5, 2 and 3, the
-    # origin is on the device grid, the device bytes equal the stored pattern,
-    # and the clamp, the refusal reason and the ratio watcher behave as the
-    # design states. F-245's launcher.mjs check is last: the page is served through
+    # painted origin is on the device grid and the painted extent is the
+    # stored count at every one of them, the device bytes equal the stored
+    # pattern at the ratios whose CSS box the layout grid represents
+    # exactly, and the clamp, the refusal reason and the ratio watcher
+    # behave as the design states. F-245's launcher.mjs check is last: the page is served through
     # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
     # Chromium, is byte-identical to the native start, and the owned stop
     # leaves the port closed. Chained on

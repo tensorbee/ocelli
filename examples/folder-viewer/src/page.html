@@ -3725,7 +3725,9 @@ function layoutViewport(vp) {
   // the origin plus the stored extent is a multiple of the ratio's
   // numerator. The snap therefore picks the origin nearest the ideal that
   // satisfies that congruence, and the painted box is then exactly the
-  // stored extent with one stored texel on each device pixel.
+  // stored extent with one stored texel on each device pixel. At the
+  // fractional ratios the compositor quantises the paint further on its
+  // own sub device grid, which the byte rows stay clear of.
   let translateX = vp.panX;
   let translateY = vp.panY;
   if (vp.zoomMode === "one") {
