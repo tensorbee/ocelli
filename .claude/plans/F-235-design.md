@@ -1295,6 +1295,7 @@ this story, and widening it is a design-plan decision, not a fix.
 | unit | AC9's four refusal decisions and AC11's slot arithmetic as pure comparisons, and AC17's builder entry | `crates/ocelli-render/src/graph.rs` and `src/voi.rs` under `#[cfg(test)]` |
 | unit | AC15 and AC16's height arithmetic as pure comparisons | `crates/ocelli-render/src/graph.rs` under `#[cfg(test)]` |
 | unit | AC7, the margin suite stays green and the sentences match the code | `cargo test -p ocelli-pixel` |
+| gpu | The pass 4 and pass 5 surface grouping rule: a surface-bound viewport groups with no other viewport, in the same frame as a co-target's rescale change, for a stack and a slab | `crates/ocelli-render/src/graph.rs` `surface_grouping_tests` under `#[cfg(test)]`, `#[ignore]`d, `gate gpu` |
 
 AC3 is not a fixture in the new file. It is the round-1 harness shape run
 once on the base tree, recorded with the session that produces AC1 and AC2.
@@ -1449,3 +1450,24 @@ Approved after four GLM design rounds and the coordinator amendment after round 
 ## Lead amendment after implementation review pass 2, 2026-11-12
 
 This replaces the stale-load paragraph of the pass 1 amendment. **One rule for every shared target, whatever the pass kinds.** When any viewport rendering into a target is stale on a frame, every viewport rendering into that target is marked dirty for that frame. The first pass encoded into the target on that frame clears it, every later pass into the same target loads, and a stale pass issues no draw whatever its kind or position. A target with a single viewport keeps the state table's clear rule. The result is that a stale stack shows the clear colour with any fresh slab drawn over it, a stale slab shows the base beneath it, and a target holding only slabs never keeps a stale composite. Fixtures: a stale stack with a fresh slab on one target reads the clear colour where the slab is absent and the slab where it is present, and two slabs on one target with no stack, one stale, read only the fresh slab's pixels.
+
+## Lead amendment after implementation review passes 4 and 5, 2026-11-12
+
+A viewport bound to a surface draws into its acquired surface texture, so the
+graph excludes it from the shared-target grouping in both directions. It is
+not marked by a stale co-target, it marks no co-target, and it is left out of
+every first-into-target computation of the viewports sharing its registered
+texture. The graph enforces this rather than relying on the caller giving a
+surface viewport a texture no other viewport uses.
+
+The fixture places the slot state that `bind_surface` writes through the
+graph's own registry, because a native surface needs a window handle the test
+harness cannot supply without `unsafe`. It exercises the grouping decision and
+not the surface attachment choice, and its module doc says so. The flag
+`surface_bound` and the attached surface must agree at every tick, which the
+graph asserts in debug builds.
+
+Any pass that draws into a freshly acquired surface texture clears it, because
+an acquired texture's contents are undefined. No pass loads an acquired
+surface texture.
+
