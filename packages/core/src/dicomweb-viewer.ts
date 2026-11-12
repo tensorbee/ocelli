@@ -1436,6 +1436,9 @@ if (import.meta.vitest) {
     try {
       const staged = await provider.fetchSelectedInstance(IDENTITY);
       expect(staged.byteLength).toBe(4);
+      // The positive reading. A seam that reported not held no matter what
+      // would make the seam assertions below vacuous.
+      expect(holdsStagedBody(provider)).toBe(true);
       provider.cancelPending();
       expect(holdsStagedBody(provider)).toBe(false);
       expect(provider.readStagedInfo()).toBeNull();
