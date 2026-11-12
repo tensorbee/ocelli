@@ -21,11 +21,11 @@ use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_
 use crate::measure::{
     FREEFORM_POINT_CAP, MeasureShape, measure_json_with_scratch, region_extent, region_json,
 };
-use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup, note_write, phases,
-    profiling, render_held, reset_phases, validate_frame_request,
+    CornerTokens, decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup,
+    note_write, phases, profiling, render_held, reset_phases, validate_frame_request,
 };
+use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::series_window::{Folded, SeriesRefusal, fold, series_window};
 use crate::value::value_json_with_scratch;
 use crate::{
@@ -134,6 +134,12 @@ struct Grey {
     edge_top: String,
     edge_bottom: String,
     edge_source: &'static str,
+    slice_thickness: Option<String>,
+    kvp: Option<String>,
+    exposure_mas: Option<String>,
+    exposure_source: &'static str,
+    repetition_time: Option<String>,
+    echo_time: Option<String>,
     calibration_source: &'static str,
     calibration_mm: Option<(f64, f64)>,
     window_index: Option<u32>,
@@ -2453,42 +2459,54 @@ fn parse_forget_ids(body: &[u8]) -> Option<Vec<FileId>> {
 
 fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
     match result {
-        Ok(preview) => Reply {
-            status: 200,
-            content_type: "application/octet-stream",
-            error: None,
-            grey: Some(Box::new(Grey {
-                width: preview.width,
-                height: preview.height,
-                frames: preview.frames,
-                auto: preview.auto.token(),
-                shown_frame: preview.frame,
-                window_center: preview.window_center,
-                window_width: preview.window_width,
-                window_function: preview.window_function,
-                inverted: preview.inverted,
-                row_spacing: preview.facts.row_spacing,
-                column_spacing: preview.facts.column_spacing,
-                spacing_source: preview.facts.spacing_source,
-                edge_left: preview.facts.edge_left,
-                edge_right: preview.facts.edge_right,
-                edge_top: preview.facts.edge_top,
-                edge_bottom: preview.facts.edge_bottom,
-                edge_source: preview.facts.edge_source,
-                calibration_source: preview.calibration_source,
-                calibration_mm: preview.calibration_mm,
-                window_index: preview.window_index,
-                window_count: preview.window_count,
-                channels: preview.channels,
-                palette_fallback: preview.palette_fallback,
-                icc: preview.icc,
-            })),
-            body: preview.grey,
-            source: None,
-            file_id: None,
-            held_flag: None,
-            html_page: None,
-        },
+        Ok(preview) => {
+            let corners = preview
+                .facts
+                .corners
+                .unwrap_or_else(|| Box::new(CornerTokens::empty()));
+            Reply {
+                status: 200,
+                content_type: "application/octet-stream",
+                error: None,
+                grey: Some(Box::new(Grey {
+                    width: preview.width,
+                    height: preview.height,
+                    frames: preview.frames,
+                    auto: preview.auto.token(),
+                    shown_frame: preview.frame,
+                    window_center: preview.window_center,
+                    window_width: preview.window_width,
+                    window_function: preview.window_function,
+                    inverted: preview.inverted,
+                    row_spacing: preview.facts.row_spacing,
+                    column_spacing: preview.facts.column_spacing,
+                    spacing_source: preview.facts.spacing_source,
+                    edge_left: preview.facts.edge_left,
+                    edge_right: preview.facts.edge_right,
+                    edge_top: preview.facts.edge_top,
+                    edge_bottom: preview.facts.edge_bottom,
+                    edge_source: preview.facts.edge_source,
+                    slice_thickness: corners.slice_thickness,
+                    kvp: corners.kvp,
+                    exposure_mas: corners.exposure_mas,
+                    exposure_source: corners.exposure_source,
+                    repetition_time: corners.repetition_time,
+                    echo_time: corners.echo_time,
+                    calibration_source: preview.calibration_source,
+                    calibration_mm: preview.calibration_mm,
+                    window_index: preview.window_index,
+                    window_count: preview.window_count,
+                    channels: preview.channels,
+                    palette_fallback: preview.palette_fallback,
+                    icc: preview.icc,
+                })),
+                body: preview.grey,
+                source: None,
+                file_id: None,
+                held_flag: None,
+                html_page: None,
+            }
+        }
         Err(error) => error_reply(error),
     }
 }
@@ -2718,6 +2736,31 @@ fn write_reply_by(
         head.push_str(&grey.edge_bottom);
         head.push_str("\r\nX-Ocelli-Edge-Source: ");
         head.push_str(grey.edge_source);
+        // F-267. The five value headers carry validated JSON number tokens,
+        // so none can carry a newline. The source header is written always,
+        // as `X-Ocelli-Spacing-Source` is, with one of four fixed values.
+        if let Some(token) = &grey.slice_thickness {
+            head.push_str("\r\nX-Ocelli-Slice-Thickness: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.kvp {
+            head.push_str("\r\nX-Ocelli-Kvp: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.exposure_mas {
+            head.push_str("\r\nX-Ocelli-Exposure-Mas: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.repetition_time {
+            head.push_str("\r\nX-Ocelli-Repetition-Time: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.echo_time {
+            head.push_str("\r\nX-Ocelli-Echo-Time: ");
+            head.push_str(token);
+        }
+        head.push_str("\r\nX-Ocelli-Exposure-Source: ");
+        head.push_str(grey.exposure_source);
         head.push_str("\r\nX-Ocelli-Calibration-Source: ");
         head.push_str(grey.calibration_source);
         head.push_str("\r\n");

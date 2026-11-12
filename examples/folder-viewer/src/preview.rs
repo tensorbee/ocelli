@@ -47,7 +47,7 @@ use ocelli_viewport::view::f32_from_f64;
 use crate::colour::{ColourRecipe, ColourScratch, ColourUnavailableReason};
 
 use crate::corners::{
-    age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
+    age_text, dicom_date_text, dicom_time_text, exposure_mas, fd_text, patient_orientation_letters,
     person_name_text,
 };
 use crate::measure::{CalibrationInputs, FactorInput, SpacingInput, choose_spacing};
@@ -112,6 +112,15 @@ const EXPOSURE: Tag = Tag(0x0018, 0x1152);
 const EXPOSURE_MICRO: Tag = Tag(0x0018, 0x1153);
 const REPETITION_TIME: Tag = Tag(0x0018, 0x0080);
 const ECHO_TIME: Tag = Tag(0x0018, 0x0081);
+/// The enhanced CT and MR functional groups the corner reads, PS3.3 2026c
+/// C.8.15.3.8, C.8.15.3.9, C.8.13.5.2 and C.8.13.5.4. The group attribute is
+/// not always the classic tag: the echo group carries Effective Echo Time.
+const CT_EXPOSURE_SEQUENCE: Tag = Tag(0x0018, 0x9321);
+const CT_XRAY_DETAILS_SEQUENCE: Tag = Tag(0x0018, 0x9325);
+const MR_TIMING_SEQUENCE: Tag = Tag(0x0018, 0x9112);
+const MR_ECHO_SEQUENCE: Tag = Tag(0x0018, 0x9114);
+const EXPOSURE_MAS: Tag = Tag(0x0018, 0x9332);
+const EFFECTIVE_ECHO_TIME: Tag = Tag(0x0018, 0x9082);
 /// Patient Orientation, PS3.3 C.7.6.1.1.1.
 const PATIENT_ORIENTATION: Tag = Tag(0x0020, 0x0020);
 /// Anatomical Orientation Type, whose `QUADRUPED` value PS3.3 C.7.6.1.1.1
@@ -208,6 +217,46 @@ impl AutoSource {
     }
 }
 
+/// The five acquisition tokens of one frame and the mAs link that answered.
+///
+/// PS3.3 2026c C.7.6.2, C.8.2.1, C.8.3.1, C.8.15.3.8 and C.8.13.5.4,
+/// resolved for the shown frame under the precedence rule. The tokens are
+/// boxed behind [`FrameFacts::corners`], so a frame the cache stores pays
+/// one word for them and the tokens' own bytes ride the heap the way the
+/// edge letters' do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CornerTokens {
+    /// Slice Thickness of the shown frame, top level or the Pixel Measures
+    /// group, as a DS token.
+    pub slice_thickness: Option<String>,
+    /// kVp of the shown frame, top level or the CT X-Ray Details group.
+    pub kvp: Option<String>,
+    /// mAs of the shown frame, the Exposure chain or the CT Exposure group,
+    /// as the field's own token.
+    pub exposure_mas: Option<String>,
+    /// `Exposure`, `ExposureInuAs` or `ExposureInmAs`, the link that
+    /// answered, or empty when none did.
+    pub exposure_source: &'static str,
+    /// Repetition Time of the shown frame, top level or the MR Timing group.
+    pub repetition_time: Option<String>,
+    /// Echo Time of the shown frame, top level Echo Time or the MR Echo
+    /// group's Effective Echo Time.
+    pub echo_time: Option<String>,
+}
+
+impl CornerTokens {
+    pub(crate) fn empty() -> Self {
+        Self {
+            slice_thickness: None,
+            kvp: None,
+            exposure_mas: None,
+            exposure_source: "",
+            repetition_time: None,
+            echo_time: None,
+        }
+    }
+}
+
 /// Spacing and patient-direction letters for one frame.
 ///
 /// Spacing tokens are row then column. A token that is already a JSON
@@ -235,6 +284,9 @@ pub struct FrameFacts {
     /// `ImageOrientationPatient` or `PatientOrientation`, the attribute the
     /// letters came from, or empty when there are no letters.
     pub edge_source: &'static str,
+    /// The acquisition tokens of the shown frame, or `None` when the frame
+    /// has none of the five fields at any level.
+    pub corners: Option<Box<CornerTokens>>,
 }
 
 /// Which frame to decode, and an optional replacement window.
@@ -2317,6 +2369,7 @@ impl FrameFacts {
             edge_top: String::new(),
             edge_bottom: String::new(),
             edge_source: "",
+            corners: None,
         }
     }
 }
@@ -2346,6 +2399,63 @@ fn frame_facts(
     };
     let (letters, edge_source) = edge_letters(metadata, multi, frame)?;
     let [edge_left, edge_right, edge_top, edge_bottom] = letters;
+    // F-267. The acquisition corners of the shown frame, under the
+    // precedence rule: the top level first, then the frame's own group and
+    // the shared group through one `resolve` call.
+    let slice_thickness = corner_token(
+        metadata,
+        multi,
+        frame,
+        SLICE_THICKNESS,
+        PIXEL_MEASURES_SEQUENCE,
+        SLICE_THICKNESS,
+        VR::DS,
+    );
+    let kvp = corner_token(
+        metadata,
+        multi,
+        frame,
+        KVP,
+        CT_XRAY_DETAILS_SEQUENCE,
+        KVP,
+        VR::DS,
+    );
+    let repetition_time = corner_token(
+        metadata,
+        multi,
+        frame,
+        REPETITION_TIME,
+        MR_TIMING_SEQUENCE,
+        REPETITION_TIME,
+        VR::DS,
+    );
+    let echo_time = corner_token(
+        metadata,
+        multi,
+        frame,
+        ECHO_TIME,
+        MR_ECHO_SEQUENCE,
+        EFFECTIVE_ECHO_TIME,
+        VR::FD,
+    );
+    let (exposure_mas, exposure_source) = corner_exposure_mas(metadata, multi, frame);
+    let corners = if slice_thickness.is_some()
+        || kvp.is_some()
+        || exposure_mas.is_some()
+        || repetition_time.is_some()
+        || echo_time.is_some()
+    {
+        Some(Box::new(CornerTokens {
+            slice_thickness,
+            kvp,
+            exposure_mas,
+            exposure_source,
+            repetition_time,
+            echo_time,
+        }))
+    } else {
+        None
+    };
     Ok(FrameFacts {
         row_spacing,
         column_spacing,
@@ -2355,6 +2465,7 @@ fn frame_facts(
         edge_top,
         edge_bottom,
         edge_source,
+        corners,
     })
 }
 
@@ -2474,6 +2585,170 @@ fn top_level_pair(metadata: &MetadataSet, tag: Tag) -> Option<(String, String)> 
         return None;
     }
     Some((clean_decimal(row)?, clean_decimal(column)?))
+}
+
+/// One top-level corner read.
+enum TopLevelRead {
+    /// No element, a present zero-length one, or text whose one component
+    /// trims away. The groups decide.
+    Absent,
+    /// A token from the one-component trim rule.
+    Token(String),
+    /// Present, but no token came from it. The read stops here.
+    Stop,
+}
+
+/// The top level of one corner field, from the metadata projection.
+///
+/// PS3.3 2026c C.7.6.2, C.8.2.1 and C.8.3.1 carry the classic homes. An
+/// absent element, a present empty one, and a text element whose one
+/// component is empty after the trim are absent and fall to the groups. A
+/// text element yields a token only when it has exactly one component,
+/// with no empty-part filter, after every trailing space and NUL is
+/// trimmed, through `clean_decimal`. A multi-valued element and a
+/// non-text element yield no token and stop the read, the measurement rule
+/// `spacing_pair` keeps: a present attribute that is not one usable value
+/// refuses rather than reading the next source. There is no VR check at
+/// the top level, the projected text rule is the only gate, the same gate
+/// `corner_text` applies for the scan.
+fn top_level_read(metadata: &MetadataSet, tag: Tag) -> TopLevelRead {
+    let Some(element) = metadata.get(tag) else {
+        return TopLevelRead::Absent;
+    };
+    if matches!(element.value(), MetadataValue::Empty) {
+        return TopLevelRead::Absent;
+    }
+    let Some(parts) = element.semantic_text() else {
+        return TopLevelRead::Stop;
+    };
+    if parts.len() != 1 {
+        return TopLevelRead::Stop;
+    }
+    let Some(text) = parts
+        .first()
+        .map(|text| text.trim_end_matches([' ', '\u{0}']))
+    else {
+        return TopLevelRead::Stop;
+    };
+    if text.is_empty() {
+        return TopLevelRead::Absent;
+    }
+    match clean_decimal(text) {
+        Some(token) => TopLevelRead::Token(token),
+        None => TopLevelRead::Stop,
+    }
+}
+
+/// One link of the mAs chain, the same read without the stop.
+///
+/// `exposure_mas` falls from an unusable Exposure to a usable Exposure in
+/// µAs, so every kind of unusable top-level value falls through here
+/// instead of stopping, a multi-value and a non-text value alike.
+fn chain_text(metadata: &MetadataSet, tag: Tag) -> Option<String> {
+    let element = metadata.get(tag)?;
+    if matches!(element.value(), MetadataValue::Empty) {
+        return None;
+    }
+    let parts = element.semantic_text()?;
+    if parts.len() != 1 {
+        return None;
+    }
+    let text = parts.first()?.trim_end_matches([' ', '\u{0}']);
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_owned())
+    }
+}
+
+/// One resolved group element's token, the PS3.6 2026c Table 6-1 VR first.
+///
+/// The VR is checked before any value read, because an OD element projects
+/// to `Float64` exactly as an FD one does and a text VR other than DS
+/// projects to `Text` exactly as DS does, so the value variant alone
+/// cannot tell the VR. A DS element reads its one component, trimmed of
+/// every trailing space and NUL, through `clean_decimal`, and an FD
+/// element its one value through `fd_text`. Anything else, including a
+/// group `resolve` error, is no token and never a refusal.
+fn group_token(
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    group: Tag,
+    attribute: Tag,
+    vr: VR,
+) -> Option<String> {
+    let found = match multi.resolve(frame, group, attribute, TopLevelFallback::Disallowed) {
+        Ok(Some(found)) => found,
+        _ => return None,
+    };
+    let element = found.element();
+    if element.vr() != vr {
+        return None;
+    }
+    match element.value() {
+        MetadataValue::Text(values) if values.len() == 1 => {
+            let text = values
+                .first()
+                .map(|text| text.trim_end_matches([' ', '\u{0}']))?;
+            if text.is_empty() {
+                None
+            } else {
+                clean_decimal(text)
+            }
+        }
+        MetadataValue::Float64(values) if values.len() == 1 => {
+            values.first().copied().and_then(fd_text)
+        }
+        _ => None,
+    }
+}
+
+/// One corner field for one frame, the top level first, then the groups.
+///
+/// The top-level tag and the group attribute are named separately, because
+/// the echo group carries Effective Echo Time where the classic top level
+/// carries Echo Time. A present top-level value that yields no token stops
+/// the read, and an absent or trim-empty one falls to the per-frame and
+/// shared groups through one `resolve` call, which orders per-frame first
+/// and never falls from a present per-frame element to the shared one.
+fn corner_token(
+    metadata: &MetadataSet,
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+    top_level: Tag,
+    group: Tag,
+    attribute: Tag,
+    group_vr: VR,
+) -> Option<String> {
+    match top_level_read(metadata, top_level) {
+        TopLevelRead::Token(token) => Some(token),
+        TopLevelRead::Stop => None,
+        TopLevelRead::Absent => group_token(multi, frame, group, attribute, group_vr),
+    }
+}
+
+/// The mAs corner, the Exposure chain and then the CT Exposure group.
+///
+/// `exposure_mas` orders Exposure then Exposure in µAs over 1000 and never
+/// computes one from tube current and exposure time. The group's Exposure
+/// in mAs is the chain's last source, `ExposureInmAs` its token, the
+/// PS3.6 2026c keyword of (0018,9332) in the pattern of the other two
+/// sources.
+fn corner_exposure_mas(
+    metadata: &MetadataSet,
+    multi: &MultiframeMetadata<'_>,
+    frame: usize,
+) -> (Option<String>, &'static str) {
+    let exposure = chain_text(metadata, EXPOSURE);
+    let micro = chain_text(metadata, EXPOSURE_MICRO);
+    let (mas, source) = exposure_mas(exposure.as_deref(), micro.as_deref());
+    if mas.is_some() {
+        return (mas, source);
+    }
+    match group_token(multi, frame, CT_EXPOSURE_SEQUENCE, EXPOSURE_MAS, VR::FD) {
+        Some(token) => (Some(token), "ExposureInmAs"),
+        None => (None, ""),
+    }
 }
 
 /// The spacing a measurement reads for one frame, PS3.3 C.7.6.2 and C.8.11.4.

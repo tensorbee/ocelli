@@ -67,7 +67,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-224, F-215, F-225, F-239, F-227, F-245)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -196,7 +196,11 @@ run_gate() {
     # still each hide the readout, and a move shows it again. F-209's
     # reference line check follows, then F-226's forget check: the process
     # forgets the folder the page left, a late reply does not post the old
-    # file again, and leaving the page forgets the folder open. F-224's
+    # file again, and leaving the page forgets the folder open. F-267's
+    # corners.mjs check follows window.mjs: the acquisition corner lines
+    # name the shown frame's own values, a repaint with the next image's
+    # reply held paints the scan values and never a previous frame's
+    # facts, and the stored -12.50 prints as -12.5. F-224's
     # changed-file check follows: a file rewritten on disk after the folder
     # was opened is refused rather than shown, choosing the folder again
     # shows the new bytes, and the probe reads one byte a file. F-245's
@@ -222,6 +226,7 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/link.mjs &&
                  node examples/folder-viewer/tests/browser/forget.mjs &&
                  node examples/folder-viewer/tests/browser/window.mjs &&
+                 node examples/folder-viewer/tests/browser/corners.mjs &&
                  node examples/folder-viewer/tests/browser/changed.mjs &&
                  node examples/folder-viewer/tests/browser/marks.mjs &&
                  node examples/folder-viewer/tests/browser/conformance.mjs &&

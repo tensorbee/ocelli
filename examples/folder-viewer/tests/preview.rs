@@ -5869,6 +5869,882 @@ fn a_corner_attribute_that_is_not_text_does_not_refuse_the_scan() -> Result<(), 
     Ok(())
 }
 
+/// The Enhanced CT Image Storage and Enhanced MR Image Storage SOP classes,
+/// PS3.3 2026c Tables A.38-1 and A.36-1.
+const ENHANCED_CT_CLASS: &str = "1.2.840.10008.5.1.4.1.1.2.1";
+const ENHANCED_MR_CLASS: &str = "1.2.840.10008.5.1.4.1.1.4.1";
+
+/// One encoded element in the header form its VR requires.
+///
+/// PS3.5 7.1.2: OB, OD, OF, OL, OV, OW, SQ and UC, UR, UT carry the
+/// 12-byte header, everything else the short one. An OD element written
+/// short would be misread as a four-byte length.
+fn element_le(tag: (u16, u16), vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    match &vr {
+        b"OB" | b"OD" | b"OF" | b"OL" | b"OV" | b"OW" | b"SQ" | b"UC" | b"UR" | b"UT" => {
+            long_le(tag, vr, value)
+        }
+        _ => short_le(tag, vr, value),
+    }
+}
+
+/// One functional group element: `sequence` SQ with one item whose content
+/// is the encoded `attributes`.
+fn group_element(sequence: (u16, u16), attributes: &[Vec<u8>]) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    for attribute in attributes {
+        body.extend_from_slice(attribute);
+    }
+    long_le(sequence, *b"SQ", &item(&body)?)
+}
+
+/// A functional group SQ with `count` identical one-attribute items.
+///
+/// Two or more items is the shape PS3.3 2026c C.8.15.3.8 refuses when
+/// Multi-energy CT Acquisition is absent, and the shape the YES case
+/// legitimately takes, so both plants use it.
+fn group_with_items(
+    sequence: (u16, u16),
+    attribute: (u16, u16),
+    vr: [u8; 2],
+    value: &[u8],
+    count: usize,
+) -> Result<Vec<u8>, String> {
+    let one = item(&element_le(attribute, vr, value)?)?;
+    let mut body = Vec::new();
+    for _ in 0..count {
+        body.extend_from_slice(&one);
+    }
+    long_le(sequence, *b"SQ", &body)
+}
+
+/// The Pixel Measures Sequence (0028,9110) with one Slice Thickness
+/// (0018,0050) item of `vr` and `value`.
+fn pixel_measures(vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    group_element(
+        (0x0028, 0x9110),
+        &[element_le((0x0018, 0x0050), vr, value)?],
+    )
+}
+
+/// The CT X-Ray Details Sequence (0018,9325) with one KVP (0018,0060) item.
+fn ct_xray_details(vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    group_element(
+        (0x0018, 0x9325),
+        &[element_le((0x0018, 0x0060), vr, value)?],
+    )
+}
+
+/// The CT Exposure Sequence (0018,9321) with one Exposure in mAs
+/// (0018,9332) item.
+fn ct_exposure(vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    group_element(
+        (0x0018, 0x9321),
+        &[element_le((0x0018, 0x9332), vr, value)?],
+    )
+}
+
+/// The MR Timing and Related Parameters Sequence (0018,9112) with one
+/// Repetition Time (0018,0080) item.
+fn mr_timing(vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    group_element(
+        (0x0018, 0x9112),
+        &[element_le((0x0018, 0x0080), vr, value)?],
+    )
+}
+
+/// The MR Echo Sequence (0018,9114) with one Effective Echo Time
+/// (0018,9082) item.
+fn mr_echo(vr: [u8; 2], value: &[u8]) -> Result<Vec<u8>, String> {
+    group_element(
+        (0x0018, 0x9114),
+        &[element_le((0x0018, 0x9082), vr, value)?],
+    )
+}
+
+/// One little-endian f64, the FD encoding of PS3.5 6.2.
+fn f64_le(value: f64) -> Vec<u8> {
+    value.to_le_bytes().to_vec()
+}
+
+/// [`file_meta`] with the media storage SOP class named.
+fn file_meta_for(sop_class: &str, transfer_syntax: &str) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    body.extend(long_le((0x0002, 0x0001), *b"OB", &[0, 1])?);
+    body.extend(short_le(
+        (0x0002, 0x0002),
+        *b"UI",
+        &ui(sop_class.as_bytes()),
+    )?);
+    body.extend(short_le((0x0002, 0x0003), *b"UI", &ui(b"2.25.1"))?);
+    body.extend(short_le(
+        (0x0002, 0x0010),
+        *b"UI",
+        &ui(transfer_syntax.as_bytes()),
+    )?);
+    body.extend(short_le((0x0002, 0x0012), *b"UI", &ui(b"2.25.2"))?);
+    let length = u32::try_from(body.len()).map_err(|_| "meta length".to_owned())?;
+    let mut meta = short_le((0x0002, 0x0000), *b"UL", &length.to_le_bytes())?;
+    meta.extend(body);
+    Ok(meta)
+}
+
+/// An enhanced multiframe of one pixel per frame, in the pattern of
+/// [`enhanced_frames`], with the planted shared groups, one group list per
+/// frame and planted top-level elements.
+///
+/// The shared rescale group is always present, as `enhanced_frames` plants
+/// it, so the frame draws. `per_frame` names one functional group item per
+/// frame and is never empty, because the frame count is its length. The
+/// SOP class and Modality are named so the MR rows carry the Enhanced MR
+/// Image IOD's own UID.
+fn enhanced_corners(
+    sop_class: &str,
+    modality: &str,
+    shared: &[Vec<u8>],
+    per_frame: &[Vec<Vec<u8>>],
+    top_level: &[Planted],
+) -> Result<Vec<u8>, String> {
+    if per_frame.is_empty() {
+        return Err("the enhanced builder needs one item per frame".to_owned());
+    }
+    // The shared Pixel Value Transformation Sequence with rescale 0 and 1.
+    let rescale = group_element(
+        (0x0028, 0x9145),
+        &[
+            short_le((0x0028, 0x1052), *b"DS", &text_pad("0"))?,
+            short_le((0x0028, 0x1053), *b"DS", &text_pad("1"))?,
+        ],
+    )?;
+    let mut shared_groups = vec![rescale];
+    shared_groups.extend(shared.to_vec());
+    let mut shared_items = Vec::new();
+    for group in &shared_groups {
+        shared_items.extend_from_slice(group);
+    }
+    let mut per_frame_items = Vec::new();
+    for groups in per_frame {
+        let mut one = Vec::new();
+        for group in groups {
+            one.extend_from_slice(group);
+        }
+        per_frame_items.extend(item(&one)?);
+    }
+    let mut pixels = Vec::new();
+    for _ in 0..per_frame.len() {
+        pixels.extend_from_slice(&50_u16.to_le_bytes());
+    }
+    let mut elements = vec![
+        (
+            (0x0008, 0x0016),
+            short_le((0x0008, 0x0016), *b"UI", &ui(sop_class.as_bytes()))?,
+        ),
+        (
+            (0x0008, 0x0060),
+            short_le((0x0008, 0x0060), *b"CS", &text_pad(modality))?,
+        ),
+        (
+            (0x0028, 0x0002),
+            short_le((0x0028, 0x0002), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0004),
+            short_le((0x0028, 0x0004), *b"CS", &text_pad("MONOCHROME2"))?,
+        ),
+        (
+            (0x0028, 0x0008),
+            short_le(
+                (0x0028, 0x0008),
+                *b"IS",
+                &text_pad(&per_frame.len().to_string()),
+            )?,
+        ),
+        (
+            (0x0028, 0x0010),
+            short_le((0x0028, 0x0010), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0011),
+            short_le((0x0028, 0x0011), *b"US", &1_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0100),
+            short_le((0x0028, 0x0100), *b"US", &16_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0101),
+            short_le((0x0028, 0x0101), *b"US", &16_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0102),
+            short_le((0x0028, 0x0102), *b"US", &15_u16.to_le_bytes())?,
+        ),
+        (
+            (0x0028, 0x0103),
+            short_le((0x0028, 0x0103), *b"US", &0_u16.to_le_bytes())?,
+        ),
+        (
+            (0x5200, 0x9229),
+            long_le((0x5200, 0x9229), *b"SQ", &item(&shared_items)?)?,
+        ),
+        (
+            (0x5200, 0x9230),
+            long_le((0x5200, 0x9230), *b"SQ", &per_frame_items)?,
+        ),
+        (
+            (0x7FE0, 0x0010),
+            long_le((0x7FE0, 0x0010), *b"OW", &pixels)?,
+        ),
+    ];
+    for (tag, vr, value) in top_level {
+        elements.push((*tag, element_le(*tag, *vr, value)?));
+    }
+    elements.sort_by_key(|(tag, _)| *tag);
+    let mut bytes = vec![0_u8; 128];
+    bytes.extend_from_slice(b"DICM");
+    bytes.extend(file_meta_for(sop_class, "1.2.840.10008.1.2.1")?);
+    for (_, encoded) in elements {
+        bytes.extend(encoded);
+    }
+    Ok(bytes)
+}
+
+/// [`enhanced_corners`] on the Enhanced CT Image Storage SOP class.
+fn enhanced_ct(
+    shared: &[Vec<u8>],
+    per_frame: &[Vec<Vec<u8>>],
+    top_level: &[Planted],
+) -> Result<Vec<u8>, String> {
+    enhanced_corners(ENHANCED_CT_CLASS, "CT", shared, per_frame, top_level)
+}
+
+/// [`enhanced_corners`] on the Enhanced MR Image Storage SOP class.
+fn enhanced_mr(
+    shared: &[Vec<u8>],
+    per_frame: &[Vec<Vec<u8>>],
+    top_level: &[Planted],
+) -> Result<Vec<u8>, String> {
+    enhanced_corners(ENHANCED_MR_CLASS, "MR", shared, per_frame, top_level)
+}
+
+/// The named grey reply header of one preview exchange, `None` when the
+/// header is absent. The reply must draw.
+fn grey_header(file: &[u8], extra: &str, name: &str) -> Result<Option<String>, String> {
+    let response = one_exchange(&http_post_to("/preview", extra, file))?;
+    let (header, _) = split_http(&response)?;
+    if !header.starts_with("HTTP/1.1 200 ") {
+        return Err(format!(
+            "the grey reply was refused: {}",
+            header.lines().next().unwrap_or("no status")
+        ));
+    }
+    Ok(header_line(header, name).map(str::to_owned))
+}
+
+fn no_header(name: &str, got: Option<String>) -> Result<(), String> {
+    if got.is_some() {
+        return Err(format!("{name} was written where the field is empty"));
+    }
+    Ok(())
+}
+
+fn header_is(name: &str, want: &str, got: Option<String>) -> Result<(), String> {
+    if got.as_deref() != Some(want) {
+        return Err(format!("{name} was {got:?}, want {want:?}"));
+    }
+    Ok(())
+}
+
+#[test]
+fn an_enhanced_corner_reads_the_frame_groups() -> Result<(), String> {
+    // AC1. PS3.3 2026c C.7.6.16.2.1 Table C.7.6.16-2: Slice Thickness
+    // (0018,0050) is Type 1C in the Pixel Measures Sequence (0028,9110),
+    // one item. A two-frame enhanced CT that stores it only in the shared
+    // item answers each frame's grey reply with the stored DS token, and
+    // the two padded files show the trimmed token, so a trim of one
+    // trailing NUL only would refuse a value the file carries.
+    let plain = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5.0"))?],
+        &[vec![], vec![]],
+        &[],
+    )?;
+    header_is(
+        "frame 0 thickness",
+        "5.0",
+        grey_header(&plain, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    header_is(
+        "frame 1 thickness",
+        "5.0",
+        grey_header(&plain, "X-Ocelli-Frame: 1\r\n", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // 35 2E 30 00, `5.0` with one trailing NUL.
+    let one_nul = enhanced_ct(
+        &[pixel_measures(*b"DS", &[b'5', b'.', b'0', 0])?],
+        &[vec![]],
+        &[],
+    )?;
+    header_is(
+        "one-NUL thickness",
+        "5.0",
+        grey_header(&one_nul, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // 31 32 00 00, `12` with two trailing NULs.
+    let two_nuls = enhanced_ct(
+        &[pixel_measures(*b"DS", &[b'1', b'2', 0, 0])?],
+        &[vec![]],
+        &[],
+    )?;
+    header_is(
+        "two-NUL thickness",
+        "12",
+        grey_header(&two_nuls, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // AC2. A per-frame value wins over a different shared one, and a
+    // present zero-length per-frame element is answered by `resolve`
+    // itself and never falls to the shared one, PS3.3 2026c
+    // C.7.6.16.1.1.
+    let both = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("9.0"))?],
+        &[
+            vec![pixel_measures(*b"DS", &text_pad("2.0"))?],
+            vec![pixel_measures(*b"DS", &text_pad("3.0"))?],
+        ],
+        &[],
+    )?;
+    header_is(
+        "frame 0 per-frame thickness",
+        "2.0",
+        grey_header(&both, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    header_is(
+        "frame 1 per-frame thickness",
+        "3.0",
+        grey_header(&both, "X-Ocelli-Frame: 1\r\n", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let zero = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("4.0"))?],
+        &[vec![pixel_measures(*b"DS", &[])?]],
+        &[],
+    )?;
+    no_header(
+        "zero-length per-frame thickness",
+        grey_header(&zero, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // AC5. A field absent from the top level and both group levels leaves
+    // its line out, and one present only in frame 0's own group leaves
+    // frame 1 without a header and without frame 0's value.
+    let bare = enhanced_ct(&[], &[vec![]], &[])?;
+    no_header(
+        "absent thickness",
+        grey_header(&bare, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let first_only = enhanced_ct(
+        &[],
+        &[vec![pixel_measures(*b"DS", &text_pad("2.0"))?], vec![]],
+        &[],
+    )?;
+    header_is(
+        "frame 0 alone thickness",
+        "2.0",
+        grey_header(&first_only, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    no_header(
+        "frame 1 alone thickness",
+        grey_header(
+            &first_only,
+            "X-Ocelli-Frame: 1\r\n",
+            "X-Ocelli-Slice-Thickness",
+        )?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn an_enhanced_corner_reads_the_top_level_first() -> Result<(), String> {
+    // AC3. A classic Slice Thickness at the top level, PS3.3 2026c C.7.6.2
+    // Table C.7-10, wins over the group form present behind it.
+    let classic = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5.0"))?],
+        &[vec![]],
+        &[planted_text((0x0018, 0x0050), *b"DS", "7.0")],
+    )?;
+    header_is(
+        "top-level thickness",
+        "7.0",
+        grey_header(&classic, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // AC3. A stray top-level Echo Time on a multi-echo enhanced file shows
+    // that value on every frame, the story row's rule. PS3.3 2026c
+    // C.8.3.1 Table C.8-4 carries Echo Time (0018,0081) Type 2 at the top
+    // level and C.8.13.5.4 Table C.8-91 carries Effective Echo Time
+    // (0018,9082) FD in the MR Echo Sequence, so the two tags are named
+    // separately. A read that took the group tag at the top level would
+    // show 30.
+    let stray = enhanced_mr(
+        &[],
+        &vec![vec![mr_echo(*b"FD", &f64_le(30.0))?]; 2],
+        &[planted_text((0x0018, 0x0081), *b"DS", "15")],
+    )?;
+    header_is(
+        "frame 0 stray echo time",
+        "15",
+        grey_header(&stray, "", "X-Ocelli-Echo-Time")?,
+    )?;
+    header_is(
+        "frame 1 stray echo time",
+        "15",
+        grey_header(&stray, "X-Ocelli-Frame: 1\r\n", "X-Ocelli-Echo-Time")?,
+    )?;
+    // AC16. A present non-text top-level element stops: a top-level KVP
+    // written FD 120.0 and a top-level Slice Thickness written FD 4.0 show
+    // nothing, though the group value is behind each.
+    let fd_kvp = enhanced_ct(
+        &[ct_xray_details(*b"DS", &text_pad("100"))?],
+        &[vec![]],
+        &[((0x0018, 0x0060), *b"FD", f64_le(120.0))],
+    )?;
+    no_header(
+        "FD top-level KVP",
+        grey_header(&fd_kvp, "", "X-Ocelli-Kvp")?,
+    )?;
+    let fd_thickness = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5.0"))?],
+        &[vec![]],
+        &[((0x0018, 0x0050), *b"FD", f64_le(4.0))],
+    )?;
+    no_header(
+        "FD top-level thickness",
+        grey_header(&fd_thickness, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // AC14. A top-level zero-length, whitespace-only or all-NUL element is
+    // absent and the group decides, PS3.3 2026c C.7.6.2 Table C.7-10,
+    // C.8.2.1 Table C.8-3 and C.8.3.1 Table C.8-4. A read that checked for
+    // empty before the trim would stop instead and show no header.
+    let zero_length = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5.0"))?],
+        &[vec![]],
+        &[((0x0018, 0x0050), *b"DS", Vec::new())],
+    )?;
+    header_is(
+        "zero-length top-level thickness",
+        "5.0",
+        grey_header(&zero_length, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let spaces = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("3.0"))?],
+        &[vec![]],
+        &[((0x0018, 0x0050), *b"DS", b"  ".to_vec())],
+    )?;
+    header_is(
+        "spaces-only top-level thickness",
+        "3.0",
+        grey_header(&spaces, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let zero_kvp = enhanced_ct(
+        &[ct_xray_details(*b"DS", &text_pad("120"))?],
+        &[vec![]],
+        &[((0x0018, 0x0060), *b"DS", Vec::new())],
+    )?;
+    header_is(
+        "zero-length top-level KVP",
+        "120",
+        grey_header(&zero_kvp, "", "X-Ocelli-Kvp")?,
+    )?;
+    let zero_te = enhanced_mr(
+        &[],
+        &vec![vec![mr_echo(*b"FD", &f64_le(30.0))?]; 1],
+        &[((0x0018, 0x0081), *b"DS", Vec::new())],
+    )?;
+    header_is(
+        "zero-length top-level Echo Time",
+        "30",
+        grey_header(&zero_te, "", "X-Ocelli-Echo-Time")?,
+    )?;
+    let all_nul = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5.0"))?],
+        &[vec![]],
+        &[((0x0018, 0x0050), *b"DS", vec![0, 0])],
+    )?;
+    header_is(
+        "all-NUL top-level thickness",
+        "5.0",
+        grey_header(&all_nul, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn an_fd_group_token_is_written_by_the_one_fd_rule() -> Result<(), String> {
+    // AC4. One planted grey reply per FD attribute, Exposure in mAs from
+    // PS3.3 2026c C.8.15.3.8 Table C.8-124 and Effective Echo Time from
+    // C.8.13.5.4 Table C.8-91. The token is `Display` of the stored
+    // binary64, so a six-digit or exponent writer would print something
+    // else than these two rows.
+    let mas = enhanced_ct(
+        &[ct_exposure(*b"FD", &f64_le(0.123456789))?],
+        &[vec![]],
+        &[],
+    )?;
+    header_is(
+        "FD mAs token",
+        "0.123456789",
+        grey_header(&mas, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    let te = enhanced_mr(&[mr_echo(*b"FD", &f64_le(0.1))?], &[vec![]], &[])?;
+    header_is(
+        "FD echo token",
+        "0.1",
+        grey_header(&te, "", "X-Ocelli-Echo-Time")?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn the_mas_chain_reads_its_three_links() -> Result<(), String> {
+    // AC6. Exposure 200 IS and Exposure in µAs 200000 IS each answer the
+    // grey reply with 200 and their own source, as the scan tests already
+    // assert for the JSON, PS3.3 2026c C.8.2.1 Table C.8-3.
+    let exposure = enhanced_ct(
+        &[],
+        &[vec![]],
+        &[planted_text((0x0018, 0x1152), *b"IS", "200")],
+    )?;
+    header_is(
+        "Exposure link",
+        "200",
+        grey_header(&exposure, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "Exposure source",
+        "Exposure",
+        grey_header(&exposure, "", "X-Ocelli-Exposure-Source")?,
+    )?;
+    let micro = enhanced_ct(
+        &[],
+        &[vec![]],
+        &[planted_text((0x0018, 0x1153), *b"IS", "200000")],
+    )?;
+    header_is(
+        "µAs link",
+        "200",
+        grey_header(&micro, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "µAs source",
+        "ExposureInuAs",
+        grey_header(&micro, "", "X-Ocelli-Exposure-Source")?,
+    )?;
+    // AC6. The group's Exposure in mAs is the chain's last source, with
+    // Exposure Time and X-Ray Tube Current planted and never multiplied,
+    // PS3.3 2026c C.8.15.3.8 Table C.8-124. The scan JSON stays empty for
+    // the enhanced file, because `push_corner_fields` reads the top level
+    // only and is untouched.
+    let group = enhanced_ct(
+        &[ct_exposure(*b"FD", &f64_le(5.5))?],
+        &[vec![]],
+        &[
+            planted_text((0x0018, 0x1150), *b"IS", "100"),
+            planted_text((0x0018, 0x1151), *b"IS", "200"),
+        ],
+    )?;
+    header_is(
+        "group mAs",
+        "5.5",
+        grey_header(&group, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "group mAs source",
+        "ExposureInmAs",
+        grey_header(&group, "", "X-Ocelli-Exposure-Source")?,
+    )?;
+    let json = inspect_json(&group, 0).map_err(|_| "the enhanced scan refused".to_owned())?;
+    for needle in ["\"exposureMas\":null", "\"exposureSource\":\"\""] {
+        if !json.contains(needle) {
+            return Err(format!("the enhanced scan lacks {needle}: {json}"));
+        }
+    }
+    // AC6. A present top-level Exposure that is not one usable value falls
+    // through the chain, `abc` first and a multi-value the same way, and a
+    // multi-value Exposure with no other source shows nothing at all.
+    let abc = enhanced_ct(
+        &[ct_exposure(*b"FD", &f64_le(5.5))?],
+        &[vec![]],
+        &[planted_text((0x0018, 0x1152), *b"IS", "abc")],
+    )?;
+    header_is(
+        "unusable Exposure falls through",
+        "5.5",
+        grey_header(&abc, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "unusable Exposure source",
+        "ExposureInmAs",
+        grey_header(&abc, "", "X-Ocelli-Exposure-Source")?,
+    )?;
+    let multi = enhanced_ct(
+        &[],
+        &[vec![]],
+        &[planted_text((0x0018, 0x1152), *b"IS", "200\\300")],
+    )?;
+    no_header(
+        "multi-value Exposure",
+        grey_header(&multi, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    header_is(
+        "multi-value Exposure source",
+        "",
+        grey_header(&multi, "", "X-Ocelli-Exposure-Source")?,
+    )?;
+    // AC16. A top-level Exposure written as a non-text value falls through
+    // the chain to the group, the mAs exception to the stop rule.
+    let binary = enhanced_ct(
+        &[ct_exposure(*b"FD", &f64_le(5.5))?],
+        &[vec![]],
+        &[((0x0018, 0x1152), *b"US", 7_u16.to_le_bytes().to_vec())],
+    )?;
+    header_is(
+        "non-text Exposure falls through",
+        "5.5",
+        grey_header(&binary, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_wrong_group_vr_yields_no_corner_token() -> Result<(), String> {
+    // AC12. PS3.6 2026c Table 6-1 gives one VR per tag, and the token read
+    // checks `element.vr()` before any value read. An OD element projects
+    // to `Float64` exactly as an FD one does, and a text VR other than DS
+    // projects to `Text` exactly as DS does, so a dispatch on the value
+    // variant alone would print a token from each of these ten plants.
+    // Each is planted with the other sources absent.
+    let rows: [(&str, Vec<u8>, &str); 10] = [
+        (
+            "thickness OD",
+            pixel_measures(*b"OD", &f64_le(5.0))?,
+            "X-Ocelli-Slice-Thickness",
+        ),
+        (
+            "thickness LO",
+            pixel_measures(*b"LO", &text_pad("5.0"))?,
+            "X-Ocelli-Slice-Thickness",
+        ),
+        (
+            "KVP FD",
+            ct_xray_details(*b"FD", &f64_le(120.0))?,
+            "X-Ocelli-Kvp",
+        ),
+        (
+            "KVP LO",
+            ct_xray_details(*b"LO", &text_pad("120"))?,
+            "X-Ocelli-Kvp",
+        ),
+        (
+            "mAs DS",
+            ct_exposure(*b"DS", &text_pad("5.5"))?,
+            "X-Ocelli-Exposure-Mas",
+        ),
+        (
+            "mAs OD",
+            ct_exposure(*b"OD", &f64_le(5.5))?,
+            "X-Ocelli-Exposure-Mas",
+        ),
+        (
+            "TR FD",
+            mr_timing(*b"FD", &f64_le(500.0))?,
+            "X-Ocelli-Repetition-Time",
+        ),
+        (
+            "TR LO",
+            mr_timing(*b"LO", &text_pad("500"))?,
+            "X-Ocelli-Repetition-Time",
+        ),
+        (
+            "TE DS",
+            mr_echo(*b"DS", &text_pad("30"))?,
+            "X-Ocelli-Echo-Time",
+        ),
+        (
+            "TE OD",
+            mr_echo(*b"OD", &f64_le(30.0))?,
+            "X-Ocelli-Echo-Time",
+        ),
+    ];
+    for (name, group, header) in rows {
+        let file = if header == "X-Ocelli-Echo-Time" || header == "X-Ocelli-Repetition-Time" {
+            enhanced_mr(&[group], &[vec![]], &[])?
+        } else {
+            enhanced_ct(&[group], &[vec![]], &[])?
+        };
+        no_header(name, grey_header(&file, "", header)?)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_multi_value_or_malformed_group_leaves_the_field_empty() -> Result<(), String> {
+    // AC15. A multi-value DS and a two-value FD inside a group yield no
+    // token, PS3.3 2026c C.7.6.16.2.1 and C.8.15.3.8.
+    let ds_multi = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("5\\6"))?],
+        &[vec![]],
+        &[],
+    )?;
+    no_header(
+        "multi-value DS thickness",
+        grey_header(&ds_multi, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let mut two = f64_le(5.5);
+    two.extend_from_slice(&f64_le(6.5));
+    let fd_multi = enhanced_ct(&[ct_exposure(*b"FD", &two)?], &[vec![]], &[])?;
+    no_header(
+        "multi-value FD mAs",
+        grey_header(&fd_multi, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    // AC10. A two-item CT Exposure Sequence and a two-item CT X-Ray
+    // Details Sequence are malformed while Multi-energy CT Acquisition is
+    // absent, PS3.3 2026c C.8.15.3.8 and C.8.15.3.9, and empty the field
+    // without refusing the scan or the grey.
+    let two_exposure = enhanced_ct(
+        &[group_with_items(
+            (0x0018, 0x9321),
+            (0x0018, 0x9332),
+            *b"FD",
+            &f64_le(5.5),
+            2,
+        )?],
+        &[vec![]],
+        &[],
+    )?;
+    no_header(
+        "two-item CT Exposure",
+        grey_header(&two_exposure, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    inspect_json(&two_exposure, 0).map_err(|_| "a malformed group refused the scan".to_owned())?;
+    let two_details = enhanced_ct(
+        &[group_with_items(
+            (0x0018, 0x9325),
+            (0x0018, 0x0060),
+            *b"DS",
+            &text_pad("100"),
+            2,
+        )?],
+        &[vec![]],
+        &[],
+    )?;
+    no_header(
+        "two-item CT X-Ray Details",
+        grey_header(&two_details, "", "X-Ocelli-Kvp")?,
+    )?;
+    // AC10. A conformant Multi-energy CT Acquisition file carries several
+    // items in both sequences, empty by design under the one-item rule.
+    let multi_energy = enhanced_ct(
+        &[
+            group_with_items((0x0018, 0x9321), (0x0018, 0x9332), *b"FD", &f64_le(5.5), 2)?,
+            group_with_items(
+                (0x0018, 0x9325),
+                (0x0018, 0x0060),
+                *b"DS",
+                &text_pad("100"),
+                3,
+            )?,
+        ],
+        &[vec![]],
+        &[planted_text((0x0018, 0x9361), *b"CS", "YES")],
+    )?;
+    no_header(
+        "Multi-energy mAs",
+        grey_header(&multi_energy, "", "X-Ocelli-Exposure-Mas")?,
+    )?;
+    no_header(
+        "Multi-energy KVP",
+        grey_header(&multi_energy, "", "X-Ocelli-Kvp")?,
+    )?;
+    // AC10. A malformed MR Echo Sequence with two items in the shared item
+    // empties every frame's TE, because `resolve` errors before precedence
+    // and nothing but the corner reads that group.
+    let two_echo = enhanced_mr(
+        &[group_with_items(
+            (0x0018, 0x9114),
+            (0x0018, 0x9082),
+            *b"FD",
+            &f64_le(30.0),
+            2,
+        )?],
+        &[vec![], vec![]],
+        &[],
+    )?;
+    no_header(
+        "two-item MR Echo frame 0",
+        grey_header(&two_echo, "", "X-Ocelli-Echo-Time")?,
+    )?;
+    no_header(
+        "two-item MR Echo frame 1",
+        grey_header(&two_echo, "X-Ocelli-Frame: 1\r\n", "X-Ocelli-Echo-Time")?,
+    )?;
+    Ok(())
+}
+
+#[test]
+fn a_classic_file_grey_reply_carries_its_scan_token() -> Result<(), String> {
+    // AC7. The grey reply of a classic file carries the same token the
+    // scan JSON computes from the same projection rule, so a perturbed
+    // shared path cannot print one value and scan another. The page
+    // reprints every token through `Number`, so the stored -12.50 shows
+    // as -12.5, which the browser check reads off the corner.
+    let minus = corner_object(&[planted_text((0x0018, 0x0050), *b"DS", "-12.50")])?;
+    header_is(
+        "stored -12.50 thickness",
+        "-12.50",
+        grey_header(&minus, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let json = inspect_json(&minus, 0).map_err(|_| "the minus scan refused".to_owned())?;
+    if !json.contains("\"sliceThickness\":-12.50") {
+        return Err(format!("the minus scan differs from its header: {json}"));
+    }
+    // A classic top-level KVP written FD 120.0 stays blank, no header and
+    // no kVp line, because a non-text top-level value yields no token as
+    // the scan path does today.
+    let binary = corner_object(&[((0x0018, 0x0060), *b"FD", f64_le(120.0))])?;
+    no_header("FD classic KVP", grey_header(&binary, "", "X-Ocelli-Kvp")?)?;
+    let json = inspect_json(&binary, 0).map_err(|_| "the FD scan refused".to_owned())?;
+    if !json.contains("\"kvp\":null") {
+        return Err(format!("the FD classic KVP was scanned: {json}"));
+    }
+    // 31 32 00 00, `12` with two trailing NULs, prints 12 from facts and
+    // from info.
+    let nuls = corner_object(&[((0x0018, 0x0050), *b"DS", b"12\0\0".to_vec())])?;
+    header_is(
+        "two-NUL classic thickness",
+        "12",
+        grey_header(&nuls, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    let json = inspect_json(&nuls, 0).map_err(|_| "the NUL scan refused".to_owned())?;
+    if !json.contains("\"sliceThickness\":12") {
+        return Err(format!("the NUL scan differs from its header: {json}"));
+    }
+    // A top-level `5\` shows nothing, its two projected components
+    // refusing the one-component rule as the scan path's joined text does.
+    let open = corner_object(&[planted_text((0x0018, 0x0050), *b"DS", "5\\")])?;
+    no_header(
+        "open-ended thickness",
+        grey_header(&open, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    // AC7. A top-level `5\6` with a shared Pixel Measures 3.0 planted
+    // shows nothing, the stop rule with a group value behind it.
+    let stop = enhanced_ct(
+        &[pixel_measures(*b"DS", &text_pad("3.0"))?],
+        &[vec![]],
+        &[planted_text((0x0018, 0x0050), *b"DS", "5\\6")],
+    )?;
+    no_header(
+        "multi-value top-level thickness",
+        grey_header(&stop, "", "X-Ocelli-Slice-Thickness")?,
+    )?;
+    Ok(())
+}
+
 #[test]
 fn the_scale_bar_reads_the_length_tool_calibration() -> Result<(), String> {
     // Lead amendment 1. The preview reply carries F-211's choice and
