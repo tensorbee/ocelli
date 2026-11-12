@@ -6832,9 +6832,9 @@ mod surface_grouping_tests {
     /// readback is whatever the load op left. A call site that passed
     /// grouping answers instead of the bound flag, or a bound branch that
     /// loads for a slab, leaves the fresh composite standing there, which
-    /// is the mutant that frame kills. The pair-B frame after it pins the
-    /// derived staleness as an encoded clear-only pass: a rescale change
-    /// that failed to mark the slab dirty would report no pass at all. A
+    /// is the mutant that frame kills. The pair-B frame after it pins that
+    /// the rescale change encodes a pass: a rescale change that failed to
+    /// mark the slab dirty would report no pass at all. A
     /// forced-false staleness is not killed in this fixture, because the
     /// absent mask discards whatever its re-enabled draw writes, so that
     /// mutant dies in `the_stale_slab_clears_and_recovers_on_a_restage`,
