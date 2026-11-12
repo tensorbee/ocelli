@@ -1142,3 +1142,15 @@ throwing `setItem` makes one key's write fail, the page shows that key's
 partial-write sentence and no other, and an implementation that reports
 every write as failed, or none, fails it, at the integrated browser stage.
 The browser-row summary lists AC2, AC3, AC4 and AC18.
+
+## Lead amendment after implementation review pass 1, 2026-11-12
+
+AC9's whole-origin sweep allows exactly the five schema keys plus
+`loglevel`. That key is written by dcmjs's bundled loglevel at module top
+level (`log.setLevel("warn")`, `dcmjs.es.js` about line 377) when
+`@ocelli/core` loads, not by the page. Its value must be one of `TRACE`,
+`DEBUG`, `INFO`, `WARN`, `ERROR` or `SILENT`. The page text never names
+`loglevel`, which `tests/preview.rs` pins. A sweep taken after a folder open
+and before any library load holds no `loglevel` key. Any other key fails.
+The README and the More page say the browser also holds the library's log
+level setting, and nothing else.
