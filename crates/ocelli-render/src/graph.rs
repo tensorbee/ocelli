@@ -1536,6 +1536,11 @@ pub struct RenderGraph {
     /// Surface textures acquired for this frame, presented after the submit.
     /// Capacity is fixed at creation so a tick does not grow it.
     frame_textures: Vec<Option<wgpu::SurfaceTexture>>,
+    /// Which viewports began a render pass on the frame now encoding.
+    /// Capacity is fixed at creation so a tick does not grow it. The
+    /// shared-target stale rule reads it to find the first pass encoded
+    /// into a target, which is the pass that clears it.
+    frame_passes: Vec<bool>,
     keys: Vec<CompiledKey>,
     pipelines: Vec<wgpu::RenderPipeline>,
     uniform_layout: wgpu::BindGroupLayout,
@@ -1774,11 +1779,14 @@ impl RenderGraph {
         surfaces.resize_with(capacity, || None);
         let mut frame_textures = Vec::new();
         frame_textures.resize_with(capacity, || None);
+        let mut frame_passes = Vec::new();
+        frame_passes.resize_with(capacity, || false);
         Ok(Self {
             registry: Registry::new(capacity),
             gpu,
             surfaces,
             frame_textures,
+            frame_passes,
             keys: compiled.keys,
             pipelines: compiled.pipelines,
             uniform_layout: compiled.uniform_layout,
@@ -2683,7 +2691,11 @@ impl RenderGraph {
     /// samples are gone and the next pre-apply reads the recorded pair.
     /// The uniform's rescale follows the effective route: the real pair
     /// while the table serves, identity while the texture holds modality
-    /// values.
+    /// values. The stale content feeds the frame's shared-target rule: on
+    /// every tick that encodes while the staleness lasts, the graph marks
+    /// every viewport rendering into the same target dirty, the first pass
+    /// encoded into the target clears it, and the stale viewport's own pass
+    /// draws nothing.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -2797,48 +2809,6 @@ impl RenderGraph {
                 && !matches!(state.pass, Pass::Slab(_))
             {
                 state.content_stale = true;
-            }
-        }
-        // A stale slab's pass loads and draws nothing, so every viewport
-        // compositing into the same target must redraw beneath it on that
-        // frame, or the old slab pixels survive the frame. The marking runs
-        // when the recorded pair moves away from the staged pair, which is
-        // the moment the next frame's derived staleness becomes true. The
-        // targets are compared through their textures, because two views of
-        // one texture are different view objects.
-        if rescale_changed {
-            let index = usize::try_from(id.0).unwrap_or(usize::MAX);
-            let is_slab = self
-                .registry
-                .states
-                .get(index)
-                .and_then(Option::as_ref)
-                .is_some_and(|state| matches!(state.pass, Pass::Slab(_)));
-            let staged = self
-                .gpu
-                .get(index)
-                .and_then(Option::as_ref)
-                .and_then(|slot| slot.slab.as_ref())
-                .map(|binding| binding.stamp.staged);
-            if is_slab
-                && staged.is_some_and(|staged| {
-                    staged != (params.slope.to_bits(), params.intercept.to_bits())
-                })
-                && let Some(slot) = self.gpu.get(index).and_then(Option::as_ref)
-            {
-                let texture = slot.target.texture();
-                for (other, held) in self.gpu.iter().enumerate() {
-                    let Some(other_slot) = held else {
-                        continue;
-                    };
-                    if other != index
-                        && other_slot.target.texture() == texture
-                        && let Some(state) =
-                            self.registry.states.get_mut(other).and_then(Option::as_mut)
-                    {
-                        state.dirty.data = true;
-                    }
-                }
             }
         }
         Ok(())
@@ -4671,6 +4641,7 @@ impl RenderGraph {
                 None => FrameOutcome::Noop,
             };
         }
+        self.mark_shared_targets_stale();
         self.acquire_dirty_surfaces();
         self.encode_frame(ctx, first_unavailable)
     }
@@ -4678,6 +4649,40 @@ impl RenderGraph {
     fn discard_frame_textures(&mut self) {
         for held in &mut self.frame_textures {
             *held = None;
+        }
+    }
+
+    /// Mark every viewport rendering into a stale target dirty for this frame.
+    ///
+    /// The shared-target stale rule, from the lead amendment after
+    /// implementation review pass 2: when any viewport rendering into a
+    /// target is stale on a frame, every viewport rendering into that
+    /// target is marked dirty, so the frame recomposites. The first pass
+    /// encoded into the target then clears it, the fresh viewports redraw
+    /// beneath the stale one, and the stale pass itself draws nothing.
+    /// Without the marking, a viewport that is alone dirty on the target
+    /// would clear or load against a composite a stale viewport must stop
+    /// holding.
+    ///
+    /// This runs after the frame is known to encode and before the surface
+    /// textures are acquired, so a marked surface viewport acquires in the
+    /// same frame. A frame that encodes nothing marks nothing, and the
+    /// target keeps the composite of the last encoded frame.
+    fn mark_shared_targets_stale(&mut self) {
+        let RenderGraph { registry, gpu, .. } = self;
+        for (index, held) in gpu.iter().enumerate() {
+            let Some(slot) = held else {
+                continue;
+            };
+            if !viewport_is_stale(registry, gpu, index) {
+                continue;
+            }
+            let texture = slot.target.texture();
+            for other in slots_on_texture(gpu, texture) {
+                if let Some(state) = registry.states.get_mut(other).and_then(Option::as_mut) {
+                    state.dirty.data = true;
+                }
+            }
         }
     }
 
@@ -4727,6 +4732,7 @@ impl RenderGraph {
             gpu,
             surfaces,
             frame_textures,
+            frame_passes,
             pipelines,
             keys,
             submissions,
@@ -4738,6 +4744,7 @@ impl RenderGraph {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("ocelli render graph frame"),
             });
+        frame_passes.fill(false);
         let mut encoded: u32 = 0;
         for index in 0..registry.states.len() {
             let key = {
@@ -4768,33 +4775,18 @@ impl RenderGraph {
             // with a rescale the pass no longer records. A slab's staleness
             // is derived from its stamp's staged pair, never stored, so it
             // cannot outlive a return to the staged pair. The pass still
-            // begins: one that shares its target with another viewport
-            // loads, so the base layer's pixels survive the frame, and one
-            // that owns its target clears, which is the state table's
-            // readback.
-            let stale = match key.pass {
-                PassKind::Slab => {
-                    let recorded = {
-                        let state = registry.states.get(index).and_then(Option::as_ref);
-                        state.map(|state| {
-                            let voi = voi_of(&state.pass);
-                            (voi.slope.to_bits(), voi.intercept.to_bits())
-                        })
-                    };
-                    let staged = slot.slab.as_ref().map(|binding| binding.stamp.staged);
-                    match (staged, recorded) {
-                        (Some(staged), Some(recorded)) => staged != recorded,
-                        _ => false,
-                    }
-                }
-                PassKind::VolumeRaycast => false,
-                _ => registry
-                    .states
-                    .get(index)
-                    .and_then(Option::as_ref)
-                    .map(|state| state.content_stale)
-                    .unwrap_or(false),
-            };
+            // begins: when any viewport on its target is stale, the first
+            // pass encoded into the target this frame clears it and every
+            // later pass loads, so the fresh viewports recomposite beneath
+            // the stale one. A target with no stale viewport keeps the state
+            // table's rule: a slab loads, everything else clears.
+            let stale = viewport_is_stale(registry, gpu, index);
+            let texture = slot.target.texture();
+            let stale_target =
+                slots_on_texture(gpu, texture).any(|other| viewport_is_stale(registry, gpu, other));
+            let first_into_target = !slots_on_texture(gpu, texture)
+                .take_while(|other| *other < index)
+                .any(|other| frame_passes.get(other).copied().unwrap_or(false));
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
             let surface_view = frame_textures
                 .get(index)
@@ -4809,6 +4801,9 @@ impl RenderGraph {
             let caller = &slot.target;
             let view = surface_view.as_ref().unwrap_or(caller);
             {
+                if let Some(begun) = frame_passes.get_mut(index) {
+                    *begun = true;
+                }
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("ocelli render graph pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -4816,11 +4811,11 @@ impl RenderGraph {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: if stale {
-                                if target_is_shared(gpu, index) {
-                                    wgpu::LoadOp::Load
-                                } else {
+                            load: if stale_target {
+                                if first_into_target {
                                     wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                                } else {
+                                    wgpu::LoadOp::Load
                                 }
                             } else if key.pass == PassKind::Slab {
                                 wgpu::LoadOp::Load
@@ -4990,22 +4985,47 @@ fn gpu_binding_ready(kind: PassKind, slot: Option<&GpuSlot>) -> bool {
     }
 }
 
-/// Whether another registered viewport renders into the same target texture.
+/// Whether this viewport's content is stale on the frame now encoding.
+///
+/// A stack's or a caller view's staleness is the stored flag, which a
+/// rescale change sets when the texture holds modality values computed
+/// with an old pair. A slab's staleness is derived, never stored: its
+/// stamp's staged pair against the pass's recorded pair. A volume ray is
+/// never stale.
+fn viewport_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize) -> bool {
+    let Some(state) = registry.states.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    match state.pass.kind() {
+        PassKind::Slab => {
+            let recorded = voi_of(&state.pass);
+            let staged = gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.slab.as_ref())
+                .map(|binding| binding.stamp.staged);
+            match staged {
+                Some(staged) => staged != (recorded.slope.to_bits(), recorded.intercept.to_bits()),
+                None => false,
+            }
+        }
+        PassKind::VolumeRaycast => false,
+        _ => state.content_stale,
+    }
+}
+
+/// The slot indices whose target renders into `texture`.
 ///
 /// Two views of one texture are different view objects, so the comparison
 /// goes through the texture each view names, which wgpu compares by
-/// resource identity. A stale pass on a shared target must not clear,
-/// because the clear would destroy the base layer's pixels in that target.
-fn target_is_shared(gpu: &[Option<GpuSlot>], index: usize) -> bool {
-    let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
-        return false;
-    };
-    let texture = slot.target.texture();
-    gpu.iter().enumerate().any(|(other, held)| {
-        other != index
-            && held
-                .as_ref()
-                .is_some_and(|other_slot| other_slot.target.texture() == texture)
+/// resource identity.
+fn slots_on_texture<'a>(
+    gpu: &'a [Option<GpuSlot>],
+    texture: &'a wgpu::Texture,
+) -> impl Iterator<Item = usize> + 'a {
+    gpu.iter().enumerate().filter_map(move |(index, held)| {
+        let slot = held.as_ref()?;
+        (slot.target.texture() == texture).then_some(index)
     })
 }
 

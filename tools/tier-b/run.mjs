@@ -213,12 +213,15 @@ if (report.status === "crash") {
 }
 const section = report.section ?? {};
 const pairs = report.pairs ?? {};
+// A section that drew reports an empty reason, which is not nullish, so the
+// fallback has to treat the empty string as absent.
+const reasonOf = (part, other) => part.reason || other.reason || "";
 if (section.status === "crash" || pairs.status === "crash") {
-  console.error(`probe crashed: ${section.reason ?? pairs.reason}`);
+  console.error(`probe crashed: ${reasonOf(section, pairs)}`);
   process.exit(3);
 }
 if (section.status === "unavailable" || pairs.status === "unavailable") {
-  console.error(`tier B pass unavailable: ${section.reason ?? pairs.reason}`);
+  console.error(`tier B pass unavailable: ${reasonOf(section, pairs)}`);
   process.exit(2);
 }
 if (
@@ -228,7 +231,7 @@ if (
   pairs.tier !== "B"
 ) {
   console.error(
-    `not a tier B run: section ${section.status}/${section.tier} pairs ${pairs.status}/${pairs.tier} ${section.reason ?? pairs.reason}`,
+    `not a tier B run: section ${section.status}/${section.tier} pairs ${pairs.status}/${pairs.tier} ${reasonOf(section, pairs)}`,
   );
   process.exit(3);
 }

@@ -90,6 +90,21 @@ viewport would count its viewports. Dirt clears only after a successful
 encode, so an unavailable viewport is reported again on the next tick rather
 than hidden behind a submitted mixed frame.
 
+**A stale target recomposites while the staleness lasts.** When any viewport
+rendering into a target is stale on a frame, every viewport rendering into
+that target is marked dirty for that frame. The first pass encoded into the
+target on that frame clears it, every later pass into the same target loads,
+and a stale pass issues no draw whatever its kind or position. A stale stack
+therefore shows the clear colour with any fresh slab drawn over it, a stale
+slab shows the base layer beneath it, and a target holding only slabs never
+keeps a stale composite. A stale viewport alone on its target clears. The
+marking runs once per tick, after the frame is known to encode and before
+the surface textures are acquired, so a marked surface viewport acquires in
+the same frame. A frame that encodes nothing marks nothing, and the target
+keeps the composite of the last encoded frame. A slab's staleness is
+derived, its stamp's staged pair against the pass's recorded pair, and a
+stack's or a caller view's is the content flag a rescale change sets.
+
 **VOI has one write route.** `set_voi` writes the thirty-two uniform bytes
 and sets the VOI flag together, and `mark_dirty` refuses a VOI mark. A window
 change therefore cannot schedule a frame without updating the bytes it
@@ -346,7 +361,8 @@ average. `VOI_WGSL` is included once. Composite loads the centre sample.
 MIP, MinIP and average reduce what the value texture holds, modality values
 because the graph pre-applies stage 1 when it stages, and then call
 `lut_chain` once. For a positive slope MIP, MinIP and composite select the
-same texel, and for a negative slope MIP and MinIP swap. There is no storage
+same texel they would select on the stored samples, and for a negative slope
+MIP and MinIP swap. There is no storage
 buffer and no compute entry. Labelmap edge on
 this pass is uncompiled. `show_slab` returns `BlendUnavailable` and does
 not bind composite.
