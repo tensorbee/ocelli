@@ -9,10 +9,11 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, SlabError,
-    SlabPass, StackPass, StoredRoute, Tier, VOI_WGSL, ViewportId, VoiParams, fragment_keys_for,
-    present_slab, slab_blend_code, slab_compile_list, slab_module,
+    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, SegPass,
+    SlabError, SlabPass, StackPass, StoredRoute, Tier, VOI_WGSL, ViewportId, VoiParams,
+    fragment_keys_for, present_slab, slab_blend_code, slab_compile_list, slab_module,
 };
+use ocelli_seg::{LabelColourLut, LabelGrid, LabelStyle, Representation, Rgba8};
 use ocelli_volume::{PlaneSample, SlabImage};
 
 fn bad_extent() -> SlabImage {
@@ -1358,5 +1359,131 @@ fn two_slabs_on_one_target_keep_only_the_fresh_pixels_when_one_is_stale() {
         got = cleared[0]
     );
     assert_eq!(fresh_only[3].to_bits(), 1.0_f32.to_bits());
+    assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+}
+
+/// **The per-frame pass reset: a viewport that stops encoding holds nothing
+/// open.**
+///
+/// A SegOverlay at index 0 and a stack at index 1 are registered on two
+/// views of one texture. `show_labelmap` stages the overlay's presenter
+/// bytes, so both viewports encode the first frame and the outcome counts
+/// two passes: the overlay draws its one labelled texel, the fill colour
+/// `[10, 20, 30, 128]` from the one-entry table, and the stack's pass, a
+/// Stack pass with no stale viewport on the target, then clears and draws
+/// its source 200.0 under its own LINEAR_EXACT window, centre 127.5 and
+/// width 255, output 0 to 255 (PS3.3 C.11.2.1.3.2), ((200 - 127.5) / 255 +
+/// 0.5) * 255 = 200.0, the grey 200/255. The readback is that grey.
+///
+/// `set_representation(overlay, Contour)` drops the overlay's labelmap
+/// binding, so the overlay is dirty and cannot encode the second frame,
+/// and `set_voi(stack, pair B)` marks the stack's pre-applied content
+/// stale. The stack's pass is now the first encoded into the target this
+/// frame, so it clears and draws nothing: the readback is the clear
+/// colour, `0.0, 0.0, 0.0, 1.0` on the `Rgba32Float` target. A missing
+/// per-frame pass reset would let the overlay's first-frame flag survive,
+/// turn the stack's clear into a load, and leave the first-frame grey.
+#[test]
+#[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+fn a_stale_stack_clears_after_an_overlay_stops_encoding_on_the_shared_target() {
+    let Some((_adapter, mut context)) = session() else {
+        println!("this machine resolved tier C, so there is no device");
+        return;
+    };
+    let mut graph = match RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float) {
+        Ok(graph) => graph,
+        Err(_) => return,
+    };
+    let (overlay_view, stack_view, texture) = colour_target(context.device(), 1);
+    let overlay = match graph.register(
+        &context,
+        overlay_view,
+        dummy_source(context.device(), context.queue()),
+        Pass::SegOverlay(SegPass {
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the overlay viewport fits"),
+    };
+    let stack = match graph.register(
+        &context,
+        stack_view,
+        float_source(context.device(), context.queue(), 200.0),
+        Pass::Stack(StackPass {
+            voi: params(&exact_chain()),
+            blend: BlendMode::Composite,
+        }),
+        StoredRoute::PreApplied,
+    ) {
+        Ok(id) => id,
+        Err(_) => unreachable!("the stack viewport fits"),
+    };
+    assert_eq!(overlay, ViewportId(0));
+    assert_eq!(stack, ViewportId(1));
+    let grid = LabelGrid {
+        width: 1,
+        height: 1,
+        indices: vec![1],
+    };
+    let lut = LabelColourLut::from_segment_one(vec![Rgba8 {
+        r: 10,
+        g: 20,
+        b: 30,
+        a: 128,
+    }]);
+    assert!(
+        graph
+            .show_labelmap(
+                &context,
+                overlay,
+                &grid,
+                &lut,
+                LabelStyle {
+                    fill: true,
+                    outline: false,
+                },
+            )
+            .is_ok()
+    );
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 2,
+            passes: 2
+        }
+    );
+    let first = read_pixel(&context, &texture);
+    let stack_grey = 200.0_f32 / 255.0;
+    assert!(
+        within_two_ulp(first[0], stack_grey),
+        "the first frame is not the stack's grey: {got} against {stack_grey}",
+        got = first[0]
+    );
+    assert_eq!(first[1].to_bits(), first[0].to_bits());
+    assert_eq!(first[2].to_bits(), first[0].to_bits());
+    assert_eq!(first[3].to_bits(), 1.0_f32.to_bits());
+
+    // The flip: the overlay loses its binding and the stack goes stale.
+    // Only the stack encodes, its pass is the first into the target, and
+    // the clear it begins with erases the first frame.
+    assert_eq!(
+        graph.set_representation(overlay, Representation::Contour),
+        Ok(())
+    );
+    let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, 0xC526_5588, 0x4000_0000);
+    assert!(graph.set_voi(&context, stack, &pair_b).is_ok());
+    assert_eq!(
+        graph.tick(&context),
+        FrameOutcome::Submitted {
+            viewports: 1,
+            passes: 1
+        }
+    );
+    let cleared = read_pixel(&context, &texture);
+    assert_eq!(cleared[0].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[1].to_bits(), 0.0_f32.to_bits());
+    assert_eq!(cleared[2].to_bits(), 0.0_f32.to_bits());
     assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
 }

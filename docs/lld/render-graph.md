@@ -98,6 +98,9 @@ and a stale pass issues no draw whatever its kind or position. A stale stack
 therefore shows the clear colour with any fresh slab drawn over it, a stale
 slab shows the base layer beneath it, and a target holding only slabs never
 keeps a stale composite. A stale viewport alone on its target clears. The
+grouping compares registered views' textures, so it covers caller views,
+and a surface viewport is its own target, because its placeholder view is
+created for that viewport alone. The
 marking runs once per tick, after the frame is known to encode and before
 the surface textures are acquired, so a marked surface viewport acquires in
 the same frame. A tick that returns before the encode marks nothing, and
