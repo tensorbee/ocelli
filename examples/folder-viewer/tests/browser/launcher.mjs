@@ -12,19 +12,20 @@
 // would still be serving.
 //
 // The binary is also identified at the process layer. The pid listening on
-// the launcher's port is resolved with lsof, and its executable path is
-// read with ps and must sit inside the private target directory. A launcher
-// that ignored the compiler artifact cargo named and ran a stale build from
-// the default target directory would serve the same page with the same
-// debug note, and would fail only here. The path is the first word of the
-// process command, because comm alone is truncated to the last component
-// on Linux, where this suite runs in CI, and names no directory.
+// the launcher's port is resolved with lsof, and its process command is
+// read with ps, because comm alone is truncated to the last component on
+// Linux, where this suite runs in CI, and names no directory. The first
+// word of that command is the executable path the spawner set. The command
+// must begin with the private target directory followed by a path
+// separator. A launcher that ignored the compiler artifact cargo named and
+// ran a stale build from the default target directory would serve the same
+// page with the same debug note, and would fail only here.
 //
 // The launcher rebuilds the core package dist in the checkout and builds
 // the debug profile into the private target directory, so the first run of
-// this control is a cold build of the whole graph, on the order of
-// gigabytes under target/, and later runs are incremental. bin/ocelli.sh
-// registers this suite under viewer-browser, after dicomweb.mjs.
+// this control is a cold full debug graph build and later runs are
+// incremental. bin/ocelli.sh registers this suite under viewer-browser,
+// after dicomweb.mjs.
 
 import { Buffer } from "node:buffer";
 import { execFileSync, spawn } from "node:child_process";
@@ -62,11 +63,9 @@ function listeningPids(port) {
   }
 }
 
-function executablePath(pid) {
+function psCommand(pid) {
   try {
-    const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
-    const firstWord = command.split(/\s+/)[0] ?? "";
-    return firstWord;
+    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
   } catch {
     return "";
   }
@@ -173,9 +172,14 @@ async function main() {
       problems.push(`no process was found listening on the launcher's port ${port}`);
     }
     for (const pid of pids) {
-      const comm = executablePath(pid);
-      if (!comm.startsWith(targetDir)) {
-        problems.push(`the backend on port ${port} runs from "${comm}", outside the private target directory`);
+      const command = psCommand(pid);
+      // The whole command is compared rather than a split on whitespace,
+      // which would cut a checkout path containing a space into words that
+      // no longer spell the directory, and the separator in the prefix
+      // refuses a sibling directory whose name merely extends the
+      // directory's name.
+      if (!command.startsWith(targetDir + path.sep)) {
+        problems.push(`the backend on port ${port} runs from "${command}", outside the private target directory`);
       }
     }
     const launcherPage = await (await fetch(url)).arrayBuffer();

@@ -1,7 +1,6 @@
 import type { InstanceIdentity, StagedMetadata } from "./index.js";
 import { afterEach, expect, vi } from "vitest";
 import { DicomwebProvider } from "./index.js";
-import { STAGED_BODY_PROBE } from "./dicomweb-viewer.js";
 import { OcelliError } from "./ocelli-error.js";
 
 const STUDY_UID = "2.25.1";
@@ -818,6 +817,7 @@ function makeWadoProvider(
   boundary: string,
   nativeFactory: (call: NativeCall) => Promise<Response>,
   captured: CapturedCalls,
+  providerCtor: typeof DicomwebProvider = DicomwebProvider,
 ): DicomwebProvider {
   const upstreamFetch: typeof fetch = async (input, init) => {
     captured.upstream.push({
@@ -842,11 +842,23 @@ function makeWadoProvider(
     return nativeFactory(call);
   };
   vi.stubGlobal("fetch", nativeFetch);
-  return new DicomwebProvider({
+  return new providerCtor({
     studiesServiceUrl: UPSTREAM_URL,
     wadoUriUrl: WADO_URL,
     fetch: upstreamFetch,
   });
+}
+
+// The staged body is private to the base class, so a release is observed by
+// counting the releases the base class routes through the public
+// releaseStaged. The subclass lives only in this test file and ships
+// nothing.
+class ReleaseSpyProvider extends DicomwebProvider {
+  releases = 0;
+  override releaseStaged(): void {
+    this.releases += 1;
+    super.releaseStaged();
+  }
 }
 
 async function nativeInstanceEnvelope(call: NativeCall, boundary: string) {
@@ -1687,8 +1699,8 @@ it("releases the staged body, aborts the held request and stages a fresh body", 
   // on the generation at all: the cancel reached the wire. The second
   // intent also clears the staged body before the cancel runs, so the two
   // gated calls below would stay green if cancelPending kept a body. The
-  // next test observes the clearing itself through the staged body probe,
-  // which carries no generation gate.
+  // next test observes the clearing itself through the release count of a
+  // test-only provider, which carries no generation gate.
   const raw = new Uint8Array([10, 20, 30, 40]);
   const boundary = "f245-cancel-staged-boundary";
   const captured: CapturedCalls = { native: [], upstream: [] };
@@ -1784,12 +1796,15 @@ it("releases the staged body, aborts the held request and stages a fresh body", 
 it("releases a settled staged body when a cancel runs with no new intent", async () => {
   // The receipt readers gate on the generation, and a cancel advances it,
   // so they cannot show the release of a body that was staged before the
-  // cancel. The staged body probe carries no gate, and no new intent runs
-  // between the settled fetch and the cancel here, so what the probe loses
-  // is the clearing in cancelPending itself.
+  // cancel. The base class releases through the public releaseStaged,
+  // which the test-only provider counts, and no new intent runs between
+  // the settled fetch and the cancel here, so what the count loses is the
+  // clearing in cancelPending itself.
   const raw = new Uint8Array([3, 1, 4, 1, 5]);
   const boundary = "f245-cancel-settled-boundary";
   const captured: CapturedCalls = { native: [], upstream: [] };
+  // The constructor handed to the helper is the counting subclass, so the
+  // instance built here is one.
   const provider = makeWadoProvider(
     raw,
     boundary,
@@ -1799,16 +1814,18 @@ it("releases a settled staged body when a cancel runs with no new intent", async
         headers: { "Content-Type": "application/json" },
       }),
     captured,
-  );
+    ReleaseSpyProvider,
+  ) as ReleaseSpyProvider;
   try {
     const staged = await provider.fetchSelectedInstance({
       studyUid: STUDY_UID,
       seriesUid: SERIES_UID,
       instanceUid: INSTANCE_UID,
     });
-    expect(provider[STAGED_BODY_PROBE]()).toBe(raw.byteLength);
+    expect(staged.byteLength).toBe(raw.byteLength);
+    const releasesBeforeCancel = provider.releases;
     provider.cancelPending();
-    expect(provider[STAGED_BODY_PROBE]()).toBeNull();
+    expect(provider.releases).toBe(releasesBeforeCancel + 1);
     // The gated readers report nothing now too, which alone would not
     // separate a release from the generation the cancel advanced.
     expect(provider.readStagedInfo()).toBeNull();
@@ -1823,12 +1840,15 @@ it("clears a staged body when a newer intent begins", async () => {
   // The same masking applies one intent earlier. A newer fetch begins by
   // clearing the stage, and from then on the gated readers refuse the old
   // receipt through the generation the intent advanced, whether or not the
-  // body was dropped. The probe is the observation that survives, so the
-  // newer intent is held at the native route while it is read.
+  // body was dropped. The release is routed through the public
+  // releaseStaged and counted by the test-only provider, so the newer
+  // intent is held at the native route while it is read.
   const raw = new Uint8Array([2, 7, 1, 8]);
   const boundary = "f245-intent-clears-boundary";
   const captured: CapturedCalls = { native: [], upstream: [] };
   const held: HeldNative[] = [];
+  // The constructor handed to the helper is the counting subclass, so the
+  // instance built here is one.
   const provider = makeWadoProvider(
     raw,
     boundary,
@@ -1844,21 +1864,23 @@ it("clears a staged body when a newer intent begins", async () => {
       });
     },
     captured,
-  );
+    ReleaseSpyProvider,
+  ) as ReleaseSpyProvider;
   try {
     const staged = await provider.fetchSelectedInstance({
       studyUid: STUDY_UID,
       seriesUid: SERIES_UID,
       instanceUid: INSTANCE_UID,
     });
-    expect(provider[STAGED_BODY_PROBE]()).toBe(raw.byteLength);
+    expect(staged.byteLength).toBe(raw.byteLength);
+    const releasesBeforeIntent = provider.releases;
     const pending = provider.fetchSelectedInstance({
       studyUid: STUDY_UID,
       seriesUid: SERIES_UID,
       instanceUid: INSTANCE_UID,
     });
     await vi.waitFor(() => expect(captured.native.length).toBe(2));
-    expect(provider[STAGED_BODY_PROBE]()).toBeNull();
+    expect(provider.releases).toBe(releasesBeforeIntent + 1);
     expect(provider.readStagedInfo()).toBeNull();
     expect(provider.takeStagedInstance(staged)).toBeNull();
     const heldCall = held[0];

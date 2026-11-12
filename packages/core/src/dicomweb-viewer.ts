@@ -474,13 +474,6 @@ function decodeInstanceMetadata(
 
 export type DicomwebProviderOptions = { studiesServiceUrl: string; wadoUriUrl: string; fetch: typeof fetch };
 
-// Test-only seam. The public staged readers gate on the current generation,
-// which every cancel advances, so they cannot tell a released body from a
-// stale one. This symbol reports the staged body's byte length with no gate,
-// which is what lets a test observe the release itself. It is deliberately
-// not re-exported from index.ts.
-export const STAGED_BODY_PROBE = Symbol("ocelli.dicomweb-viewer.staged-body-probe");
-
 export class DicomwebProvider {
   readonly #studiesServiceUrl: URL;
   readonly #wadoUriUrl: URL;
@@ -506,7 +499,7 @@ export class DicomwebProvider {
     for (const entry of [...this.#live]) {
       entry.controller.abort();
     }
-    this.#staged = null;
+    this.releaseStaged();
     const replaced = this.#queued;
     if (replaced !== null) {
       this.#queued = null;
@@ -608,7 +601,7 @@ export class DicomwebProvider {
     for (const entry of [...this.#live]) {
       entry.controller.abort();
     }
-    this.#staged = null;
+    this.releaseStaged();
     const queued = this.#queued;
     this.#queued = null;
     if (queued !== null) {
@@ -1326,12 +1319,9 @@ export class DicomwebProvider {
   }
 
   releaseStaged(): void {
+    // The intent and cancel paths release through this public method, so a
+    // test-only subclass can observe a release without a probe shipping in
+    // the class.
     this.#staged = null;
-  }
-
-  // Reports the privately staged body's byte length with no generation gate,
-  // so a test can observe a release directly. Null when nothing is staged.
-  [STAGED_BODY_PROBE](): number | null {
-    return this.#staged === null ? null : this.#staged.body.byteLength;
   }
 }

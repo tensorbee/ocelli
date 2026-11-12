@@ -938,13 +938,14 @@ control. It starts the viewer the way a user does, through `npm run dev`, with
 a private `CARGO_TARGET_DIR` under the repository's ignored `target/`,
 distinct from the default `target/debug`, so a path under it can only be the
 one cargo's own compiler artifact named. The directory is kept between runs,
-so the first run is a cold build of the whole graph, on the order of
-gigabytes under `target/`, and later runs are incremental. The
-binary is also identified at the process layer: the pid listening on the
-launcher's port is resolved with `lsof` and its executable path is read with
-`ps -o command=`, and it must sit inside the private target directory, so a
-launcher that ignored the compiler artifact and ran a stale build from the
-default target directory fails there. It waits for the one URL
+so the first run is a cold full debug graph build and later runs are
+incremental. The binary is also identified at the process layer: the pid
+listening on the launcher's port is resolved with `lsof` and its process
+command is read with `ps -o command=`, whose first word is the executable
+path the spawner set. That command must begin with the private target
+directory followed by a path separator, so a launcher that ignored the
+compiler artifact and ran a stale build from the default target directory
+fails there. It waits for the one URL
 the backend prints, opens the page in headless Chromium, asserts the boot
 status and source chooser, fetches the same page from a plain native start of
 the release binary, and asserts the two bodies are identical. It signals the
