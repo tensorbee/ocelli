@@ -555,6 +555,15 @@ fn binding_available(features: wgpu::TextureFormatFeatures) -> bool {
 /// Channels a preserving format stores, with the sample in `.r`.
 ///
 /// `R16Float` is not here. It is not the stored `f32` after `textureLoad`.
+pub(crate) fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> {
+    match format {
+        wgpu::TextureFormat::R32Float => Some(1),
+        wgpu::TextureFormat::Rg32Float => Some(2),
+        wgpu::TextureFormat::Rgba32Float => Some(4),
+        _ => None,
+    }
+}
+
 /// One container value as the exact `f32` the shader indexes with.
 ///
 /// The accepted union keeps every value inside `u16` or `i16`, so the
@@ -579,15 +588,6 @@ fn pre_apply(samples: &[f32], slope: f32, intercept: f32) -> Vec<f32> {
         .iter()
         .map(|sample| ocelli_pixel::modality(Stored(*sample), slope, intercept).0)
         .collect()
-}
-
-pub(crate) fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> {
-    match format {
-        wgpu::TextureFormat::R32Float => Some(1),
-        wgpu::TextureFormat::Rg32Float => Some(2),
-        wgpu::TextureFormat::Rgba32Float => Some(4),
-        _ => None,
-    }
 }
 
 fn stored_bytes_per_row(width: u32, format: wgpu::TextureFormat) -> Result<u32, UploadError> {
@@ -2756,8 +2756,11 @@ impl RenderGraph {
             // The raw samples are gone and the texture holds modality values
             // computed with the old pair. Refusing here would pin the old
             // rescale forever, because the recorded chain is the only thing
-            // the next pre-apply reads.
-            if let Some(state) = self.registry.state_mut(id) {
+            // the next pre-apply reads. A slab carries no stored flag: its
+            // staleness is derived from its stamp's staged pair.
+            if let Some(state) = self.registry.state_mut(id)
+                && !matches!(state.pass, Pass::Slab(_))
+            {
                 state.content_stale = true;
             }
         }
@@ -2984,7 +2987,7 @@ impl RenderGraph {
         lut: &ColourLut,
     ) -> Result<(), GraphError> {
         let index = usize::try_from(id.0).unwrap_or(usize::MAX);
-        let (known, declared_pre_applied, content) = {
+        let (declared_pre_applied, content) = {
             let state = self
                 .registry
                 .states
@@ -2992,13 +2995,13 @@ impl RenderGraph {
                 .and_then(Option::as_ref)
                 .ok_or(GraphError::UnknownViewport)?;
             (
-                true,
                 matches!(state.route, StoredRoute::PreApplied),
                 state.content,
             )
         };
-        if !known {
-            return Err(GraphError::UnknownViewport);
+        let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
+        if !rebound {
+            return Err(GraphError::ViewportNotRebound);
         }
         let palette = lut.mode() == 2;
         if palette && (declared_pre_applied || content == ContentKind::PreApplied) {
@@ -3008,10 +3011,6 @@ impl RenderGraph {
         if !palette && content == ContentKind::RawFractional {
             // Raw fractional samples have no correct stage 1 path here.
             return Err(GraphError::ColourUnavailable);
-        }
-        let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
-        if !rebound {
-            return Err(GraphError::ViewportNotRebound);
         }
         let features = adapter
             .wgpu_adapter()
