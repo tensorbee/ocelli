@@ -9,26 +9,9 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode,
-    fragment_keys_for,
-    FrameOutcome,
-    Pass,
-    PassKind,
-    PipelineFamily,
-    PipelineKey,
-    present_slab,
-    RenderGraph,
-    slab_blend_code,
-    slab_compile_list,
-    slab_module,
-    SlabError,
-    SlabPass,
-    StackPass,
-    StoredRoute,
-    Tier,
-    ViewportId,
-    VOI_WGSL,
-    VoiParams,
+    BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RenderGraph, SlabError,
+    SlabPass, StackPass, StoredRoute, Tier, VOI_WGSL, ViewportId, VoiParams, fragment_keys_for,
+    present_slab, slab_blend_code, slab_compile_list, slab_module,
 };
 use ocelli_volume::{PlaneSample, SlabImage};
 
@@ -419,8 +402,8 @@ fn one_submit_for_a_slab_and_a_stack() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => unreachable!("the stack viewport fits"),
     };
@@ -434,8 +417,8 @@ fn one_submit_for_a_slab_and_a_stack() {
             blend: BlendMode::Mip,
             voi,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
     };
@@ -485,8 +468,8 @@ fn an_absent_slab_pixel_is_not_painted_zero() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(_) => {}
         Err(_) => unreachable!("the stack viewport fits"),
     };
@@ -499,8 +482,8 @@ fn an_absent_slab_pixel_is_not_painted_zero() {
             blend: BlendMode::Composite,
             voi,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
     };
@@ -570,8 +553,8 @@ fn slab_blend_readback_follows_one_voi_after_the_stored_reduction() {
             blend: BlendMode::Composite,
             voi,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => unreachable!("the slab viewport fits"),
     };

@@ -413,13 +413,16 @@ mod tests {
             "voi.wgsl declares the section 18.4 uniform other than once"
         );
         assert_eq!(
-            VOI_WGSL.matches("var<uniform> modality_route : ModalityRoute;")
+            VOI_WGSL
+                .matches("var<uniform> modality_route : ModalityRoute;")
                 .count(),
             1,
             "voi.wgsl declares the route uniform other than once"
         );
         assert_eq!(
-            VOI_WGSL.matches("var modality_table : texture_2d<f32>;").count(),
+            VOI_WGSL
+                .matches("var modality_table : texture_2d<f32>;")
+                .count(),
             1,
             "voi.wgsl declares the folded table other than once"
         );
@@ -436,10 +439,7 @@ mod tests {
     fn the_container_check_refuses_count_zero_and_ranges_outside_the_union() {
         use super::{StoredRoute, check_container};
         assert_eq!(
-            check_container(StoredRoute::Tabled {
-                first: 0,
-                count: 0
-            }),
+            check_container(StoredRoute::Tabled { first: 0, count: 0 }),
             Err(super::RouteError::RangeOutside),
             "count 0 would reach create_texture as a zero extent"
         );
@@ -476,31 +476,41 @@ mod tests {
             "a covered last value that would overflow the walk is refused"
         );
         // The accepted edges and the common shapes.
-        assert!(check_container(StoredRoute::Tabled {
-            first: -32_768,
-            count: 65_536
-        })
-        .is_ok());
-        assert!(check_container(StoredRoute::Tabled {
-            first: 0,
-            count: 65_536
-        })
-        .is_ok());
-        assert!(check_container(StoredRoute::Tabled {
-            first: 0,
-            count: 4_095
-        })
-        .is_ok());
-        assert!(check_container(StoredRoute::Tabled {
-            first: 0,
-            count: 16
-        })
-        .is_ok());
-        assert!(check_container(StoredRoute::Tabled {
-            first: -32_768,
-            count: 1
-        })
-        .is_ok());
+        assert!(
+            check_container(StoredRoute::Tabled {
+                first: -32_768,
+                count: 65_536
+            })
+            .is_ok()
+        );
+        assert!(
+            check_container(StoredRoute::Tabled {
+                first: 0,
+                count: 65_536
+            })
+            .is_ok()
+        );
+        assert!(
+            check_container(StoredRoute::Tabled {
+                first: 0,
+                count: 4_095
+            })
+            .is_ok()
+        );
+        assert!(
+            check_container(StoredRoute::Tabled {
+                first: 0,
+                count: 16
+            })
+            .is_ok()
+        );
+        assert!(
+            check_container(StoredRoute::Tabled {
+                first: -32_768,
+                count: 1
+            })
+            .is_ok()
+        );
         assert!(check_container(StoredRoute::PreApplied).is_ok());
     }
 
@@ -524,13 +534,13 @@ mod tests {
             count: 65_536,
         };
         let mut table = vec![0.0_f32; 65_536];
-        fill_modality_table(
+        let filled = fill_modality_table(
             route,
             f32::from_bits(0x3D47EF8C),
             f32::from_bits(0xC52D91AC),
             &mut table,
-        )
-        .expect("the 16-bit container is legal");
+        );
+        assert!(filled.is_ok(), "the 16-bit container is legal: {filled:?}");
         let entry = table.get(2371).copied().unwrap_or(f32::NAN);
         assert_eq!(
             entry.to_bits(),
@@ -569,7 +579,8 @@ mod tests {
             count: 4_095,
         };
         let mut table = vec![7.5_f32; 4_096];
-        fill_modality_table(route, 2.0, -1024.0, &mut table).expect("4095 fits the union");
+        let filled = fill_modality_table(route, 2.0, -1024.0, &mut table);
+        assert!(filled.is_ok(), "4095 fits the union: {filled:?}");
         assert_eq!(
             table.get(4_094).copied().unwrap_or(f32::NAN).to_bits(),
             7_164.0_f32.to_bits(),
@@ -594,10 +605,7 @@ mod tests {
         );
         assert_eq!(
             fill_modality_table(
-                StoredRoute::Tabled {
-                    first: 0,
-                    count: 0
-                },
+                StoredRoute::Tabled { first: 0, count: 0 },
                 2.0,
                 -1024.0,
                 &mut []
@@ -627,12 +635,12 @@ mod tests {
             invert: 1,
         };
         let identity = voi.with_identity_rescale();
-        assert_eq!(identity.slope, 1.0);
-        assert_eq!(identity.intercept, 0.0);
-        assert_eq!(identity.center, voi.center);
-        assert_eq!(identity.width, voi.width);
-        assert_eq!(identity.ymin, voi.ymin);
-        assert_eq!(identity.ymax, voi.ymax);
+        assert_eq!(identity.slope.to_bits(), 1.0_f32.to_bits());
+        assert_eq!(identity.intercept.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(identity.center.to_bits(), voi.center.to_bits());
+        assert_eq!(identity.width.to_bits(), voi.width.to_bits());
+        assert_eq!(identity.ymin.to_bits(), voi.ymin.to_bits());
+        assert_eq!(identity.ymax.to_bits(), voi.ymax.to_bits());
         assert_eq!(identity.fn_kind, voi.fn_kind);
         assert_eq!(identity.invert, voi.invert);
         assert_eq!(std::mem::size_of::<super::VoiParams>(), 32);

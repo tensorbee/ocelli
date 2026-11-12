@@ -11,18 +11,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode,
-    Dirty,
-    FrameOutcome,
-    GraphError,
-    Pass,
-    RayAxis,
-    RenderGraph,
-    StackPass,
-    StoredRoute,
-    ViewportId,
-    VoiParams,
-    VolumePass,
+    BlendMode, Dirty, FrameOutcome, GraphError, Pass, RayAxis, RenderGraph, StackPass, StoredRoute,
+    ViewportId, VoiParams, VolumePass,
 };
 
 fn native_clock() -> impl FnMut() -> u64 {
@@ -229,7 +219,11 @@ fn set_view_dirties_only_the_camera_and_keeps_the_css_matrix() {
         Err(GraphError::UnknownViewport)
     ));
     let (source, target_view, target) = sized_views(&context, &[40.0], 1);
-    let viewport = match graph.register(&context, target_view, source, stack(),
+    let viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -252,7 +246,7 @@ fn set_view_dirties_only_the_camera_and_keeps_the_css_matrix() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -361,7 +355,11 @@ fn a_fragment_past_the_image_is_black_under_the_identity() {
         return;
     };
     let (source, target_view, target) = sized_views(&context, &[40.0], 2);
-    let _viewport = match graph.register(&context, target_view, source, stack(),
+    let _viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -406,7 +404,11 @@ fn tier_b_margin_or_a_recorded_miss() {
         unreachable!("asserted immediately above")
     };
     let (source, target_view, target) = sized_views(&context, &[40.0], 2);
-    let viewport = match graph.register(&context, target_view, source, stack(),
+    let viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -488,7 +490,11 @@ fn device_fragments_are_divided_by_dpr_before_the_css_camera() {
         1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0_f32,
     ];
     let (source, target_view, target) = sized_views(&context, &[40.0, 4_000.0], 2);
-    let viewport = match graph.register(&context, target_view, source, stack(),
+    let viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -509,7 +515,11 @@ fn device_fragments_are_divided_by_dpr_before_the_css_camera() {
     );
 
     let (source, target_view, target) = sized_views(&context, &[40.0, 4_000.0], 2);
-    let viewport = match graph.register(&context, target_view, source, stack(),
+    let viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -535,7 +545,11 @@ fn device_fragments_are_divided_by_dpr_before_the_css_camera() {
     let mut translated = css;
     translated[12] = -0.4;
     let (source, target_view, target) = sized_views(&context, &[40.0], 1);
-    let viewport = match graph.register(&context, target_view, source, stack(),
+    let viewport = match graph.register(
+        &context,
+        target_view,
+        source,
+        stack(),
         StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
@@ -557,7 +571,11 @@ fn fractional_dpr_selects_the_derived_texels() -> Result<(), &'static str> {
     ];
     let (source, target_view, target) = sized_views(&context, &[-160.0, 40.0, 4_000.0, -160.0], 5);
     let viewport = graph
-        .register(&context, target_view, source, stack(),
+        .register(
+            &context,
+            target_view,
+            source,
+            stack(),
             StoredRoute::PreApplied,
         )
         .map_err(|_| "one slot refused")?;

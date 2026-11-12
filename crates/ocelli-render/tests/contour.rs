@@ -5,18 +5,8 @@
 
 use ocelli_core::Pt;
 use ocelli_render::{
-    BlendMode,
-    ContourDrawError,
-    ContourView,
-    Dirty,
-    FrameOutcome,
-    GraphResources,
-    Pass,
-    Recovered,
-    RenderGraph,
-    SegPass,
-    StoredRoute,
-    ViewportId,
+    BlendMode, ContourDrawError, ContourView, Dirty, FrameOutcome, GraphResources, Pass, Recovered,
+    RenderGraph, SegPass, StoredRoute, ViewportId,
 };
 use ocelli_seg::{
     Contour, ContourGeometricType, LabelColourLut, PlaneFrame, Representation, Rgba8,
@@ -209,8 +199,8 @@ fn shown_contour_matches_the_presenter() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::LabelmapEdgeProjection,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => return,
     };
@@ -228,8 +218,8 @@ fn shown_contour_matches_the_presenter() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) {
+        StoredRoute::PreApplied,
+    ) {
         Ok(id) => id,
         Err(_) => return,
     };

@@ -155,13 +155,16 @@ fn tabled_route(first: i32, count: u32, slope: f32, intercept: f32) -> RouteFixt
     let height = usize::try_from(count.div_ceil(MODALITY_FOLD)).unwrap_or(1);
     let width = usize::try_from(MODALITY_FOLD).unwrap_or(1);
     let mut table = vec![0.0_f32; width.saturating_mul(height)];
-    fill_modality_table(
+    let filled = fill_modality_table(
         StoredRoute::Tabled { first, count },
         slope,
         intercept,
         &mut table,
-    )
-    .expect("the fixture declares a legal container");
+    );
+    assert!(
+        filled.is_ok(),
+        "the fixture declares a legal container: {filled:?}"
+    );
     RouteFixture {
         route: ModalityRoute {
             tabled: 1,
@@ -308,7 +311,11 @@ fn dispatch_routed(
         contents: bytemuck::bytes_of(&fixture.route),
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    assert_eq!(route_uniform.size(), 16, "the route uniform is not 16 bytes");
+    assert_eq!(
+        route_uniform.size(),
+        16,
+        "the route uniform is not 16 bytes"
+    );
 
     let fold = usize::try_from(fixture.route.fold).unwrap_or(1);
     let (width, height) = if fixture.route.tabled != 0 {
@@ -1385,7 +1392,12 @@ fn the_flag_zero_route_returns_its_input_bits_unchanged() {
         fn_kind: 1,
         invert: 0,
     };
-    let probed = stage_one_on_gpu(&context, params, &identity_route(), &[from_bits(0x44E7_C30D)]);
+    let probed = stage_one_on_gpu(
+        &context,
+        params,
+        &identity_route(),
+        &[from_bits(0x44E7_C30D)],
+    );
     assert_eq!(
         value(&probed, 0).to_bits(),
         0x44E7_C30D,

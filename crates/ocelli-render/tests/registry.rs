@@ -6,27 +6,9 @@
 
 use ocelli_core::Pt;
 use ocelli_render::{
-    BlendMode,
-    ContourDrawError,
-    ContourView,
-    Dirty,
-    FrameOutcome,
-    GraphError,
-    GraphResources,
-    LabelmapDrawError,
-    Pass,
-    RayAxis,
-    Recovered,
-    RenderGraph,
-    SegPass,
-    SlabPass,
-    StackPass,
-    StoredRoute,
-    SurfaceDrawError,
-    SurfaceView,
-    ViewportId,
-    VoiParams,
-    VolumePass,
+    BlendMode, ContourDrawError, ContourView, Dirty, FrameOutcome, GraphError, GraphResources,
+    LabelmapDrawError, Pass, RayAxis, Recovered, RenderGraph, SegPass, SlabPass, StackPass,
+    StoredRoute, SurfaceDrawError, SurfaceView, ViewportId, VoiParams, VolumePass,
 };
 use ocelli_seg::{
     Contour, ContourGeometricType, LabelColourLut, LabelGrid, LabelStyle, PlaneFrame,
@@ -260,8 +242,8 @@ fn overlay(context: &ocelli_render::GpuContext, graph: &mut RenderGraph) -> Opti
             Pass::SegOverlay(SegPass {
                 blend: BlendMode::Composite,
             }),
-        StoredRoute::PreApplied,
-)
+            StoredRoute::PreApplied,
+        )
         .ok()
 }
 
@@ -313,8 +295,8 @@ fn a_stack_has_no_representation() {
             voi: voi(),
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) else {
+        StoredRoute::PreApplied,
+    ) else {
         return;
     };
     assert_eq!(
@@ -340,8 +322,8 @@ fn a_stack_has_no_representation() {
             axis: RayAxis::Slice,
             from_far: false,
         }),
-    StoredRoute::PreApplied,
-) else {
+        StoredRoute::PreApplied,
+    ) else {
         return;
     };
     assert_eq!(
@@ -357,8 +339,8 @@ fn a_stack_has_no_representation() {
             blend: BlendMode::Composite,
             voi: voi(),
         }),
-    StoredRoute::PreApplied,
-) else {
+        StoredRoute::PreApplied,
+    ) else {
         return;
     };
     assert_eq!(
@@ -427,8 +409,8 @@ fn the_matching_show_uploads() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) else {
+        StoredRoute::PreApplied,
+    ) else {
         return;
     };
     let colours = lut();
@@ -572,8 +554,8 @@ fn recovery_keeps_the_choice_and_drops_the_texture() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
-) else {
+        StoredRoute::PreApplied,
+    ) else {
         return;
     };
     assert_eq!(

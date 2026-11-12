@@ -1936,11 +1936,7 @@ impl RenderGraph {
         let slab_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("ocelli slab uniform"),
-                entries: &[
-                    uniform_binding(0),
-                    uniform_binding(1),
-                    texture_binding(2),
-                ],
+                entries: &[uniform_binding(0), uniform_binding(1), texture_binding(2)],
             });
         let slab_value = wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -2078,17 +2074,18 @@ impl RenderGraph {
         route_decision(&pass, route).map_err(|_| GraphError::RouteInvalid)?;
         let voi = voi_of(&pass);
         let id = self.registry.register(pass, route)?;
-        let slot = self.create_gpu_slot(
-            ctx,
-            target,
-            source,
-            (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
-            None,
-            None,
-            route,
-            STORED_FORMAT,
-        )
-        .map_err(|_| GraphError::RouteInvalid)?;
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                source,
+                (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
+                None,
+                None,
+                route,
+                STORED_FORMAT,
+            )
+            .map_err(|_| GraphError::RouteInvalid)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2120,6 +2117,9 @@ impl RenderGraph {
     /// for a refused route declaration. Nothing is registered in those
     /// cases. [`UploadError::CapacityExhausted`] beyond the capacity fixed at
     /// creation, changing no existing slot.
+    // The route is the plan's final parameter and the rest are the existing
+    // registration shape, so the width is the API, not an accident.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_stored(
         &mut self,
         ctx: &GpuContext,
@@ -2178,6 +2178,9 @@ impl RenderGraph {
         Ok(id)
     }
 
+    // One argument per GPU object the slot owns, which is what a creation
+    // function names.
+    #[allow(clippy::too_many_arguments)]
     fn create_gpu_slot(
         &self,
         ctx: &GpuContext,
@@ -2215,7 +2218,8 @@ impl RenderGraph {
         });
         let (route_uniform, modality_table) =
             create_route_state(device, ctx.queue(), route, voi, table_format)?;
-        let modality_table_view = modality_table.create_view(&wgpu::TextureViewDescriptor::default());
+        let modality_table_view =
+            modality_table.create_view(&wgpu::TextureViewDescriptor::default());
         let params = colour
             .as_ref()
             .map(|held| held.params)
@@ -2742,10 +2746,10 @@ impl RenderGraph {
                 table_format,
             )?;
             self.modality_uploads += 1;
-            if content == ContentKind::PreApplied {
-                if let Some(state) = self.registry.state_mut(id) {
-                    state.content_stale = true;
-                }
+            if content == ContentKind::PreApplied
+                && let Some(state) = self.registry.state_mut(id)
+            {
+                state.content_stale = true;
             }
         }
         if matches!(declared, StoredRoute::PreApplied) && rescale_changed {
@@ -2802,8 +2806,14 @@ impl RenderGraph {
             ctx.device().limits().max_texture_dimension_2d,
         )
         .map_err(|_| GraphError::RouteInvalid)?;
-        write_stored_samples(ctx.queue(), &slot.modality_table, upload, table_format, &data)
-            .map_err(|_| GraphError::RouteInvalid)
+        write_stored_samples(
+            ctx.queue(),
+            &slot.modality_table,
+            upload,
+            table_format,
+            &data,
+        )
+        .map_err(|_| GraphError::RouteInvalid)
     }
 
     /// Write the CSS camera and the device pixel ratio, and mark the camera dirty.
@@ -3222,7 +3232,9 @@ impl RenderGraph {
             .and_then(Option::as_ref)
             .ok_or(UploadError::NotRebound)?;
         match decision {
-            UploadContent::Raw { flip_back, first, .. } => {
+            UploadContent::Raw {
+                flip_back, first, ..
+            } => {
                 if *flip_back {
                     ctx.queue().write_buffer(
                         &slot.route_uniform,
@@ -3260,7 +3272,9 @@ impl RenderGraph {
         }
         if let Some(state) = self.registry.state_mut(id) {
             match decision {
-                UploadContent::Raw { kind, flip_back, .. } => {
+                UploadContent::Raw {
+                    kind, flip_back, ..
+                } => {
                     state.content = *kind;
                     state.staged = None;
                     state.content_stale = false;
@@ -4971,6 +4985,9 @@ fn pre_apply_slab(image: &SlabImage, slope: f32, intercept: f32) -> SlabImage {
     applied
 }
 
+// One argument per resource the staging binds, which is what a staging
+// function names.
+#[allow(clippy::too_many_arguments)]
 fn stage_slab(
     ctx: &GpuContext,
     uniform_layout: &wgpu::BindGroupLayout,
@@ -5507,12 +5524,12 @@ mod tests {
         CompiledKey, Dirty, Registry, SlotState, aligned_row_bytes, pipeline_index,
         slab_mask_bytes, slab_value_bytes,
     };
-    use crate::voi::StoredRoute;
     use crate::caps::Tier;
     use crate::graph::{
         BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph,
         Upload, UploadError, ViewportId, VolumePass,
     };
+    use crate::voi::StoredRoute;
     use ocelli_volume::{PlaneSample, SlabImage};
 
     fn slab_of(width: u32, height: u32, depth: u32, absent_at: (u32, u32)) -> SlabImage {
@@ -5837,8 +5854,8 @@ mod tests {
 #[cfg(test)]
 mod route_tests {
     use super::{
-        ContentKind, EffectiveRoute, RouteError, SlabPass, StackPass, StoredRoute, brick_slot_count,
-        modality_table_height, route_decision,
+        ContentKind, EffectiveRoute, RouteError, SlabPass, StackPass, StoredRoute,
+        brick_slot_count, modality_table_height, route_decision,
     };
     use crate::graph::{BlendMode, Pass, SegPass};
 
@@ -5959,17 +5976,14 @@ mod route_tests {
         };
         assert!(matches!(
             tabled,
-            StoredRoute::Tabled { first: 0, count: 256 }
+            StoredRoute::Tabled {
+                first: 0,
+                count: 256
+            }
         ));
         // The mapping is a match on the declaration, so the arms are pinned
         // by construction; this asserts the discriminants stay distinct.
-        assert_ne!(
-            ContentKind::RawIntegral,
-            ContentKind::RawFractional
-        );
-        assert_ne!(
-            EffectiveRoute::Tabled,
-            EffectiveRoute::PreApplied
-        );
+        assert_ne!(ContentKind::RawIntegral, ContentKind::RawFractional);
+        assert_ne!(EffectiveRoute::Tabled, EffectiveRoute::PreApplied);
     }
 }

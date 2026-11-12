@@ -46,7 +46,15 @@ fn session() -> Option<(ocelli_render::ResolvedAdapter, ocelli_render::GpuContex
 /// A chain over one rescale pair and one LINEAR_EXACT window.
 fn pair_chain(slope: u32, intercept: u32, center: f32, width: f32) -> LutChain {
     let modality = ModalityTransform::new(None, Some(from_bits(slope)), Some(from_bits(intercept)));
-    let voi = VoiTransform::new(None, &[center], &[width], 0, VoiFunction::LinearExact, 0.0, 255.0);
+    let voi = VoiTransform::new(
+        None,
+        &[center],
+        &[width],
+        0,
+        VoiFunction::LinearExact,
+        0.0,
+        255.0,
+    );
     assert!(modality.is_ok() && voi.is_ok());
     let (Ok(modality), Ok(voi)) = (modality, voi) else {
         unreachable!("asserted immediately above")
@@ -192,24 +200,43 @@ fn require_frame(outcome: FrameOutcome) {
 
 fn palette_lut() -> PaletteColorLut {
     // Two entries mapped from stored 8: the first texel red, the second blue.
-    let red = LutDescriptor::new(2, 8, 8, vec![255.0, 0.0]).expect("a two-entry red channel");
-    let green = LutDescriptor::new(2, 8, 8, vec![0.0, 0.0]).expect("a two-entry green channel");
-    let blue = LutDescriptor::new(2, 8, 8, vec![0.0, 255.0]).expect("a two-entry blue channel");
-    PaletteColorLut::new(red, green, blue).expect("a palette descriptor triple")
+    let red = LutDescriptor::new(2, 8, 8, vec![255.0, 0.0]);
+    assert!(red.is_ok(), "a two-entry red channel: {red:?}");
+    let green = LutDescriptor::new(2, 8, 8, vec![0.0, 0.0]);
+    assert!(green.is_ok(), "a two-entry green channel: {green:?}");
+    let blue = LutDescriptor::new(2, 8, 8, vec![0.0, 255.0]);
+    assert!(blue.is_ok(), "a two-entry blue channel: {blue:?}");
+    let (Ok(red), Ok(green), Ok(blue)) = (red, green, blue) else {
+        unreachable!("asserted immediately above")
+    };
+    let triple = PaletteColorLut::new(red, green, blue);
+    assert!(triple.is_ok(), "a palette descriptor triple: {triple:?}");
+    match triple {
+        Ok(built) => built,
+        Err(_) => unreachable!("asserted immediately above"),
+    }
 }
 
 fn palette_colour() -> ColourLut {
-    ColourLut::palette(
+    let baked = ColourLut::palette(
         palette_lut(),
         PhotometricInterpretation::PaletteColor,
         IccProfilePresence::Absent,
-    )
-    .expect("the palette bakes")
+    );
+    assert!(baked.is_ok(), "the palette bakes: {baked:?}");
+    match baked {
+        Ok(built) => built,
+        Err(_) => unreachable!("asserted immediately above"),
+    }
 }
 
 fn preset_colour() -> ColourLut {
-    ColourLut::preset(PresetId::Grey, PhotometricInterpretation::Monochrome2)
-        .expect("the grey preset bakes")
+    let baked = ColourLut::preset(PresetId::Grey, PhotometricInterpretation::Monochrome2);
+    assert!(baked.is_ok(), "the grey preset bakes: {baked:?}");
+    match baked {
+        Ok(built) => built,
+        Err(_) => unreachable!("asserted immediately above"),
+    }
 }
 
 /// **AC8, the pre-applied route through the graph, pinned.**
@@ -238,7 +265,12 @@ fn the_pre_applied_route_draws_the_hand_displays() {
         Ok(graph) => graph,
         Err(_) => return,
     };
-    let chain = pair_chain(SLOPE_A, INTERCEPT_A, from_bits(0x44E7_C333), from_bits(0x3C23_D70A));
+    let chain = pair_chain(
+        SLOPE_A,
+        INTERCEPT_A,
+        from_bits(0x44E7_C333),
+        from_bits(0x3C23_D70A),
+    );
     let (view, texture) = target(context.device(), 2);
     let viewport = match graph.register_stored(
         &context,
@@ -261,7 +293,10 @@ fn the_pre_applied_route_draws_the_hand_displays() {
             .is_ok()
     );
     require_frame(graph.tick(&context));
-    assert_eq!(readback(&context, &texture, 2), vec![9, 9, 9, 255, 12, 12, 12, 255]);
+    assert_eq!(
+        readback(&context, &texture, 2),
+        vec![9, 9, 9, 255, 12, 12, 12, 255]
+    );
 }
 
 /// **AC6, the counters.**
@@ -457,7 +492,11 @@ fn the_route_refusals_fire_and_preserve_the_previous_state() {
         Ok(id) => id,
         Err(error) => unreachable!("the tabled registration fits: {error:?}"),
     };
-    assert!(graph.select_colour_lut(&context, &adapter, fractional, &palette_colour()).is_ok());
+    assert!(
+        graph
+            .select_colour_lut(&context, &adapter, fractional, &palette_colour())
+            .is_ok()
+    );
     assert!(
         graph
             .upload_stored(&context, &adapter, fractional, 1, 1, &[2371.5])
@@ -529,10 +568,7 @@ fn the_ray_binds_the_declared_container_and_refuses_a_disagreement() {
         level: 0,
         brick: coord,
     };
-    let bricks = [ocelli_render::VolumeBrick {
-        key: &key,
-        coord,
-    }];
+    let bricks = [ocelli_render::VolumeBrick { key: &key, coord }];
     let ray_source = || ocelli_render::VolumeRaySource {
         bricks: &bricks,
         edge: volume.brick_grid().edge,
@@ -563,7 +599,11 @@ fn the_ray_binds_the_declared_container_and_refuses_a_disagreement() {
         Ok(id) => id,
         Err(error) => unreachable!("the ray registration fits: {error:?}"),
     };
-    assert!(graph.bind_volume_ray(&context, &adapter, agreeing, ray_source()).is_ok());
+    assert!(
+        graph
+            .bind_volume_ray(&context, &adapter, agreeing, ray_source())
+            .is_ok()
+    );
     // The disagreeing declarations refuse.
     let (view, _texture) = target(context.device(), 1);
     let wrong_container = match graph.register(
@@ -663,18 +703,30 @@ fn the_ortho_flip_pre_applies_fractional_and_flips_back_on_integral() {
     };
     let chain = {
         let modality = ModalityTransform::new(None, Some(2.0), Some(-1024.0));
-        let voi = VoiTransform::new(None, &[3719.0], &[2.0], 0, VoiFunction::LinearExact, 0.0, 255.0);
+        let voi = VoiTransform::new(
+            None,
+            &[3719.0],
+            &[2.0],
+            0,
+            VoiFunction::LinearExact,
+            0.0,
+            255.0,
+        );
         assert!(modality.is_ok() && voi.is_ok());
         let (Ok(modality), Ok(voi)) = (modality, voi) else {
             unreachable!("asserted immediately above")
         };
-        LutChain::new(
+        let built = LutChain::new(
             modality,
             voi,
             PhotometricInterpretation::Monochrome2,
             PresentationLutEvidence::Absent,
-        )
-        .expect("the slope-2 chain builds")
+        );
+        assert!(built.is_ok(), "the slope-2 chain builds: {built:?}");
+        match built {
+            Ok(chain) => chain,
+            Err(_) => unreachable!("asserted immediately above"),
+        }
     };
     let (view, texture) = target(context.device(), 2);
     let viewport = match graph.register_stored(
@@ -816,18 +868,30 @@ fn the_flip_rebuilds_the_table_and_the_flip_back_serves_it() {
     };
     let slope_two = {
         let modality = ModalityTransform::new(None, Some(2.0), Some(-1024.0));
-        let voi = VoiTransform::new(None, &[3719.0], &[2.0], 0, VoiFunction::LinearExact, 0.0, 255.0);
+        let voi = VoiTransform::new(
+            None,
+            &[3719.0],
+            &[2.0],
+            0,
+            VoiFunction::LinearExact,
+            0.0,
+            255.0,
+        );
         assert!(modality.is_ok() && voi.is_ok());
         let (Ok(modality), Ok(voi)) = (modality, voi) else {
             unreachable!("asserted immediately above")
         };
-        LutChain::new(
+        let built = LutChain::new(
             modality,
             voi,
             PhotometricInterpretation::Monochrome2,
             PresentationLutEvidence::Absent,
-        )
-        .expect("the slope-2 chain builds")
+        );
+        assert!(built.is_ok(), "the slope-2 chain builds: {built:?}");
+        match built {
+            Ok(chain) => chain,
+            Err(_) => unreachable!("asserted immediately above"),
+        }
     };
     let (view, texture) = target(context.device(), 2);
     let viewport = match graph.register_stored(
@@ -855,7 +919,11 @@ fn the_flip_rebuilds_the_table_and_the_flip_back_serves_it() {
     );
     let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, from_bits(0xC526_55EC), 2.0);
     assert!(graph.set_voi(&context, viewport, &pair_b).is_ok());
-    assert_eq!(graph.modality_uploads(), 1, "the rescale change rebuilt the table");
+    assert_eq!(
+        graph.modality_uploads(),
+        1,
+        "the rescale change rebuilt the table"
+    );
     require_frame(graph.tick(&context));
     assert_eq!(
         readback(&context, &texture, 2),
@@ -897,7 +965,12 @@ fn the_caller_view_recovers_through_rebind() {
         Ok(graph) => graph,
         Err(_) => return,
     };
-    let pair_a = pair_chain(SLOPE_A, INTERCEPT_A, from_bits(0x44E7_C333), from_bits(0x3C23_D70A));
+    let pair_a = pair_chain(
+        SLOPE_A,
+        INTERCEPT_A,
+        from_bits(0x44E7_C333),
+        from_bits(0x3C23_D70A),
+    );
     let (view, texture) = target(context.device(), 2);
     let viewport = match graph.register(
         &context,
@@ -913,7 +986,10 @@ fn the_caller_view_recovers_through_rebind() {
         Err(error) => unreachable!("the caller-view registration fits: {error:?}"),
     };
     require_frame(graph.tick(&context));
-    assert_eq!(readback(&context, &texture, 2), vec![9, 9, 9, 255, 12, 12, 12, 255]);
+    assert_eq!(
+        readback(&context, &texture, 2),
+        vec![9, 9, 9, 255, 12, 12, 12, 255]
+    );
 
     let pair_b = pair_chain(SLOPE_B, INTERCEPT_B, from_bits(0xC526_5588), 2.0);
     assert!(graph.set_voi(&context, viewport, &pair_b).is_ok());
@@ -949,7 +1025,11 @@ fn the_caller_view_recovers_through_rebind() {
             .0,
         ],
     );
-    assert!(graph.rebind(&context, viewport, rebound_view, fresh).is_ok());
+    assert!(
+        graph
+            .rebind(&context, viewport, rebound_view, fresh)
+            .is_ok()
+    );
     require_frame(graph.tick(&context));
     assert_eq!(
         readback(&context, &texture, 2),

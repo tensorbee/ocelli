@@ -395,18 +395,8 @@ pub fn read_stage_one_pairs(
     if !features.allowed_usages.contains(needed) {
         return Err(Section183Error::Unavailable);
     }
-    let pair_a = pair_chain(
-        0x3571_C0F8,
-        0x44E7_C2FC,
-        0x44E7_C30D,
-        0x38FF_FFD5,
-    )?;
-    let pair_b = pair_chain(
-        0x3D47_EF8C,
-        0xC52D_91AC,
-        0xBC9A_0000,
-        0x39D1_B717,
-    )?;
+    let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C30D, 0x38FF_FFD5)?;
+    let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xBC9A_0000, 0x39D1_B717)?;
     let mut graph = match RenderGraph::new(ctx, 2, COLOUR_FORMAT) {
         Ok(graph) => graph,
         Err(GraphError::TierCUnavailable) => return Err(Section183Error::TierC),
@@ -482,8 +472,12 @@ fn pair_chain(
     center: u32,
     width: u32,
 ) -> Result<LutChain, Section183Error> {
-    let modality = ModalityTransform::new(None, Some(f32::from_bits(slope)), Some(f32::from_bits(intercept)))
-        .map_err(|error| Section183Error::Readback(format!("{error:?}")))?;
+    let modality = ModalityTransform::new(
+        None,
+        Some(f32::from_bits(slope)),
+        Some(f32::from_bits(intercept)),
+    )
+    .map_err(|error| Section183Error::Readback(format!("{error:?}")))?;
     let voi = VoiTransform::new(
         None,
         &[f32::from_bits(center)],
@@ -531,7 +525,11 @@ fn pair_target(
 }
 
 /// Displays of one row, read through a mapped buffer on the 0 to 255 scale.
-fn read_row(ctx: &GpuContext, texture: &wgpu::Texture, width: u32) -> Result<Vec<f32>, Section183Error> {
+fn read_row(
+    ctx: &GpuContext,
+    texture: &wgpu::Texture,
+    width: u32,
+) -> Result<Vec<f32>, Section183Error> {
     let device = ctx.device();
     let row_bytes = 256_u32;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {

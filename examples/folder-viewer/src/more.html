@@ -384,7 +384,7 @@ present_cpu_plane(&amp;mut raster, &amp;view, &amp;presentation, &amp;axial, qua
     <h2>Slab</h2>
     <span class="status none">Not yet in the viewer. The library draws slabs on GPU tiers A and B. CPU reduction is unavailable.</span>
     <p>A slab collapses a thick block of slices into one image. Maximum intensity projection makes contrast filled vessels or lung nodules stand out, minimum intensity projection shows airways, and an average reduces noise.</p>
-    <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>.</p>
+    <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>, and it reduces modality values, because stage 1 is applied before the block is staged.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::BlendMode;
 use ocelli_volume::OrthoPlane;

@@ -12,18 +12,8 @@ use ocelli_pixel::{
     VoiFunction, VoiTransform,
 };
 use ocelli_render::{
-    BlendMode,
-    Dirty,
-    FrameOutcome,
-    Pass,
-    PassKind,
-    PipelineKey,
-    RenderGraph,
-    StackPass,
-    StoredRoute,
-    Tier,
-    ViewportId,
-    VoiParams,
+    BlendMode, Dirty, FrameOutcome, Pass, PassKind, PipelineKey, RenderGraph, StackPass,
+    StoredRoute, Tier, ViewportId, VoiParams,
 };
 
 #[test]
@@ -253,7 +243,7 @@ fn the_section_18_3_rows_render_through_the_graph() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(viewport) => viewport,
         Err(_) => unreachable!("registration must fit"),
@@ -296,7 +286,7 @@ fn an_uncompiled_blend_reports_unavailable_and_keeps_its_dirt() {
             voi,
             blend: BlendMode::Mip,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(viewport) => viewport,
         Err(_) => unreachable!("registration must fit"),
@@ -329,7 +319,7 @@ fn two_dirty_viewports_submit_once_and_a_mixed_frame_reports_later() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -343,7 +333,7 @@ fn two_dirty_viewports_submit_once_and_a_mixed_frame_reports_later() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -357,7 +347,7 @@ fn two_dirty_viewports_submit_once_and_a_mixed_frame_reports_later() {
             voi,
             blend: BlendMode::Mip,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -419,7 +409,7 @@ fn recovery_drops_viewport_objects_until_they_are_rebound() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -548,7 +538,7 @@ fn set_voi_is_the_single_uniform_route_and_rejects_in_order() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),
@@ -561,7 +551,7 @@ fn set_voi_is_the_single_uniform_route_and_rejects_in_order() {
         Pass::SegOverlay(ocelli_render::SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => unreachable!("registration must fit"),

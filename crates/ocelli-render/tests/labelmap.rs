@@ -11,22 +11,8 @@ use ocelli_pixel::{
     VoiTransform,
 };
 use ocelli_render::{
-    BlendMode,
-    Dirty,
-    FrameOutcome,
-    GraphError,
-    GraphResources,
-    LabelmapDrawError,
-    Pass,
-    PassKind,
-    PipelineKey,
-    Recovered,
-    RenderGraph,
-    SegPass,
-    StackPass,
-    StoredRoute,
-    Tier,
-    ViewportId,
+    BlendMode, Dirty, FrameOutcome, GraphError, GraphResources, LabelmapDrawError, Pass, PassKind,
+    PipelineKey, Recovered, RenderGraph, SegPass, StackPass, StoredRoute, Tier, ViewportId,
     VoiParams,
 };
 use ocelli_seg::{LabelColourLut, LabelGrid, LabelStyle, LabelmapError, Rgba8, present_labelmap};
@@ -280,7 +266,7 @@ fn shown_labelmap_matches_the_presenter() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => return,
@@ -359,7 +345,7 @@ fn labelmap_edge_uploads_the_outline_and_a_foreign_pass_does_not() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::LabelmapEdgeProjection,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => return,
@@ -394,7 +380,7 @@ fn labelmap_edge_uploads_the_outline_and_a_foreign_pass_does_not() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => return,
@@ -422,7 +408,7 @@ fn labelmap_edge_uploads_the_outline_and_a_foreign_pass_does_not() {
             voi,
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => return,
@@ -488,7 +474,7 @@ fn recovery_reuploads_a_labelmap_that_includes_background() {
         Pass::SegOverlay(SegPass {
             blend: BlendMode::Composite,
         }),
-    StoredRoute::PreApplied,
+        StoredRoute::PreApplied,
     ) {
         Ok(id) => id,
         Err(_) => return,

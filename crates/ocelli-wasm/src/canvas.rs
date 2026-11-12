@@ -274,10 +274,13 @@ fn attach_with_context(
         let Some(graph) = table.graph.as_mut() else {
             return Err("the render graph was not created".to_owned());
         };
-        match graph.register(context, target, source, stack_pass(),
+        match graph.register(
+            context,
+            target,
+            source,
+            stack_pass(),
             StoredRoute::PreApplied,
         ) {
-
             Ok(id) => id,
             Err(error) => return Err(error.to_string()),
         }

@@ -9,7 +9,7 @@
 
 use ocelli_render::{
     BlendMode, FrameOutcome, PassKind, PipelineFamily, PipelineKey, RenderGraph, Section183Error,
-    StageOnePairs, Tier, ViewportId, read_section_18_3, read_stage_one_pairs, resolve_native_gl,
+    Tier, ViewportId, read_section_18_3, read_stage_one_pairs, resolve_native_gl,
 };
 
 /// Not widened. Matches `tests/voi_shader.rs` and `tests/upload.rs`.

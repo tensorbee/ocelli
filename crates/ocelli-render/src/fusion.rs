@@ -510,8 +510,10 @@ pub(crate) struct FusionGpu {
     output: wgpu::TextureView,
     pet_voi: wgpu::Buffer,
     ct_voi: wgpu::Buffer,
-    route: wgpu::Buffer,
-    table: wgpu::Texture,
+    /// Kept alive so the bind groups' route binding stays valid.
+    _route: wgpu::Buffer,
+    /// Kept alive so the bind groups' stand-in table binding stays valid.
+    _table: wgpu::Texture,
     pet_params: wgpu::Buffer,
     ct_params: wgpu::Buffer,
     pet_stored: wgpu::Texture,
@@ -793,8 +795,22 @@ impl FusionGpu {
         let pet_window = pet_target.create_view(&wgpu::TextureViewDescriptor::default());
         let output = output_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_view = front_dummy.create_view(&wgpu::TextureViewDescriptor::default());
-        let window_uniforms = bind_uniforms(device, &uniform_layout, &pet_voi, &route, &table_view, &pet_params);
-        let fuse_uniforms = bind_uniforms(device, &uniform_layout, &ct_voi, &route, &table_view, &ct_params);
+        let window_uniforms = bind_uniforms(
+            device,
+            &uniform_layout,
+            &pet_voi,
+            &route,
+            &table_view,
+            &pet_params,
+        );
+        let fuse_uniforms = bind_uniforms(
+            device,
+            &uniform_layout,
+            &ct_voi,
+            &route,
+            &table_view,
+            &ct_params,
+        );
         let window_sources = bind_sources(
             device,
             &source_layout,
@@ -822,8 +838,8 @@ impl FusionGpu {
             output,
             pet_voi,
             ct_voi,
-            route,
-            table,
+            _route: route,
+            _table: table,
             pet_params,
             ct_params,
             pet_stored,
@@ -938,11 +954,13 @@ fn same_samples(held: &FusionStamp, next: &FusionStamp) -> bool {
         && held.geometry_b == next.geometry_b
         && held.plane == next.plane
         // A rescale change re-packs the planes, because the staged bytes
-        // were computed with the old pair.
-        && held.voi_a.slope == next.voi_a.slope
-        && held.voi_a.intercept == next.voi_a.intercept
-        && held.voi_b.slope == next.voi_b.slope
-        && held.voi_b.intercept == next.voi_b.intercept
+        // were computed with the old pair. The pairs are compared as bits,
+        // because a changed pair is a bit change and nothing here wants an
+        // epsilon.
+        && held.voi_a.slope.to_bits() == next.voi_a.slope.to_bits()
+        && held.voi_a.intercept.to_bits() == next.voi_a.intercept.to_bits()
+        && held.voi_b.slope.to_bits() == next.voi_b.slope.to_bits()
+        && held.voi_b.intercept.to_bits() == next.voi_b.intercept.to_bits()
 }
 
 fn params_of(opacity_pet: f32, opacity_ct: f32, table: Option<&[Rgb]>) -> FusionParams {
