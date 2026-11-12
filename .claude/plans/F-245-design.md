@@ -387,3 +387,7 @@ The route approved in principle adds the existing workspace flate2 only as a DEV
 **Registration.** The new browser module is registered in `bin/ocelli.sh` under `viewer-browser` by this story, as the approved write map already said. It never depended on F-268.
 
 **AC8.** The plan's procedure requires an otherwise idle host. The run on a host that was not idle is a disclosed observation, not AC8 evidence, and AC8 stays owed until an idle run is taken.
+
+## Lead amendment after review pass 6, 2026-11-12
+
+**In-source release tests ship inert.** The staged body is held in a private field, so any seam that observes its release lives in the class and ships with it. The release is observed through vitest in-source blocks guarded by `import.meta.vitest`, which no browser, Node host or consumer bundler sets, so the blocks are inert in the published package. The seam they use reports only whether a staged body is held, a boolean, and never returns the body, its bytes or its length. No packaging check or gate is changed for this, and the inert block is recorded here as a deliberate choice rather than an implementer's call.
