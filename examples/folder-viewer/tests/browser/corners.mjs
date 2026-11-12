@@ -21,8 +21,10 @@
 //               per-frame MR Timing Sequence names Repetition Time 500 and
 //               whose per-frame MR Echo Sequence names Effective Echo Time
 //               30, must name its own TR and TE lines. They come only from
-//               the reply headers, so a header name the page mistypes or a
-//               swapped repetitionTime and echoTime leaves them out.
+//               the reply headers, so a header name the page mistypes
+//               leaves its line out, and a swapped repetitionTime and
+//               echoTime shows the wrong values, TR 30 ms and TE 500 ms,
+//               with the wanted lines missing.
 //
 // The files are written by this script into a temporary folder, carry no
 // patient attributes, and are removed afterwards. It starts the viewer with
