@@ -1580,6 +1580,13 @@ pub struct RenderGraph {
     /// This is not a [`Pass`]. A viewport with no fusion binding keeps its
     /// stack pipeline. The tick encodes this view in the same encoder.
     fusion: Option<FusionGpu>,
+    /// Viewport indices whose `surface_bound` flag a grouping fixture
+    /// placed without an attached surface. The tick's grouping assert
+    /// exempts exactly these, because the fixture seam is the plan's own
+    /// sanction and any other flag without an object is a violated
+    /// invariant.
+    #[cfg(test)]
+    test_surface_exemptions: Vec<usize>,
 }
 
 /// Blend compiled for the stack and the volume ray.
@@ -1813,6 +1820,8 @@ impl RenderGraph {
             bricks: BrickResidency::new(),
             brick_stamps: BTreeMap::new(),
             fusion: None,
+            #[cfg(test)]
+            test_surface_exemptions: Vec::new(),
         })
     }
 
@@ -4611,6 +4620,34 @@ impl RenderGraph {
         }
     }
 
+    /// Place `SlotState::surface_bound` for a grouping fixture.
+    ///
+    /// The fixtures hold no bound object, because a native surface needs a
+    /// window handle the harness cannot fabricate, and the plan sanctions
+    /// placing the flag through the registry. The tick's grouping assert
+    /// reads both directions, so a flag without an object is a violation
+    /// everywhere except this sanctioned seam: the helper records the index
+    /// so the assert exempts exactly the fixture placements.
+    #[cfg(test)]
+    fn place_surface_bound_for_fixture(&mut self, index: usize) {
+        if let Some(Some(state)) = self.registry.states.get_mut(index) {
+            state.surface_bound = true;
+        }
+        self.test_surface_exemptions.push(index);
+    }
+
+    /// Whether `index` is a sanctioned fixture placement of the bound flag.
+    #[cfg(test)]
+    fn surface_flag_exempt(&self, index: usize) -> bool {
+        self.test_surface_exemptions.contains(&index)
+    }
+
+    /// No fixture seam exists outside a test build, so nothing is exempt.
+    #[cfg(not(test))]
+    fn surface_flag_exempt(&self, _index: usize) -> bool {
+        false
+    }
+
     /// One frame tick, driven by the caller's requestAnimationFrame.
     ///
     /// Reads the device state once, encodes each dirty viewport once in
@@ -4629,20 +4666,25 @@ impl RenderGraph {
             return FrameOutcome::DeviceLost;
         }
         // The acquisition and the colour attachment read the attached
-        // surface and the grouping reads the bound flag, so an attached
-        // surface must be marked bound. `bind_surface` writes both together
-        // and the dead-device rebuild clears both together, which holds the
-        // reverse everywhere but the surface grouping fixture, where the
-        // flag is placed without an object by the plan's own sanction.
-        debug_assert!(self.surfaces.iter().enumerate().all(|(index, attached)| {
-            attached.is_none()
-                || self
+        // surface and the grouping reads the bound flag, so the two must
+        // agree in both directions: an attached surface is marked bound,
+        // and a marked bound viewport has an attached surface.
+        // `bind_surface` writes both together and the dead-device rebuild
+        // clears both together. The surface grouping fixture is the one
+        // sanctioned placement of the flag without an object, and its
+        // index is in the exemption set the placement helper records.
+        debug_assert!(
+            self.surfaces.iter().enumerate().all(|(index, attached)| {
+                let bound = self
                     .registry
                     .states
                     .get(index)
                     .and_then(Option::as_ref)
-                    .is_some_and(|state| state.surface_bound)
-        }));
+                    .is_some_and(|state| state.surface_bound);
+                (attached.is_some() == bound) || self.surface_flag_exempt(index)
+            }),
+            "surface grouping: an attached surface must be marked bound and a marked bound viewport must have an attached surface"
+        );
         let mut first_unavailable: Option<ViewportId> = None;
         let mut any_encodable = false;
         for (index, state) in self.registry.states.iter().enumerate() {
@@ -5986,14 +6028,17 @@ mod tests {
     /// first pass to draw into a freshly acquired surface texture in a
     /// frame clears it, because an acquired texture's contents are
     /// undefined. A bound viewport's pass is that first pass, so neither
-    /// its staleness nor its kind can turn the clear into a load. The
-    /// first two bound rows pass the exact arguments the encode path
-    /// passes, two false placeholders for grouping answers it never
-    /// computed, so the old choice, where a fresh bound slab loaded, is
-    /// red on the first row. The third bound row pins the branch against
-    /// a staleness the encode path never supplies for a bound viewport.
-    /// The unbound rows are the shared-target rule of the pass 2
-    /// amendment and the state table.
+    /// its staleness nor its kind can turn the clear into a load. This
+    /// unit test pins `frame_load_op`'s own branch rows. The first two
+    /// bound rows pass the exact arguments the encode path passes, two
+    /// false placeholders for grouping answers it never computed. The
+    /// third bound row passes a staleness the encode path never supplies
+    /// for a bound viewport, pinning the branch against it. The call site
+    /// that passes those arguments is pinned on the device by
+    /// `a_surface_bound_slab_groups_with_nothing_and_clears_when_stale`,
+    /// whose all-absent frame dies if the encode site passes grouping
+    /// answers instead of the bound flag. The unbound rows are the
+    /// shared-target rule of the pass 2 amendment and the state table.
     #[test]
     fn the_load_op_clears_the_first_pass_into_an_acquired_texture() {
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
@@ -6616,14 +6661,9 @@ mod surface_grouping_tests {
         assert_eq!(bound, ViewportId(0));
         // The state `bind_surface` writes for a bound viewport. No bound
         // object can exist in this harness, so the pass falls back to the
-        // registered view.
-        if let Some(Some(state)) = graph
-            .registry
-            .states
-            .get_mut(usize::try_from(bound.0).unwrap_or(usize::MAX))
-        {
-            state.surface_bound = true;
-        }
+        // registered view. The helper records the index in the exemption
+        // set the tick's grouping assert reads.
+        graph.place_surface_bound_for_fixture(usize::try_from(bound.0).unwrap_or(usize::MAX));
 
         let stored = graph.register_stored(
             &context,
@@ -6786,13 +6826,20 @@ mod surface_grouping_tests {
     /// The pan and the rescale change in one tick: the slab's pass encodes
     /// first and the stale stack's pass must clear, not load what the slab
     /// drew, which is the unfiltered-grouping kill on the slab path. After
-    /// the recovery, `set_voi` with pair B on the slab makes it stale
-    /// through its stamp's staged pair against the recorded pair, and its
-    /// clear-only pass is the first and only pass on its target, so the
-    /// readback is the clear colour. Under a forced-false staleness the
-    /// slab pass would load instead, which is the mutant this frame kills.
-    /// The stack does not encode, so the slab's staleness marks no
-    /// co-target.
+    /// the recovery, an all-absent re-stage of the bound slab runs while
+    /// the target still holds the stack's fresh composite: the mask
+    /// discards every fragment, so the pass writes nothing and the
+    /// readback is whatever the load op left. A call site that passed
+    /// grouping answers instead of the bound flag, or a bound branch that
+    /// loads for a slab, leaves the fresh composite standing there, which
+    /// is the mutant that frame kills. The pair-B frame after it pins the
+    /// derived staleness as an encoded clear-only pass: a rescale change
+    /// that failed to mark the slab dirty would report no pass at all. A
+    /// forced-false staleness is not killed in this fixture, because the
+    /// absent mask discards whatever its re-enabled draw writes, so that
+    /// mutant dies in `the_stale_slab_clears_and_recovers_on_a_restage`,
+    /// whose slab has present pixels. The stack does not encode at the
+    /// pair-B frame, so the slab's staleness marks no co-target.
     #[test]
     #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
     fn a_surface_bound_slab_groups_with_nothing_and_clears_when_stale() {
@@ -6850,14 +6897,9 @@ mod surface_grouping_tests {
         assert_eq!(bound, ViewportId(0));
         // The state `bind_surface` writes for a bound viewport. No bound
         // object can exist in this harness, so the pass falls back to the
-        // registered view.
-        if let Some(Some(state)) = graph
-            .registry
-            .states
-            .get_mut(usize::try_from(bound.0).unwrap_or(usize::MAX))
-        {
-            state.surface_bound = true;
-        }
+        // registered view. The helper records the index in the exemption
+        // set the tick's grouping assert reads.
+        graph.place_surface_bound_for_fixture(usize::try_from(bound.0).unwrap_or(usize::MAX));
 
         let stored = graph.register_stored(
             &context,
@@ -6948,10 +6990,55 @@ mod surface_grouping_tests {
             got = fresh[0]
         );
 
+        // The acquired-surface clear is pinned at the call site, not only
+        // in `frame_load_op`'s own rows, and this frame runs while T still
+        // holds the fresh composite. No sample is present, so the mask is
+        // all zeros and every fragment discards before any value load:
+        // the pass writes nothing, and the readback is whatever the load
+        // op left. A call site that passed grouping answers instead of the
+        // bound flag would load here, because the re-staged slab is fresh,
+        // and so would a bound branch that loads for a slab. Either way
+        // the readback is the fresh composite above and not the clear
+        // colour, which is the mutant this frame kills.
+        let absent = SlabImage {
+            width: 1,
+            height: 1,
+            step_mm: 2.5,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: 2,
+            samples: vec![PlaneSample::Absent, PlaneSample::Absent],
+        };
+        assert!(
+            graph
+                .show_slab(&context, &adapter, bound, &absent, BlendMode::Average)
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let absent_read = read_target(&context, &texture);
+        assert_eq!(
+            absent_read[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the fresh bound slab with no present sample did not clear its target: {got}",
+            got = absent_read[0]
+        );
+
         // Pair B on the slab: the staged pair is still pair A, so the
         // derived staleness holds and the clear-only pass is the first and
-        // only pass on its target this frame. Under a forced-false
-        // staleness the slab pass would load the stack's composite instead.
+        // only pass on its target this frame. The outcome pins the encode:
+        // a rescale change that failed to mark the slab dirty would report
+        // no pass at all. A forced-false staleness survives this frame,
+        // because the absent mask above discards whatever its re-enabled
+        // draw writes, and dies in
+        // `the_stale_slab_clears_and_recovers_on_a_restage`, whose slab
+        // has present pixels. A load mutant dies on the all-absent frame
+        // above and the test ends there, so this frame adds no load
+        // coverage.
         assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
         assert_eq!(
             graph.tick(&context),
@@ -6966,6 +7053,87 @@ mod surface_grouping_tests {
             0.0_f32.to_bits(),
             "the stale bound slab did not clear its target: {got}",
             got = restaled[0]
+        );
+    }
+
+    /// The grouping assert's reverse direction, driven through the real
+    /// tick.
+    ///
+    /// A mutant detach path that clears the attached surface and leaves
+    /// the flag ends in exactly the state this test places: a bound flag
+    /// with no object, outside the fixture exemption, because the
+    /// placement helper is the only sanctioned writer and this test does
+    /// not call it. The real tick must refuse that state, and does so in
+    /// a debug build, where the assert exists. The panic is caught rather
+    /// than expected with `#[should_panic]`, because a machine that
+    /// resolves tier C has no device to drive the tick with and must
+    /// report that it did not apply instead of failing.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn the_tick_refuses_a_bound_flag_placed_outside_the_fixture_seam() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // A renderable target, so the only panic this state can produce is
+        // the grouping assert and not a validation error from the pass
+        // falling back to a view that cannot be rendered into.
+        let target = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping assert target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let registered = graph.register(
+            &context,
+            target.create_view(&wgpu::TextureViewDescriptor::default()),
+            float_source(context.device(), context.queue(), 0.0),
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(registered) = registered else { return };
+
+        // The state a buggy detach leaves: the surface gone, the flag
+        // standing, and no exemption recorded, because the placement
+        // helper was not called.
+        if let Some(Some(state)) = graph
+            .registry
+            .states
+            .get_mut(usize::try_from(registered.0).unwrap_or(usize::MAX))
+        {
+            state.surface_bound = true;
+        }
+
+        let drove = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| graph.tick(&context)));
+        assert!(
+            drove.is_err(),
+            "the tick accepted a bound flag with no attached surface outside the fixture exemption"
         );
     }
 }
