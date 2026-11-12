@@ -1818,6 +1818,61 @@ it("releases a settled staged body when a cancel runs with no new intent", async
     provider.dispose();
   }
 });
+
+it("clears a staged body when a newer intent begins", async () => {
+  // The same masking applies one intent earlier. A newer fetch begins by
+  // clearing the stage, and from then on the gated readers refuse the old
+  // receipt through the generation the intent advanced, whether or not the
+  // body was dropped. The probe is the observation that survives, so the
+  // newer intent is held at the native route while it is read.
+  const raw = new Uint8Array([2, 7, 1, 8]);
+  const boundary = "f245-intent-clears-boundary";
+  const captured: CapturedCalls = { native: [], upstream: [] };
+  const held: HeldNative[] = [];
+  const provider = makeWadoProvider(
+    raw,
+    boundary,
+    async (call) => {
+      if (captured.native.length === 2) {
+        const heldCall = holdNative(call);
+        held.push(heldCall);
+        return heldCall.promise;
+      }
+      return new Response(JSON.stringify(await nativeInstanceEnvelope(call, boundary)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    captured,
+  );
+  try {
+    const staged = await provider.fetchSelectedInstance({
+      studyUid: STUDY_UID,
+      seriesUid: SERIES_UID,
+      instanceUid: INSTANCE_UID,
+    });
+    expect(provider[STAGED_BODY_PROBE]()).toBe(raw.byteLength);
+    const pending = provider.fetchSelectedInstance({
+      studyUid: STUDY_UID,
+      seriesUid: SERIES_UID,
+      instanceUid: INSTANCE_UID,
+    });
+    await vi.waitFor(() => expect(captured.native.length).toBe(2));
+    expect(provider[STAGED_BODY_PROBE]()).toBeNull();
+    expect(provider.readStagedInfo()).toBeNull();
+    expect(provider.takeStagedInstance(staged)).toBeNull();
+    const heldCall = held[0];
+    if (heldCall === undefined) throw new Error("held call missing");
+    heldCall.resolve(new Response(JSON.stringify(await nativeInstanceEnvelope(heldCall.call, boundary)), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    const settled = await pending;
+    expect(settled.generation).toBe(staged.generation + 1);
+  } finally {
+    provider.dispose();
+  }
+});
 });
 
 describe("WADO native 422 bounded error body", () => {

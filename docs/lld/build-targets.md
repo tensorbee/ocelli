@@ -935,11 +935,11 @@ environment. It is registered in the `viewer-browser` gate's module list in
 
 `examples/folder-viewer/tests/browser/launcher.mjs` is the launcher's browser
 control. It starts the viewer the way a user does, through `npm run dev`, with
-a private `CARGO_TARGET_DIR` under the repository's ignored `target/`, kept
-between runs so the debug build is incremental and distinct from the default
-`target/debug`, so a path under it can only be the one cargo's own compiler
-artifact named. The first run is a cold build of the whole graph, on the
-order of gigabytes under `target/`, and later runs are incremental. The
+a private `CARGO_TARGET_DIR` under the repository's ignored `target/`,
+distinct from the default `target/debug`, so a path under it can only be the
+one cargo's own compiler artifact named. The directory is kept between runs,
+so the first run is a cold build of the whole graph, on the order of
+gigabytes under `target/`, and later runs are incremental. The
 binary is also identified at the process layer: the pid listening on the
 launcher's port is resolved with `lsof` and its executable path is read with
 `ps -o command=`, and it must sit inside the private target directory, so a

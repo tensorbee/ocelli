@@ -412,10 +412,10 @@ async function main() {
     // The panel's first open starts loading the provider. A local source
     // chosen while that load is in flight is a release with no provider to
     // cancel, and the studies search that load returns must not write over
-    // the release's idle line. The library request is held so the window is
-    // deterministic, on a page of its own so the flow below keeps its
-    // footing: the checks this page already ran have finished that same
-    // load, so here it is still in flight when the panel opens.
+    // the release's idle line. The library request is held so the window
+    // is deterministic. The sequence runs on a page of its own: this
+    // page's checks have already finished that load, so there the panel
+    // opens with the provider ready and no window to catch.
     const libraryUrl = `${viewerOrigin}/lib/ocelli-core/index.js`;
     let librarySeen = 0;
     let releaseLibrary = () => {};
@@ -583,8 +583,10 @@ async function main() {
     // The reversed reply case with a non-cancellable fetch. The page's fetch
     // drops the signal, so the native POST survives the cancel and completes
     // on the real network through the real native parser, and the generation
-    // guard must refuse the stale result. A guard mutant would stage the old
-    // body and write the stale status here.
+    // guard must refuse the stale result. A guard mutant would write the
+    // stale status here, which the loop below is the observation of. The
+    // staged body itself is not readable after a cancel for the same
+    // generation reason, so no receipt check is added here.
     await page.evaluate(() => {
       const real = window.fetch.bind(window);
       window.fetch = (input, init) => real(input, init === undefined ? undefined : { ...init, signal: undefined });
@@ -626,10 +628,6 @@ async function main() {
         break;
       }
       await page.waitForTimeout(50);
-    }
-    const stagedAfterReversed = await page.evaluate(() => remoteProvider.readStagedInfo() === null);
-    if (!stagedAfterReversed) {
-      problems.push("the reversed native reply staged a body");
     }
     await page.unroute(`${viewerOrigin}/dicweb/instance`);
 
