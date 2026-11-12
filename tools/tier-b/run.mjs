@@ -48,6 +48,9 @@ const build = spawnSync(
   ],
   { stdio: "inherit", cwd: repo },
 );
+if (build.error) {
+  console.error(`wasm-pack build failed: ${build.error}`);
+}
 if (build.status !== 0) {
   console.error(`wasm-pack build failed with status ${build.status}`);
   process.exit(build.status ?? 3);

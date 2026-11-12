@@ -404,22 +404,28 @@ mod tests {
             "voi.wgsl grew an entry point, so it no longer composes"
         );
         assert!(!VOI_WGSL.contains("var<storage"));
-        // No binding above the reserved set, not merely no binding 3: a
-        // `@binding(4)` would collide with the consumer just the same. The
-        // reserved set is 0, the section 18.4 uniform, and 1 and 2, the
-        // route uniform and the folded table.
-        let highest = VOI_WGSL
+        // The reserved set is exact, not merely capped: 0 is the section
+        // 18.4 uniform, 1 the route uniform and 2 the folded table. A
+        // binding past 2 would collide with the consumer and a missing one
+        // would leave a reserved object unbound.
+        let mut bindings: Vec<u32> = VOI_WGSL
             .match_indices("@binding(")
             .filter_map(|(at, _)| {
                 let rest = VOI_WGSL.get(at + "@binding(".len()..)?;
                 let end = rest.find(')')?;
-                rest[..end].parse::<u32>().ok()
+                let value = rest[..end].parse::<u32>().ok()?;
+                // Declarations only: the file's own header names binding 0
+                // in prose, and prose is not a binding.
+                let after = rest.get(end + 1..)?.trim_start();
+                after.starts_with("var").then_some(value)
             })
-            .max()
-            .unwrap_or(0);
-        assert!(
-            highest <= 2,
-            "voi.wgsl binds {highest}, past the reserved 0, 1 and 2"
+            .collect();
+        bindings.sort_unstable();
+        bindings.dedup();
+        assert_eq!(
+            bindings,
+            vec![0, 1, 2],
+            "voi.wgsl must bind exactly 0, 1 and 2 and nothing else"
         );
         // The DECLARATIONS, not the binding attributes, which the file's own
         // header also names in prose when it explains what it reserves.
