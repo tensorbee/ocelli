@@ -6234,6 +6234,25 @@
         "F-266"
       ],
       "notes": "Filed by the S47 design round on 2026-11-11 when the operator narrowed F-266 to no checkout-root or /@fs reach. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved."
+    },
+    {
+      "fid": "F-282",
+      "eid": "E19.10",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "depends_eids": [
+        "E6.9"
+      ],
+      "story": "Dirt on one layer of a shared render target reaches every layer: when one viewport rendering into a texture shared with other viewports is redrawn, every viewport on that texture is redrawn in index order on the same frame, so a fresh slab is never wiped by a base layer that clears beneath it, with a fixture for each pass kind pairing",
+      "sprint": "S48",
+      "weeks": 1,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-235"
+      ],
+      "notes": "Filed by the F-235 implementation review pass 3 on 2026-11-12: after a stale state recovers through a re-upload only the uploaded viewport is dirty, which predates F-235. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved."
     }
   ]
 }
