@@ -100,10 +100,11 @@ slab shows the base layer beneath it, and a target holding only slabs never
 keeps a stale composite. A stale viewport alone on its target clears. The
 marking runs once per tick, after the frame is known to encode and before
 the surface textures are acquired, so a marked surface viewport acquires in
-the same frame. A frame that encodes nothing marks nothing, and the target
-keeps the composite of the last encoded frame. A slab's staleness is
-derived, its stamp's staged pair against the pass's recorded pair, and a
-stack's or a caller view's is the content flag a rescale change sets.
+the same frame. A tick that returns before the encode marks nothing, and
+the target keeps the composite of the last encoded frame. A slab's
+staleness is derived, its stamp's staged pair against the pass's recorded
+pair, and a stack's or a caller view's is the content flag a rescale change
+sets.
 
 **VOI has one write route.** `set_voi` writes the thirty-two uniform bytes
 and sets the VOI flag together, and `mark_dirty` refuses a VOI mark. A window

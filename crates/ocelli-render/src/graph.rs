@@ -2692,10 +2692,10 @@ impl RenderGraph {
     /// The uniform's rescale follows the effective route: the real pair
     /// while the table serves, identity while the texture holds modality
     /// values. The stale content feeds the frame's shared-target rule: on
-    /// every tick that encodes while the staleness lasts, the graph marks
-    /// every viewport rendering into the same target dirty, the first pass
-    /// encoded into the target clears it, and the stale viewport's own pass
-    /// draws nothing.
+    /// every tick that reaches the frame's encode while the staleness
+    /// lasts, the graph marks every viewport rendering into the same target
+    /// dirty, the first pass encoded into the target clears it, and the
+    /// stale viewport's own pass draws nothing.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -4666,8 +4666,7 @@ impl RenderGraph {
     ///
     /// This runs after the frame is known to encode and before the surface
     /// textures are acquired, so a marked surface viewport acquires in the
-    /// same frame. A frame that encodes nothing marks nothing, and the
-    /// target keeps the composite of the last encoded frame.
+    /// same frame. A tick that returns before the encode marks nothing.
     fn mark_shared_targets_stale(&mut self) {
         let RenderGraph { registry, gpu, .. } = self;
         for (index, held) in gpu.iter().enumerate() {
