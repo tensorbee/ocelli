@@ -587,6 +587,13 @@ const config = tseslint.config(
         seriesOf: "readonly",
         cacheKey: "readonly",
         PLAIN_VIEW: "readonly",
+        // F-204's one-to-one.mjs reads the page's fitScale to compute the
+        // clamp expectations from the measured cell, and its in-page decode
+        // and init-script callback use the Image and MediaQueryList
+        // constructors.
+        fitScale: "readonly",
+        Image: "readonly",
+        MediaQueryList: "readonly",
       },
     },
   },

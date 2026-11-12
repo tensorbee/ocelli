@@ -725,6 +725,7 @@
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
   <symbol id="i-headers" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/></symbol>
   <symbol id="i-fit" viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1"/><path d="M3 3l3.5 3.5M21 3l-3.5 3.5M3 21l3.5-3.5M21 21l-3.5-3.5"/></symbol>
+  <symbol id="i-one" viewBox="0 0 24 24"><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M3 3h4M3 3v4M21 3h-4M21 3v4M3 21h4M3 21v-4M21 21h-4M21 21v-4"/></symbol>
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/></symbol>
   <symbol id="i-full" viewBox="0 0 24 24"><path d="M3.5 8.5v-5h5M15.5 3.5h5v5M20.5 15.5v5h-5M8.5 20.5h-5v-5"/></symbol>
   <symbol id="i-left" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15"/></symbol>
@@ -795,6 +796,7 @@
   <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span><span class="badge" id="headers-badge" hidden></span></button>
   <span class="sep"></span>
   <button type="button" class="icon" id="fit" aria-label="Fit" data-key="0"><svg class="i"><use href="#i-fit"/></svg><span class="sr">Fit</span></button>
+  <button type="button" class="icon" id="one-to-one" aria-label="One to one" data-key="\"><svg class="i"><use href="#i-one"/></svg><span class="sr">One to one</span></button>
   <button type="button" class="icon" id="reset" aria-label="Reset" data-key="Shift R"><svg class="i"><use href="#i-reset"/></svg><span class="sr">Reset</span></button>
   <button type="button" class="icon" id="fullscreen" aria-label="Full screen" data-key="Shift F"><svg class="i"><use href="#i-full"/></svg><span class="sr">Full screen</span></button>
 </div>
@@ -924,6 +926,7 @@
       <kbd>= −</kbd><span>Zoom in or out</span>
       <kbd>1 to 9</kbd><span>Window row</span>
       <kbd>0</kbd><span>Fit</span>
+      <kbd>\</kbd><span>One to one</span>
       <kbd>Del</kbd><span>Remove the selected mark</span>
       <kbd>Esc</kbd><span>Clear the selection</span>
       <kbd>[ ]</kbd><span>Hide or show a side panel</span>
@@ -1022,6 +1025,7 @@ const SENTENCE = {
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
+  "one-to-one": "Show one stored pixel on one device pixel. A stored frame smaller than the device pixel ratio keeps its view and the corner says so.",
   reset: "Put the image back to the first usable window in the file, or to the automatic window when it stores none, and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
   invert: "Reverse the display, each channel on a colour image. The pixels in the file are not changed.",
@@ -1364,12 +1368,16 @@ function blankViewport(cell) {
     cell,
     seriesKey: "",
     viewIndex: 0,
-    fitMode: true, scale: 1, panX: 0, panY: 0,
+    zoomMode: "fit", scale: 1, panX: 0, panY: 0,
     rotation: 0, flipH: false, flipV: false,
     overrideWindow: null, draftWindow: null, activePreset: null, windowIndex: 0, invert: false,
     tileMode: false,
     imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
+    // F-204. The translate last written by the layout, and the refusal
+    // reason a named refusal shows in the corner line until its condition
+    // clears.
+    panAppliedX: 0, panAppliedY: 0, zoomRefusal: "",
     // F-225. The file of the last image this viewport drew.
     paintedFile: null,
     loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
@@ -1637,6 +1645,7 @@ for (const name of TOOLS) {
 }
 document.getElementById("reset").addEventListener("click", () => resetView(activeViewport()));
 document.getElementById("fit").addEventListener("click", () => fitView(activeViewport()));
+document.getElementById("one-to-one").addEventListener("click", () => oneToOneView(activeViewport()));
 document.getElementById("fullscreen").addEventListener("click", toggleFull);
 document.getElementById("invert").addEventListener("click", () => {
   const vp = activeViewport();
@@ -1792,6 +1801,19 @@ function relayout() {
     for (const node of vp.dom.tiles.querySelectorAll("canvas")) sizeTile(node);
   }
 }
+
+// F-204. A device pixel ratio change with an unchanged CSS viewport fires
+// neither existing listener, so the page arms a resolution query for the
+// live ratio and re-arms it inside its own handler. Each change re-lays out
+// through relayout, which sets layoutDirty and bypasses the stamp.
+function armRatioWatcher() {
+  const query = window.matchMedia("(resolution:" + window.devicePixelRatio + "dppx)");
+  query.addEventListener("change", () => {
+    armRatioWatcher();
+    relayout();
+  }, { once: true });
+}
+armRatioWatcher();
 document.addEventListener("pointerover", (event) => {
   const node = event.target.closest("[data-sentence], [id]");
   if (!node) return;
@@ -2515,7 +2537,7 @@ function loadSeries(vp, key) {
   vp.seriesKey = key;
   vp.shownWindow = null;
   vp.paletteFallback = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.layoutDirty = true;
   vp.overrideWindow = null;
   vp.draftWindow = null;
@@ -3471,6 +3493,9 @@ function drawGrey(vp, grey) {
   }
   syncStage(vp);
   if (!vp.tileMode) {
+    // F-204. A frame change clears the refusal reason before the layout, so
+    // a reason can never outlive the frame it was refused on.
+    vp.zoomRefusal = "";
     layoutViewport(vp);
     const drawn = notes.get(noteKey(currentImage(vp)));
     const mine = vp.cell === activeCell && (draft || selected != null);
@@ -3586,12 +3611,53 @@ function fitScale(vp) {
   return Math.min(rect.width / width, rect.height / height);
 }
 
+// F-204. The ratio's numerator, the integer the device pixel ratio's
+// rational form repeats over, or 0 when no small denominator matches. The
+// probe ratios such as 1.38 store as f32 values whose rational form has no
+// small numerator, and those ratios run no byte row.
+function ratioPeriod(ratio) {
+  for (let denominator = 1; denominator <= 64; denominator += 1) {
+    const scaled = ratio * denominator;
+    if (Math.abs(scaled - Math.round(scaled)) < 1e-9) return Math.round(scaled);
+  }
+  return 0;
+}
+
+// F-204. The translate that lands the painted device origin on k, the
+// integer nearest the panned origin whose sum with the painted device
+// extent is a multiple of the ratio's numerator. The congruence is what
+// makes the painted extent exactly the stored count under the measured
+// edge rounding, and ties go toward positive infinity. A fractional
+// extent, which the resampled axis of an anisotropic frame has, carries no
+// exactness claim and takes the plain nearest integer.
+function oneToOneTranslate(base, pan, ratio, deviceExtent) {
+  const ideal = Math.round((base + pan) * ratio);
+  let k = ideal;
+  const period = ratioPeriod(ratio);
+  if (period > 1 && Number.isInteger(deviceExtent)) {
+    let shift = (((-deviceExtent - k) % period) + period) % period;
+    if (shift > period / 2) shift -= period;
+    k = ideal + shift;
+  }
+  return k / ratio - Math.round(base);
+}
+
 function layoutViewport(vp) {
   const { imageWidth, imageHeight, aspectX, aspectY, dom } = vp;
   if (!imageWidth || dom.stage.hidden) return;
+  const ratio = window.devicePixelRatio || 1;
+  // F-204. The one-to-one guards re-run on every layout of a held mode, so
+  // a frame change or a ratio change that leaves the stored frame smaller
+  // than the device pixel ratio drops to fit before any style write. The
+  // drop shows no reason, because nothing claims 1:1 any more.
+  if (vp.zoomMode === "one" && (vp.imageWidth < ratio || vp.imageHeight < ratio)) {
+    vp.zoomMode = "fit";
+  }
   const stamp = imageWidth + "x" + imageHeight
     + ":" + aspectX + ":" + aspectY
-    + ":" + (vp.fitMode ? "fit" : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
+    + ":" + (vp.zoomMode === "fit" ? "fit"
+      : vp.zoomMode === "one" ? "one:" + vp.panX + ":" + vp.panY
+      : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
     + ":" + vp.rotation
     + ":" + (vp.flipH ? 1 : 0)
     + ":" + (vp.flipV ? 1 : 0)
@@ -3600,19 +3666,36 @@ function layoutViewport(vp) {
   // Zoom, pan, fit, rotation, a flip or a new image size moves this cell's
   // picture, so a readout placed over it for the old geometry goes.
   leavePointerFor(vp);
-  if (vp.fitMode) {
+  if (vp.zoomMode === "fit") {
     vp.scale = fitScale(vp);
     vp.panX = 0;
     vp.panY = 0;
+  } else if (vp.zoomMode === "one") {
+    // F-204. One stored pixel per device pixel is the scale 1 / ratio on a
+    // square-pixel frame and (1 / ratio) / aspectY on an anisotropic one,
+    // where the rows are exact and the columns are resampled. The scale is
+    // recomputed from the live ratio on every layout, and the pan rides the
+    // change as zoomAt's arithmetic does with the zoom centre at the cell
+    // centre, where the offset under the centre is minus the pan.
+    const identity = (1 / ratio) / vp.aspectY;
+    const factor = identity / vp.scale;
+    vp.panX += -vp.panX * (1 - factor);
+    vp.panY += -vp.panY * (1 - factor);
+    vp.scale = identity;
   }
   const scale = vp.scale;
   const pictureW = Math.max(1, imageWidth * scale * aspectX);
   const pictureH = Math.max(1, imageHeight * scale * aspectY);
-  dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  if (vp.zoomMode === "one") {
+    // The identity renders pixelated at every ratio. The comparison below
+    // evaluates one ulp below 1 at some ratios and would select auto.
+    dom.canvas.style.imageRendering = "pixelated";
+  } else {
+    dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  }
   const turned = vp.rotation % 180 !== 0;
   dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
   dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
-  dom.frame.style.transform = "translate(" + vp.panX + "px, " + vp.panY + "px)";
   dom.stage.style.width = pictureW + "px";
   dom.stage.style.height = pictureH + "px";
   dom.stage.style.marginLeft = (-pictureW / 2) + "px";
@@ -3627,8 +3710,40 @@ function layoutViewport(vp) {
   dom.ink.style.height = pictureH + "px";
   dom.refs.style.width = pictureW + "px";
   dom.refs.style.height = pictureH + "px";
+  // F-204. The translate is written after the size writes, so the one
+  // branch can measure the laid-out canvas with the translate last written
+  // still applied, subtract it, and write the translate that lands the
+  // painted origin on the target device pixel.
+  //
+  // The measured Chromium anchor law, probes under target in the F-204
+  // session: the compositor snaps the canvas layer's box to whole CSS
+  // pixels. The painted left edge is the static layer position rounded to
+  // a whole CSS pixel with the frame's translate riding unsnapped, so the
+  // painted device origin is (round(untransformed) + translate) * ratio.
+  // The painted right edge is the total CSS position plus the CSS width,
+  // rounded, so the painted device extent is the stored count only when
+  // the origin plus the stored extent is a multiple of the ratio's
+  // numerator. The snap therefore picks the origin nearest the ideal that
+  // satisfies that congruence, and the painted box is then exactly the
+  // stored extent with one stored texel on each device pixel.
+  let translateX = vp.panX;
+  let translateY = vp.panY;
+  if (vp.zoomMode === "one") {
+    const box = dom.canvas.getBoundingClientRect();
+    const baseX = box.left - vp.panAppliedX;
+    const baseY = box.top - vp.panAppliedY;
+    translateX = oneToOneTranslate(baseX, vp.panX, ratio, imageWidth * aspectX / aspectY);
+    translateY = oneToOneTranslate(baseY, vp.panY, ratio, imageHeight);
+  }
+  dom.frame.style.transform = "translate(" + translateX + "px, " + translateY + "px)";
+  vp.panAppliedX = translateX;
+  vp.panAppliedY = translateY;
   const fitted = fitScale(vp);
-  vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  if (vp.zoomMode === "one") {
+    vp.zoomLabel = vp.aspectX === 1 && vp.aspectY === 1 ? "1:1" : "1:1 rows";
+  } else {
+    vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  }
   paintOverlays(vp);
   syncTextScale(vp);
   paintSelection(vp);
@@ -3714,7 +3829,17 @@ function paintOverlays(vp) {
   const warning = iccWarning(info);
   if (warning) windowLine += "\n" + warning;
   if (info.colour && vp.paletteFallback) windowLine += "\nThis palette was read as 8-bit because all its entries fit in 8 bits.";
-  assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
+  // F-204. A refusal reason shows in place of the Zoom suffix only while
+  // its own condition still holds, re-checked from the predicate the guard
+  // evaluated, and is written empty at the first paint where it does not,
+  // so no later paint shows a stale reason.
+  let zoomLine = "Zoom " + vp.zoomLabel;
+  if (vp.zoomRefusal) {
+    const refusalRatio = window.devicePixelRatio || 1;
+    if (vp.imageWidth < refusalRatio || vp.imageHeight < refusalRatio) zoomLine = vp.zoomRefusal;
+    else vp.zoomRefusal = "";
+  }
+  assignText(corners.br, windowLine + "\n" + zoomLine);
   paintScale(vp);
 }
 
@@ -3863,8 +3988,42 @@ function nextUnshownKey() {
 }
 
 function fitView(vp) {
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   layoutViewport(vp);
+  copyZoom(vp);
+}
+
+// F-204. Entering the one-to-one mode keeps the image centre as zoomCentre
+// does: zoomAt's pan arithmetic at the cell centre, where the offset under
+// the centre is minus the pan, moves the pan by the same factor as the
+// scale. The frame's identity scale is 1 / ratio on a square-pixel frame
+// and (1 / ratio) / aspectY on an anisotropic one, where the rows are
+// exact and the columns are resampled. `request` is false from copyZoom,
+// where an unsuitable target keeps its own mode and shows no reason.
+function enterOneToOne(vp, request) {
+  if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden || vp.tileMode) return false;
+  const ratio = window.devicePixelRatio || 1;
+  if (vp.imageWidth < ratio || vp.imageHeight < ratio) {
+    if (request) {
+      vp.zoomRefusal = "1:1 needs a frame at least the device pixel ratio big";
+      // The refusal writes this string and no layout state, and the corner
+      // is the surface that shows it, so the paint runs without a layout.
+      paintOverlays(vp);
+    }
+    return false;
+  }
+  const identity = (1 / ratio) / vp.aspectY;
+  const factor = identity / vp.scale;
+  vp.panX += -vp.panX * (1 - factor);
+  vp.panY += -vp.panY * (1 - factor);
+  vp.scale = identity;
+  vp.zoomMode = "one";
+  layoutViewport(vp);
+  return true;
+}
+
+function oneToOneView(vp) {
+  if (!enterOneToOne(vp, true)) return;
   copyZoom(vp);
 }
 
@@ -3878,7 +4037,7 @@ function resetView(vp) {
   vp.rotation = 0;
   vp.flipH = false;
   vp.flipV = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.panX = 0;
   vp.panY = 0;
   if (vp.cell === activeCell) syncControls();
@@ -4309,12 +4468,12 @@ async function scheduleLive(vp) {
   try {
     const grey = await requestGrey(image, { view: vp, window: win });
     if (token === vp.liveToken && vp.draftWindow && image === currentImage(vp)) {
-      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, fitMode: vp.fitMode };
+      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, zoomMode: vp.zoomMode };
       drawGrey(vp, grey);
       vp.scale = keep.scale;
       vp.panX = keep.panX;
       vp.panY = keep.panY;
-      vp.fitMode = keep.fitMode;
+      vp.zoomMode = keep.zoomMode;
       layoutViewport(vp);
     }
   } catch {}
@@ -4337,7 +4496,12 @@ function queueSlice(delta) {
 function zoomAt(vp, clientX, clientY, factor) {
   if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden) return;
   const fitted = fitScale(vp);
-  const next = clamp(vp.scale * factor, fitted * 0.05, fitted * 40);
+  // F-204. The clamp range extends to include the frame's own identity
+  // scale, so the identity is reachable by the same gestures that reach
+  // every other scale, and zooming out below it stays possible on a frame
+  // wider than its cell.
+  const identity = (1 / (window.devicePixelRatio || 1)) / vp.aspectY;
+  const next = clamp(vp.scale * factor, Math.min(fitted * 0.05, identity), Math.max(fitted * 40, identity));
   if (next === vp.scale) return;
   const rect = vp.dom.cell.getBoundingClientRect();
   const qx = clientX - (rect.left + rect.width / 2) - vp.panX;
@@ -4346,7 +4510,7 @@ function zoomAt(vp, clientX, clientY, factor) {
   vp.panX += qx * (1 - ratio);
   vp.panY += qy * (1 - ratio);
   vp.scale = next;
-  vp.fitMode = false;
+  vp.zoomMode = "free";
   layoutViewport(vp);
 }
 
@@ -4450,7 +4614,10 @@ function onPointerMove(event) {
   if (drag.markId && travel >= 5) drag.markId = "";
   const mode = drag.mode;
   if (mode === "pan") {
-    vp.fitMode = false;
+    // F-204. Pan keeps a held one-to-one mode, because the one-to-one scale
+    // does not depend on the cell size. No rounding is added to the deltas,
+    // the origin snap rounds the total laid-out position each layout.
+    vp.zoomMode = vp.zoomMode === "one" ? "one" : "free";
     vp.panX += event.clientX - drag.x;
     vp.panY += event.clientY - drag.y;
     drag.x = event.clientX;
@@ -6059,6 +6226,9 @@ function onKey(event) {
   } else if (event.key === "0") {
     event.preventDefault();
     fitView(vp);
+  } else if (event.key === "\\") {
+    event.preventDefault();
+    oneToOneView(vp);
   } else if (event.key === "[") {
     togglePanel("no-series");
   } else if (event.key === "]") {
@@ -7026,10 +7196,17 @@ function copyZoom(source) {
   for (const vp of shownViewports()) {
     if (vp === source || !currentImage(vp) || !vp.imageWidth) continue;
     if (vp.tileMode || vp.dom.stage.hidden) continue;
-    if (source.fitMode) {
-      vp.fitMode = true;
+    if (source.zoomMode === "one") {
+      // F-204. The source's mode propagates, and each target's own guards
+      // run against its own frame, cell and ratio. An unsuitable target
+      // keeps its own mode and scale.
+      enterOneToOne(vp, false);
+      continue;
+    }
+    if (source.zoomMode === "fit") {
+      vp.zoomMode = "fit";
     } else {
-      vp.fitMode = false;
+      vp.zoomMode = "free";
       vp.scale = fitScale(vp) * source.scale / fitted;
     }
     layoutViewport(vp);
