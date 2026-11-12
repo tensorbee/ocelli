@@ -905,6 +905,47 @@ function crossTabProblems(seen) {
   return problems;
 }
 
+// N1, review pass 1. The listener's refresh replaces the profile, so a
+// mouse-unsaved sentence left by this tab's own failed write goes with it:
+// the profile this tab now holds is the document's. The one-shot refusal
+// eats this tab's first write, which is its own profile document's.
+async function observeListenerClearsUnsaved(url, browser) {
+  return withPage(browser, async (page, context) => {
+    await page.addInitScript(() => {
+      const original = Storage.prototype.setItem;
+      let refused = true;
+      Storage.prototype.setItem = function (key, value) {
+        if (refused) {
+          refused = false;
+          throw new Error("this browser refused the write");
+        }
+        return original.call(this, key, value);
+      };
+    });
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await page.locator("#mouse-profile").selectOption("scroll-left");
+    const shown = await page.evaluate(() => !document.getElementById("mouse-unsaved").hidden);
+    await other.locator("#mouse-profile").selectOption("window-left");
+    await page.waitForTimeout(300);
+    const after = {
+      unsaved: await page.evaluate(() => !document.getElementById("mouse-unsaved").hidden),
+      profile: await page.evaluate(() => document.getElementById("mouse-profile").value),
+    };
+    await context.close();
+    return { shown, after };
+  });
+}
+
+function listenerClearsUnsavedProblems(seen) {
+  const problems = [];
+  if (!seen.shown) problems.push("the tab's own refused profile write did not show mouse-unsaved");
+  if (seen.after.unsaved) problems.push("the listener's refresh left the stale mouse-unsaved showing");
+  if (seen.after.profile !== "window-left") problems.push(`the listener did not replace the profile: ${seen.after.profile}`);
+  return problems;
+}
+
 // AC10. The stored default applies once per series load, Reset returns the
 // file window, scrolling keeps it, play sends no preset header after Reset
 // and only preset headers while the default is applied. The hold cases
@@ -1644,6 +1685,10 @@ async function main() {
     const cross = await observeCrossTab(origin, browser, folders);
     problems.push(...crossTabProblems(cross));
     console.log("AC15: the two-page change survives, the listener refreshes without writing");
+
+    const clearsUnsaved = await observeListenerClearsUnsaved(origin, browser);
+    problems.push(...listenerClearsUnsavedProblems(clearsUnsaved));
+    console.log("N1: the listener's refresh clears a stale mouse-unsaved");
 
     const storedDefault = await observeStoredDefault(origin, browser, folders);
     problems.push(...storedDefaultProblems(storedDefault));
