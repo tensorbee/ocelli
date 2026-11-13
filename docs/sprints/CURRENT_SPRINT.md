@@ -104,3 +104,10 @@ C.7.6.3.1.2 gives partial range.
 - **A prepared story** is done only after integration onto `sprint/s47` and
   its review loop and feature profile there. A worker's own pass is not
   integration.
+
+## Carried forward from S47
+
+- **F-202** carried to S48: its design was approved on 2026-11-12 after five rounds, with deviations D-34 and D-35 recorded, and it lands after F-204, F-205 and F-241 by the lead's order, so its six weeks of implementation start in S48.
+- **F-241** carried to S48: phases 1 and 2, the library extraction, demux, stream interface, 4:2:0 conversion and the WebCodecs bridge in a third wasm module, are on `work/f-241-glm` under review, and Approach items 6 to 9 (the `@ocelli/core` video source, the folder viewer part, the synthetic corpus rows and the bench subject) and the browser and equipped-host rows AC10 to AC13, AC16 and AC22 to AC26 remain.
+- **F-273** carried to S48: the equipped reference scalar normalization stays on the bounded-packet path under the real-study hold, and nothing in S47 could complete its acceptance.
+- **F-278** carried to S48: its approved plan depends on F-273, which carries.
