@@ -3628,27 +3628,30 @@ function fitScale(vp) {
   return Math.min(rect.width / width, rect.height / height);
 }
 
-// F-204. The denominator of the device pixel ratio's rational form, the
-// whole CSS pixel step whose multiples land the box on a whole number of
-// device pixels. The comparison holds within half the 1/64 device pixel
-// layout unit, because the engine quantises the box on that grid: an f32
-// ratio such as 1.38 stores as a value whose exact product is never
-// integral, and the step still exists. 0 when no step up to 64 exists.
-function deviceStep(ratio) {
-  for (let denominator = 1; denominator <= 64; denominator += 1) {
-    const scaled = ratio * denominator;
-    if (Math.abs(scaled - Math.round(scaled)) <= 1 / 64) return denominator;
+// F-204. The whole CSS pixel step whose multiples land on a whole number
+// of device pixels at this ratio: 1 at ratios 1 and 2, 4 at 1.25 and 2 at
+// 1.5. The ratio the page reads is the engine's f32 widened to a double,
+// 1.38 reads as 1.3799999952316284, so a product is taken as whole within
+// 1e-4. That is far above the representation error at the step such a
+// ratio needs, 2.4e-7 for 1.38 at step 50, and far below a near miss such
+// as 7 times 1.57, which is 0.01 short of 11. 0 when no step up to the
+// limit exists.
+function deviceStep(ratio, limit) {
+  for (let step = 1; step <= limit; step += 1) {
+    const scaled = ratio * step;
+    if (Math.abs(scaled - Math.round(scaled)) <= 1e-4) return step;
   }
   return 0;
 }
 
 // The largest whole CSS pixel box side not exceeding the cell side whose
 // product with the ratio is a whole number of device pixels: a multiple of
-// the step. 0 when the cell is too small for one.
+// the step. 0 when the cell side is smaller than the step, the view the
+// refusal names as too small.
 function oneToOneBox(side, ratio) {
-  const step = deviceStep(ratio);
-  if (!step) return 0;
   const whole = Math.floor(side);
+  const step = deviceStep(ratio, whole);
+  if (!step) return 0;
   return whole - (whole % step);
 }
 
@@ -3870,7 +3873,8 @@ function layoutViewport(vp) {
   // cell, and the backing then maps one to one onto the device grid, which
   // the byte rows of one-to-one.mjs check in screenshots.
   if (one) {
-    const step = deviceStep(ratio);
+    // The box rule above passed, so the step is no larger than the box.
+    const step = deviceStep(ratio, boxW);
     const laid = dom.canvas.getBoundingClientRect();
     const baseX = laid.left - vp.panAppliedX - vp.oneShiftX;
     const baseY = laid.top - vp.panAppliedY - vp.oneShiftY;

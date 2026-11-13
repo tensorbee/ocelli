@@ -209,20 +209,22 @@ run_gate() {
     # from the page, a refused and a validated instance leave the local image
     # untouched, a pending fetch that a local source change cancels never
     # labels that changed image, and the served More row states the partial
-    # status. F-204's one-to-one.mjs check follows: the drawn frame covers
-    # one device pixel per stored pixel at ratios 1, 1.25, 1.5, 2 and 3, the
-    # painted origin is a whole device pixel and the painted extent is the
-    # stored count at every one of them, the device bytes of the backing
-    # equal the stored pattern at every byte row case including the mid pan
-    # and the transforms, the anisotropic rows draw one device row per
-    # stored row with the columns resampled, and the clamp, the refusal
-    # reason and the ratio watcher behave as the design states. F-245's launcher.mjs check is last: the page is served through
-    # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
-    # Chromium, is byte-identical to the native start, and the owned stop
-    # leaves the port closed. Chained on
-    # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
-    # the viewer, so it is outside the floor. The CI step that runs it is the
-    # `viewer-browser` job, which installs both.
+    # status. F-204's one-to-one.mjs check follows: in the one-to-one mode the
+    # painted box observed in the canvas backing is the stored count of device
+    # pixels at ratios 1, 1.25, 1.5 and 2, and at 3 for the linked cells, its
+    # observed origin is a whole device pixel, the screenshot bytes at that
+    # origin equal the stored pattern on square pixels at every byte row case,
+    # after the mid pan too, and its permutation under the rotation and flips,
+    # the anisotropic rows draw one device row per stored row with the columns
+    # an in-order subsample, and the clamp, the refusal reason, the link and
+    # the ratio watcher behave as the design states. F-245's launcher.mjs
+    # check is last: the page is served through the real npm launcher under a
+    # custom CARGO_TARGET_DIR, boots in Chromium, is byte-identical to the
+    # native start, and the owned stop leaves the port closed. Chained on `&&`
+    # because a case arm returns the status of its last command. It needs that
+    # browser install and a release build of the viewer, so it is outside the
+    # floor. The CI step that runs it is the `viewer-browser` job, which
+    # installs both.
     viewer-browser)
                  if [ ! -d tools/bench/node_modules ]; then
                    echo "The benchmark harness's browser is not installed." >&2

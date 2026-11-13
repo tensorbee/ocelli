@@ -57,13 +57,12 @@
 // its cell, the backing is that box times the device pixel ratio, and the
 // page writes the stored pixels one to one at an integer device offset that
 // carries the centring, the pan and the snap, with rotation and flips by
-// index. The measured Chromium anchor law (scratch probes under target in
-// the F-204 fix round): the painted layer origin is the static position
-// rounded to a whole CSS pixel with the frame translate riding unsnapped,
-// so the painted device origin is (round(static) + translate) * ratio, and
-// a device-sized backing is byte-exact exactly when that origin is
-// integral. The page records the painted device box it wrote, and every
-// byte row crops the screenshot at that recorded origin, never by a search.
+// index. The suite never reads the page's own record of where it painted.
+// Every painted box and origin is observed: the opaque box in the backing,
+// placed by the canvas element's laid-out position. Every byte row crops a
+// device scale screenshot at that observed origin, an exact integer offset,
+// never by a search, so a compositor that moved or resampled the backing
+// fails the row.
 
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -263,10 +262,15 @@ function permuteFlipV(bytes, columns, rows) {
   return out;
 }
 
-/** The smallest integer CSS step whose product with the ratio is integral. */
+/**
+ * The smallest integer CSS step whose product with the ratio is integral:
+ * 1 at ratios 1 and 2, 4 at 1.25, 2 at 1.5. A CDP override stores the
+ * ratio as an f32, so 1.57 reads as 1.5700000524520874 and its product at
+ * step 100 misses 157 by about 5e-6, which the 1e-4 bound accepts.
+ */
 function stepFor(ratio) {
-  for (let step = 1; step <= 64; step += 1) {
-    if (Math.abs(step * ratio - Math.round(step * ratio)) < 1e-9) return step;
+  for (let step = 1; step <= 2000; step += 1) {
+    if (Math.abs(step * ratio - Math.round(step * ratio)) <= 1e-4) return step;
   }
   throw new Error(`no integer step lands on the device grid at ratio ${ratio}`);
 }
@@ -352,9 +356,11 @@ function view(page, cellIndex) {
         paint.offsetY = minY;
       }
     }
+    const ink = vp.dom.ink.getBoundingClientRect();
     return {
       cell: vp.cell,
       x: rect.x, y: rect.y, w: rect.width, h: rect.height,
+      inkX: ink.x, inkY: ink.y, inkW: ink.width, inkH: ink.height,
       cellX: cell.x, cellY: cell.y, cellW: cell.width, cellH: cell.height,
       dpr: ratio,
       backingW: canvas.width, backingH: canvas.height,
@@ -461,7 +467,9 @@ function idealOrigin(cellStart, cellSize, dpr, extent, pan) {
  * pixel picture in the measured cell is off the device grid by more than
  * the AC2 epsilon, so the origin cases prove the snap against a centring
  * the engine cannot paint unsnapped. At ratio 1 that is a cell whose width
- * minus the picture width is odd.
+ * minus the picture width is odd. At a fractional ratio the fraction must
+ * also be above 0.55, so a snap that truncates instead of rounding lands
+ * more than CENTRING_SLACK from the ideal and fails the case.
  */
 async function fractionalCell(page, screenW) {
   for (let width = 1600; width <= 1720; width += 1) {
@@ -470,15 +478,17 @@ async function fractionalCell(page, screenW) {
       const box = activeViewport().dom.cell.getBoundingClientRect();
       return { x: box.x, w: box.width, dpr: window.devicePixelRatio };
     });
-    if (!onGrid(idealOrigin(cell.x, cell.w, cell.dpr, screenW, 0))) return cell;
+    const ideal = idealOrigin(cell.x, cell.w, cell.dpr, screenW, 0);
+    const fraction = ideal - Math.floor(ideal);
+    if (!onGrid(ideal) && (Number.isInteger(cell.dpr) || fraction > 0.55)) return cell;
   }
   throw new Error(`no viewport width makes the centring fractional for a ${screenW} device pixel picture`);
 }
 
 // AC1. The drawn extent is the stored extent in device pixels at ratios 1,
 // 1.25, 1.5 and 2, and the axes swap under a 90 degree rotation, read from
-// the recorded painted box. The canvas element maps its whole CSS pixel box
-// one to one onto the device grid, which the backing check pins.
+// the observed painted box. The canvas element's box times the ratio is
+// its backing size, so the backing is not scaled onto the page.
 export async function observeExtents(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -524,6 +534,17 @@ export function extentProblems(readings) {
       problems.push(`${reading.name}: the painted origin ${reading.paintX}, ${reading.paintY} is not whole device pixels`);
     }
     if (reading.mode !== "one") problems.push(`${reading.name}: the mode is ${reading.mode}, not one`);
+    // The marks layer's turned box covers the painted box, so a mark drawn
+    // in the mode sits on the pixels it names, rotated or not.
+    const inkOff = Math.max(
+      Math.abs(reading.inkX * reading.dpr - reading.paintX),
+      Math.abs(reading.inkY * reading.dpr - reading.paintY),
+      Math.abs(reading.inkW * reading.dpr - reading.paintW),
+      Math.abs(reading.inkH * reading.dpr - reading.paintH),
+    );
+    if (!(inkOff <= EXTENT_EPSILON)) {
+      problems.push(`${reading.name}: the marks layer box is ${inkOff} device px off the painted box`);
+    }
   }
   return problems;
 }
@@ -794,6 +815,7 @@ export async function observeRatioWatcher(url, chromium, folder) {
             mode: vp.zoomMode,
           };
         }));
+        probes[probes.length - 1].crop = await capturePixels(page, 128, 96, session);
       }
       const resizeEvents = await page.evaluate(() => window.__resizeEvents);
       return { before, atTwo, armsAfterTwo, resizedAfterTwo, cropAtTwo, atOne, armsAfterOne, resizedAfterOne, cropAtOne, probes, resizeEvents };
@@ -841,6 +863,8 @@ export function ratioWatcherProblems(seen) {
     if (probe.rendering !== "pixelated") {
       problems.push(`at ratio ${probe.factor} the identity renders ${probe.rendering}, not pixelated`);
     }
+    if (probe.mode !== "one") problems.push(`at ratio ${probe.factor} the mode is ${probe.mode}, not the held one`);
+    problems.push(...byteProblems(`the probe ratio ${probe.factor}`, probe.crop, FIXTURES.p.bytes, FIXTURES.p.columns));
   }
   return problems;
 }
@@ -1089,6 +1113,44 @@ export function backingStoreProblems(seen) {
   } else {
     problems.push(...byteProblems("the backing after Fit", { grey: seen.backing }, FIXTURES.p.bytes, FIXTURES.p.columns));
   }
+  return problems;
+}
+
+// The device backing is repainted on a frame change that leaves the
+// layout stamp alone. Invert redraws the same frame at the same size, and
+// the page flips the monochrome display byte after the chain, PS3.3
+// C.11.6.1's INVERSE shape, so over the identity window the expected byte
+// is 255 minus the stored value, hand-derived: (0, 0) shows 255 and the
+// override at (127, 95) shows 0. A stale backing would still show the
+// stored pattern, and a backing resized to the stored frame would show it
+// stretched over the whole cell.
+export async function observeSameSizeRedraw(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 2, async (page) => {
+      await openFolder(page, url, folder);
+      await page.keyboard.press("\\");
+      await page.click("#toggle-corners");
+      await page.click("#invert");
+      // The new reply has arrived when its first byte, stored 0, is no
+      // longer 0. A timeout leaves the byte row to report the failure.
+      await page.waitForFunction(() => activeViewport().invert && activeViewport().grey.bytes[0] !== 0, null, { timeout: 20000 })
+        .catch(() => {});
+      await page.waitForTimeout(150);
+      await page.mouse.move(2, 2);
+      return { got: await capturePixels(page, 128, 96), state: await view(page) };
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function sameSizeRedrawProblems(seen) {
+  if (!seen || !seen.got) return ["the same size redraw case was not observed"];
+  const want = FIXTURES.p.bytes.map((value) => 255 - value);
+  const problems = [];
+  if (seen.state.mode !== "one") problems.push(`after invert the mode is ${seen.state.mode}, not one`);
+  problems.push(...byteProblems("the inverted frame in the mode", seen.got, want, FIXTURES.p.columns));
   return problems;
 }
 
@@ -1462,6 +1524,7 @@ async function main() {
       clamp: await observeClamp(server.url, chromium, folder),
       link: await observeLink(server.url, chromium, folder),
       backingStore: await observeBackingStore(server.url, chromium, folder),
+      sameSize: await observeSameSizeRedraw(server.url, chromium, folder),
       refusals: await observeRefusals(server.url, chromium, folder),
       belowRatio: await observeBelowRatio(server.url, chromium, folder),
       transforms: await observeTransforms(server.url, chromium, folder),
@@ -1495,6 +1558,7 @@ async function main() {
     .concat(clampProblems(seen.clamp))
     .concat(linkProblems(seen.link))
     .concat(backingStoreProblems(seen.backingStore))
+    .concat(sameSizeRedrawProblems(seen.sameSize))
     .concat(refusalProblems(seen.refusals))
     .concat(belowRatioProblems(seen.belowRatio))
     .concat(transformProblems(seen.transforms))
@@ -1506,7 +1570,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log("one stored pixel is one device pixel in the mode, byte for byte at every byte row case in the pinned Chromium under the emulated ratios");
+  console.log("one stored pixel is one device pixel in the mode, byte for byte in screenshots at every square pixel byte row case, with the anisotropic rows one device row per stored row, in the pinned Chromium under emulated ratios");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

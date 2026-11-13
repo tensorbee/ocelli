@@ -962,12 +962,14 @@ disabled and no allowlist widened. `fetch` was already a browser global there.
 suite. It writes seven wholly synthetic identity fixtures into a temporary
 folder, starts the release viewer with `OCELLI_PORT=0` and stops it by its
 PID, and drives the one-to-one mode in headless Chromium at device pixel
-ratios 1, 1.25, 1.5, 2, 3 and the four ulp probes, reading device pixels
-through a screenshot clip on the device-aligned grid decoded in-page. It is
-registered in the `viewer-browser` gate's module list immediately before
-`launcher.mjs`, which stays last. `eslint.config.js` gains `fitScale`,
-`Image` and `MediaQueryList` in that suite's existing browser context, with
-no rule disabled and no allowlist widened.
+ratios 1, 1.25, 1.5, 2, 3 and the four ulp probes. It observes the painted
+box as the opaque box in the canvas backing and reads device pixels through
+a screenshot clip on the device-aligned grid decoded in-page, cropped at
+that observed origin. It is registered in the `viewer-browser` gate's module
+list immediately before `launcher.mjs`, which stays last. `eslint.config.js`
+gains `fitScale`, `clientToImage`, `Image` and `MediaQueryList` in that
+suite's existing browser context, with no rule disabled and no allowlist
+widened.
 `scripts/guards/catalogue.py` gains the `folder-viewer-dev` guard for
 `bin/folder-viewer-dev.mjs`, and `ci/guard-probe-budget.json` budgets that
 guard at six probes. Each probe drives the launcher's own refusal through a
