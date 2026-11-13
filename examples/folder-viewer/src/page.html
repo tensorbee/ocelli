@@ -3509,6 +3509,10 @@ function drawGrey(vp, grey) {
     // F-204. A frame change clears the refusal reason before the layout, so
     // a reason can never outlive the frame it was refused on.
     vp.zoomRefusal = "";
+    // The paint above sized the backing to the stored frame, and in the
+    // mode the backing is the device-sized box, so the layout must repaint
+    // it even when the new frame leaves the stamp unchanged.
+    if (vp.zoomMode === "one") vp.layoutDirty = true;
     layoutViewport(vp);
     const drawn = notes.get(noteKey(currentImage(vp)));
     const mine = vp.cell === activeCell && (draft || selected != null);
@@ -3819,30 +3823,27 @@ function layoutViewport(vp) {
     // its backing store is that box times the ratio, and the stored pixels
     // are written one to one at an integer device offset that carries the
     // centring, the pan and the snap. Rotation and flips ride the index in
-    // that write, never a CSS transform, so the stage carries none. The
-    // margins carry the last written alignment shift until the snap
-    // recomputes it, so the measurement below sees the box this layout
-    // will paint.
+    // that write, never a CSS transform. The margins carry the last written
+    // alignment shift until the snap below recomputes it.
     dom.frame.style.width = boxW + "px";
     dom.frame.style.height = boxH + "px";
     dom.stage.style.width = boxW + "px";
     dom.stage.style.height = boxH + "px";
     dom.stage.style.marginLeft = (-boxW / 2 + vp.oneShiftX) + "px";
     dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
-    // The mode carries no transform on the frame or the stage: an identity
-    // transform would still make the frame a composited layer with its own
-    // device pixel snap, and the measured probe noise comes from exactly
-    // that second snap. With no transform in the chain the canvas's layer
-    // snaps once, at its own whole CSS pixel static position.
+    // The mode writes no transform on the frame or the stage, so the
+    // canvas's device position is its laid-out position alone.
     dom.stage.style.transform = "none";
     dom.stage.style.transformOrigin = "center center";
     dom.canvas.style.width = boxW + "px";
     dom.canvas.style.height = boxH + "px";
-    // The marks and reference lines sit over the drawn device box.
-    dom.ink.style.width = (extents.screenW / ratio) + "px";
-    dom.ink.style.height = (extents.screenH / ratio) + "px";
-    dom.refs.style.width = (extents.screenW / ratio) + "px";
-    dom.refs.style.height = (extents.screenH / ratio) + "px";
+    // The marks and reference lines keep the unrotated picture size and
+    // take the rotation and flips as their own transform below, as they
+    // did on the stage, so their turned box covers the drawn device box.
+    dom.ink.style.width = (extents.alongColumns / ratio) + "px";
+    dom.ink.style.height = (extents.alongRows / ratio) + "px";
+    dom.refs.style.width = (extents.alongColumns / ratio) + "px";
+    dom.refs.style.height = (extents.alongRows / ratio) + "px";
   } else {
     dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
     dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
@@ -3861,18 +3862,13 @@ function layoutViewport(vp) {
   }
   // F-204. The translate is written after the size writes, so the mode can
   // measure the laid-out canvas with the translate last written still
-  // applied, subtract it, and align the static position.
-  //
-  // The measured Chromium law, probes under target in the F-204 fix round:
-  // a canvas whose static position times the ratio is a whole device pixel
-  // paints its backing one to one, byte exact, at every probed ratio, and a
-  // fractional translate on top of a fractional static position does not
-  // land predictably. The mode therefore aligns the canvas's static
-  // position to the nearest whole CSS pixel step multiple through the
-  // stage's margins, leaves the frame translate at zero, and compensates
-  // the alignment shift inside the device offset, so the picture stays
-  // centred in the cell and the painted layer origin is the exact integer
-  // align times the ratio.
+  // applied and subtract it. The mode moves the canvas's position to the
+  // nearest multiple of the ratio's whole CSS pixel step through the
+  // stage's margins, so the position times the ratio is a whole device
+  // pixel, and writes no frame translate. The alignment shift is taken
+  // back inside the device offset, so the picture stays centred in the
+  // cell, and the backing then maps one to one onto the device grid, which
+  // the byte rows of one-to-one.mjs check in screenshots.
   if (one) {
     const step = deviceStep(ratio);
     const laid = dom.canvas.getBoundingClientRect();
@@ -3886,7 +3882,6 @@ function layoutViewport(vp) {
     dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
     translateX = 0;
     translateY = 0;
-    dom.frame.style.transform = "none";
     const layerX = Math.round(alignX * ratio);
     const layerY = Math.round(alignY * ratio);
     // The device offset: the centring plus the pan minus the alignment
@@ -3894,10 +3889,12 @@ function layoutViewport(vp) {
     const ox = Math.round((boxW * ratio - extents.screenW) / 2 + (vp.panX - vp.oneShiftX) * ratio);
     const oy = Math.round((boxH * ratio - extents.screenH) / 2 + (vp.panY - vp.oneShiftY) * ratio);
     paintOneToOne(vp, boxW, boxH, extents.screenW, extents.screenH, ox, oy);
-    dom.ink.style.left = (ox / ratio) + "px";
-    dom.ink.style.top = (oy / ratio) + "px";
-    dom.refs.style.left = (ox / ratio) + "px";
-    dom.refs.style.top = (oy / ratio) + "px";
+    const inkLeft = (ox + (extents.screenW - extents.alongColumns) / 2) / ratio;
+    const inkTop = (oy + (extents.screenH - extents.alongRows) / 2) / ratio;
+    dom.ink.style.left = inkLeft + "px";
+    dom.ink.style.top = inkTop + "px";
+    dom.refs.style.left = inkLeft + "px";
+    dom.refs.style.top = inkTop + "px";
     dom.ink.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
     dom.refs.style.transform = dom.ink.style.transform;
     dom.ink.style.transformOrigin = "center center";
@@ -3931,7 +3928,7 @@ function layoutViewport(vp) {
     vp.oneShiftX = 0;
     vp.oneShiftY = 0;
   }
-  dom.frame.style.transform = "translate(" + translateX + "px, " + translateY + "px)";
+  dom.frame.style.transform = one ? "none" : "translate(" + translateX + "px, " + translateY + "px)";
   vp.panAppliedX = translateX;
   vp.panAppliedY = translateY;
   const fitted = fitScale(vp);
@@ -5276,28 +5273,31 @@ function updateMag(vp, event, tile, point) {
   context.translate(mag.width / 2, mag.height / 2);
   if (!tile && vp.zoomMode === "one") {
     // F-204. The mode's backing holds the displayed image, one device pixel
-    // per stored pixel at the recorded device offset, so the source is
-    // addressed in device pixels at the displayed position of the stored
-    // point and the rotation is already in the bytes. Two magnifier pixels
-    // per source pixel is twice the on-screen size.
+    // per stored row and per displayed column, written at the recorded
+    // device offset, so the source is addressed in backing pixels at the
+    // displayed position of the stored point, and the rotation and flips
+    // are already in the bytes. Two magnifier pixels per backing pixel is
+    // the power the path below uses, 2 * ratio per CSS pixel.
     const extents = oneToOneExtents(vp);
     const turned = vp.rotation % 180 !== 0;
     const bufU = turned ? extents.screenH : extents.screenW;
     const bufV = turned ? extents.screenW : extents.screenH;
-    const su = vp.flipH ? vp.imageWidth - 1 - point.x : point.x;
-    const sv = vp.flipV ? vp.imageHeight - 1 - point.y : point.y;
+    // The point is continuous, so the reflections are about the far edge,
+    // not the last pixel centre.
+    const su = vp.flipH ? vp.imageWidth - point.x : point.x;
+    const sv = vp.flipV ? vp.imageHeight - point.y : point.y;
     const u = su * bufU / vp.imageWidth;
     const v = sv;
-    const dx = vp.rotation === 90 ? bufV - 1 - v
-      : vp.rotation === 180 ? bufU - 1 - u
+    const dx = vp.rotation === 90 ? bufV - v
+      : vp.rotation === 180 ? bufU - u
       : vp.rotation === 270 ? v
       : u;
     const dy = vp.rotation === 90 ? u
-      : vp.rotation === 180 ? bufV - 1 - v
-      : vp.rotation === 270 ? bufU - 1 - u
+      : vp.rotation === 180 ? bufV - v
+      : vp.rotation === 270 ? bufU - u
       : v;
     context.scale(2, 2);
-    context.drawImage(source, -(vp.paintX + dx), -(vp.paintY + dy));
+    context.drawImage(source, -(vp.paintOffsetX + dx), -(vp.paintOffsetY + dy));
     context.setTransform(1, 0, 0, 1, 0, 0);
     const local = wrap.getBoundingClientRect();
     let left = event.clientX - local.left + 20;
@@ -5311,7 +5311,6 @@ function updateMag(vp, event, tile, point) {
     if (point.x < 0 || point.y < 0 || point.x > width || point.y > height) mag.hidden = true;
     return;
   }
-  context.translate(mag.width / 2, mag.height / 2);
   if (!tile) {
     context.rotate(vp.rotation * Math.PI / 180);
     context.scale(vp.flipH ? -1 : 1, vp.flipV ? -1 : 1);
