@@ -35,7 +35,7 @@
   body {
     display: grid;
     grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
-    grid-template-rows: 44px auto minmax(0, 1fr) 40px 28px;
+    grid-template-rows: 44px auto minmax(0, 1fr) 40px 28px auto;
     font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
     overflow: hidden;
     transition: grid-template-columns 0.18s ease;
@@ -99,11 +99,20 @@
     padding: 0 10px;
   }
   .segment button + button { border-left: 0; border-radius: 0 6px 6px 0; }
+  #source-folder:has(+ #source-dicomweb:not([hidden])) { border-radius: 0; }
+  #source-dicomweb { border-left: 0; border-radius: 0 6px 6px 0; }
+  #source-dicomweb[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--on); }
   .segment button:first-child { border-radius: 6px 0 0 6px; }
   .segment button:hover { background: var(--hover); }
   .segment button.active, .segment button.active:hover { background: var(--on); color: var(--on-ink); border-color: var(--on); }
   nav { display: flex; gap: 14px; padding: 0 4px; }
   nav a { color: var(--muted); text-decoration: none; }
+  #remote { position: fixed; top: 52px; right: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 140px); overflow: auto; z-index: 6; background: var(--raised); border: 1px solid var(--edge); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+  #remote h2 { margin: 0 0 4px; font-size: 13px; }
+  #remote p { margin: 4px 0; color: var(--muted); }
+  #remote ol { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+  #remote ol li { overflow-wrap: anywhere; }
+  #remote button { overflow-wrap: anywhere; width: 100%; text-align: left; }
   nav a:hover { color: var(--ink); }
   nav a[aria-current="page"] { color: var(--ink); }
   .icon {
@@ -419,6 +428,18 @@
     text-overflow: ellipsis;
     min-width: 0;
   }
+  #prefs-note {
+    grid-column: 2;
+    grid-row: 6;
+    margin: 0;
+    padding: 2px 10px 4px;
+    color: var(--muted);
+    font-size: 12px;
+    background: var(--ground);
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+  #prefs-note span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #inspector {
     grid-column: 3;
     grid-row: 2 / -1;
@@ -716,6 +737,7 @@
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
   <symbol id="i-headers" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/></symbol>
   <symbol id="i-fit" viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1"/><path d="M3 3l3.5 3.5M21 3l-3.5 3.5M3 21l3.5-3.5M21 21l-3.5-3.5"/></symbol>
+  <symbol id="i-one" viewBox="0 0 24 24"><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M3 3h4M3 3v4M21 3h-4M21 3v4M3 21h4M3 21v-4M21 21h-4M21 21v-4"/></symbol>
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/></symbol>
   <symbol id="i-full" viewBox="0 0 24 24"><path d="M3.5 8.5v-5h5M15.5 3.5h5v5M20.5 15.5v5h-5M8.5 20.5h-5v-5"/></symbol>
   <symbol id="i-left" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15"/></symbol>
@@ -730,6 +752,7 @@
   <div class="segment" id="source">
     <button type="button" id="source-synthetic">Synthetic study</button>
     <button type="button" id="source-folder">Folder</button>
+    <button type="button" id="source-dicomweb" aria-expanded="false" aria-controls="remote" hidden>DICOMweb</button>
   </div>
   <nav>
     <a href="/" aria-current="page">Images</a>
@@ -738,6 +761,11 @@
   </nav>
   <button type="button" class="icon" id="toggle-inspector" aria-label="Tools panel" data-key="]"><svg class="i"><use href="#i-right"/></svg></button>
 </header>
+<section id="remote" hidden aria-label="DICOMweb studies">
+  <h2>DICOMweb studies</h2>
+  <p id="remote-state"></p>
+  <ol id="remote-list"></ol>
+</section>
 <aside id="series">
   <div class="panel-head">SERIES</div>
   <div id="series-list"></div>
@@ -780,6 +808,7 @@
   <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span><span class="badge" id="headers-badge" hidden></span></button>
   <span class="sep"></span>
   <button type="button" class="icon" id="fit" aria-label="Fit" data-key="0"><svg class="i"><use href="#i-fit"/></svg><span class="sr">Fit</span></button>
+  <button type="button" class="icon" id="one-to-one" aria-label="One to one" data-key="\"><svg class="i"><use href="#i-one"/></svg><span class="sr">One to one</span></button>
   <button type="button" class="icon" id="reset" aria-label="Reset" data-key="Shift R"><svg class="i"><use href="#i-reset"/></svg><span class="sr">Reset</span></button>
   <button type="button" class="icon" id="fullscreen" aria-label="Full screen" data-key="Shift F"><svg class="i"><use href="#i-full"/></svg><span class="sr">Full screen</span></button>
 </div>
@@ -853,11 +882,20 @@
   <span id="counter">0 / 0</span>
 </div>
 <p id="sentence"></p>
+<p id="prefs-note" class="note-text" hidden></p>
 <aside id="inspector">
   <section>
     <h2>WINDOW</h2>
     <div id="window-list"></div>
     <p class="note-text" id="window-note">Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.</p>
+    <label class="profile-row">Default preset
+      <select id="default-preset" aria-label="Default preset">
+        <option value="none">None</option>
+        <option value="soft_tissue">Soft tissue</option>
+        <option value="lung">Lung</option>
+        <option value="bone">Bone</option>
+      </select>
+    </label>
   </section>
   <section>
     <h2>MARKS</h2>
@@ -899,7 +937,7 @@
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
     <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
-    <p class="note-text">This browser keeps the profile and the play rate for this address, so they return after a restart only on the same OCELLI_PORT.</p>
+    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. Any other choice the browser did not keep, or a choice it could not use, says so in the line under the image. A profile change the browser did not keep is named in the MOUSE section.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -909,6 +947,7 @@
       <kbd>= −</kbd><span>Zoom in or out</span>
       <kbd>1 to 9</kbd><span>Window row</span>
       <kbd>0</kbd><span>Fit</span>
+      <kbd>\</kbd><span>One to one</span>
       <kbd>Del</kbd><span>Remove the selected mark</span>
       <kbd>Esc</kbd><span>Clear the selection</span>
       <kbd>[ ]</kbd><span>Hide or show a side panel</span>
@@ -990,6 +1029,36 @@ const MOUSE_TEXT = { scroll: "Next or previous image", pan: "Pan", zoom: "Zoom a
 const MOUSE_KEY = "ocelli.mouse";
 const FPS_KEY = "ocelli.fps";
 const FPS_VALUES = Array.from({ length: 30 }, (_, at) => String(at + 1));
+// F-205. The page's choices live in one versioned document, `ocelli.prefs`,
+// and the four legacy keys stay beside it so an older binary keeps reading
+// them. Every field is one of a closed set, so no free text, path, URL or
+// identifier is ever stored. `none` means no default preset.
+const PREFS_KEY = "ocelli.prefs";
+const PREFS_VERSION = 1;
+const PREFS_FIELDS = ["mouseProfile", "cineFps", "hideSeries", "hideInspector", "defaultPreset"];
+const PREFS_DEFAULTS = Object.freeze({ mouseProfile: "ocelli", cineFps: 10, hideSeries: false, hideInspector: false, defaultPreset: "none" });
+const PREFS_LEGACY_KEYS = Object.freeze({ mouseProfile: MOUSE_KEY, cineFps: FPS_KEY, hideSeries: "ocelli.no-series", hideInspector: "ocelli.no-inspector" });
+const PREFS_ALL_KEYS = Object.freeze([PREFS_KEY, MOUSE_KEY, FPS_KEY, "ocelli.no-series", "ocelli.no-inspector"]);
+const DEFAULT_PRESETS = Object.freeze(["none", "soft_tissue", "lung", "bone"]);
+// The refusal sentences. No sentence echoes a stored value, because a
+// refused value is arbitrary text of unknown origin and the page does not
+// propagate it into the DOM.
+const PREFS_REFUSALS = Object.freeze({
+  mouseProfile: "The saved mouse profile is not one this viewer knows, so the Ocelli profile is used.",
+  cineFps: "The saved play rate is not a whole number from 1 to 30, so 10 is used.",
+  hideSeries: "The saved series column choice is not readable, so the series list is shown.",
+  hideInspector: "The saved tools column choice is not readable, so the tools column is shown.",
+  defaultPreset: "The saved default preset is not one this viewer knows, so no default preset is applied.",
+  document: "The saved preferences could not be used, so the viewer's usual choices apply and the saved document is left unchanged.",
+  notOffered: "The saved default preset is not offered on this image, so it is not applied.",
+  legacyPartial: "The choice was kept in this browser, but the copy that older versions of this viewer read was not updated."
+});
+const PREFS_WRITE_FAILURES = Object.freeze({
+  cineFps: "This browser did not keep the play rate. It applies until you reload.",
+  hideSeries: "This browser did not keep the series column choice. It applies until you reload.",
+  hideInspector: "This browser did not keep the tools column choice. It applies until you reload.",
+  defaultPreset: "This browser did not keep the default preset. It applies until you reload."
+});
 const SENTENCE = {
   "tool-scroll": "Drag up or down to move through the images.",
   "tool-pan": "Drag to move the image.",
@@ -1007,6 +1076,7 @@ const SENTENCE = {
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
+  "one-to-one": "Show one stored pixel on one device pixel. A stored frame smaller than the device pixel ratio keeps its view and the corner says so.",
   reset: "Put the image back to the first usable window in the file, or to the automatic window when it stores none, and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
   invert: "Reverse the display, each channel on a colour image. The pixels in the file are not changed.",
@@ -1031,11 +1101,13 @@ const SENTENCE = {
   "toggle-reference": "A yellow line shows where the outlined viewport's image cuts this one, when both share a Frame of Reference UID. The local process computes it.",
   "source-synthetic": "A generated CT. It is not a patient.",
   "source-folder": "Open a folder of DICOM files. The files stay where they are.",
+  "source-dicomweb": "Search the configured DICOMweb service. The open local study stays as it is.",
   "toggle-series": "Hide or show the series list.",
   "toggle-inspector": "Hide or show the window list, marks and key list."
 };
 // The window list. Every name and number in it comes from the local
-// process's inspect reply. The page keeps no preset and no window number.
+// process's inspect reply. The page stores choices only through the
+// preference schema, and the numbers it shows come from the local process.
 const PRESET_ROW = "A preset from the library, in Hounsfield units. The local process offers the presets on CT only.";
 const FILE_ROW = "A window stored in the file, named by its Window Center & Width Explanation, or by its place in the file when it has none.";
 const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
@@ -1149,6 +1221,8 @@ const checksMessage = document.getElementById("checks-message");
 const checksWrap = document.getElementById("checks-wrap");
 const checksRows = document.getElementById("checks-rows");
 const sentence = document.getElementById("sentence");
+const prefsNote = document.getElementById("prefs-note");
+const defaultPresetSelect = document.getElementById("default-preset");
 const marksEl = document.getElementById("marks");
 const swatches = document.getElementById("swatches");
 const sizeRow = document.getElementById("size-row");
@@ -1163,6 +1237,7 @@ let currentGeneration = 0;
 let seriesList = [];
 const seriesByKey = new Map();
 let sourceMode = "";
+let remoteConfig = null;
 const positions = new Map();
 const cache = new Map();
 const inflight = new Map();
@@ -1232,7 +1307,15 @@ function resetFolderState() {
   sessionTracking.clear();
 }
 let marksModule = null;
-let activeProfile = readPreference(MOUSE_KEY, PROFILE_IDS, "ocelli");
+// The page's kept choices and the sentences still outstanding about them.
+// `loadPreferences` fills both from storage, and the save helpers keep them
+// current. `resolved` holds the choices storage last held as this page knows
+// them, advanced by each resolve and by this page's own kept writes, so the
+// listener can tell a write of a failed field itself from a write of another
+// field. Nothing here reaches the DOM.
+const prefs = { values: { ...PREFS_DEFAULTS }, resolved: { ...PREFS_DEFAULTS }, sentences: [], writeFailures: {}, legacyPartial: false };
+loadPreferences();
+let activeProfile = prefs.values.mouseProfile;
 let tool = PROFILES[activeProfile].start;
 let showCorners = true;
 let showCross = false;
@@ -1347,14 +1430,32 @@ function blankViewport(cell) {
     cell,
     seriesKey: "",
     viewIndex: 0,
-    fitMode: true, scale: 1, panX: 0, panY: 0,
+    zoomMode: "fit", scale: 1, panX: 0, panY: 0,
     rotation: 0, flipH: false, flipV: false,
     overrideWindow: null, draftWindow: null, activePreset: null, windowIndex: 0, invert: false,
     tileMode: false,
     imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
+    // F-204. The translate last written by the layout, and the refusal
+    // reason a named refusal shows in the corner line until its condition
+    // clears.
+    panAppliedX: 0, panAppliedY: 0, zoomRefusal: "",
+    // F-204. The one-to-one paint state: the last grey reply, the displayed
+    // buffer cached against the frame and transform state, the integer
+    // device offset in the backing the buffer was written at while the
+    // mode holds, which the magnifier reads, the whole CSS pixel
+    // alignment shift the stage margins carry, and whether the backing
+    // still holds the mode's buffer, which the restore outside the mode
+    // reads when the sizes match.
+    grey: null, oneBuf: null, oneBufGrey: null, oneBufKey: "",
+    paintOffsetX: 0, paintOffsetY: 0,
+    oneShiftX: 0, oneShiftY: 0, oneBacking: false,
     // F-225. The file of the last image this viewport drew.
     paintedFile: null,
+    // F-205. The load whose stored-default trial holds the first paint, and
+    // whether the viewport names a stored preset the process does not offer.
+    // Both are per viewport and reset with the record.
+    paintHold: null, presetNotOffered: false,
     loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
     scrollDir: 1,
     mainBusy: false, mainTail: Promise.resolve(),
@@ -1387,6 +1488,7 @@ folderInput.addEventListener("change", () => {
   if (!files.length) return;
   sourceMode = "folder";
   markSource();
+  remoteRelease();
   readFolder(files);
 });
 document.getElementById("source-synthetic").addEventListener("click", openSynthetic);
@@ -1402,7 +1504,187 @@ window.addEventListener("focus", probeActive);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") probeActive();
 });
-document.getElementById("source-folder").addEventListener("click", () => folderInput.click());
+// Choosing the folder source is an intent even before a folder is picked, so
+// a pending remote fetch cannot outlive it. The change event releases again,
+// because a folder can also be chosen from the empty-state button, which does
+// not pass here.
+document.getElementById("source-folder").addEventListener("click", () => {
+  remoteRelease();
+  folderInput.click();
+});
+// A configured remote service only adds a source choice. Discovery or valid
+// staging never resets local state, marks, cache or reports. Any other
+// outcome, including the unconfigured null probe or malformed JSON, stays
+// silent.
+async function probeRemoteSource() {
+  let config = null;
+  try {
+    const response = await fetch("/dicweb/config", { method: "GET", cache: "no-store" });
+    if (response.status === 200) {
+      const json = await response.json();
+      if (json && typeof json === "object" && !Array.isArray(json)
+        && Object.keys(json).length === 2
+        && typeof json.studiesServiceUrl === "string" && json.studiesServiceUrl.length
+        && typeof json.wadoUriUrl === "string" && json.wadoUriUrl.length) {
+        config = Object.freeze({ studiesServiceUrl: json.studiesServiceUrl, wadoUriUrl: json.wadoUriUrl });
+      }
+    }
+  } catch {}
+  if (config) {
+    remoteConfig = config;
+    document.getElementById("source-dicomweb").hidden = false;
+  }
+}
+probeRemoteSource();
+
+let remoteProvider = null;
+let remoteProviderPromise = null;
+// The panel's release epoch. A local source chosen while the provider is
+// still loading has no provider to cancel yet, so the epoch is what the
+// studies search that load returns must check before it writes anything.
+let remoteEpoch = 0;
+// Opening a local source is a new intent for the remote panel too. A pending
+// remote fetch is cancelled and a staged body is released, so a late reply
+// can never claim the local image is unchanged and no body is held. The
+// panel also returns to its idle line, so no stale status outlives the
+// release.
+function remoteRelease() {
+  remoteEpoch += 1;
+  const provider = remoteProvider;
+  if (provider) {
+    provider.cancelPending();
+    provider.releaseStaged();
+  }
+  remoteState("The DICOMweb panel is idle.");
+}
+async function remoteProviderFor() {
+  if (remoteProvider) return remoteProvider;
+  if (!remoteProviderPromise) {
+    remoteProviderPromise = (async () => {
+      const core = await loadLibrary();
+      if (!core || typeof core.DicomwebProvider !== "function") return null;
+      remoteProvider = new core.DicomwebProvider({
+        studiesServiceUrl: remoteConfig.studiesServiceUrl,
+        wadoUriUrl: remoteConfig.wadoUriUrl,
+        fetch: (input, init) => fetch(input, init)
+      });
+      return remoteProvider;
+    })();
+  }
+  return remoteProviderPromise;
+}
+
+function remoteState(text) {
+  document.getElementById("remote-state").textContent = text;
+}
+
+function remoteError(error) {
+  if (error && error.code === "Aborted") return;
+  if (!remoteProvider) {
+    remoteState("The DICOMweb library is not available.");
+    return;
+  }
+  let text = "The DICOMweb request was refused.";
+  if (error && typeof error.code === "string") text += " Code " + error.code + ".";
+  remoteState(text);
+}
+
+function remoteShow(rows, label, onPick) {
+  const list = document.getElementById("remote-list");
+  const items = [];
+  for (const row of rows) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label(row);
+    button.addEventListener("click", () => onPick(row));
+    item.appendChild(button);
+    items.push(item);
+  }
+  list.replaceChildren(...items);
+}
+
+function remoteBackItem() {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Back to studies";
+  button.addEventListener("click", () => remoteOpenStudies());
+  item.appendChild(button);
+  return item;
+}
+
+async function remoteOpenStudies() {
+  const epoch = remoteEpoch;
+  let provider = null;
+  try {
+    provider = await remoteProviderFor();
+  } catch (error) {
+    provider = null;
+  }
+  if (epoch !== remoteEpoch) {
+    // A local source was chosen while the provider loaded. Its release
+    // already spoke and its idle line outlives this load, so nothing here
+    // is written over it.
+    return;
+  }
+  if (!provider) {
+    remoteState("The DICOMweb library is not available.");
+    return;
+  }
+  remoteState("Searching studies.");
+  try {
+    const result = await provider.searchStudies();
+    remoteShow(result.rows, (row) => row.studyUid, (row) => remoteOpenSeries(row.studyUid));
+    remoteState(result.rows.length ? "Choose a study." : "No studies were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteOpenSeries(studyUid) {
+  const provider = remoteProvider;
+  remoteState("Searching series.");
+  try {
+    const result = await provider.searchSeries(studyUid);
+    remoteShow(result.rows, (row) => row.seriesUid, (row) => remoteOpenInstances(studyUid, row.seriesUid));
+    document.getElementById("remote-list").prepend(remoteBackItem());
+    remoteState(result.rows.length ? "Choose a series." : "No series were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteOpenInstances(studyUid, seriesUid) {
+  const provider = remoteProvider;
+  remoteState("Searching instances.");
+  try {
+    const result = await provider.searchInstances(studyUid, seriesUid);
+    remoteShow(result.rows, (row) => row.instanceUid, (row) => remoteFetchInstance(studyUid, seriesUid, row.instanceUid));
+    document.getElementById("remote-list").prepend(remoteBackItem());
+    remoteState(result.rows.length ? "Choose an instance." : "No instances were found.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+async function remoteFetchInstance(studyUid, seriesUid, instanceUid) {
+  const provider = remoteProvider;
+  remoteState("Fetching the instance.");
+  try {
+    await provider.fetchSelectedInstance({ studyUid, seriesUid, instanceUid });
+    remoteState("The remote instance is fetched and validated. Remote image display is not available yet. The local image is unchanged.");
+  } catch (error) {
+    remoteError(error);
+  }
+}
+
+document.getElementById("source-dicomweb").addEventListener("click", () => {
+  const section = document.getElementById("remote");
+  section.hidden = !section.hidden;
+  document.getElementById("source-dicomweb").setAttribute("aria-expanded", section.hidden ? "false" : "true");
+  if (!section.hidden && !document.getElementById("remote-list").childElementCount) remoteOpenStudies();
+});
 for (const button of document.querySelectorAll("[data-open]")) {
   button.addEventListener("click", () => {
     if (button.dataset.open === "folder") folderInput.click();
@@ -1411,9 +1693,8 @@ for (const button of document.querySelectorAll("[data-open]")) {
 }
 document.getElementById("toggle-series").addEventListener("click", () => togglePanel("no-series"));
 document.getElementById("toggle-inspector").addEventListener("click", () => togglePanel("no-inspector"));
-for (const name of ["no-series", "no-inspector"]) {
-  if (readPreference("ocelli." + name, ["0", "1"], "0") === "1") document.body.classList.add(name);
-}
+if (prefs.values.hideSeries) document.body.classList.add("no-series");
+if (prefs.values.hideInspector) document.body.classList.add("no-inspector");
 syncPanels();
 profileSelect.value = activeProfile;
 paintMouseKeys();
@@ -1428,8 +1709,10 @@ profileSelect.addEventListener("change", () => {
   if (!profileKeyed) profileSelect.blur();
   profileKeyed = false;
 });
-fpsInput.value = readPreference(FPS_KEY, FPS_VALUES, "10");
+fpsInput.value = String(prefs.values.cineFps);
 fpsValue.textContent = fpsInput.value;
+defaultPresetSelect.value = prefs.values.defaultPreset;
+paintPrefsNote();
 useSliderButton.addEventListener("click", () => {
   useSlider = !useSlider;
   syncCineLine();
@@ -1439,6 +1722,7 @@ for (const name of TOOLS) {
 }
 document.getElementById("reset").addEventListener("click", () => resetView(activeViewport()));
 document.getElementById("fit").addEventListener("click", () => fitView(activeViewport()));
+document.getElementById("one-to-one").addEventListener("click", () => oneToOneView(activeViewport()));
 document.getElementById("fullscreen").addEventListener("click", toggleFull);
 document.getElementById("invert").addEventListener("click", () => {
   const vp = activeViewport();
@@ -1551,7 +1835,56 @@ modal.addEventListener("click", closeModal);
 filter.addEventListener("input", paintHeaderRows);
 playButton.addEventListener("click", togglePlay);
 fpsInput.addEventListener("input", () => { fpsValue.textContent = fpsInput.value; });
-fpsInput.addEventListener("change", () => { writePreference(FPS_KEY, fpsInput.value); });
+fpsInput.addEventListener("change", () => { savePreference("cineFps", Number(fpsInput.value)); });
+defaultPresetSelect.addEventListener("change", () => { savePreference("defaultPreset", defaultPresetSelect.value); });
+// Another same-origin page's write. The same resolve the load uses runs
+// again and refreshes the state and the visible controls without a reload
+// and without writing. The current tool is kept, and a running cine reads
+// its rate from the slider on its next step. A field whose own write
+// failed this session keeps the value in effect and its sentence when the
+// other tab writes a different field, and takes the stored value again
+// only when the stored value for that field itself moved, which is the
+// other tab's kept write of the same field.
+window.addEventListener("storage", (event) => {
+  if (event.key !== null && !PREFS_ALL_KEYS.includes(event.key)) return;
+  const resolved = resolvePreferences();
+  const moved = {};
+  for (const field of PREFS_FIELDS) moved[field] = resolved.values[field] !== prefs.resolved[field];
+  prefs.resolved = resolved.values;
+  const values = { ...prefs.values };
+  for (const field of ["cineFps", "hideSeries", "hideInspector", "defaultPreset"]) {
+    if (!prefs.writeFailures[field] || moved[field]) {
+      values[field] = resolved.values[field];
+      delete prefs.writeFailures[field];
+    }
+  }
+  // The profile's failed write keeps its own paragraph instead of a note
+  // line, and the same rule moves it: the stored profile itself is what
+  // decides, because this tab now holds the document's profile only once
+  // the document's profile changed.
+  const profileRefreshed = moved.mouseProfile || mouseUnsaved.hidden;
+  if (profileRefreshed) {
+    values.mouseProfile = resolved.values.mouseProfile;
+    activeProfile = values.mouseProfile;
+    profileSelect.value = activeProfile;
+    paintMouseKeys();
+    mouseUnsaved.hidden = true;
+  }
+  prefs.values = values;
+  prefs.sentences = resolved.sentences;
+  // A successful document write rewrites all four legacy keys, so another
+  // tab's change repairs a copy an older version of this viewer reads.
+  prefs.legacyPartial = false;
+  if (!prefs.writeFailures.cineFps) {
+    fpsInput.value = String(values.cineFps);
+    fpsValue.textContent = fpsInput.value;
+  }
+  if (!prefs.writeFailures.hideSeries) document.body.classList.toggle("no-series", values.hideSeries);
+  if (!prefs.writeFailures.hideInspector) document.body.classList.toggle("no-inspector", values.hideInspector);
+  if (!prefs.writeFailures.hideSeries || !prefs.writeFailures.hideInspector) syncPanels();
+  if (!prefs.writeFailures.defaultPreset) defaultPresetSelect.value = values.defaultPreset;
+  paintPrefsNote();
+});
 scrubber.addEventListener("input", () => {
   const vp = activeViewport();
   showIndex(vp, Number(scrubber.value));
@@ -1594,6 +1927,19 @@ function relayout() {
     for (const node of vp.dom.tiles.querySelectorAll("canvas")) sizeTile(node);
   }
 }
+
+// F-204. A device pixel ratio change with an unchanged CSS viewport fires
+// neither existing listener, so the page arms a resolution query for the
+// live ratio and re-arms it inside its own handler. Each change re-lays out
+// through relayout, which sets layoutDirty and bypasses the stamp.
+function armRatioWatcher() {
+  const query = window.matchMedia("(resolution:" + window.devicePixelRatio + "dppx)");
+  query.addEventListener("change", () => {
+    armRatioWatcher();
+    relayout();
+  }, { once: true });
+}
+armRatioWatcher();
 document.addEventListener("pointerover", (event) => {
   const node = event.target.closest("[data-sentence], [id]");
   if (!node) return;
@@ -1813,22 +2159,20 @@ async function postHeaders(file) {
 function togglePanel(name) {
   const on = !document.body.classList.contains(name);
   document.body.classList.toggle(name, on);
-  writePreference("ocelli." + name, on ? "1" : "0");
+  savePreference(name === "no-series" ? "hideSeries" : "hideInspector", on);
   syncPanels();
 }
 
 // Every read and write of this browser's storage is in these two, inside try
-// and catch, because a private window or blocked site data can throw. A
-// missing key, a value outside `allowed` or a throw gives `fallback`, and
-// nothing is written back.
-function readPreference(key, allowed, fallback) {
-  let stored = null;
+// and catch, because a private window or blocked site data can throw. They
+// are the page's only two storage accessors, and the preference schema above
+// them owns every closed set, refusal and sentence.
+function readPreference(key) {
   try {
-    stored = localStorage.getItem(key);
+    return localStorage.getItem(key);
   } catch {
-    return fallback;
+    return null;
   }
-  return allowed.includes(stored) ? stored : fallback;
 }
 
 // False when the browser did not keep the value.
@@ -1841,13 +2185,222 @@ function writePreference(key, value) {
   }
 }
 
+// The document's shape on read. Anything that is not a usable version 1
+// object is refused whole: unparsable text, null, an array, a number, or an
+// object whose version is not exactly the number 1.
+function parsePrefsDocument(raw) {
+  if (raw == null) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (parsed.version !== PREFS_VERSION) return null;
+  return parsed;
+}
+
+// The closed set of each field. A missing field, a field of the wrong JSON
+// type and a value outside its set are all the same refusal.
+function prefValueValid(field, value) {
+  switch (field) {
+    case "mouseProfile": return typeof value === "string" && PROFILE_IDS.includes(value);
+    case "cineFps": return Number.isInteger(value) && value >= 1 && value <= 30;
+    case "hideSeries":
+    case "hideInspector": return typeof value === "boolean";
+    case "defaultPreset": return typeof value === "string" && DEFAULT_PRESETS.includes(value);
+    default: return false;
+  }
+}
+
+// The document exactly as it is stored: the version and the five fields, in
+// this order, each a validated value. Unknown fields never survive a write.
+function prefsDocumentJSON(values) {
+  return JSON.stringify({
+    version: PREFS_VERSION,
+    mouseProfile: values.mouseProfile,
+    cineFps: values.cineFps,
+    hideSeries: values.hideSeries,
+    hideInspector: values.hideInspector,
+    defaultPreset: values.defaultPreset
+  });
+}
+
+// The legacy encoding of a validated value. The rate is its decimal string
+// and the columns are "0" and "1", so an older binary reads them unchanged.
+function prefLegacyValue(field, value) {
+  if (field === "cineFps") return String(value);
+  if (field === "hideSeries" || field === "hideInspector") return value ? "1" : "0";
+  return value;
+}
+
+// Reads the stored choices without writing anything. The page load and the
+// storage listener share this one resolve. A usable document wins. Without
+// one, whether the stored document is absent or refused whole, the four
+// legacy keys are used, each validated against its own set, a value outside
+// its set naming that key and taking the default.
+function resolvePreferences() {
+  const values = { ...PREFS_DEFAULTS };
+  const sentences = [];
+  const raw = readPreference(PREFS_KEY);
+  const stored = parsePrefsDocument(raw);
+  if (stored !== null) {
+    for (const field of PREFS_FIELDS) {
+      if (prefValueValid(field, stored[field])) values[field] = stored[field];
+      else sentences.push(PREFS_REFUSALS[field]);
+    }
+    return { values, sentences, refused: false, sawLegacy: false };
+  }
+  const refused = raw != null;
+  if (refused) sentences.push(PREFS_REFUSALS.document);
+  let sawLegacy = false;
+  const mouse = readPreference(MOUSE_KEY);
+  if (mouse != null) {
+    sawLegacy = true;
+    if (PROFILE_IDS.includes(mouse)) values.mouseProfile = mouse;
+    else sentences.push(PREFS_REFUSALS.mouseProfile);
+  }
+  const fps = readPreference(FPS_KEY);
+  if (fps != null) {
+    sawLegacy = true;
+    if (FPS_VALUES.includes(fps)) values.cineFps = Number(fps);
+    else sentences.push(PREFS_REFUSALS.cineFps);
+  }
+  for (const field of ["hideSeries", "hideInspector"]) {
+    const stored = readPreference(PREFS_LEGACY_KEYS[field]);
+    if (stored == null) continue;
+    sawLegacy = true;
+    if (stored === "0" || stored === "1") values[field] = stored === "1";
+    else sentences.push(PREFS_REFUSALS[field]);
+  }
+  return { values, sentences, refused, sawLegacy };
+}
+
+// The page load. When there is no document and any legacy key is present, the
+// document is written once from the validated values and all four legacy keys
+// are rewritten from it, so an invalid legacy value is repaired in place. A
+// refused document is left byte-identical, and a load with neither store
+// writes nothing.
+function loadPreferences() {
+  const resolved = resolvePreferences();
+  prefs.values = resolved.values;
+  prefs.resolved = resolved.values;
+  prefs.sentences = resolved.sentences;
+  if (resolved.refused || !resolved.sawLegacy) return;
+  if (!writePreference(PREFS_KEY, prefsDocumentJSON(resolved.values))) return;
+  const failures = [];
+  for (const field of PREFS_FIELDS) {
+    if (!writePreference(PREFS_LEGACY_KEYS[field], prefLegacyValue(field, resolved.values[field]))) failures.push(field);
+  }
+  prefs.legacyPartial = failures.length > 0;
+}
+
+// Writes one choice. The document is re-read inside this helper and only the
+// named field changes, so a tab that opened earlier cannot drop another
+// tab's field. A field whose re-read value is valid is kept as read, and a
+// field whose re-read value is invalid is written as this tab's value in
+// effect. The field being changed is written at the user's new value. The
+// merged document is only what is written: this session keeps applying its
+// own values, so a later write of another field never replaces an untouched
+// field's choice in effect. A successful document write rewrites all four
+// legacy keys from the written values. A refused document is never written:
+// the change writes the changed field's legacy key only, and a default
+// preset change, which has no legacy key, is kept nowhere. The result names
+// whether the document and the changed field's own legacy key hold the
+// value, which for the default preset is the document's success alone.
+function savePreference(field, value) {
+  if (!prefValueValid(field, value)) return { document: false, legacy: false };
+  const raw = readPreference(PREFS_KEY);
+  const current = parsePrefsDocument(raw);
+  const refused = raw != null && current === null;
+  const inEffect = { ...prefs.values, [field]: value };
+  const next = { ...inEffect };
+  if (current !== null) {
+    for (const name of PREFS_FIELDS) {
+      if (name !== field && prefValueValid(name, current[name])) next[name] = current[name];
+    }
+  }
+  let documentKept = false;
+  let legacyKept = false;
+  if (refused) {
+    const ownKey = PREFS_LEGACY_KEYS[field];
+    if (ownKey) {
+      legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+      // A kept own write is what a load reads while the document is refused,
+      // so the listener's baseline moves with it.
+      if (legacyKept) prefs.resolved = { ...prefs.resolved, [field]: next[field] };
+    }
+  } else {
+    documentKept = writePreference(PREFS_KEY, prefsDocumentJSON(next));
+    if (documentKept) {
+      // The document now holds next, so that is the state a later stored
+      // change is measured against.
+      prefs.resolved = { ...next };
+      const failures = [];
+      for (const name of PREFS_FIELDS) {
+        const legacyKey = PREFS_LEGACY_KEYS[name];
+        if (legacyKey && !writePreference(legacyKey, prefLegacyValue(name, next[name]))) failures.push(name);
+      }
+      prefs.legacyPartial = failures.length > 0;
+      legacyKept = !failures.includes(field);
+    } else {
+      const ownKey = PREFS_LEGACY_KEYS[field];
+      if (ownKey) legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+    }
+  }
+  // The sentence for the changed field. mouseProfile's write failure keeps
+  // its own paragraph in the MOUSE section instead, and in the refused state
+  // a legacy success is a kept choice, so only a real loss names a sentence.
+  if (field !== "mouseProfile") {
+    const kept = documentKept || (refused && legacyKept);
+    if (kept) delete prefs.writeFailures[field];
+    else prefs.writeFailures[field] = true;
+  }
+  prefs.values = inEffect;
+  paintPrefsNote();
+  // What the reader keeps: the document's own success when it is usable,
+  // because it wins on the next load, and the legacy key's success while the
+  // stored document is refused, because the legacy keys are what a load uses
+  // then.
+  return { document: documentKept, legacy: legacyKept, kept: refused ? legacyKept : documentKept };
+}
+
+// One line per outstanding condition, several at once, in the plan's order:
+// the load refusals, the outlined viewport's not-offered sentence, then the
+// write failures and the partial copy.
+function paintPrefsNote() {
+  const lines = [...prefs.sentences];
+  const vp = activeViewport();
+  if (vp && vp.presetNotOffered) lines.push(PREFS_REFUSALS.notOffered);
+  for (const field of ["cineFps", "hideSeries", "hideInspector", "defaultPreset"]) {
+    if (prefs.writeFailures[field]) lines.push(PREFS_WRITE_FAILURES[field]);
+  }
+  if (prefs.legacyPartial) lines.push(PREFS_REFUSALS.legacyPartial);
+  if (!lines.length) {
+    prefsNote.hidden = true;
+    prefsNote.replaceChildren();
+    return;
+  }
+  const nodes = [];
+  for (const line of lines) {
+    const span = document.createElement("span");
+    span.textContent = line;
+    nodes.push(span);
+  }
+  prefsNote.replaceChildren(...nodes);
+  prefsNote.hidden = false;
+}
+
 // A profile change sets the tool left starts on, which cancels a draft
-// first, as any tool change does.
+// first, as any tool change does. The write failure keeps its own paragraph
+// here, so the save result drives `mouse-unsaved` directly.
 function setProfile(id) {
   if (!PROFILE_IDS.includes(id)) return;
   activeProfile = id;
   profileSelect.value = id;
-  mouseUnsaved.hidden = writePreference(MOUSE_KEY, id);
+  const outcome = savePreference("mouseProfile", id);
+  mouseUnsaved.hidden = outcome.kept;
   paintMouseKeys();
   setTool(PROFILES[id].start);
 }
@@ -1953,6 +2506,7 @@ function markSource() {
 }
 
 async function openSynthetic() {
+  remoteRelease();
   const ticket = ++currentGeneration;
   sourceMode = "synthetic";
   markSource();
@@ -2306,7 +2860,12 @@ function loadSeries(vp, key) {
     cancelDraft();
   }
   const previous = currentImage(vp);
-  const next = series.images[positions.get(key) || 0] || series.images[0];
+  // The shown image, resolved once through the wrap `showIndex` applies, so
+  // the stored-default trial is judged on the image the viewport will show.
+  const count = series.images.length;
+  const remembered = positions.get(key);
+  const shownAt = count ? ((Number.isInteger(remembered) ? remembered : 0) % count + count) % count : 0;
+  const next = series.images[shownAt] || series.images[0];
   if (previous && next && Boolean(previous.info.colour) !== Boolean(next.info.colour)) vp.invert = false;
   vp.loadToken += 1;
   vp.tileToken += 1;
@@ -2316,7 +2875,7 @@ function loadSeries(vp, key) {
   vp.seriesKey = key;
   vp.shownWindow = null;
   vp.paletteFallback = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.layoutDirty = true;
   vp.overrideWindow = null;
   vp.draftWindow = null;
@@ -2326,15 +2885,63 @@ function loadSeries(vp, key) {
     windowNotice = "";
     syncWindowList();
   }
+  // F-205. The stored default is tried once per series load, after the
+  // viewport has moved, so the trial captures the new series' image. The
+  // single evaluation here is the apply's eligibility, and a trial sets the
+  // first-paint hold under this load's token before the index is shown.
+  vp.presetNotOffered = false;
+  const trialToken = storedDefaultTrial(vp, next);
+  vp.paintHold = trialToken == null ? null : vp.loadToken;
   syncStage(vp);
   syncSeriesRows();
   clearLine(vp);
-  const remembered = positions.get(key);
-  const drawing = showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
-  if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);
+  const drawing = showIndex(vp, shownAt);
+  if (trialToken != null) {
+    const loadToken = vp.loadToken;
+    // Every outcome releases the hold, and a release whose load was
+    // superseded repaints nothing.
+    chooseWindow(vp, { preset: trialToken }, { propagate: false }).finally(() => releasePaintHold(vp, loadToken));
+  }
+  if (vp.cell === activeCell) {
+    probeAfterSeriesDraw(vp, drawing);
+    paintPrefsNote();
+  }
   // A new series in any shown cell needs its line, and a new source moves
   // the others. One coalesced request covers both.
   if (cellShown(vp)) scheduleLink();
+}
+
+// Whether this load will try the stored default preset, and the not-offered
+// sentence when it will not but the rows are choosable. The rows-choosable
+// rule is the window list's own: no VOI LUT listed and the image monochrome.
+// An image with no preset list at all, an MR or a colour image, stays
+// silent, because there is nothing the process could have offered.
+function storedDefaultTrial(vp, image) {
+  const token = prefs.values.defaultPreset;
+  if (token === "none" || !image || !drawable(image.info)) return null;
+  const listed = windowInfo(image);
+  if (listed.voiLuts.length > 0 || !(image.info && image.info.monochrome)) return null;
+  if (presetOffered(image, token)) return token;
+  if (listed.presets.length) vp.presetNotOffered = true;
+  return null;
+}
+
+// The trial of this load is over, whatever it decided. The hold opens and
+// the viewport repaints from its current window state: the preset on a
+// commit, the reader's choice if one landed during the trial, and the
+// window the page would have shown otherwise. A superseded load's token no
+// longer matches, so its release repaints nothing.
+function releasePaintHold(vp, loadToken) {
+  if (vp.paintHold !== loadToken) return;
+  vp.paintHold = null;
+  if (cellShown(vp)) showIndex(vp, vp.viewIndex);
+}
+
+// Whether this viewport's first paint waits for its stored-default trial.
+// The hold names the load it was set under, so a newer load or a changed
+// file frees every paint site without a release.
+function paintHeld(vp) {
+  return vp.paintHold === vp.loadToken;
 }
 
 function drawable(info) {
@@ -2494,13 +3101,15 @@ async function showIndex(vp, next) {
     faultShown(vp, image);
     return;
   }
-  if (vp.tileMode && !seriesWindowWanted(vp, image)) paintTiles(vp);
+  if (vp.tileMode && !paintHeld(vp) && !seriesWindowWanted(vp, image)) paintTiles(vp);
   schedulePrefetch(vp);
   // A series that is still to get its window is drawn only once it has it,
   // so no grey of this image's own window is taken from the cache first.
   const hit = seriesWindowWanted(vp, image) ? null : takeGrey(cacheKey(image, vp));
   if (hit) {
-    applyGrey(vp, hit, image);
+    // A held viewport waits for its trial, and the release repaints from
+    // this cached grey.
+    if (!paintHeld(vp)) applyGrey(vp, hit, image);
     return;
   }
   return pumpMain(vp);
@@ -2538,8 +3147,8 @@ async function pumpMain(vp) {
           await ensureSeriesWindow(seriesOf(vp));
           // After the wait the tiles paint at the series window, or at each
           // image's own window once the series is refused, and a series
-          // still waiting is not painted.
-          if (vp.tileMode && cellShown(vp) && !seriesWindowWanted(vp, currentImage(vp))) paintTiles(vp);
+          // still waiting is not painted. A held viewport waits too.
+          if (vp.tileMode && cellShown(vp) && !paintHeld(vp) && !seriesWindowWanted(vp, currentImage(vp))) paintTiles(vp);
           if (token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image) continue;
           if (vp.cell === activeCell) syncWindowList();
           schedulePrefetch(vp);
@@ -2547,7 +3156,9 @@ async function pumpMain(vp) {
         key = cacheKey(image, vp);
         const grey = await fetchGrey(image, vp);
         if (moved()) continue;
-        applyGrey(vp, grey, image);
+        // The reply is cached either way, so a held viewport repaints from
+        // it when its trial releases the hold.
+        if (!paintHeld(vp)) applyGrey(vp, grey, image);
         break;
       } catch (error) {
         if (moved()) continue;
@@ -3095,7 +3706,17 @@ async function requestGrey(image, options) {
         top: response.headers.get("X-Ocelli-Edge-Top") || "",
         bottom: response.headers.get("X-Ocelli-Edge-Bottom") || "",
         calibrationSource: response.headers.get("X-Ocelli-Calibration-Source") || "",
-        calibrationColumn: headerNumber(response, "X-Ocelli-Calibration-Column")
+        calibrationColumn: headerNumber(response, "X-Ocelli-Calibration-Column"),
+        // F-267. The shown frame's own acquisition values, stamped with the
+        // identity they belong to. The exposure source header is not
+        // parsed, because nothing on the page reads a source name.
+        sliceThickness: headerNumber(response, "X-Ocelli-Slice-Thickness"),
+        kvp: headerNumber(response, "X-Ocelli-Kvp"),
+        exposureMas: headerNumber(response, "X-Ocelli-Exposure-Mas"),
+        repetitionTime: headerNumber(response, "X-Ocelli-Repetition-Time"),
+        echoTime: headerNumber(response, "X-Ocelli-Echo-Time"),
+        serial: fileSerial(image.file),
+        frame: image.frame
       }
     };
   }
@@ -3247,6 +3868,14 @@ function drawGrey(vp, grey) {
   const aspect = greyAspect(grey.facts);
   vp.aspectX = aspect.x;
   vp.aspectY = aspect.y;
+  // F-204. The mode repaints from this reply on every layout, and the
+  // non-mode path repaints it when the backing returns to the stored size,
+  // so the viewport holds it until the next frame replaces it. This is the
+  // only assignment of `vp.grey`, and every caller of drawGrey honours
+  // F-205's first-paint hold, so the two F-204 repaints that skip the hold,
+  // `paintOneToOne` and the backing restore in layoutViewport, only ever
+  // redraw the frame already on screen.
+  vp.grey = grey;
   const dom = vp.dom;
   if (!vp.viewContext) vp.viewContext = dom.canvas.getContext("2d");
   if (!vp.viewContext) {
@@ -3262,6 +3891,13 @@ function drawGrey(vp, grey) {
   }
   syncStage(vp);
   if (!vp.tileMode) {
+    // F-204. A frame change clears the refusal reason before the layout, so
+    // a reason can never outlive the frame it was refused on.
+    vp.zoomRefusal = "";
+    // The paint above sized the backing to the stored frame, and in the
+    // mode the backing is the device-sized box, so the layout must repaint
+    // it even when the new frame leaves the stamp unchanged.
+    if (vp.zoomMode === "one") vp.layoutDirty = true;
     layoutViewport(vp);
     const drawn = notes.get(noteKey(currentImage(vp)));
     const mine = vp.cell === activeCell && (draft || selected != null);
@@ -3377,12 +4013,167 @@ function fitScale(vp) {
   return Math.min(rect.width / width, rect.height / height);
 }
 
+// F-204. The whole CSS pixel step whose multiples land on a whole number
+// of device pixels at this ratio: 1 at ratios 1 and 2, 4 at 1.25 and 2 at
+// 1.5. The ratio the page reads is the engine's f32 widened to a double,
+// 1.38 reads as 1.3799999952316284, so a product is taken as whole within
+// 1e-4. That is far above the representation error at the step such a
+// ratio needs, 2.4e-7 for 1.38 at step 50, and far below a near miss such
+// as 7 times 1.57, which is 0.01 short of 11. 0 when no step up to the
+// limit exists.
+function deviceStep(ratio, limit) {
+  for (let step = 1; step <= limit; step += 1) {
+    const scaled = ratio * step;
+    if (Math.abs(scaled - Math.round(scaled)) <= 1e-4) return step;
+  }
+  return 0;
+}
+
+// The search cap for the ratio's whole CSS pixel step, the same bound the
+// one-to-one suite's stepFor uses. A ratio with no step under it has no
+// device-aligned box under the cap.
+const STEP_LIMIT = 2000;
+
+// The box the mode draws into, sized up, never down: the smallest whole
+// multiple of the ratio's step that covers the cell side, plus one step so
+// the alignment shift still covers it, clipped by the cell's own overflow
+// hidden. No part of the cell inside the drawn frame is left unpainted,
+// which the reach rows of one-to-one.mjs check. 0 when
+// no step exists up to the cap.
+function oneToOneBox(side, ratio) {
+  const whole = Math.ceil(side);
+  const step = deviceStep(ratio, STEP_LIMIT);
+  if (!step) return 0;
+  return Math.ceil(whole / step) * step + step;
+}
+
+// The displayed device extents along the stored column and row axes. Rows
+// are one device row per stored row. Columns draw at aspectX over aspectY
+// device pixels per stored column, PS3.3 10.7.1.3's spacing order through
+// greyAspect, so a 128 column 0.7\0.5 frame draws round(128 * 0.5 / 0.7),
+// 91 device columns.
+function oneToOneExtents(vp) {
+  const turned = vp.rotation % 180 !== 0;
+  const alongColumns = Math.round(vp.imageWidth * vp.aspectX / vp.aspectY);
+  const alongRows = vp.imageHeight;
+  return { alongColumns, alongRows, screenW: turned ? alongRows : alongColumns, screenH: turned ? alongColumns : alongRows };
+}
+
+// The stored pixel a displayed device pixel draws, nearest centre: with the
+// device count equal to the stored count this is the exact identity, and on
+// the resampled column axis it is an order-preserving nearest choice.
+function oneToOneSource(deviceAt, storedCount, deviceCount) {
+  return Math.min(storedCount - 1, Math.max(0, Math.floor((deviceAt + 0.5) * storedCount / deviceCount)));
+}
+
+// The mode's displayed buffer: the grey bytes gathered through the inverse
+// of the rotate and flip the stage used to carry, addressed in device
+// pixels. Cached against the frame and transform state, so a pan or a ratio
+// change repositions the same buffer instead of refilling it.
+function oneToOneBuffer(vp, screenW, screenH) {
+  const grey = vp.grey;
+  const key = grey.width + "x" + grey.height + ":" + screenW + "x" + screenH
+    + ":" + vp.rotation + ":" + (vp.flipH ? 1 : 0) + (vp.flipV ? 1 : 0);
+  if (vp.oneBuf && vp.oneBufGrey === grey && vp.oneBufKey === key) return vp.oneBuf;
+  const buffer = new ImageData(screenW, screenH);
+  const data = buffer.data;
+  const bytes = grey.bytes;
+  const channels = grey.channels;
+  const storedW = grey.width;
+  const storedH = grey.height;
+  const turned = vp.rotation % 180 !== 0;
+  const bufU = turned ? screenH : screenW;
+  const bufV = turned ? screenW : screenH;
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
+  for (let dy = 0; dy < screenH; dy += 1) {
+    for (let dx = 0; dx < screenW; dx += 1) {
+      // Undo the rotation to the stored axes, resample the column axis,
+      // then undo the flip. Rotate 90 degrees clockwise maps displayed
+      // (dx, dy) to stored (dy, rows - 1 - dx).
+      let u;
+      let v;
+      if (vp.rotation === 90) {
+        u = dy;
+        v = bufV - 1 - dx;
+      } else if (vp.rotation === 180) {
+        u = bufU - 1 - dx;
+        v = bufV - 1 - dy;
+      } else if (vp.rotation === 270) {
+        u = bufU - 1 - dy;
+        v = dx;
+      } else {
+        u = dx;
+        v = dy;
+      }
+      const su = oneToOneSource(u, storedW, bufU);
+      const sv = oneToOneSource(v, storedH, bufV);
+      const sx = fx === -1 ? storedW - 1 - su : su;
+      const sy = fy === -1 ? storedH - 1 - sv : sv;
+      const source = (sy * storedW + sx) * channels;
+      const at = (dy * screenW + dx) * 4;
+      if (channels === 3) {
+        data[at] = bytes[source];
+        data[at + 1] = bytes[source + 1];
+        data[at + 2] = bytes[source + 2];
+      } else {
+        const value = bytes[source];
+        data[at] = value;
+        data[at + 1] = value;
+        data[at + 2] = value;
+      }
+      data[at + 3] = 255;
+    }
+  }
+  vp.oneBuf = buffer;
+  vp.oneBufGrey = grey;
+  vp.oneBufKey = key;
+  return buffer;
+}
+
+// The mode's paint: the backing is the element box times the ratio, and the
+// displayed buffer is written one to one at the integer device offset. The
+// oneBacking flag records that the backing holds this buffer, so leaving
+// the mode restores the stored bytes even when the sizes happen to match.
+function paintOneToOne(vp, boxW, boxH, screenW, screenH, ox, oy) {
+  const ratio = window.devicePixelRatio || 1;
+  const backingW = Math.round(boxW * ratio);
+  const backingH = Math.round(boxH * ratio);
+  if (vp.dom.canvas.width !== backingW || vp.dom.canvas.height !== backingH) {
+    vp.dom.canvas.width = backingW;
+    vp.dom.canvas.height = backingH;
+  }
+  vp.oneBacking = true;
+  const context = vp.viewContext;
+  if (!context || !vp.grey) return;
+  context.clearRect(0, 0, backingW, backingH);
+  context.putImageData(oneToOneBuffer(vp, screenW, screenH), ox, oy);
+}
+
 function layoutViewport(vp) {
   const { imageWidth, imageHeight, aspectX, aspectY, dom } = vp;
   if (!imageWidth || dom.stage.hidden) return;
+  const ratio = window.devicePixelRatio || 1;
+  // F-204. The one-to-one guards re-run on every layout of a held mode, so
+  // a frame change or a ratio change that leaves the stored frame smaller
+  // than the device pixel ratio drops to fit before any style write, and
+  // so does a ratio whose whole CSS pixel step is past the search cap,
+  // where the box rule finds no step. The drop shows no reason, because
+  // nothing claims 1:1 any more. The cell size itself is no guard: the box
+  // is sized up past the cell and the cell's overflow hidden clips it,
+  // matching cornerstone3D 5.8.2, which never refuses for cell size.
+  if (vp.zoomMode === "one") {
+    const cellBox = dom.cell.getBoundingClientRect();
+    if (vp.imageWidth < ratio || vp.imageHeight < ratio
+      || !oneToOneBox(cellBox.width, ratio) || !oneToOneBox(cellBox.height, ratio)) {
+      vp.zoomMode = "fit";
+    }
+  }
   const stamp = imageWidth + "x" + imageHeight
     + ":" + aspectX + ":" + aspectY
-    + ":" + (vp.fitMode ? "fit" : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
+    + ":" + (vp.zoomMode === "fit" ? "fit"
+      : vp.zoomMode === "one" ? "one:" + vp.panX + ":" + vp.panY
+      : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
     + ":" + vp.rotation
     + ":" + (vp.flipH ? 1 : 0)
     + ":" + (vp.flipV ? 1 : 0)
@@ -3391,35 +4182,160 @@ function layoutViewport(vp) {
   // Zoom, pan, fit, rotation, a flip or a new image size moves this cell's
   // picture, so a readout placed over it for the old geometry goes.
   leavePointerFor(vp);
-  if (vp.fitMode) {
+  if (vp.zoomMode === "fit") {
     vp.scale = fitScale(vp);
     vp.panX = 0;
     vp.panY = 0;
+  } else if (vp.zoomMode === "one") {
+    // F-204. One stored pixel per device pixel is the scale 1 / ratio on a
+    // square-pixel frame and (1 / ratio) / aspectY on an anisotropic one,
+    // where the rows are exact and the columns are resampled. The scale is
+    // recomputed from the live ratio on every layout, and the pan rides the
+    // change as zoomAt's arithmetic does with the zoom centre at the cell
+    // centre, where the offset under the centre is minus the pan.
+    const identity = (1 / ratio) / vp.aspectY;
+    const factor = identity / vp.scale;
+    vp.panX += -vp.panX * (1 - factor);
+    vp.panY += -vp.panY * (1 - factor);
+    vp.scale = identity;
   }
   const scale = vp.scale;
   const pictureW = Math.max(1, imageWidth * scale * aspectX);
   const pictureH = Math.max(1, imageHeight * scale * aspectY);
-  dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  const one = vp.zoomMode === "one";
+  const extents = one ? oneToOneExtents(vp) : null;
+  const cellBox = one ? dom.cell.getBoundingClientRect() : null;
+  const boxW = one ? oneToOneBox(cellBox.width, ratio) : 0;
+  const boxH = one ? oneToOneBox(cellBox.height, ratio) : 0;
+  if (one) {
+    // The identity renders pixelated at every ratio. The comparison below
+    // evaluates one ulp below 1 at some ratios and would select auto.
+    dom.canvas.style.imageRendering = "pixelated";
+  } else {
+    dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  }
   const turned = vp.rotation % 180 !== 0;
-  dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
-  dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
-  dom.frame.style.transform = "translate(" + vp.panX + "px, " + vp.panY + "px)";
-  dom.stage.style.width = pictureW + "px";
-  dom.stage.style.height = pictureH + "px";
-  dom.stage.style.marginLeft = (-pictureW / 2) + "px";
-  dom.stage.style.marginTop = (-pictureH / 2) + "px";
   const fx = vp.flipH ? -1 : 1;
   const fy = vp.flipV ? -1 : 1;
-  dom.stage.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
-  dom.stage.style.transformOrigin = "center center";
-  dom.canvas.style.width = pictureW + "px";
-  dom.canvas.style.height = pictureH + "px";
-  dom.ink.style.width = pictureW + "px";
-  dom.ink.style.height = pictureH + "px";
-  dom.refs.style.width = pictureW + "px";
-  dom.refs.style.height = pictureH + "px";
+  let translateX = vp.panX;
+  let translateY = vp.panY;
+  if (one) {
+    // F-204, the lead amendments after implementation passes 1 and 2. While
+    // the mode holds, the canvas element is sized in whole CSS pixels up
+    // past its cell, the smallest whole multiple of the ratio's step that
+    // covers the cell plus one step for the alignment shift, and the cell's
+    // overflow hidden clips the excess. Its backing store is that box times
+    // the ratio, and the stored pixels are written one to one at an integer
+    // device offset that carries the centring, the pan and the snap.
+    // Rotation and flips ride the index in that write, never a CSS
+    // transform. The margins carry the last written alignment shift until
+    // the snap below recomputes it.
+    dom.frame.style.width = boxW + "px";
+    dom.frame.style.height = boxH + "px";
+    dom.stage.style.width = boxW + "px";
+    dom.stage.style.height = boxH + "px";
+    dom.stage.style.marginLeft = (-boxW / 2 + vp.oneShiftX) + "px";
+    dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
+    // The mode writes no transform on the frame or the stage, so the
+    // canvas's device position is its laid-out position alone.
+    dom.stage.style.transform = "none";
+    dom.stage.style.transformOrigin = "center center";
+    dom.canvas.style.width = boxW + "px";
+    dom.canvas.style.height = boxH + "px";
+    // The marks and reference lines keep the unrotated picture size and
+    // take the rotation and flips as their own transform below, as they
+    // did on the stage, so their turned box covers the drawn device box.
+    dom.ink.style.width = (extents.alongColumns / ratio) + "px";
+    dom.ink.style.height = (extents.alongRows / ratio) + "px";
+    dom.refs.style.width = (extents.alongColumns / ratio) + "px";
+    dom.refs.style.height = (extents.alongRows / ratio) + "px";
+  } else {
+    dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
+    dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
+    dom.stage.style.width = pictureW + "px";
+    dom.stage.style.height = pictureH + "px";
+    dom.stage.style.marginLeft = (-pictureW / 2) + "px";
+    dom.stage.style.marginTop = (-pictureH / 2) + "px";
+    dom.stage.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
+    dom.stage.style.transformOrigin = "center center";
+    dom.canvas.style.width = pictureW + "px";
+    dom.canvas.style.height = pictureH + "px";
+    dom.ink.style.width = pictureW + "px";
+    dom.ink.style.height = pictureH + "px";
+    dom.refs.style.width = pictureW + "px";
+    dom.refs.style.height = pictureH + "px";
+  }
+  // F-204. The translate is written after the size writes, so the mode can
+  // measure the laid-out canvas with the translate last written still
+  // applied and subtract it. The mode moves the canvas's position to the
+  // nearest multiple of the ratio's whole CSS pixel step through the
+  // stage's margins, so the position times the ratio is a whole device
+  // pixel, and writes no frame translate. The alignment shift is taken
+  // back inside the device offset, so the picture stays centred in the
+  // cell, and the backing then maps one to one onto the device grid, which
+  // the byte rows of one-to-one.mjs check in screenshots.
+  if (one) {
+    // The box rule above passed, so the step is no larger than the box.
+    const step = deviceStep(ratio, boxW);
+    const laid = dom.canvas.getBoundingClientRect();
+    const baseX = laid.left - vp.panAppliedX - vp.oneShiftX;
+    const baseY = laid.top - vp.panAppliedY - vp.oneShiftY;
+    const alignX = Math.round(baseX / step) * step;
+    const alignY = Math.round(baseY / step) * step;
+    vp.oneShiftX = alignX - baseX;
+    vp.oneShiftY = alignY - baseY;
+    dom.stage.style.marginLeft = (-boxW / 2 + vp.oneShiftX) + "px";
+    dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
+    translateX = 0;
+    translateY = 0;
+    // The device offset: the centring plus the pan minus the alignment
+    // shift the margins introduced, snapped to a whole device pixel.
+    const ox = Math.round((boxW * ratio - extents.screenW) / 2 + (vp.panX - vp.oneShiftX) * ratio);
+    const oy = Math.round((boxH * ratio - extents.screenH) / 2 + (vp.panY - vp.oneShiftY) * ratio);
+    paintOneToOne(vp, boxW, boxH, extents.screenW, extents.screenH, ox, oy);
+    const inkLeft = (ox + (extents.screenW - extents.alongColumns) / 2) / ratio;
+    const inkTop = (oy + (extents.screenH - extents.alongRows) / 2) / ratio;
+    dom.ink.style.left = inkLeft + "px";
+    dom.ink.style.top = inkTop + "px";
+    dom.refs.style.left = inkLeft + "px";
+    dom.refs.style.top = inkTop + "px";
+    dom.ink.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
+    dom.refs.style.transform = dom.ink.style.transform;
+    dom.ink.style.transformOrigin = "center center";
+    dom.refs.style.transformOrigin = "center center";
+    vp.paintOffsetX = ox;
+    vp.paintOffsetY = oy;
+  } else {
+    if (dom.ink.style.left !== "0px") dom.ink.style.left = "0px";
+    if (dom.ink.style.top !== "0px") dom.ink.style.top = "0px";
+    if (dom.refs.style.left !== "0px") dom.refs.style.left = "0px";
+    if (dom.refs.style.top !== "0px") dom.refs.style.top = "0px";
+    if (dom.ink.style.transform) dom.ink.style.transform = "";
+    if (dom.refs.style.transform) dom.refs.style.transform = "";
+    // Outside the mode the backing returns to the stored frame size and
+    // the paint restores the stored bytes, whenever the mode resized the
+    // backing away or the backing still holds the mode's own buffer at the
+    // stored size.
+    if (vp.grey && (vp.oneBacking || dom.canvas.width !== vp.grey.width || dom.canvas.height !== vp.grey.height)) {
+      dom.canvas.width = vp.grey.width;
+      dom.canvas.height = vp.grey.height;
+      paintGrey(vp.viewContext, dom.canvas, vp.grey);
+    }
+    vp.oneBacking = false;
+    vp.paintOffsetX = 0;
+    vp.paintOffsetY = 0;
+    vp.oneShiftX = 0;
+    vp.oneShiftY = 0;
+  }
+  dom.frame.style.transform = one ? "none" : "translate(" + translateX + "px, " + translateY + "px)";
+  vp.panAppliedX = translateX;
+  vp.panAppliedY = translateY;
   const fitted = fitScale(vp);
-  vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  if (one) {
+    vp.zoomLabel = vp.aspectX === 1 && vp.aspectY === 1 ? "1:1" : "1:1 rows";
+  } else {
+    vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  }
   paintOverlays(vp);
   syncTextScale(vp);
   paintSelection(vp);
@@ -3474,10 +4390,23 @@ function paintOverlays(vp) {
   if (info.instanceNumber) lower.push("Instance " + info.instanceNumber);
   if (image.reported > 1) lower.push("Frame " + (image.frame + 1) + " / " + image.reported);
   if (info.sliceLocation != null) lower.push("Location " + info.sliceLocation + " mm");
-  if (info.sliceThickness != null) lower.push("Thickness " + info.sliceThickness + " mm");
-  const tube = [info.kvp != null ? info.kvp + " kVp" : "", info.exposureMas != null ? info.exposureMas + " mAs" : ""].filter(Boolean).join("  ");
+  // F-267. The acquisition values of the shown frame ride the grey reply,
+  // stamped with the serial and frame they belong to. They are used only
+  // while they match the image being painted, so a repaint through the
+  // corner toggle, a flip, a tile change or a resize while the next
+  // frame's grey is in flight paints the scan values, never the previous
+  // image's per-frame ones.
+  const facts = vp.shownFacts;
+  const fresh = facts && facts.serial === fileSerial(image.file) && facts.frame === image.frame;
+  const thickness = fresh ? facts.sliceThickness : info.sliceThickness;
+  const kvp = fresh ? facts.kvp : info.kvp;
+  const exposureMas = fresh ? facts.exposureMas : info.exposureMas;
+  const repetitionTime = fresh ? facts.repetitionTime : info.repetitionTime;
+  const echoTime = fresh ? facts.echoTime : info.echoTime;
+  if (thickness != null) lower.push("Thickness " + thickness + " mm");
+  const tube = [kvp != null ? kvp + " kVp" : "", exposureMas != null ? exposureMas + " mAs" : ""].filter(Boolean).join("  ");
   if (tube) lower.push(tube);
-  const timing = [info.repetitionTime != null ? "TR " + info.repetitionTime + " ms" : "", info.echoTime != null ? "TE " + info.echoTime + " ms" : ""].filter(Boolean).join("  ");
+  const timing = [repetitionTime != null ? "TR " + repetitionTime + " ms" : "", echoTime != null ? "TE " + echoTime + " ms" : ""].filter(Boolean).join("  ");
   if (timing) lower.push(timing);
   assignText(corners.bl, lower.join("\n"));
   const win = vp.draftWindow || vp.overrideWindow || vp.shownWindow;
@@ -3492,7 +4421,17 @@ function paintOverlays(vp) {
   const warning = iccWarning(info);
   if (warning) windowLine += "\n" + warning;
   if (info.colour && vp.paletteFallback) windowLine += "\nThis palette was read as 8-bit because all its entries fit in 8 bits.";
-  assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
+  // F-204. A refusal reason shows in place of the Zoom suffix only while
+  // the condition that produced the stored string is the one that holds,
+  // re-checked from the predicate the guard evaluated, and is written empty
+  // at the first paint where it does not, so no later paint shows a stale
+  // reason.
+  let zoomLine = "Zoom " + vp.zoomLabel;
+  if (vp.zoomRefusal) {
+    if (zoomRefusalReason(vp) === vp.zoomRefusal) zoomLine = vp.zoomRefusal;
+    else vp.zoomRefusal = "";
+  }
+  assignText(corners.br, windowLine + "\n" + zoomLine);
   paintScale(vp);
 }
 
@@ -3641,8 +4580,59 @@ function nextUnshownKey() {
 }
 
 function fitView(vp) {
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   layoutViewport(vp);
+  copyZoom(vp);
+}
+
+// F-204. The refusal condition, re-checked from the same predicate the
+// guard evaluated: a stored frame below the device pixel ratio. The corner
+// line shows the reason only while it holds, so no stale reason survives.
+function zoomRefusalReason(vp) {
+  if (!vp.imageWidth) return "";
+  const ratio = window.devicePixelRatio || 1;
+  if (vp.imageWidth < ratio || vp.imageHeight < ratio) {
+    return "1:1 needs a frame at least the device pixel ratio big";
+  }
+  return "";
+}
+
+// F-204. Entering the one-to-one mode keeps the image centre as zoomCentre
+// does: zoomAt's pan arithmetic at the cell centre, where the offset under
+// the centre is minus the pan, moves the pan by the same factor as the
+// scale. The frame's identity scale is 1 / ratio on a square-pixel frame
+// and (1 / ratio) / aspectY on an anisotropic one, where the rows are
+// exact and the columns are resampled. `request` is false from copyZoom,
+// where an unsuitable target keeps its own mode and shows no reason.
+function enterOneToOne(vp, request) {
+  if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden || vp.tileMode) return false;
+  const reason = zoomRefusalReason(vp);
+  if (reason) {
+    if (request) {
+      vp.zoomRefusal = reason;
+      // The refusal writes this string and no layout state, and the corner
+      // is the surface that shows it, so the paint runs without a layout.
+      paintOverlays(vp);
+    }
+    return false;
+  }
+  const ratio = window.devicePixelRatio || 1;
+  // A ratio whose whole CSS pixel step is past the search cap has no
+  // device-aligned box, so the entry refuses silently and changes nothing,
+  // the same check the held-mode guard in layoutViewport applies.
+  if (!deviceStep(ratio, STEP_LIMIT)) return false;
+  const identity = (1 / ratio) / vp.aspectY;
+  const factor = identity / vp.scale;
+  vp.panX += -vp.panX * (1 - factor);
+  vp.panY += -vp.panY * (1 - factor);
+  vp.scale = identity;
+  vp.zoomMode = "one";
+  layoutViewport(vp);
+  return true;
+}
+
+function oneToOneView(vp) {
+  if (!enterOneToOne(vp, true)) return;
   copyZoom(vp);
 }
 
@@ -3656,7 +4646,7 @@ function resetView(vp) {
   vp.rotation = 0;
   vp.flipH = false;
   vp.flipV = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.panX = 0;
   vp.panY = 0;
   if (vp.cell === activeCell) syncControls();
@@ -3818,8 +4808,11 @@ function chooseRow(vp, number) {
 // The commit point of a window change is a successful preview reply. The
 // change is asked for under its own cache key and the viewport takes it only
 // when its image arrives, so a refusal leaves the state and the shown image
-// alone and puts the refusal in the sentence line.
-async function chooseWindow(vp, next) {
+// alone and puts the refusal in the sentence line. The stored-default apply
+// passes `propagate: false`, so it never copies to the linked viewports and
+// never overwrites a reader-set window in one of them.
+async function chooseWindow(vp, next, options = {}) {
+  const propagate = options.propagate !== false;
   const image = currentImage(vp);
   if (!image || !drawable(image.info)) return false;
   const token = vp.loadToken;
@@ -3853,7 +4846,7 @@ async function chooseWindow(vp, next) {
     showSentence();
   }
   showIndex(vp, vp.viewIndex);
-  copyWindow(vp);
+  if (propagate) copyWindow(vp);
   return true;
 }
 
@@ -3892,7 +4885,7 @@ async function refreshFrameWindows(image) {
   // asks again under its new key.
   for (const vp of shownViewports()) {
     if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
-    else if (vp.tileMode && tileImages(vp).includes(image)) paintTiles(vp);
+    else if (vp.tileMode && !paintHeld(vp) && tileImages(vp).includes(image)) paintTiles(vp);
   }
   syncWindowList();
 }
@@ -4087,12 +5080,12 @@ async function scheduleLive(vp) {
   try {
     const grey = await requestGrey(image, { view: vp, window: win });
     if (token === vp.liveToken && vp.draftWindow && image === currentImage(vp)) {
-      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, fitMode: vp.fitMode };
+      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, zoomMode: vp.zoomMode };
       drawGrey(vp, grey);
       vp.scale = keep.scale;
       vp.panX = keep.panX;
       vp.panY = keep.panY;
-      vp.fitMode = keep.fitMode;
+      vp.zoomMode = keep.zoomMode;
       layoutViewport(vp);
     }
   } catch {}
@@ -4115,7 +5108,12 @@ function queueSlice(delta) {
 function zoomAt(vp, clientX, clientY, factor) {
   if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden) return;
   const fitted = fitScale(vp);
-  const next = clamp(vp.scale * factor, fitted * 0.05, fitted * 40);
+  // F-204. The clamp range extends to include the frame's own identity
+  // scale, so the identity is reachable by the same gestures that reach
+  // every other scale, and zooming out below it stays possible on a frame
+  // wider than its cell.
+  const identity = (1 / (window.devicePixelRatio || 1)) / vp.aspectY;
+  const next = clamp(vp.scale * factor, Math.min(fitted * 0.05, identity), Math.max(fitted * 40, identity));
   if (next === vp.scale) return;
   const rect = vp.dom.cell.getBoundingClientRect();
   const qx = clientX - (rect.left + rect.width / 2) - vp.panX;
@@ -4124,7 +5122,7 @@ function zoomAt(vp, clientX, clientY, factor) {
   vp.panX += qx * (1 - ratio);
   vp.panY += qy * (1 - ratio);
   vp.scale = next;
-  vp.fitMode = false;
+  vp.zoomMode = "free";
   layoutViewport(vp);
 }
 
@@ -4228,7 +5226,10 @@ function onPointerMove(event) {
   if (drag.markId && travel >= 5) drag.markId = "";
   const mode = drag.mode;
   if (mode === "pan") {
-    vp.fitMode = false;
+    // F-204. Pan keeps a held one-to-one mode, because the one-to-one scale
+    // does not depend on the cell size. No rounding is added to the deltas,
+    // the origin snap rounds the total laid-out position each layout.
+    vp.zoomMode = vp.zoomMode === "one" ? "one" : "free";
     vp.panX += event.clientX - drag.x;
     vp.panY += event.clientY - drag.y;
     drag.x = event.clientX;
@@ -4672,6 +5673,46 @@ function updateMag(vp, event, tile, point) {
   const shownY = tile ? tile.getBoundingClientRect().height / height : vp.scale * vp.aspectY;
   const power = 2 * ratio;
   context.translate(mag.width / 2, mag.height / 2);
+  if (!tile && vp.zoomMode === "one") {
+    // F-204. The mode's backing holds the displayed image, one device pixel
+    // per stored row and per displayed column, written at the recorded
+    // device offset, so the source is addressed in backing pixels at the
+    // displayed position of the stored point, and the rotation and flips
+    // are already in the bytes. Two magnifier pixels per backing pixel is
+    // the power the path below uses, 2 * ratio per CSS pixel.
+    const extents = oneToOneExtents(vp);
+    const turned = vp.rotation % 180 !== 0;
+    const bufU = turned ? extents.screenH : extents.screenW;
+    const bufV = turned ? extents.screenW : extents.screenH;
+    // The point is continuous, so the reflections are about the far edge,
+    // not the last pixel centre.
+    const su = vp.flipH ? vp.imageWidth - point.x : point.x;
+    const sv = vp.flipV ? vp.imageHeight - point.y : point.y;
+    const u = su * bufU / vp.imageWidth;
+    const v = sv;
+    const dx = vp.rotation === 90 ? bufV - v
+      : vp.rotation === 180 ? bufU - u
+      : vp.rotation === 270 ? v
+      : u;
+    const dy = vp.rotation === 90 ? u
+      : vp.rotation === 180 ? bufV - v
+      : vp.rotation === 270 ? bufU - u
+      : v;
+    context.scale(2, 2);
+    context.drawImage(source, -(vp.paintOffsetX + dx), -(vp.paintOffsetY + dy));
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    const local = wrap.getBoundingClientRect();
+    let left = event.clientX - local.left + 20;
+    let top = event.clientY - local.top - side - 20;
+    if (left + side > local.width) left = event.clientX - local.left - side - 20;
+    if (top < 0) top = event.clientY - local.top + 20;
+    mag.style.left = left + "px";
+    mag.style.top = top + "px";
+    mag.hidden = false;
+    mag.dataset.cell = String(vp.cell);
+    if (point.x < 0 || point.y < 0 || point.x > width || point.y > height) mag.hidden = true;
+    return;
+  }
   if (!tile) {
     context.rotate(vp.rotation * Math.PI / 180);
     context.scale(vp.flipH ? -1 : 1, vp.flipV ? -1 : 1);
@@ -5837,6 +6878,9 @@ function onKey(event) {
   } else if (event.key === "0") {
     event.preventDefault();
     fitView(vp);
+  } else if (event.key === "\\") {
+    event.preventDefault();
+    oneToOneView(vp);
   } else if (event.key === "[") {
     togglePanel("no-series");
   } else if (event.key === "]") {
@@ -6538,6 +7582,9 @@ function setActive(cell) {
   // is now drawn from it.
   clearLine(viewports[cell]);
   scheduleLink();
+  // The preset note names the outlined viewport's own state, so the new
+  // active cell repaints it.
+  paintPrefsNote();
   // The active series is the one the status counts and the probe reads, so
   // activating a cell does what selecting a series does.
   noteChanged();
@@ -6804,10 +7851,17 @@ function copyZoom(source) {
   for (const vp of shownViewports()) {
     if (vp === source || !currentImage(vp) || !vp.imageWidth) continue;
     if (vp.tileMode || vp.dom.stage.hidden) continue;
-    if (source.fitMode) {
-      vp.fitMode = true;
+    if (source.zoomMode === "one") {
+      // F-204. The source's mode propagates, and each target's own guards
+      // run against its own frame, cell and ratio. An unsuitable target
+      // keeps its own mode and scale.
+      enterOneToOne(vp, false);
+      continue;
+    }
+    if (source.zoomMode === "fit") {
+      vp.zoomMode = "fit";
     } else {
-      vp.fitMode = false;
+      vp.zoomMode = "free";
       vp.scale = fitScale(vp) * source.scale / fitted;
     }
     layoutViewport(vp);

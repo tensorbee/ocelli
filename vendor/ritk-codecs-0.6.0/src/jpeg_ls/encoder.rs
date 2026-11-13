@@ -169,7 +169,9 @@ fn encode_scan(samples: &[u16], rows: usize, cols: usize, bpp: u32, near: i32) -
                         bw.write_bit(1);
                         acc += seg;
                         if acc >= remaining {
-                            // Run filled the line exactly; decoder clamps.
+                            // Run filled the line exactly. The decoder's hit
+                            // count is the full segment here, so its RUNindex
+                            // rises too (F.1 step 18 b ii).
                             if ctx.run_index < 31 {
                                 ctx.run_index += 1;
                             }

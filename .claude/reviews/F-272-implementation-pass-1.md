@@ -1,0 +1,19 @@
+# F-272 implementation microscope, pass 1
+
+Reviewer: Codex, independent of GLM. Candidate produce.rs SHA256 `9c6d7980a4cdebaa6b689b9708f736e847d7274df04bf3f8fcc48f2f2c070ecb`. This is an early independent source and consumer review while the author's final microscope and negative controls remain pending.
+
+Result: 3 defects, 1 smell, 1 nit. No completion or prepared handoff is accepted.
+
+D1. The guard rejects normal installed oracle topology. f272_walk marks every symlink unsupported, and guard_no_checkout_write refuses any such note before running the child. The canonical tools/oracle currently contains 13,948 entries with 14 expected symlinks under node_modules/.bin. The isolated worker has 80 entries and no symlinks. Thus the green isolated suite does not establish the normal installed consumer, which fails before checking writes. The approved plan permits only an explicitly justified named dependency-cache exclusion. Declare the exact cache and test both the ordinary installed shape and refusal of symlinks outside that cache. Keep actual source, lockfiles, reference and comparison outputs protected. Do not apply a blanket ignored-file exclusion.
+
+D2. concurrent_fixture_invocations_use_distinct_paths can hang on its failure path. Each worker executes fallible I/O and assertions before waiting on Barrier(2). If one panics there, its peer can wait forever, and thread::scope cannot return to report the failure. Repair the rendezvous lifecycle and demonstrate a bounded one-sided failure control while preserving overlapping ownership and distinct-path assertions. No wider timeout or gate exception.
+
+D3. AC2 records a false filtered-out count. The frozen candidate log reports selected 21 and filtered_out 0 before and after the child, while the actual child reports 21 passed and 104 filtered out. Counting non-namespace entries from an already-filtered listing cannot recover excluded tests. Obtain and reconcile the actual inventory and selected list, retaining the same binary, selection and own-list exit. Derive the real excluded count without a constant and compare it with the executed selection. Do not present post-filter local rejection counts as suite exclusions.
+
+S1. The approved private API returns an owner guard. produce_test_scratch_dir instead returns PathBuf and every caller constructs a separate guard. Ownership is not established by the helper's return contract, increasing the cases a caller must remember. Return the owner from successful exclusive creation and let callers borrow its path. This also follows the explicit API and approach clauses without changing production behavior.
+
+N1. The f272_list_selected_tests comment calls namespace matching a known libtest issue. It is ordinary --exact semantics, independently observed: the literal namespace plus --exact selects zero, while prefix matching selects the actual suite. Remove the false attribution. The no-op branch in f272_normalize_list_line adds no filtering and should be removed or made meaningful by the author.
+
+Positive evidence is kept separate. Actual source snapshots ran the applicable successful producer test with the same seven synthetic cases and six preserved rendered views, retaining its original assertions. Both dispositions hashes were `610db5f52ae64b46042bbcb53b7a9edcbf03bbfec31e5a174f4114f29cf63914`. The observer was confined to disposable snapshots. The candidate focused suite reports 22 parent and 21 child passes, and clippy passes. Those results do not cover the installed-cache topology or the one-sided rendezvous failure above.
+
+This review challenges the lifecycle and actual installed consumer beyond the original empty worker tree. Existing final-state-only evidence boundaries remain correct. It makes no transient-write or whole-corpus oracle claim. GLM owns all semantic repairs and its next microscope. Root will review the resulting complete diff and evidence afterward.

@@ -264,12 +264,12 @@ function item(content) {
   return Buffer.concat([u16(0xfffe), u16(0xe000), u32(content.length), content]);
 }
 
-/** Two 32 by 32 frames with a Frame VOI LUT item each, no patient attributes. */
 /**
  * One enhanced CT of 32 by 32 frames. A `null` frame has an empty per-frame
  * item, so it falls back to `top`, the top-level window when one is given.
+ * Exported for the preferences suite's held-inspect tile case.
  */
-function enhanced(frames, top) {
+export function enhanced(frames, top) {
   const sopClass = "1.2.840.10008.5.1.4.1.1.2.1";
   const sop = "2.25.213030";
   const meta = Buffer.concat([

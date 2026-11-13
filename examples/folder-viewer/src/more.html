@@ -134,7 +134,7 @@
   <h1>Features and the road ahead</h1>
   <p class="lede">The viewer is Ocelli's showcase. A feature is implemented here only when it has a usable workflow on Images. Library code without that workflow is shown separately.</p>
   <div class="note">
-    <p><strong>This is the S46 integration preview.</strong> Sprint acceptance and performance measurements are still in progress. Another running build can show an older feature list.</p>
+    <p><strong>This is the S47 integration preview.</strong> Sprint acceptance and performance measurements are still in progress. Another running build can show an older feature list.</p>
     <p><strong>Implemented</strong> means usable in this viewer, with the limits named. <strong>Partial</strong> means a working part exists and the missing part is stated. <strong>Not yet</strong> means the viewer workflow is absent, even when its library is built. <strong>Planned</strong> is future work and is never presented as an implemented advantage.</p>
   </div>
   <p>The comparison uses the inspected Cornerstone3D <strong>5.8.2</strong> core, tools and DICOM loader as the tested baseline, checked 8 November 2026. Cornerstone supplies library APIs. A host application still supplies workflows such as prior-study search and saved preferences. Current ecosystem capabilities are identified explicitly.</p>
@@ -153,7 +153,7 @@
     <tr><th scope="row">Several series and linked scroll, window and zoom</th><td>Supported APIs and synchronizers</td><td>Built</td><td><span class="viewer-state part">Partial</span>Available on Images</td><td class="delivery">S46 preview</td></tr>
     <tr><th scope="row">RGB, YBR and palette colour</th><td>Supported, format-dependent</td><td>Built</td><td><span class="viewer-state done">Implemented</span>Supported colour shapes draw in the S46 preview</td><td class="delivery">S46 preview</td></tr>
     <tr data-features="F-263"><th scope="row">Measurements and ROI statistics</th><td>Tools supported</td><td>Built</td><td><span class="viewer-state part">Partial</span>Current tools work. Remaining tool families need viewer controls</td><td class="delivery">S48: F-263</td></tr>
-    <tr data-features="F-204"><th scope="row">One stored pixel to one device pixel</th><td>Display-area scale API</td><td>Zoom building blocks</td><td><span class="viewer-state none">Not yet</span>A dedicated one-to-one mode is missing</td><td class="delivery">S47: F-204</td></tr>
+    <tr data-features="F-204"><th scope="row">One stored pixel to one device pixel</th><td>Display-area scale API</td><td>Zoom building blocks</td><td><span class="viewer-state done">Implemented</span>Local images on Images. The core factor stays explicit</td><td class="delivery">S47: F-204</td></tr>
     <tr data-features="F-246"><th scope="row">Nearest and linear interpolation selector</th><td>Supported</td><td>Built on A, B and C</td><td><span class="viewer-state part">Partial</span>Nearest display works. No mode selector</td><td class="delivery">S48: F-246</td></tr>
     <tr data-features="F-261"><th scope="row">Between-slice stack blending</th><td>Volume resampling exists. Separate stack mode not verified</td><td>Volume resampling built</td><td><span class="viewer-state none">Not yet</span>A distinct stack-blend workflow is planned</td><td class="delivery">S49: F-261</td></tr>
     <tr data-features="F-247"><th scope="row">DICOM overlay planes and shutters</th><td>Dedicated plane and shutter parity needs verification</td><td>Reader built</td><td><span class="viewer-state none">Not yet</span>Image drawing and controls are missing</td><td class="delivery">S48: F-247</td></tr>
@@ -174,10 +174,10 @@
   <tbody>
     <tr class="group"><th colspan="5" scope="rowgroup">Study workflows and interoperability</th></tr>
     <tr data-features="F-257"><th scope="row">Prior studies and hanging layouts</th><td>Host application workflow</td><td>Source and layout foundations</td><td><span class="viewer-state none">Not yet</span>Prior-study selection is missing</td><td class="delivery">S50: F-257</td></tr>
-    <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state none">Not yet</span>Images currently opens local folders</td><td class="delivery">S47: F-245</td></tr>
+    <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state part">Partial</span>The viewer searches studies, series and instances over DICOMweb and fetches one instance the native backend validates, remote image display is not available yet, and local folders open as before</td><td class="delivery">S47: F-245</td></tr>
     <tr data-features="F-249"><th scope="row">Metadata browser</th><td>Metadata APIs. Browser UI belongs to the host</td><td>Typed metadata built</td><td><span class="viewer-state part">Partial</span>Headers are browsable and filterable</td><td class="delivery">S48: F-249</td></tr>
     <tr data-features="F-250"><th scope="row">Metadata compare and copy</th><td>Host application workflow</td><td>Metadata foundations built</td><td><span class="viewer-state none">Not yet</span>No compare or copy workflow</td><td class="delivery">S48: F-250</td></tr>
-    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Four browser settings saved</td><td><span class="viewer-state part">Partial</span>General tool, window and layout preferences remain</td><td class="delivery">S47: F-205</td></tr>
+    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>No preference API. The folder viewer keeps five validated choices, with named refusals</td><td><span class="viewer-state part">Partial</span>Per-key tool bindings and hanging layouts remain</td><td class="delivery">S47: F-205</td></tr>
     <tr><th scope="row">SR measurements and key images</th><td>Adapters and host workflow</td><td>Read and write built</td><td><span class="viewer-state done">Implemented</span>Save marks and reopen SR/KOS in the viewer</td><td class="delivery">S46 preview</td></tr>
     <tr data-features="F-258"><th scope="row">Rendered capture and further document exports</th><td>Adapters and host workflow, format-dependent</td><td>Document APIs built</td><td><span class="viewer-state part">Partial</span>SR/KOS work. Other export actions remain</td><td class="delivery">S50: F-258</td></tr>
     <tr data-features="F-202"><th scope="row">Browser worker decode and render</th><td>DICOM worker decode supported</td><td>Fetch, hand-off and pool built</td><td><span class="viewer-state none">Not yet</span>Local native decoding works. Browser decode is unfinished</td><td class="delivery">S47: F-202</td></tr>
@@ -212,7 +212,7 @@
   <div class="comparison-wrap" role="region" aria-label="Scheduled showcase delivery" tabindex="0">
   <table class="comparison"><caption>Ordered implementation waves. Estimates express relative engineering effort and are not calendar deadlines.</caption><thead><tr><th scope="col">Sprint</th><th scope="col">Outcome</th><th scope="col">Scheduled work</th></tr></thead><tbody>
   <tr><th scope="row">S47</th><td>One viewer and browser execution</td><td>Local and DICOMweb sources, worker decode and render, one-to-one display, shared preferences, video playback and VOI, plus the built viewer, enhanced image corners, reference-normalization and comparison-page maintenance follow-ups.<br><small>F-202, F-204, F-205, F-235, F-241, F-245, F-266, F-267, F-268, F-269, F-272, F-273, F-278</small></td></tr>
-  <tr><th scope="row">S48</th><td>Complete stack workflows</td><td>Interpolation, overlays and shutters, histograms, recursive metadata, compare and copy, remaining measurement tools, ECG waveforms and MPEG-2 decoding, plus codec accuracy, ICC validation, the numeric window link and S46 review follow-ups.<br><small>F-242, F-246, F-247, F-248, F-249, F-250, F-263, F-265, F-270, F-271, F-274, F-275, F-277, F-279, F-280</small></td></tr>
+  <tr><th scope="row">S48</th><td>Complete stack workflows</td><td>Interpolation, overlays and shutters, histograms, recursive metadata, compare and copy, remaining measurement tools, ECG waveforms and MPEG-2 decoding, plus codec accuracy, ICC validation, the numeric window link and S46 review follow-ups.<br><small>F-242, F-246, F-247, F-248, F-249, F-250, F-263, F-265, F-270, F-271, F-274, F-275, F-277, F-279, F-280, F-281, F-282</small></td></tr>
   <tr><th scope="row">S49</th><td>MPR, fusion and segmentation</td><td>Orthographic and oblique MPR, linked patient cursor, slabs, fusion, between-slice sampling, segmentation display, editing and interchange.<br><small>F-203, F-251, F-252, F-253, F-254, F-261, F-264</small></td></tr>
   <tr><th scope="row">S50</th><td>Volume and study workflows</td><td>3D volume and controls, prior studies, rendered exports and GSPS read/apply, safe JPEG XL recompression, browser conformance, and the complete viewer coverage gate, plus pyramid means across rescales before streaming.<br><small>F-255, F-256, F-257, F-258, F-259, F-260, F-262, F-276</small></td></tr>
   </tbody></table></div>
@@ -233,7 +233,7 @@
     <li><a href="#auto-window">Automatic window</a><span class="mark">implemented</span></li>
     <li><a href="#metadata">Metadata browser</a><span class="mark">partial</span></li>
     <li><a href="#conformance">Conformance report</a><span class="mark">implemented</span></li>
-    <li><a href="#one">One to one</a><span class="mark">not yet</span></li>
+    <li><a href="#one">One to one</a><span class="mark">implemented</span></li>
     <li><a href="#preferences">Preferences</a><span class="mark">partial</span></li>
     <li><a href="#jpegxl">JPEG XL</a><span class="mark">partial</span></li>
     <li><a href="#worker">Browser worker decode</a><span class="mark">not yet</span></li>
@@ -272,7 +272,7 @@ if let Some(shutter) = set.shutter() {
 }
 let grey = set.presentation_value();             // Shutter Presentation Value, when present</code></pre>
 </details>
-    <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The example page posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
+    <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The boundary demo posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
   </section>
 
   <section class="feature" id="interpolation">
@@ -341,7 +341,7 @@ for change in scene.set_point(1, point)? {
 }</code></pre>
 </details>
     <p>A different Frame of Reference UID stays where it is, and a refused point is <code>SyncError::Unavailable</code> with no slot written. <code>attachSideBySide(ocelliElement, neighbour)</code> in <code>@ocelli/core</code> pairs an Ocelli element with an element another library owns and enables the seam, which is the migration case rather than a second series.</p>
-    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>npm run dev</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
+    <p class="tiers">The image page of this folder viewer lays out 1 by 1 up to 3 by 3 viewports, each with its own series, image, zoom and window, and a series row dragged onto a viewport opens there. Its Link menu turns on linked scroll, synced window and synced zoom over every visible viewport, through <code>ocelli_viewport::link</code> in the local process. Not built: linked scroll and synced window as features of the <code>dev:boundary-demo</code> example, and prior study lookup. That example page reads Prior studies, Linked scroll and Synced window unavailable.</p>
   </section>
 
   <section class="feature" id="mpr">
@@ -384,7 +384,7 @@ present_cpu_plane(&amp;mut raster, &amp;view, &amp;presentation, &amp;axial, qua
     <h2>Slab</h2>
     <span class="status none">Not yet in the viewer. The library draws slabs on GPU tiers A and B. CPU reduction is unavailable.</span>
     <p>A slab collapses a thick block of slices into one image. Maximum intensity projection makes contrast filled vessels or lung nodules stand out, minimum intensity projection shows airways, and an average reduces noise.</p>
-    <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>.</p>
+    <p class="where">The plane and samples live in <code>ocelli-volume</code>, <code>crates/ocelli-volume/src/slab.rs</code>. The reduction is a shader in <code>ocelli-render</code>, chosen by <code>BlendMode</code>, and it reduces modality values, because stage 1 is applied before the block is staged.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>use ocelli_render::BlendMode;
 use ocelli_volume::OrthoPlane;
@@ -460,7 +460,7 @@ let (low, high, bin) = (range.min, range.max, range.width);
 
 let stats = roi_statistics(&amp;region, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
 </details>
-    <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The example page reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
+    <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The boundary demo reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
   </section>
 
   <section class="feature" id="auto-window">
@@ -502,7 +502,7 @@ for (tag, element) in metadata.iter() {
 }
 let modality = metadata.get(Tag(0x0008, 0x0060));</code></pre>
 </details>
-    <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The example viewer reads Metadata browser unavailable.</p>
+    <p class="tiers">The same model is what QIDO-RS JSON parses into. The image page has a Headers panel. The boundary demo reads Metadata browser unavailable.</p>
   </section>
 
   <section class="feature" id="conformance">
@@ -523,23 +523,24 @@ let json = report.to_json();               // read by readConformanceReport</cod
 
   <section class="feature" id="one">
     <h2>One to one</h2>
-    <span class="status none">Not yet in the viewer.</span>
-    <p>One to one shows each stored pixel as exactly one screen pixel, so nothing is resampled and fine texture is seen as acquired.</p>
-    <p class="where">There is no code for it. A <code>Zoom</code> command in <code>@ocelli/core</code> scales the camera by a factor, and nothing computes the factor that maps one stored pixel to one device pixel.</p>
+    <span class="status done">Implemented on Images.</span>
+    <p>One to one shows each stored pixel on one device pixel, so on a frame with square pixels nothing is resampled and fine texture is seen as acquired. On a frame whose pixels are not square the rows are one device row each and the columns are resampled, which the corner line says. It covers the local images the page draws from files and folders.</p>
+    <p class="where">The factor is computed in the page from the device pixel ratio. In the mode the canvas is a whole CSS pixel box sized up past its cell, the smallest whole multiple of the ratio's whole CSS pixel step that covers the cell plus one step for the alignment shift, so its size times the ratio is whole, its backing has that many device pixels, and the stored pixels are written into the backing one to one, as cornerstone3D 5.8.2 sizes its backing at the device resolution. The cell's own clipping cuts the box's excess, so no part of the cell inside the frame is left unpainted. A <code>Zoom</code> command in <code>@ocelli/core</code> keeps taking an explicit factor and no core command names the device grid. The mode is entered with the toolbar button beside Fit or the <code>\</code> key, and the corner line reads Zoom 1:1. On a frame whose pixels are not square the rows are one device row each and the columns are resampled by nearest sampling, and the corner line reads Zoom 1:1 rows. Pan keeps the mode, and the wheel, the zoom keys and a zoom drag reach the scale and leave it like any other. On a frame wider than its cell, zooming out from one to one goes below it. A stored frame smaller than the device pixel ratio keeps its view, and the corner line shows the reason while that holds. Opening another series and Reset return to fit.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>import { packCommands, viewportId } from "@ocelli/core";
 
-// What exists: an explicit zoom factor. It is not a one to one mode.
+// The core keeps an explicit zoom factor. The page computes the factor that
+// maps one stored pixel to one device pixel and no core command names it.
 packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 </details>
-    <p class="tiers">The example page reads One to one unavailable.</p>
+    <p class="tiers">Tiers A, B and C are not applicable, because the mode is the page's own write of the decoded display bytes into its canvas and the render path is unchanged on every tier. The folder viewer shows One to one on the Images page, with the button beside Fit and the <code>\</code> key, while the boundary demo still reads One to one unavailable. On a frame with square pixels the mode is verified byte for byte in screenshots under the emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is DevTools device scale emulation and not a physical display.</p>
   </section>
 
   <section class="feature" id="preferences">
     <h2>Preferences</h2>
-    <span class="status part">Partial. Four choices are saved. General viewing, tool and layout preferences remain.</span>
+    <span class="status part">Partial. Five validated choices are saved. Per-key tool bindings and hanging layouts remain.</span>
     <p>Preferences keep a reader's choices between sessions, such as default window presets, tool bindings and hanging layouts.</p>
-    <p>The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages.</p>
+    <p>The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset. The browser also holds the library's log level setting, which dcmjs writes when the page loads the library, and nothing else. The choices live in one versioned document in the page, validated against closed sets on every read and every write, and any other choice the browser did not keep or could not use is named in a line under the image, never applied quietly. A profile change the browser did not keep is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.</p>
     <p class="where">The session state that does exist is the viewport snapshot, which restores a viewport after a fault and is not a preference store.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>import { parseSnapshot } from "@ocelli/core";
@@ -547,7 +548,7 @@ packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 // What exists: one viewport's state as copied JSON, for recovery.
 const parsed = parseSnapshot(session.snapshot());</code></pre>
 </details>
-    <p class="tiers">The example page reads Preferences unavailable.</p>
+    <p class="tiers">The choices are page-local to the folder viewer, and its local and DICOMweb sources share them. The library has no preference API, and the React demo keeps its Preferences unavailable panel.</p>
   </section>
 
   <section class="feature" id="jpegxl">

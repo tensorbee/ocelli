@@ -137,14 +137,16 @@ class RitkVendor(unittest.TestCase):
     def test_a_planted_byte_in_each_patched_source_file_is_refused(self):
         # A patched file is exempt from the archive inventory, so it is held
         # to its own recorded bytes instead, and the refusal names it. F-239
-        # records the D-31 colour-decode files and F-243 the D-20 JPEG-LS
-        # files, and a planted byte in each is refused by name.
+        # records the D-31 colour-decode files, F-243 the D-20 JPEG-LS
+        # files, and F-269 the JPEG-LS context test file, and a planted
+        # byte in each is refused by name.
         self.assertEqual(sorted(pin_and_size_check.RITK_PATCHED_HASHES), [
             "src/jpeg_2000/image.rs",
             "src/jpeg_2000/mod.rs",
             "src/jpeg_2000/packet/reader.rs",
             "src/jpeg_ls/bitstream.rs",
             "src/jpeg_ls/context/mod.rs",
+            "src/jpeg_ls/context/tests.rs",
             "src/jpeg_ls/decoder.rs",
             "src/jpeg_ls/encoder.rs",
             "src/jpeg_ls/scan.rs",

@@ -11,6 +11,7 @@
 
 mod colour;
 mod corners;
+mod dicomweb;
 mod link;
 mod measure;
 mod preview;
@@ -29,7 +30,7 @@ mod csp;
 
 pub use colour::ColourUnavailableReason;
 pub use corners::{
-    age_text, dicom_date_text, dicom_time_text, exposure_mas, patient_orientation_letters,
+    age_text, dicom_date_text, dicom_time_text, exposure_mas, fd_text, patient_orientation_letters,
     person_name_text,
 };
 pub use link::plane_from_token;
@@ -37,8 +38,8 @@ pub use measure::{
     FREEFORM_POINT_CAP, MeasureShape, RegionExtent, measure_frame, region_extent_frame,
 };
 pub use preview::{
-    AutoSource, FRAME_LIST_CAP, FrameFacts, FrameRequest, Preview, PreviewError, conformance_json,
-    headers_json, inspect_json, plane_token, preview_first_frame, preview_frame,
+    AutoSource, CornerTokens, FRAME_LIST_CAP, FrameFacts, FrameRequest, Preview, PreviewError,
+    conformance_json, headers_json, inspect_json, plane_token, preview_first_frame, preview_frame,
     window_function_from_token, window_preset_from_token,
 };
 pub use synthetic::{SLICES, slice};

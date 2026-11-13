@@ -109,9 +109,10 @@ RITK_ADDITIONS = {
 }
 RITK_INVENTORY_SHA256 = "066d80ffd6b74bd9410df63f1d694c209431be8e3efde37b7c427f71da0cb351"
 # The reviewed patch record, rewritten when a patch changes. F-239 added the
-# three-component colour decode to the published decoder and F-243 the
-# JPEG-LS run-mode, end-of-scan and default-threshold patch.
-RITK_PROVENANCE_SHA256 = "0d589a00f49f8e387bceb316af58e1a5dca537ee32101661a7eacaf82aa78acf"
+# three-component colour decode to the published decoder, F-243 the
+# JPEG-LS run-mode, end-of-scan and default-threshold patch, and F-269 a
+# comment-only audit whose corrections landed in four jpeg_ls files.
+RITK_PROVENANCE_SHA256 = "9b67630ae9ebd39f7617bbd613a53ccdf911f7c66c0162b11e32b8a45e579b8c"
 # Every published source file this repository has patched, with the exact
 # bytes of the reviewed patch. Anything else must stay byte-identical to the
 # archive.
@@ -125,12 +126,17 @@ RITK_PATCHED_HASHES = {
     # F-243 and D-20. ITU-T T.87 A.7.1 run mode, the context RESET, the end of
     # scan held to CharLS 2.4.4 and C.2.4.1.1.1 default thresholds, with the
     # encoder's code segment A.16 mirror and one published test edited by the
-    # lead's ruling.
+    # lead's ruling. F-269's comment audit also binds context/mod.rs,
+    # encoder.rs and scan.rs, so those three digests carry F-269 comment
+    # bytes too.
     "src/jpeg_ls/bitstream.rs": "49367ccb7467dd91b267a2dfe5a1f70f70d872bf28243fdbbf817e9a34a68cbb",
-    "src/jpeg_ls/context/mod.rs": "7a39478fed96333a1654ce3f8ad4029866abe2e28db26262fc8618e54d586a95",
+    "src/jpeg_ls/context/mod.rs": "24af96f8abb4e5aae0b94428426c949f41ad85438daae0ff1cfa7a3289986421",
+    # F-269. The comment-only audit against ITU-T T.87. First patched under
+    # F-269, which edited only this file's test annotations.
+    "src/jpeg_ls/context/tests.rs": "b62259de352e6353fc4decc2e9a2e05700246a7d8b87dcfa46935bde66f57f95",
     "src/jpeg_ls/decoder.rs": "d898917107a8d2575a04cc47ba53748785f04c1b661235f283ede6744f8a4b11",
-    "src/jpeg_ls/encoder.rs": "be209fabf20a8b54b53c6156eb4de9922464c5192e600f3a6b88da6d5aa4b988",
-    "src/jpeg_ls/scan.rs": "5fa6512032ced5ec593394d65111ae296ecb3702dbdc1dfe178a27dacdd2c559",
+    "src/jpeg_ls/encoder.rs": "8ad43406e62dc7c01ced6744f838b68121ba8f74c99fb96e24c842155abaad75",
+    "src/jpeg_ls/scan.rs": "29b9eac0579b3279d883304a2ac739d8034e7e68bd0a6c60289d6e627dbb659f",
     "src/jpeg_ls/tests/conformance.rs": "aee89d4a0a49b21d8f6ebc4229e4458cc4c037300dad36babcb17f08f4acc512",
 }
 # The manifest-only patch D-20 records, checked as TOML as well as by hash.

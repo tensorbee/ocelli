@@ -11,7 +11,7 @@ use js_sys::Reflect;
 use js_sys::Uint8ClampedArray;
 use ocelli_render::{
     BlendMode, GpuContext, Pass, RasterResult, RenderGraph, ResolvedAdapter, StackPass,
-    TierRequest, ViewportId, VoiParams, device_extent, resolve, resolve_adapter,
+    StoredRoute, TierRequest, ViewportId, VoiParams, device_extent, resolve, resolve_adapter,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -274,7 +274,13 @@ fn attach_with_context(
         let Some(graph) = table.graph.as_mut() else {
             return Err("the render graph was not created".to_owned());
         };
-        match graph.register(context, target, source, stack_pass()) {
+        match graph.register(
+            context,
+            target,
+            source,
+            stack_pass(),
+            StoredRoute::PreApplied,
+        ) {
             Ok(id) => id,
             Err(error) => return Err(error.to_string()),
         }
@@ -483,6 +489,152 @@ pub async fn tier_b_section_183(canvas: OffscreenCanvas) -> String {
     }
 }
 
+/// Draw the two F-227 stage-one pairs on a GL-only instance and return JSON.
+///
+/// The named user is `tools/tier-b/run.mjs`. The shipped module does not
+/// carry `tier-b-probe`, so this export is absent from the measured
+/// artefact. The readback is the test. It is not a product path.
+#[cfg(feature = "tier-b-probe")]
+#[wasm_bindgen(js_name = tierBStageOnePairs)]
+pub async fn tier_b_stage_one_pairs(canvas: OffscreenCanvas) -> String {
+    use ocelli_render::{
+        Section183Error, Tier, WebGlProbe, read_stage_one_pairs, resolve_webgl, stored_format_name,
+    };
+
+    let mut clock = browser_clock();
+    let probe = resolve_webgl(wgpu::SurfaceTarget::OffscreenCanvas(canvas), &mut clock).await;
+    match probe {
+        WebGlProbe::NoAdapter { reason } => {
+            pairs_report("no-adapter", "", "", "", "", &reason, None, None)
+        }
+        WebGlProbe::Demoted { name, decided_by } => pairs_report(
+            "demoted",
+            "C",
+            &name,
+            "",
+            decided_label(decided_by),
+            "the WebGL adapter resolved tier C",
+            None,
+            None,
+        ),
+        WebGlProbe::Opened(opened) => {
+            let tier = crate::tier_label::tier_name(opened.adapter.resolution().caps.tier);
+            let renderer = match opened.adapter.resolution().evidence.candidate.as_ref() {
+                Some(candidate) => candidate.name.clone(),
+                None => String::new(),
+            };
+            let decided = decided_label(opened.adapter.resolution().evidence.decided_by);
+            let mut context = match opened.adapter.open().await {
+                Ok(context) => context,
+                Err(error) => {
+                    return pairs_report(
+                        "unavailable",
+                        tier,
+                        &renderer,
+                        "",
+                        decided,
+                        &error.to_string(),
+                        None,
+                        None,
+                    );
+                }
+            };
+            if context.caps().tier == Tier::Cpu {
+                return pairs_report(
+                    "demoted",
+                    "C",
+                    &renderer,
+                    "",
+                    decided,
+                    "open resolved tier C",
+                    None,
+                    None,
+                );
+            }
+            match read_stage_one_pairs(&mut context, &opened.adapter) {
+                Ok(pairs) => pairs_report(
+                    "drew",
+                    crate::tier_label::tier_name(context.caps().tier),
+                    &renderer,
+                    stored_format_name(pairs.format),
+                    decided,
+                    "",
+                    Some(&pairs.window_ends),
+                    Some(pairs.cancellation_single),
+                ),
+                Err(Section183Error::Unavailable) => pairs_report(
+                    "unavailable",
+                    crate::tier_label::tier_name(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    "no preserving format or the colour target cannot be read as f32",
+                    None,
+                    None,
+                ),
+                Err(Section183Error::TierC) => pairs_report(
+                    "demoted",
+                    "C",
+                    &renderer,
+                    "",
+                    decided,
+                    "the graph is unavailable on tier C",
+                    None,
+                    None,
+                ),
+                Err(Section183Error::NotSubmitted) => pairs_report(
+                    "unavailable",
+                    crate::tier_label::tier_name(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    "the frame was not submitted",
+                    None,
+                    None,
+                ),
+                Err(Section183Error::Readback(reason)) => pairs_report(
+                    "unavailable",
+                    crate::tier_label::tier_name(context.caps().tier),
+                    &renderer,
+                    "",
+                    decided,
+                    &reason,
+                    None,
+                    None,
+                ),
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tier-b-probe")]
+fn pairs_report(
+    status: &str,
+    tier: &str,
+    renderer: &str,
+    format: &str,
+    decided_by: &str,
+    reason: &str,
+    window_ends: Option<&[f32; 2]>,
+    cancellation: Option<f32>,
+) -> String {
+    let (ends, single) = match (window_ends, cancellation) {
+        (Some(ends), Some(single)) => (json_row(ends), format!("{single:?}")),
+        _ => ("[0,0]".to_owned(), "0.0".to_owned()),
+    };
+    format!(
+        "{{\"status\":\"{}\",\"tier\":\"{}\",\"renderer\":\"{}\",\"format\":\"{}\",\"decidedBy\":\"{}\",\"reason\":\"{}\",\"windowEnds\":{},\"cancellation\":{}}}",
+        json_escape(status),
+        json_escape(tier),
+        json_escape(renderer),
+        json_escape(format),
+        json_escape(decided_by),
+        json_escape(reason),
+        ends,
+        single,
+    )
+}
+
 #[cfg(feature = "tier-b-probe")]
 fn decided_label(decided: ocelli_render::DecidedBy) -> &'static str {
     match decided {
@@ -536,7 +688,7 @@ fn json_report(
 }
 
 #[cfg(feature = "tier-b-probe")]
-fn json_row(values: &[f32; 4]) -> String {
+fn json_row(values: &[f32]) -> String {
     let mut text = String::from("[");
     let mut first = true;
     for value in values {

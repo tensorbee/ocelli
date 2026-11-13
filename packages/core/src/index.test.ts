@@ -46,6 +46,8 @@ const PUBLISHED: readonly string[] = [
   "DicomwebClient",
   "DicomwebError",
   "postWadoInstance",
+  // ./dicomweb-viewer.js, F-245
+  "DicomwebProvider",
   // ./ocelli-error.js, shell string codes
   "OcelliError",
   // ./ring.js, HLD 17.3

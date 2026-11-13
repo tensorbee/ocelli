@@ -21,11 +21,11 @@ use crate::link::{CELLS, COUNT_FIELD_CHARS, SOURCE_WORD, TARGET_WORD, TOKEN_MAX_
 use crate::measure::{
     FREEFORM_POINT_CAP, MeasureShape, measure_json_with_scratch, region_extent, region_json,
 };
-use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::preview::{
-    decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup, note_write, phases,
-    profiling, render_held, reset_phases, validate_frame_request,
+    CornerTokens, decode_held, decode_ticks, inspect_post, merge_worker_phases, note_lookup,
+    note_write, phases, profiling, render_held, reset_phases, validate_frame_request,
 };
+use crate::preview::{FRAME_LIST_CAP, UID_MAX_CHARS};
 use crate::series_window::{Folded, SeriesRefusal, fold, series_window};
 use crate::value::value_json_with_scratch;
 use crate::{
@@ -37,6 +37,10 @@ const HEADER_CAP: usize = 16 * 1024;
 /// One posted file. A multi-frame object arrives whole, so the cap is one
 /// gibibyte rather than a single decoded frame.
 const BODY_CAP: usize = 1024 * 1024 * 1024;
+/// DICWEB qido route declared-body cap: two mebibytes.
+const DICWEB_QIDO_BODY_CAP: usize = 2 * 1024 * 1024;
+/// DICWEB instance route declared-body cap: thirty-two mebibytes.
+const DICWEB_INSTANCE_BODY_CAP: usize = 32 * 1024 * 1024;
 const PAGE: &str = include_str!("page.html");
 const MORE: &str = include_str!("more.html");
 const USE_PAGE: &str = include_str!("use.html");
@@ -67,6 +71,8 @@ struct Request {
     shape: Option<String>,
     /// `X-Ocelli-Region` as it arrived, read only by `/region`.
     region: Option<String>,
+    /// Typed metadata for the two native DICOMweb POST routes, else `None`.
+    dicweb: Option<DicwebRequestHeaders>,
     close: bool,
     /// Capacity charged to inflight for this body.
     body_charge: usize,
@@ -128,6 +134,12 @@ struct Grey {
     edge_top: String,
     edge_bottom: String,
     edge_source: &'static str,
+    slice_thickness: Option<String>,
+    kvp: Option<String>,
+    exposure_mas: Option<String>,
+    exposure_source: &'static str,
+    repetition_time: Option<String>,
+    echo_time: Option<String>,
     calibration_source: &'static str,
     calibration_mm: Option<(f64, f64)>,
     window_index: Option<u32>,
@@ -186,13 +198,20 @@ enum ReadStop {
 /// `InvalidInput` error when `OCELLI_PORT` or `OCELLI_CACHE_MIB` is not usable.
 pub fn serve() -> std::io::Result<()> {
     let config = ViewerConfig::from_env()?;
+    let studies = std::env::var_os("OCELLI_VIEWER_STUDIES_SERVICE_URL");
+    let wado = std::env::var_os("OCELLI_VIEWER_WADO_URI_URL");
+    let dicomweb =
+        crate::dicomweb::viewer_dicomweb_config_from_os(studies.as_deref(), wado.as_deref())?;
     let listener = TcpListener::bind(("127.0.0.1", chosen_port()?))?;
     let addr = listener.local_addr()?;
     let viewer = Arc::new(Viewer::server(config));
     start_census_log(&viewer);
     println!("http://{addr}/");
     std::io::stdout().flush()?;
-    serve_on(listener, viewer)
+    serve_on_in(
+        listener,
+        Arc::new(ServeContext::configured(viewer, dicomweb)),
+    )
 }
 
 /// Append a schedule line every 20 ms when `OCELLI_CENSUS_LOG` names a file.
@@ -253,16 +272,74 @@ fn start_census_log(viewer: &Arc<Viewer>) {
 /// Returns the listener error when accepting fails hard enough to end the loop.
 /// A single failed accept is skipped.
 pub fn serve_on(listener: TcpListener, viewer: Arc<Viewer>) -> std::io::Result<()> {
+    serve_on_in(listener, Arc::new(ServeContext::local(viewer)))
+}
+
+/// Per-context serving state shared across accept threads.
+struct ServeContext {
+    viewer: Arc<Viewer>,
+    dicomweb: Option<crate::dicomweb::ViewerDicomwebConfig>,
+    main_policy: Option<String>,
+}
+
+impl ServeContext {
+    fn local(viewer: Arc<Viewer>) -> Self {
+        Self {
+            viewer,
+            dicomweb: None,
+            main_policy: None,
+        }
+    }
+
+    fn configured(
+        viewer: Arc<Viewer>,
+        dicomweb: Option<crate::dicomweb::ViewerDicomwebConfig>,
+    ) -> Self {
+        let main_policy = dicomweb.as_ref().map(|config| {
+            crate::csp::configured_main_policy(PAGE, std::slice::from_ref(&config.connect_origin))
+        });
+        Self {
+            viewer,
+            dicomweb,
+            main_policy,
+        }
+    }
+}
+
+/// Accept connections on an existing listener. Does not print.
+///
+/// # Errors
+///
+/// Returns the listener error when accepting fails hard enough to end the loop.
+/// A single failed accept is skipped.
+fn serve_on_in(listener: TcpListener, context: Arc<ServeContext>) -> std::io::Result<()> {
     for incoming in listener.incoming() {
         let Ok(stream) = incoming else {
             continue;
         };
-        let viewer = Arc::clone(&viewer);
+        let context = Arc::clone(&context);
         std::thread::spawn(move || {
-            let _ = handle_connection_with(stream, &viewer);
+            let _ = handle_connection_in(stream, &context);
         });
     }
     Ok(())
+}
+
+/// Serve requests on one connection until it closes or sits idle.
+///
+/// A connection past the cap gets 503 and is closed without taking a slot.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket fails before a response is written.
+/// A clean end of stream after a response is success.
+fn handle_connection_in(stream: TcpStream, context: &ServeContext) -> std::io::Result<()> {
+    handle_connection_view(
+        stream,
+        &context.viewer,
+        context.dicomweb.as_ref(),
+        context.main_policy.as_deref(),
+    )
 }
 
 fn chosen_port() -> std::io::Result<u16> {
@@ -291,7 +368,7 @@ fn chosen_port() -> std::io::Result<u16> {
 /// Returns an I/O error when the socket fails before a response is written.
 pub fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
     let viewer = Viewer::new(ViewerConfig { cache_bytes: 0 });
-    connection_session(stream, &viewer, Duration::from_secs(60), true)
+    connection_session(stream, &viewer, Duration::from_secs(60), true, None, None)
 }
 
 /// Serve requests on one connection until it closes or sits idle.
@@ -302,7 +379,23 @@ pub fn handle_connection(stream: TcpStream) -> std::io::Result<()> {
 ///
 /// Returns an I/O error when the socket fails before a response is written.
 /// A clean end of stream after a response is success.
-pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io::Result<()> {
+pub fn handle_connection_with(stream: TcpStream, viewer: &Viewer) -> std::io::Result<()> {
+    handle_connection_view(stream, viewer, None, None)
+}
+
+/// Connection handling body keyed on the viewer. The optional dicomweb config enables the GET
+/// /dicweb/config reply and the two native POST routes, and changes no page. The main policy is
+/// the only setting that changes the Image page header.
+///
+/// # Errors
+///
+/// Returns an I/O error when the socket fails before a response is written.
+fn handle_connection_view(
+    mut stream: TcpStream,
+    viewer: &Viewer,
+    dicomweb: Option<&crate::dicomweb::ViewerDicomwebConfig>,
+    main_policy: Option<&str>,
+) -> std::io::Result<()> {
     if !viewer.acquire_connection() {
         let _ = stream.set_nodelay(true);
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
@@ -321,7 +414,7 @@ pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io
         };
         if got_headers {
             let reply = busy_reply();
-            let _ = write_reply(&mut stream, &reply, false);
+            let _ = write_reply(&mut stream, &reply, false, main_policy);
             let _ = stream.flush();
             if let Some(end) = header_end {
                 discard_busy_body(&mut stream, &pending, end);
@@ -330,7 +423,7 @@ pub fn handle_connection_with(mut stream: TcpStream, viewer: &Viewer) -> std::io
         return Ok(());
     }
     let _guard = ConnectionGuard { viewer };
-    connection_session(stream, viewer, READ_TIMEOUT, false)
+    connection_session(stream, viewer, READ_TIMEOUT, false, dicomweb, main_policy)
 }
 
 struct ConnectionGuard<'a> {
@@ -348,6 +441,8 @@ fn connection_session(
     viewer: &Viewer,
     read_timeout: Duration,
     one_request: bool,
+    dicomweb: Option<&crate::dicomweb::ViewerDicomwebConfig>,
+    main_policy: Option<&str>,
 ) -> std::io::Result<()> {
     stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -359,7 +454,7 @@ fn connection_session(
             Err(ReadStop::CleanClose) => return Ok(()),
             Err(ReadStop::Io(error)) => return Err(error),
             Err(ReadStop::Reply(reply)) => {
-                write_reply(&mut stream, &reply, false)?;
+                write_reply(&mut stream, &reply, false, main_policy)?;
                 return Ok(());
             }
         };
@@ -374,10 +469,41 @@ fn connection_session(
             counted: request.body_counted,
             slot: request.body_slot.take(),
         };
-        let (mut reply, home) = route(viewer, request, Some(&stream), &mut charge);
+        let (mut reply, home) = if request.method == "GET" && request.path == "/dicweb/config" {
+            match dicomweb {
+                Some(config) => {
+                    let reply = dicweb_json_reply(&serde_json::json!({
+                        "studiesServiceUrl": config.studies_service_url,
+                        "wadoUriUrl": config.wado_uri_url,
+                    }));
+                    retire_request_body(&charge, request.body);
+                    (reply, None)
+                }
+                None => {
+                    // An unconfigured viewer still answers the page's silent
+                    // probe, with a JSON null body instead of a missing route,
+                    // so a page load never logs a 404 for it.
+                    let reply = dicweb_json_reply(&serde_json::Value::Null);
+                    retire_request_body(&charge, request.body);
+                    (reply, None)
+                }
+            }
+        } else if request.method == "POST"
+            && (request.path == "/dicweb/qido" || request.path == "/dicweb/instance")
+            && dicomweb.is_none()
+        {
+            // A local-only viewer refuses the native DICOMweb POST routes
+            // with a 404. The page never shows the remote source without a
+            // configured service, so the native parser is not reachable
+            // through them.
+            retire_request_body(&charge, request.body);
+            (text_reply(404, None, "not found"), None)
+        } else {
+            route(viewer, request, Some(&stream), &mut charge)
+        };
         drop(charge);
         let write_started = profiling().then(Instant::now);
-        let written = write_reply(&mut stream, &reply, !close);
+        let written = write_reply(&mut stream, &reply, !close, main_policy);
         if let Some(home) = home {
             // The write is done or failed, so the grey goes home and its
             // claim with it.
@@ -463,6 +589,14 @@ fn route(
             retire_request_body(charge, request.body);
             (reply, None)
         }
+        ("POST", "/dicweb/qido") => {
+            let reply = dicweb_route(request, charge);
+            (reply, None)
+        }
+        ("POST", "/dicweb/instance") => {
+            let reply = dicweb_route(request, charge);
+            (reply, None)
+        }
         _ => {
             retire_request_body(charge, request.body);
             (text_reply(404, None, "not found"), None)
@@ -480,6 +614,121 @@ fn retire_request_body(charge: &BodyCharge<'_>, body: Vec<u8>) {
         Some(slot) => retire_bytes(&slot.retire(), body),
         None => drop(body),
     }
+}
+
+/// Typed request metadata for the native DICOMweb POST routes.
+enum DicwebRequestHeaders {
+    Qido(QidoRequestHeaders),
+    Instance(InstanceRequestHeaders),
+}
+
+/// Most bytes a serialized DICOMweb reply may occupy.
+const DICWEB_JSON_LIMIT: usize = 16 * 1024 * 1024;
+
+/// Bounded sink for serialized DICOMweb JSON.
+struct JsonSink {
+    body: Vec<u8>,
+}
+
+impl std::io::Write for JsonSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let room = DICWEB_JSON_LIMIT.saturating_sub(self.body.len());
+        if buf.len() > room {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "dicweb json limit",
+            ));
+        }
+        self.body.try_reserve_exact(buf.len()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::OutOfMemory, "dicweb json reserve")
+        })?;
+        self.body.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Serialize a DICOMweb reply under `DICWEB_JSON_LIMIT` while writing.
+fn dicweb_json_reply(value: &serde_json::Value) -> Reply {
+    let mut sink = JsonSink { body: Vec::new() };
+    match serde_json::to_writer(&mut sink, value) {
+        Ok(()) => bare(200, "application/json", sink.body),
+        Err(_) => dicweb_refusal_reply(DicwebRefusal::AllocationRefused),
+    }
+}
+
+/// Recognize the two native POST paths from the first request line only.
+///
+/// The line is not retained and no header value is returned. This lets a
+/// malformed general header on a native path refuse without leaking the
+/// preview text form, and without weakening `parse_header`.
+fn native_dicweb_post(header: &str) -> bool {
+    let Some(line) = header.split("\r\n").next() else {
+        return false;
+    };
+    let mut parts = line.split(' ');
+    match (parts.next(), parts.next()) {
+        (Some("POST"), Some(raw_path)) => {
+            let path = match raw_path.split('?').next() {
+                Some(bare) => bare,
+                None => raw_path,
+            };
+            path == "/dicweb/qido" || path == "/dicweb/instance"
+        }
+        _ => false,
+    }
+}
+
+/// Parse the typed metadata for one native DICOMweb POST path.
+fn parse_dicweb_headers(path: &str, header: &str) -> Result<DicwebRequestHeaders, DicwebRefusal> {
+    match path {
+        "/dicweb/qido" => parse_qido_request_headers(header)
+            .map(DicwebRequestHeaders::Qido)
+            .map_err(DicwebRefusal::from),
+        "/dicweb/instance" => parse_instance_request_headers(header)
+            .map(DicwebRequestHeaders::Instance)
+            .map_err(DicwebRefusal::from),
+        _ => Err(DicwebRefusal::InvalidRequest),
+    }
+}
+
+/// Serve one native DICOMweb POST route and free its body on this thread.
+///
+/// The body is borrowed by the projection helper, so the same `Vec` is
+/// retired after the helper returns. The charge stays live through parse
+/// and hash, and no raw header or body copy is retained in the reply.
+fn dicweb_route(request: Request, charge: &mut BodyCharge<'_>) -> Reply {
+    let reply = match (request.path.as_str(), request.dicweb) {
+        ("/dicweb/qido", Some(DicwebRequestHeaders::Qido(headers))) => {
+            match crate::dicomweb::qido_reply(
+                &request.body,
+                &headers.scope,
+                &headers.source_nonce,
+                headers.generation,
+            ) {
+                Ok(value) => dicweb_json_reply(&value),
+                Err(error) => dicweb_refusal_reply(error.into()),
+            }
+        }
+        ("/dicweb/instance", Some(DicwebRequestHeaders::Instance(headers))) => {
+            match crate::dicomweb::instance_reply(
+                &request.body,
+                &headers.boundary,
+                &headers.identity,
+                &headers.source_nonce,
+                headers.generation,
+            ) {
+                Ok(value) => dicweb_json_reply(&value),
+                Err(error) => dicweb_refusal_reply(error.into()),
+            }
+        }
+        _ => dicweb_refusal_reply(DicwebRefusal::InvalidRequest),
+    };
+    retire_request_body(charge, request.body);
+    reply
 }
 
 fn get_reply(viewer: &Viewer, request: &Request) -> Reply {
@@ -537,6 +786,7 @@ const LIBRARY_FILES: &[&str] = &[
     "crosshair",
     "cursor",
     "dicomweb",
+    "dicomweb-viewer",
     "errors",
     "events",
     "fatal",
@@ -2209,42 +2459,54 @@ fn parse_forget_ids(body: &[u8]) -> Option<Vec<FileId>> {
 
 fn from_preview(result: Result<Preview, PreviewError>) -> Reply {
     match result {
-        Ok(preview) => Reply {
-            status: 200,
-            content_type: "application/octet-stream",
-            error: None,
-            grey: Some(Box::new(Grey {
-                width: preview.width,
-                height: preview.height,
-                frames: preview.frames,
-                auto: preview.auto.token(),
-                shown_frame: preview.frame,
-                window_center: preview.window_center,
-                window_width: preview.window_width,
-                window_function: preview.window_function,
-                inverted: preview.inverted,
-                row_spacing: preview.facts.row_spacing,
-                column_spacing: preview.facts.column_spacing,
-                spacing_source: preview.facts.spacing_source,
-                edge_left: preview.facts.edge_left,
-                edge_right: preview.facts.edge_right,
-                edge_top: preview.facts.edge_top,
-                edge_bottom: preview.facts.edge_bottom,
-                edge_source: preview.facts.edge_source,
-                calibration_source: preview.calibration_source,
-                calibration_mm: preview.calibration_mm,
-                window_index: preview.window_index,
-                window_count: preview.window_count,
-                channels: preview.channels,
-                palette_fallback: preview.palette_fallback,
-                icc: preview.icc,
-            })),
-            body: preview.grey,
-            source: None,
-            file_id: None,
-            held_flag: None,
-            html_page: None,
-        },
+        Ok(preview) => {
+            let corners = preview
+                .facts
+                .corners
+                .unwrap_or_else(|| Box::new(CornerTokens::empty()));
+            Reply {
+                status: 200,
+                content_type: "application/octet-stream",
+                error: None,
+                grey: Some(Box::new(Grey {
+                    width: preview.width,
+                    height: preview.height,
+                    frames: preview.frames,
+                    auto: preview.auto.token(),
+                    shown_frame: preview.frame,
+                    window_center: preview.window_center,
+                    window_width: preview.window_width,
+                    window_function: preview.window_function,
+                    inverted: preview.inverted,
+                    row_spacing: preview.facts.row_spacing,
+                    column_spacing: preview.facts.column_spacing,
+                    spacing_source: preview.facts.spacing_source,
+                    edge_left: preview.facts.edge_left,
+                    edge_right: preview.facts.edge_right,
+                    edge_top: preview.facts.edge_top,
+                    edge_bottom: preview.facts.edge_bottom,
+                    edge_source: preview.facts.edge_source,
+                    slice_thickness: corners.slice_thickness,
+                    kvp: corners.kvp,
+                    exposure_mas: corners.exposure_mas,
+                    exposure_source: corners.exposure_source,
+                    repetition_time: corners.repetition_time,
+                    echo_time: corners.echo_time,
+                    calibration_source: preview.calibration_source,
+                    calibration_mm: preview.calibration_mm,
+                    window_index: preview.window_index,
+                    window_count: preview.window_count,
+                    channels: preview.channels,
+                    palette_fallback: preview.palette_fallback,
+                    icc: preview.icc,
+                })),
+                body: preview.grey,
+                source: None,
+                file_id: None,
+                held_flag: None,
+                html_page: None,
+            }
+        }
         Err(error) => error_reply(error),
     }
 }
@@ -2372,14 +2634,26 @@ impl Write for DeadlineWriter<'_> {
 }
 
 /// Write one reply, all of it within [`WRITE_TIMEOUT`].
-fn write_reply(stream: &mut TcpStream, reply: &Reply, keep_alive: bool) -> std::io::Result<()> {
-    write_reply_by(stream, reply, keep_alive, Instant::now() + WRITE_TIMEOUT)
+fn write_reply(
+    stream: &mut TcpStream,
+    reply: &Reply,
+    keep_alive: bool,
+    policy: Option<&str>,
+) -> std::io::Result<()> {
+    write_reply_by(
+        stream,
+        reply,
+        keep_alive,
+        policy,
+        Instant::now() + WRITE_TIMEOUT,
+    )
 }
 
 fn write_reply_by(
     stream: &mut TcpStream,
     reply: &Reply,
     keep_alive: bool,
+    policy: Option<&str>,
     deadline: Instant,
 ) -> std::io::Result<()> {
     let mut stream = DeadlineWriter { stream, deadline };
@@ -2393,7 +2667,11 @@ fn write_reply_by(
     );
     if let Some(page) = reply.html_page {
         head.push_str("Content-Security-Policy: ");
-        head.push_str(crate::csp::page_policy(page.source()));
+        if let (HtmlPage::Image, Some(p)) = (page, policy) {
+            head.push_str(p);
+        } else {
+            head.push_str(crate::csp::page_policy(page.source()));
+        }
         head.push_str("\r\n");
     }
     if let Some(code) = reply.error {
@@ -2458,6 +2736,31 @@ fn write_reply_by(
         head.push_str(&grey.edge_bottom);
         head.push_str("\r\nX-Ocelli-Edge-Source: ");
         head.push_str(grey.edge_source);
+        // F-267. The five value headers carry validated JSON number tokens,
+        // so none can carry a newline. The source header is written always,
+        // as `X-Ocelli-Spacing-Source` is, with one of four fixed values.
+        if let Some(token) = &grey.slice_thickness {
+            head.push_str("\r\nX-Ocelli-Slice-Thickness: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.kvp {
+            head.push_str("\r\nX-Ocelli-Kvp: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.exposure_mas {
+            head.push_str("\r\nX-Ocelli-Exposure-Mas: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.repetition_time {
+            head.push_str("\r\nX-Ocelli-Repetition-Time: ");
+            head.push_str(token);
+        }
+        if let Some(token) = &grey.echo_time {
+            head.push_str("\r\nX-Ocelli-Echo-Time: ");
+            head.push_str(token);
+        }
+        head.push_str("\r\nX-Ocelli-Exposure-Source: ");
+        head.push_str(grey.exposure_source);
         head.push_str("\r\nX-Ocelli-Calibration-Source: ");
         head.push_str(grey.calibration_source);
         head.push_str("\r\n");
@@ -2492,12 +2795,37 @@ fn read_header_bytes_after(
     pending: &mut Vec<u8>,
     handled: usize,
 ) -> Result<usize, ReadStop> {
+    let native_first_line = |pending: &[u8]| -> bool {
+        let limit = match pending.iter().position(|&b| b == b'\r' || b == b'\n') {
+            Some(pos) => pos,
+            None => pending.len(),
+        };
+        let Some(line_bytes) = pending.get(..limit) else {
+            return false;
+        };
+        let Ok(line) = std::str::from_utf8(line_bytes) else {
+            return false;
+        };
+        native_dicweb_post(line)
+    };
     let mut chunk = [0_u8; 8192];
     loop {
         if let Some(end) = header_end_at(pending) {
+            if end > HEADER_CAP && native_first_line(pending) {
+                pending.clear();
+                return Err(ReadStop::Reply(dicweb_refusal_reply(
+                    DicwebRefusal::InvalidRequest,
+                )));
+            }
             return Ok(end);
         }
         if pending.len() > HEADER_CAP {
+            if native_first_line(pending) {
+                pending.clear();
+                return Err(ReadStop::Reply(dicweb_refusal_reply(
+                    DicwebRefusal::InvalidRequest,
+                )));
+            }
             pending.clear();
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -2532,6 +2860,7 @@ fn read_request(
     viewer: &Viewer,
 ) -> Result<Request, ReadStop> {
     let header_end = read_header_bytes_after(stream, pending, handled)?;
+    let native;
     let header = {
         let Some(header_bytes) = pending.get(..header_end) else {
             return Err(ReadStop::Io(std::io::Error::new(
@@ -2539,18 +2868,67 @@ fn read_request(
                 "header",
             )));
         };
-        std::str::from_utf8(header_bytes)
-            .map_err(|_| {
-                ReadStop::Reply(text_reply(
+        if let Some(line_end) = header_bytes.windows(2).position(|w| w == b"\r\n") {
+            native = header_bytes
+                .get(..line_end)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .map(native_dicweb_post)
+                .unwrap_or(false);
+        } else {
+            native = std::str::from_utf8(header_bytes)
+                .map(native_dicweb_post)
+                .unwrap_or(false);
+        }
+        match std::str::from_utf8(header_bytes) {
+            Ok(text) => text.to_owned(),
+            Err(_) if native => {
+                return Err(ReadStop::Reply(dicweb_refusal_reply(
+                    DicwebRefusal::InvalidRequest,
+                )));
+            }
+            Err(_) => {
+                return Err(ReadStop::Reply(text_reply(
                     400,
                     Some("header"),
                     "the preview request header is not text",
-                ))
-            })?
-            .to_owned()
+                )));
+            }
+        }
     };
-    let parsed = parse_header(&header).map_err(ReadStop::Reply)?;
+    let parsed = match parse_header(&header) {
+        Ok(parsed) => parsed,
+        Err(reply) => {
+            if native_dicweb_post(&header) {
+                return Err(ReadStop::Reply(dicweb_refusal_reply(
+                    DicwebRefusal::InvalidRequest,
+                )));
+            }
+            return Err(ReadStop::Reply(reply));
+        }
+    };
     let declared = match parsed.length {
+        Some(value)
+            if parsed.method == "POST"
+                && parsed.path == "/dicweb/qido"
+                && value > DICWEB_QIDO_BODY_CAP =>
+        {
+            return Err(ReadStop::Reply(bare(
+                413,
+                "application/json",
+                br#"{"code":"AllocationRefused"}"#.to_vec(),
+            )));
+        }
+        Some(value)
+            if parsed.method == "POST"
+                && parsed.path == "/dicweb/instance"
+                && value > DICWEB_INSTANCE_BODY_CAP =>
+        {
+            return Err(ReadStop::Reply(bare(
+                413,
+                "application/json",
+                br#"{"code":"AllocationRefused"}"#.to_vec(),
+            )));
+        }
         Some(value) if parsed.path == "/link" && value > LINK_BODY_CAP => {
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -2587,6 +2965,11 @@ fn read_request(
             )));
         }
         Some(value) => value,
+        None if native => {
+            return Err(ReadStop::Reply(dicweb_refusal_reply(
+                DicwebRefusal::InvalidRequest,
+            )));
+        }
         None if parsed.method == "POST" => {
             return Err(ReadStop::Reply(text_reply(
                 400,
@@ -2595,6 +2978,16 @@ fn read_request(
             )));
         }
         None => 0,
+    };
+    let dicweb = if parsed.method == "POST"
+        && (parsed.path == "/dicweb/qido" || parsed.path == "/dicweb/instance")
+    {
+        match parse_dicweb_headers(&parsed.path, &header) {
+            Ok(typed) => Some(typed),
+            Err(error) => return Err(ReadStop::Reply(dicweb_refusal_reply(error))),
+        }
+    } else {
+        None
     };
     let mut entered = 0_usize;
     let mut counted = false;
@@ -2620,6 +3013,18 @@ fn read_request(
             if counted {
                 viewer.leave_body();
             }
+            let stop = match (stop, native) {
+                (ReadStop::Reply(reply), true) => {
+                    if reply.status == 503 {
+                        ReadStop::Reply(dicweb_refusal_reply(DicwebRefusal::HttpStatus))
+                    } else if reply.status == 413 || reply.error == Some("body") {
+                        ReadStop::Reply(dicweb_refusal_reply(DicwebRefusal::AllocationRefused))
+                    } else {
+                        ReadStop::Reply(dicweb_refusal_reply(DicwebRefusal::InvalidRequest))
+                    }
+                }
+                (stop, _) => stop,
+            };
             return Err(stop);
         }
     };
@@ -2643,6 +3048,7 @@ fn read_request(
         points: parsed.points,
         shape: parsed.shape,
         region: parsed.region,
+        dicweb,
         close: parsed.close,
         body_charge: final_charge,
         body_counted: counted,
@@ -2869,6 +3275,339 @@ fn release_read_buffer(pending: &mut Vec<u8>) {
     } else {
         pending.clear();
     }
+}
+
+use crate::dicomweb::{QIDO_MAX_GENERATION, QidoScope, is_valid_uid, qido_nonce_is_valid};
+
+/// Parsed QIDO request header metadata.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct QidoRequestHeaders {
+    /// Selected QIDO scope built from validated header values.
+    pub(crate) scope: QidoScope,
+    /// Validated source nonce for the request.
+    pub(crate) source_nonce: String,
+    /// Validated generation counter.
+    pub(crate) generation: u64,
+}
+
+/// Header parsing failures.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DicwebHeaderError {
+    /// Structurally invalid header block or invalid QIDO metadata.
+    InvalidRequest,
+    /// Missing, duplicated, or wrong Content-Type header.
+    ContentType,
+}
+
+/// Tracked header names, lowercase.
+const HEADER_CONTENT_TYPE: &str = "content-type";
+const HEADER_X_QIDO_LEVEL: &str = "x-qido-level";
+const HEADER_X_QIDO_PARENT_STUDY: &str = "x-qido-parent-study";
+const HEADER_X_QIDO_PARENT_SERIES: &str = "x-qido-parent-series";
+const HEADER_X_QIDO_SOURCE_NONCE: &str = "x-qido-source-nonce";
+const HEADER_X_QIDO_GENERATION: &str = "x-qido-generation";
+
+/// Valid QIDO level tokens.
+const LEVEL_STUDY: &str = "study";
+const LEVEL_SERIES: &str = "series";
+const LEVEL_INSTANCE: &str = "instance";
+
+/// Required media type for the request body.
+const MEDIA_TYPE_DICOM_JSON: &str = "application/dicom+json";
+
+/// Collection of tracked header occurrences.
+struct TrackedFields {
+    content_type: Option<String>,
+    level: Option<String>,
+    parent_study: Option<String>,
+    parent_series: Option<String>,
+    source_nonce: Option<String>,
+    generation: Option<String>,
+}
+
+impl TrackedFields {
+    fn new() -> Self {
+        TrackedFields {
+            content_type: None,
+            level: None,
+            parent_study: None,
+            parent_series: None,
+            source_nonce: None,
+            generation: None,
+        }
+    }
+
+    fn set_once(slot: &mut Option<String>, value: String) -> Result<(), DicwebHeaderError> {
+        if slot.is_some() {
+            return Err(DicwebHeaderError::InvalidRequest);
+        }
+        *slot = Some(value);
+        Ok(())
+    }
+
+    fn record(&mut self, name: &str, value: String) -> Result<(), DicwebHeaderError> {
+        if name == HEADER_CONTENT_TYPE {
+            if self.content_type.is_some() {
+                return Err(DicwebHeaderError::ContentType);
+            }
+            self.content_type = Some(value);
+            return Ok(());
+        }
+        let slot = if name == HEADER_X_QIDO_LEVEL {
+            &mut self.level
+        } else if name == HEADER_X_QIDO_PARENT_STUDY {
+            &mut self.parent_study
+        } else if name == HEADER_X_QIDO_PARENT_SERIES {
+            &mut self.parent_series
+        } else if name == HEADER_X_QIDO_SOURCE_NONCE {
+            &mut self.source_nonce
+        } else if name == HEADER_X_QIDO_GENERATION {
+            &mut self.generation
+        } else {
+            return Ok(());
+        };
+        Self::set_once(slot, value)
+    }
+}
+
+/// Validate one optional parent UID header, refusing absence or bad syntax.
+fn require_uid(raw: Option<&str>) -> Result<String, DicwebHeaderError> {
+    let uid = match raw {
+        Some(v) => v.trim().to_string(),
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    if !is_valid_uid(&uid) {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+    Ok(uid)
+}
+
+/// Parse the bounded raw header block for the POST /dicweb/qido route.
+///
+/// The first line (request line) is skipped and final empty lines are
+/// ignored. Only the six tracked header names are interpreted; every other
+/// header is discarded without retention. No input value is returned in any
+/// error variant.
+pub(crate) fn parse_qido_request_headers(
+    header: &str,
+) -> Result<QidoRequestHeaders, DicwebHeaderError> {
+    let mut fields = TrackedFields::new();
+
+    for line in header.split("\r\n").skip(1) {
+        if line.is_empty() {
+            continue;
+        }
+        let (name_raw, value_raw) = match line.split_once(':') {
+            Some(pair) => pair,
+            None => return Err(DicwebHeaderError::InvalidRequest),
+        };
+        let name = name_raw.to_ascii_lowercase();
+        let value = value_raw.trim().to_string();
+        fields.record(&name, value)?;
+    }
+
+    let content_type_raw = match fields.content_type {
+        Some(v) => v,
+        None => return Err(DicwebHeaderError::ContentType),
+    };
+    let media_ok = match content_type_raw.split(';').next() {
+        Some(m) => m.trim().eq_ignore_ascii_case(MEDIA_TYPE_DICOM_JSON),
+        None => false,
+    };
+    if !media_ok {
+        return Err(DicwebHeaderError::ContentType);
+    }
+
+    let level = match fields.level {
+        Some(v) => v,
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+
+    let scope = match level.as_str() {
+        LEVEL_STUDY => {
+            if fields.parent_study.is_some() || fields.parent_series.is_some() {
+                return Err(DicwebHeaderError::InvalidRequest);
+            }
+            QidoScope::Study
+        }
+        LEVEL_SERIES => {
+            if fields.parent_series.is_some() {
+                return Err(DicwebHeaderError::InvalidRequest);
+            }
+            let study_uid = require_uid(fields.parent_study.as_deref())?;
+            QidoScope::Series { study_uid }
+        }
+        LEVEL_INSTANCE => {
+            let study_uid = require_uid(fields.parent_study.as_deref())?;
+            let series_uid = require_uid(fields.parent_series.as_deref())?;
+            QidoScope::Instance {
+                study_uid,
+                series_uid,
+            }
+        }
+        _ => return Err(DicwebHeaderError::InvalidRequest),
+    };
+
+    let source_nonce = match fields.source_nonce {
+        Some(ref n) => n.trim().to_string(),
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    if !qido_nonce_is_valid(&source_nonce) {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+
+    let generation_raw = match fields.generation {
+        Some(ref g) => g.trim().to_string(),
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    let generation: u64 = match generation_raw.parse() {
+        Ok(g) => g,
+        Err(_) => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    if generation > QIDO_MAX_GENERATION {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+    if generation.to_string() != generation_raw {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+
+    Ok(QidoRequestHeaders {
+        scope,
+        source_nonce,
+        generation,
+    })
+}
+
+fn split_header_parts(value: &str) -> Result<Vec<&str>, DicwebHeaderError> {
+    let mut parts: Vec<&str> = Vec::new();
+    let mut start = 0usize;
+    let mut in_quotes = false;
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if in_quotes {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_quotes = false;
+            }
+        } else if ch == '"' {
+            in_quotes = true;
+        } else if ch == ';' {
+            parts.push(
+                value
+                    .get(start..index)
+                    .ok_or(DicwebHeaderError::ContentType)?,
+            );
+            start = index + 1;
+        }
+    }
+    if in_quotes || escaped {
+        return Err(DicwebHeaderError::ContentType);
+    }
+    parts.push(value.get(start..).ok_or(DicwebHeaderError::ContentType)?);
+    Ok(parts)
+}
+
+fn unquote_value(raw: &str) -> Result<String, DicwebHeaderError> {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        let inner = rest
+            .strip_suffix('"')
+            .ok_or(DicwebHeaderError::ContentType)?;
+        let mut out = String::new();
+        let mut chars = inner.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some(next) => out.push(next),
+                    None => return Err(DicwebHeaderError::ContentType),
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        Ok(out)
+    } else if trimmed.contains('"') {
+        Err(DicwebHeaderError::ContentType)
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn is_boundary_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+        || matches!(
+            ch,
+            '\'' | '(' | ')' | '+' | '_' | ',' | '-' | '.' | '/' | ':' | '=' | '?' | ' '
+        )
+}
+
+fn valid_boundary(value: &str) -> bool {
+    if value.ends_with(' ') {
+        return false;
+    }
+    let mut count = 0usize;
+    for ch in value.chars() {
+        if !is_boundary_char(ch) {
+            return false;
+        }
+        count += 1;
+        if count > 70 {
+            return false;
+        }
+    }
+    count >= 1
+}
+
+fn dicweb_instance_boundary(value: &str) -> Result<String, DicwebHeaderError> {
+    let parts = split_header_parts(value)?;
+    let mut iter = parts.iter();
+    let base = iter
+        .next()
+        .ok_or(DicwebHeaderError::ContentType)?
+        .trim()
+        .to_ascii_lowercase();
+    if base != "multipart/related" {
+        return Err(DicwebHeaderError::ContentType);
+    }
+    let mut params: Vec<(String, String)> = Vec::new();
+    for part in iter {
+        let part = part.trim();
+        let (raw_name, raw_value) = part.split_once('=').ok_or(DicwebHeaderError::ContentType)?;
+        let name = raw_name.trim().to_ascii_lowercase();
+        if name.is_empty() {
+            return Err(DicwebHeaderError::ContentType);
+        }
+        let parsed = unquote_value(raw_value)?;
+        if parsed.is_empty() {
+            return Err(DicwebHeaderError::ContentType);
+        }
+        if params.iter().any(|(existing, _)| *existing == name) {
+            return Err(DicwebHeaderError::ContentType);
+        }
+        params.push((name, parsed));
+    }
+    let mut seen_type = false;
+    let mut boundary: Option<String> = None;
+    for (name, val) in &params {
+        if name == "type" {
+            seen_type = true;
+            if !val.trim().eq_ignore_ascii_case("application/dicom") {
+                return Err(DicwebHeaderError::ContentType);
+            }
+        } else if name == "boundary" {
+            if !valid_boundary(val) {
+                return Err(DicwebHeaderError::ContentType);
+            }
+            boundary = Some(val.clone());
+        }
+    }
+    if !seen_type {
+        return Err(DicwebHeaderError::ContentType);
+    }
+    boundary.ok_or(DicwebHeaderError::ContentType)
 }
 
 struct HeaderParts {
@@ -3171,9 +3910,985 @@ fn header_end_at(buf: &[u8]) -> Option<usize> {
         .map(|start| start + 4)
 }
 
+use std::collections::BTreeMap;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct InstanceRequestHeaders {
+    pub(crate) identity: crate::dicomweb::InstanceIdentity,
+    pub(crate) source_nonce: String,
+    pub(crate) generation: u64,
+    pub(crate) boundary: String,
+}
+
+/// Parse the bounded raw header block for the POST /dicweb/instance route.
+///
+/// The first line (request line) is skipped and final empty lines are
+/// ignored. Only the six tracked header names are interpreted; every other
+/// header is discarded without retention. Duplicate tracked names are
+/// refused. No input value is returned in any error variant.
+pub(crate) fn parse_instance_request_headers(
+    header: &str,
+) -> Result<InstanceRequestHeaders, DicwebHeaderError> {
+    let mut fields: BTreeMap<String, String> = BTreeMap::new();
+
+    for line in header.split("\r\n").skip(1) {
+        if line.is_empty() {
+            continue;
+        }
+        let (name_raw, value_raw) = match line.split_once(':') {
+            Some(pair) => pair,
+            None => return Err(DicwebHeaderError::InvalidRequest),
+        };
+        let name = name_raw.to_ascii_lowercase();
+        if name != HEADER_CONTENT_TYPE
+            && name != HEADER_X_INSTANCE_STUDY_UID
+            && name != HEADER_X_INSTANCE_SERIES_UID
+            && name != HEADER_X_INSTANCE_SOP_UID
+            && name != HEADER_X_WADO_SOURCE_NONCE
+            && name != HEADER_X_WADO_GENERATION
+        {
+            continue;
+        }
+        let value = value_raw.trim().to_string();
+        let is_content_type = name == HEADER_CONTENT_TYPE;
+        let replaced = fields.insert(name, value);
+        if replaced.is_some() {
+            if is_content_type {
+                return Err(DicwebHeaderError::ContentType);
+            }
+            return Err(DicwebHeaderError::InvalidRequest);
+        }
+    }
+
+    let content_type_raw = match fields.get(HEADER_CONTENT_TYPE) {
+        Some(v) => v.clone(),
+        None => return Err(DicwebHeaderError::ContentType),
+    };
+    let boundary = dicweb_instance_boundary(&content_type_raw)?;
+
+    let study_uid = require_uid(fields.get(HEADER_X_INSTANCE_STUDY_UID).map(|v| v.as_str()))?;
+    let series_uid = require_uid(fields.get(HEADER_X_INSTANCE_SERIES_UID).map(|v| v.as_str()))?;
+    let instance_uid = require_uid(fields.get(HEADER_X_INSTANCE_SOP_UID).map(|v| v.as_str()))?;
+
+    let source_nonce = match fields.get(HEADER_X_WADO_SOURCE_NONCE) {
+        Some(n) => n.trim().to_string(),
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    if !qido_nonce_is_valid(&source_nonce) {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+
+    let generation_raw = match fields.get(HEADER_X_WADO_GENERATION) {
+        Some(g) => g.trim().to_string(),
+        None => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    let generation: u64 = match generation_raw.parse() {
+        Ok(g) => g,
+        Err(_) => return Err(DicwebHeaderError::InvalidRequest),
+    };
+    if generation > QIDO_MAX_GENERATION {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+    if generation.to_string() != generation_raw {
+        return Err(DicwebHeaderError::InvalidRequest);
+    }
+
+    Ok(InstanceRequestHeaders {
+        identity: crate::dicomweb::InstanceIdentity {
+            study_uid,
+            series_uid,
+            instance_uid,
+        },
+        source_nonce,
+        generation,
+        boundary,
+    })
+}
+
+/// Tracked instance route header names, lowercase.
+const HEADER_X_INSTANCE_STUDY_UID: &str = "x-wado-study-instance-uid";
+const HEADER_X_INSTANCE_SERIES_UID: &str = "x-wado-series-instance-uid";
+const HEADER_X_INSTANCE_SOP_UID: &str = "x-wado-sop-instance-uid";
+const HEADER_X_WADO_SOURCE_NONCE: &str = "x-wado-source-nonce";
+const HEADER_X_WADO_GENERATION: &str = "x-wado-generation";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DicwebRefusal {
+    InvalidRequest,
+    AllocationRefused,
+    ContentType,
+    InvalidValue,
+    HttpStatus,
+}
+
+fn fixed_json_bytes(variant_name: &'static str) -> Vec<u8> {
+    let mut body = Vec::with_capacity(variant_name.len() + 12);
+    body.extend_from_slice(b"{\"code\":\"");
+    body.extend_from_slice(variant_name.as_bytes());
+    body.extend_from_slice(b"\"}");
+    body
+}
+
+fn dicweb_refusal_reply(error: DicwebRefusal) -> Reply {
+    match error {
+        DicwebRefusal::InvalidRequest => {
+            bare(400, "application/json", fixed_json_bytes("InvalidRequest"))
+        }
+        DicwebRefusal::AllocationRefused => bare(
+            413,
+            "application/json",
+            fixed_json_bytes("AllocationRefused"),
+        ),
+        DicwebRefusal::ContentType => {
+            bare(415, "application/json", fixed_json_bytes("ContentType"))
+        }
+        DicwebRefusal::InvalidValue => {
+            bare(422, "application/json", fixed_json_bytes("InvalidValue"))
+        }
+        DicwebRefusal::HttpStatus => bare(503, "application/json", fixed_json_bytes("HttpStatus")),
+    }
+}
+
+impl From<crate::dicomweb::QidoError> for DicwebRefusal {
+    fn from(value: crate::dicomweb::QidoError) -> Self {
+        match value {
+            crate::dicomweb::QidoError::InvalidRequest => DicwebRefusal::InvalidRequest,
+            crate::dicomweb::QidoError::InvalidValue => DicwebRefusal::InvalidValue,
+            crate::dicomweb::QidoError::AllocationRefused => DicwebRefusal::AllocationRefused,
+        }
+    }
+}
+
+impl From<crate::dicomweb::InstanceError> for DicwebRefusal {
+    fn from(value: crate::dicomweb::InstanceError) -> Self {
+        match value {
+            crate::dicomweb::InstanceError::InvalidRequest => DicwebRefusal::InvalidRequest,
+            crate::dicomweb::InstanceError::InvalidValue => DicwebRefusal::InvalidValue,
+            crate::dicomweb::InstanceError::AllocationRefused => DicwebRefusal::AllocationRefused,
+            crate::dicomweb::InstanceError::ContentType => DicwebRefusal::ContentType,
+        }
+    }
+}
+
+impl From<DicwebHeaderError> for DicwebRefusal {
+    fn from(value: DicwebHeaderError) -> Self {
+        match value {
+            DicwebHeaderError::InvalidRequest => DicwebRefusal::InvalidRequest,
+            DicwebHeaderError::ContentType => DicwebRefusal::ContentType,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f245_dicweb_route_native_header_cap() -> Result<(), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+
+        let build_header = |total: usize, target: &str| -> Result<String, String> {
+            let head = format!(
+                "POST {target} HTTP/1.1\r\n\
+                 Host: 127.0.0.1\r\n\
+                 Content-Type: application/dicom+json\r\n\
+                 X-Qido-Level: study\r\n\
+                 X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n\
+                 X-Qido-Generation: 1\r\n\
+                 Content-Length: 2\r\n\
+                 Connection: close\r\n"
+            );
+            let overhead = head.len() + "X-Pad: ".len() + "\r\n".len() + "\r\n".len();
+            if total < overhead {
+                return Err("target below minimum header size".to_string());
+            }
+            let pad = total - overhead;
+            let mut header = head;
+            header.push_str("X-Pad: ");
+            for _ in 0..pad {
+                header.push('0');
+            }
+            header.push_str("\r\n\r\n");
+            Ok(header)
+        };
+
+        for (target, total, fragmented) in [
+            ("/dicweb/qido", HEADER_CAP, false),
+            ("/dicweb/qido", HEADER_CAP, true),
+            ("/dicweb/qido", HEADER_CAP + 1, false),
+            ("/dicweb/qido", HEADER_CAP + 1, true),
+            ("/dicweb/qido?x", HEADER_CAP, false),
+            ("/dicweb/qido?x", HEADER_CAP, true),
+            ("/dicweb/qido?x", HEADER_CAP + 1, false),
+            ("/dicweb/qido?x", HEADER_CAP + 1, true),
+        ] {
+            let header = build_header(total, target)?;
+            if header.len() != total {
+                return Err(format!(
+                    "header length {} != target {}",
+                    header.len(),
+                    total
+                ));
+            }
+
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+            let addr = listener.local_addr().map_err(|e| e.to_string())?;
+
+            let mut client = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+            let mut server = listener.accept().map_err(|e| e.to_string())?.0;
+            server
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .map_err(|e| e.to_string())?;
+
+            client
+                .write_all(header.as_bytes())
+                .map_err(|e| e.to_string())?;
+            client.write_all(b"[]").map_err(|e| e.to_string())?;
+            client
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(|e| e.to_string())?;
+
+            let mut pending: Vec<u8> = Vec::new();
+            if fragmented {
+                let mut seven = [0_u8; 7];
+                server.read_exact(&mut seven).map_err(|e| e.to_string())?;
+                pending.extend_from_slice(&seven);
+            }
+
+            match read_request(&mut server, &mut pending, 0, &viewer) {
+                Ok(mut request) => {
+                    if total != HEADER_CAP {
+                        return Err("expected header refusal but request was accepted".to_string());
+                    }
+                    if request.body != b"[]" {
+                        return Err("request body mismatch".to_string());
+                    }
+                    let mut charge = BodyCharge {
+                        viewer: &viewer,
+                        bytes: request.body_charge,
+                        counted: request.body_counted,
+                        slot: request.body_slot.take(),
+                    };
+                    let (reply, _home) = route(&viewer, request, None, &mut charge);
+                    drop(charge);
+                    if viewer.memory_census().inflight != 0 {
+                        return Err("inflight not zero after charge drop".to_string());
+                    }
+                    if reply.status != 200 {
+                        return Err(format!("expected 200 for exact cap, got {}", reply.status));
+                    }
+                    if reply.content_type != "application/json" {
+                        return Err(format!("content_type mismatch: {}", reply.content_type));
+                    }
+                    if reply.error.is_some() {
+                        return Err("unexpected error field".to_string());
+                    }
+                }
+                Err(ReadStop::Reply(reply)) => {
+                    if total != HEADER_CAP + 1 {
+                        return Err(format!(
+                            "unexpected refusal at exact cap: status {}",
+                            reply.status
+                        ));
+                    }
+                    if reply.status != 400 {
+                        return Err(format!("expected 400 for over-cap, got {}", reply.status));
+                    }
+                    if reply.content_type != "application/json" {
+                        return Err(format!("content_type mismatch: {}", reply.content_type));
+                    }
+                    if reply.error.is_some() {
+                        return Err("unexpected error field".to_string());
+                    }
+                    let parsed: serde_json::Value =
+                        serde_json::from_slice(&reply.body).map_err(|e| e.to_string())?;
+                    if parsed != serde_json::json!({"code": "InvalidRequest"}) {
+                        return Err(format!("body mismatch: {}", parsed));
+                    }
+                    if viewer.memory_census().inflight != 0 {
+                        return Err("inflight not zero after refusal".to_string());
+                    }
+                }
+                Err(ReadStop::Io(e)) => return Err(e.to_string()),
+                Err(ReadStop::CleanClose) => return Err("unexpected clean close".to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn f245_dicweb_route_wado_tuple_refusal_retry() -> Result<(), String> {
+        const F245_A_MULTIPART_HEX: &str = "2D2D663234352D7761646F2D626F756E646172790D0A436F6E74656E742D547970653A206170706C69636174696F6E2F6469636F6D0D0A436F6E74656E742D4C6F636174696F6E3A202F73796E7468657469632F696E7374616E63650D0A436F6E74656E742D4C656E6774683A203435380D0A0D0A00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004449434D02000000554C04007C000000020001004F4200000200000000010200020055491A00312E322E3834302E31303030382E352E312E342E312E312E32000200030055490600322E32352E330200100055491400312E322E3834302E31303030382E312E322E31000200120055490800322E32352E3939000200130053480A004632343553594E5448200800160055491A00312E322E3834302E31303030382E352E312E342E312E312E32000800180055490600322E32352E330800600043530200435420000D0055490600322E32352E3120000E0055490600322E32352E32280002005553020001002800040043530C004D4F4E4F4348524F4D4532202800100055530200010028001100555302000100280000015553020010002800010155530200100028000201555302000F0028000301555302000000E07F10004F5700000200000000000D0A2D2D663234352D7761646F2D626F756E646172792D2D0D0A";
+        const F245_A_MULTIPART_SHA256: &str =
+            "06364c3195af83700d11dd3f3c6768d5aa5827b9cbc4d4cd466752ce0f77c04b";
+        const F245_A_MULTIPART_LEN: usize = 601;
+
+        let mut fixture = Vec::with_capacity(F245_A_MULTIPART_LEN);
+        let mut chars = F245_A_MULTIPART_HEX.as_bytes();
+        if !chars.len().is_multiple_of(2) {
+            return Err("fixture hex had odd length".to_string());
+        }
+        while let Some(pair) = chars.get(..2) {
+            let pair = std::str::from_utf8(pair).map_err(|e| e.to_string())?;
+            fixture.push(u8::from_str_radix(pair, 16).map_err(|e| e.to_string())?);
+            chars = chars.get(2..).unwrap_or(&[]);
+        }
+        if fixture.len() != F245_A_MULTIPART_LEN {
+            return Err(format!("fixture length {}", fixture.len()));
+        }
+
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+
+        let cases: Vec<(&str, bool)> =
+            vec![("2.25.3", true), ("2.25.999", false), ("2.25.3", true)];
+
+        let success = serde_json::json!({
+            "identity": {
+                "studyUid": "2.25.1",
+                "seriesUid": "2.25.2",
+                "instanceUid": "2.25.3",
+            },
+            "rawBodySha256": F245_A_MULTIPART_SHA256,
+            "sourceNonce": "00000000000000000000000000000000",
+            "generation": 1,
+            "byteLength": F245_A_MULTIPART_LEN,
+            "representation": {
+                "field": "wado-rs-instances",
+                "boundary": "f245-wado-boundary",
+            },
+        });
+        let refusal = serde_json::json!({"code": "InvalidValue"});
+
+        let targets = ["/dicweb/instance", "/dicweb/instance?x"];
+        for target in targets {
+            for (case, valid) in cases.clone() {
+                let listener =
+                    std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+                let addr = listener.local_addr().map_err(|e| e.to_string())?;
+
+                let mut client = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+                let mut server = listener.accept().map_err(|e| e.to_string())?.0;
+
+                let header = format!(
+                    "POST {target} HTTP/1.1\r\n\
+                 Host: 127.0.0.1\r\n\
+                 Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n\
+                 X-Wado-Study-Instance-UID: 2.25.1\r\n\
+                 X-Wado-Series-Instance-UID: 2.25.2\r\n\
+                 X-Wado-SOP-Instance-UID: {}\r\n\
+                 X-Wado-Source-Nonce: 00000000000000000000000000000000\r\n\
+                 X-Wado-Generation: 1\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\
+                 \r\n",
+                    case,
+                    fixture.len()
+                );
+                client
+                    .write_all(header.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                client.write_all(&fixture).map_err(|e| e.to_string())?;
+                client
+                    .shutdown(std::net::Shutdown::Write)
+                    .map_err(|e| e.to_string())?;
+
+                let mut request = match read_request(&mut server, &mut Vec::new(), 0, &viewer) {
+                    Ok(request) => request,
+                    Err(ReadStop::Reply(reply)) => {
+                        return Err(format!("unexpected refusal reply: status {}", reply.status));
+                    }
+                    Err(ReadStop::Io(e)) => return Err(e.to_string()),
+                    Err(ReadStop::CleanClose) => return Err("unexpected clean close".to_string()),
+                };
+
+                if request.body != fixture {
+                    return Err("request body mismatch".to_string());
+                }
+
+                let mut charge = BodyCharge {
+                    viewer: &viewer,
+                    bytes: request.body_charge,
+                    counted: request.body_counted,
+                    slot: request.body_slot.take(),
+                };
+
+                let (reply, _home) = route(&viewer, request, None, &mut charge);
+                drop(charge);
+
+                if viewer.memory_census().inflight != 0 {
+                    return Err("inflight not zero after charge drop".to_string());
+                }
+
+                let expected_status: u16 = if valid { 200 } else { 422 };
+
+                if reply.status != expected_status {
+                    return Err(format!(
+                        "status mismatch: {} != {}",
+                        reply.status, expected_status
+                    ));
+                }
+                if reply.content_type != "application/json" {
+                    return Err(format!("content_type mismatch: {}", reply.content_type));
+                }
+                if reply.error.is_some() {
+                    return Err("unexpected error field".to_string());
+                }
+
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&reply.body).map_err(|e| e.to_string())?;
+
+                if valid {
+                    if parsed != success {
+                        return Err(format!("body mismatch: {} != {}", parsed, success));
+                    }
+                } else if parsed != refusal {
+                    return Err(format!("body mismatch: {} != {}", parsed, refusal));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn f245_dicweb_route_reader_refusals_are_closed() -> Result<(), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+
+        let expected_json: &[u8] = br#"{"code":"InvalidRequest"}"#;
+
+        let mut cases: Vec<(Vec<u8>, bool)> = vec![
+        // (1) recognized native POST /dicweb/qido missing Content-Length
+        (
+            b"POST /dicweb/qido HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: application/dicom+json\r\n\
+              X-Qido-Level: study\r\n\
+              X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Qido-Generation: 1\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+        // (2) recognized native POST /dicweb/instance missing Content-Length
+        (
+            b"POST /dicweb/instance HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n\
+              X-Wado-Study-Instance-UID: 2.25.1\r\n\
+              X-Wado-Series-Instance-UID: 2.25.2\r\n\
+              X-Wado-SOP-Instance-UID: 2.25.3\r\n\
+              X-Wado-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Wado-Generation: 1\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+        // query target variants of the missing Content-Length refusals
+        (
+            b"POST /dicweb/qido?x HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: application/dicom+json\r\n\
+              X-Qido-Level: study\r\n\
+              X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Qido-Generation: 1\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+        (
+            b"POST /dicweb/instance?x HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n\
+              X-Wado-Study-Instance-UID: 2.25.1\r\n\
+              X-Wado-Series-Instance-UID: 2.25.2\r\n\
+              X-Wado-SOP-Instance-UID: 2.25.3\r\n\
+              X-Wado-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Wado-Generation: 1\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+        // (3) native QIDO with Content-Length: 2 but only 1 body byte then EOF
+        (
+            b"POST /dicweb/qido HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: application/dicom+json\r\n\
+              X-Qido-Level: study\r\n\
+              X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Qido-Generation: 1\r\n\
+              Content-Length: 2\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+        // (4) native instance with Content-Length: 2 but only 1 body byte then EOF
+        (
+            b"POST /dicweb/instance HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n\
+              X-Wado-Study-Instance-UID: 2.25.1\r\n\
+              X-Wado-Series-Instance-UID: 2.25.2\r\n\
+              X-Wado-SOP-Instance-UID: 2.25.3\r\n\
+              X-Wado-Source-Nonce: 00000000000000000000000000000000\r\n\
+              X-Wado-Generation: 1\r\n\
+              Content-Length: 2\r\n\
+              Connection: close\r\n\
+              \r\n"
+                .to_vec(),
+            true,
+        ),
+    ];
+
+        // (5) valid native QIDO request-line but non-UTF8 byte in an irrelevant header
+        {
+            let mut header = b"POST /dicweb/qido HTTP/1.1\r\n\
+                           Host: 127.0.0.1\r\n"
+                .to_vec();
+            header.extend_from_slice(b"X-Irrelevant: ");
+            header.push(0xff);
+            header.extend_from_slice(b"\r\nContent-Length: 2\r\nConnection: close\r\n\r\n");
+            cases.push((header, true));
+        }
+
+        for (header, native) in cases {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+            let addr = listener.local_addr().map_err(|e| e.to_string())?;
+
+            let mut client = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+            let mut server = listener.accept().map_err(|e| e.to_string())?.0;
+            server
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .map_err(|e| e.to_string())?;
+
+            client.write_all(&header).map_err(|e| e.to_string())?;
+
+            // (3) and (4): declared length 2, deliver only 1 body byte then EOF
+            if header.windows(17).any(|w| w == b"Content-Length: 2") {
+                client.write_all(b"x").map_err(|e| e.to_string())?;
+            }
+
+            client
+                .shutdown(std::net::Shutdown::Write)
+                .map_err(|e| e.to_string())?;
+
+            let reply = match read_request(&mut server, &mut Vec::new(), 0, &viewer) {
+                Err(ReadStop::Reply(reply)) => reply,
+                Ok(_) => return Err("expected refusal reply, got Ok".to_string()),
+                Err(ReadStop::Io(e)) => return Err(format!("unexpected io stop: {}", e)),
+                Err(ReadStop::CleanClose) => return Err("unexpected clean close".to_string()),
+            };
+
+            if reply.status != 400 {
+                return Err(format!("status mismatch: {} != 400", reply.status));
+            }
+            if reply.error.is_some() {
+                return Err("unexpected error field".to_string());
+            }
+            if reply.body != expected_json {
+                return Err(format!(
+                    "body mismatch: {:?} != {:?}",
+                    reply.body, expected_json
+                ));
+            }
+            if reply.content_type != "application/json" {
+                return Err(format!("content_type mismatch: {}", reply.content_type));
+            }
+
+            if viewer.memory_census().inflight != 0 {
+                return Err("inflight not zero after read refusal".to_string());
+            }
+
+            if !native {
+                return Err("case flagged non-native in native refusal loop".to_string());
+            }
+        }
+
+        // Legacy /file short body keeps the old text reply contract.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+        let addr = listener.local_addr().map_err(|e| e.to_string())?;
+
+        let mut client = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+        let mut server = listener.accept().map_err(|e| e.to_string())?.0;
+        server
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .map_err(|e| e.to_string())?;
+
+        client
+            .write_all(
+                b"POST /file HTTP/1.1\r\n\
+              Host: 127.0.0.1\r\n\
+              Content-Length: 2\r\n\
+              Connection: close\r\n\
+              \r\n",
+            )
+            .map_err(|e| e.to_string())?;
+        client.write_all(b"x").map_err(|e| e.to_string())?;
+        client
+            .shutdown(std::net::Shutdown::Write)
+            .map_err(|e| e.to_string())?;
+
+        let reply = match read_request(&mut server, &mut Vec::new(), 0, &viewer) {
+            Err(ReadStop::Reply(reply)) => reply,
+            Ok(_) => return Err("expected legacy refusal reply, got Ok".to_string()),
+            Err(ReadStop::Io(e)) => return Err(format!("unexpected io stop: {}", e)),
+            Err(ReadStop::CleanClose) => return Err("unexpected clean close".to_string()),
+        };
+
+        if reply.status != 400 {
+            return Err(format!("legacy status mismatch: {} != 400", reply.status));
+        }
+        if reply.content_type != "text/plain; charset=utf-8" {
+            return Err(format!(
+                "legacy content_type mismatch: {}",
+                reply.content_type
+            ));
+        }
+        if reply.error != Some("length") {
+            return Err(format!("legacy error mismatch: {:?}", reply.error));
+        }
+        if reply.body != b"the preview request ended early" {
+            return Err(format!("legacy body mismatch: {:?}", reply.body));
+        }
+
+        if viewer.memory_census().inflight != 0 {
+            return Err("inflight not zero after legacy read refusal".to_string());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn f245_dicweb_route_native_target_classification() -> Result<(), String> {
+        let checks: Vec<(&str, bool)> = vec![
+            ("/dicweb/qido", true),
+            ("/dicweb/qido?x", true),
+            ("/dicweb/instance", true),
+            ("/dicweb/instance?x", true),
+            ("/dicweb/qidox?x", false),
+            ("/dicweb/instanceevil?x", false),
+            ("/dicweb/qido/extra?x", false),
+        ];
+        for (request_line, expected) in checks {
+            let line = format!("POST {request_line} HTTP/1.1");
+            if native_dicweb_post(&line) != expected {
+                return Err(format!("classification mismatch for {}", request_line));
+            }
+        }
+        if native_dicweb_post("GET /dicweb/qido HTTP/1.1") {
+            return Err("GET must not be native".to_string());
+        }
+        Ok(())
+    }
+    #[test]
+    fn f245_dicweb_route_serialized_reply_limit() {
+        let inner = DICWEB_JSON_LIMIT - 2;
+        let value = serde_json::Value::String("x".repeat(inner));
+        let reply = dicweb_json_reply(&value);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.content_type, "application/json");
+        assert_eq!(reply.error, None);
+        assert_eq!(reply.body.len(), 16 * 1024 * 1024);
+        let decoded = serde_json::from_slice::<serde_json::Value>(&reply.body).ok();
+        assert_eq!(decoded, Some(value));
+
+        let value = serde_json::Value::String("x".repeat(DICWEB_JSON_LIMIT - 1));
+        let reply = dicweb_json_reply(&value);
+        assert_eq!(reply.status, 413);
+        assert_eq!(reply.content_type, "application/json");
+        assert_eq!(reply.error, None);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&reply.body).ok(),
+            Some(serde_json::json!({"code":"AllocationRefused"}))
+        );
+    }
+
+    #[test]
+    fn f245_dicweb_route_closed_refusal_codes() {
+        let expected = [
+            (DicwebRefusal::InvalidRequest, 400, "InvalidRequest"),
+            (DicwebRefusal::AllocationRefused, 413, "AllocationRefused"),
+            (DicwebRefusal::ContentType, 415, "ContentType"),
+            (DicwebRefusal::InvalidValue, 422, "InvalidValue"),
+            (DicwebRefusal::HttpStatus, 503, "HttpStatus"),
+        ];
+        for (error, status, code) in expected {
+            let reply = dicweb_refusal_reply(error);
+            assert_eq!(reply.status, status);
+            assert_eq!(reply.content_type, "application/json");
+            assert_eq!(reply.error, None);
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&reply.body).ok(),
+                Some(serde_json::json!({ "code": code }))
+            );
+        }
+    }
+
+    #[test]
+    fn f245_dicweb_route_qido_success_refusal_retry() -> Result<(), String> {
+        let viewer = Viewer::new(ViewerConfig {
+            cache_bytes: 8 * 1024 * 1024,
+        });
+
+        let cases: Vec<(&[u8], bool, serde_json::Value)> = vec![
+            (
+                b"[] ",
+                true,
+                serde_json::json!({
+                    "level": "study",
+                    "rows": [],
+                    "capturedScope": {},
+                    "sourceNonce": "00000000000000000000000000000000",
+                    "generation": 1,
+                    "rawBodySha256": "f223e84f7ea456ba7472aea4c56e9f658053cf12c504eb03a51f0e80c905c55c"
+                }),
+            ),
+            (b"[", false, serde_json::json!({"code": "InvalidValue"})),
+            (
+                b"[] ",
+                true,
+                serde_json::json!({
+                    "level": "study",
+                    "rows": [],
+                    "capturedScope": {},
+                    "sourceNonce": "00000000000000000000000000000000",
+                    "generation": 1,
+                    "rawBodySha256": "f223e84f7ea456ba7472aea4c56e9f658053cf12c504eb03a51f0e80c905c55c"
+                }),
+            ),
+        ];
+
+        let targets = ["/dicweb/qido", "/dicweb/qido?x"];
+        for target in targets {
+            for (body, valid, expected) in cases.clone() {
+                let listener =
+                    std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+                let addr = listener.local_addr().map_err(|e| e.to_string())?;
+
+                let mut client = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+                let mut server = listener.accept().map_err(|e| e.to_string())?.0;
+
+                let header = format!(
+                    "POST {target} HTTP/1.1\r\n\
+             Host: 127.0.0.1\r\n\
+             Content-Type: application/dicom+json\r\n\
+             X-Qido-Level: study\r\n\
+             X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n\
+             X-Qido-Generation: 1\r\n\
+             Content-Length: {}\r\n\
+             Connection: close\r\n\
+             \r\n",
+                    body.len()
+                );
+                client
+                    .write_all(header.as_bytes())
+                    .map_err(|e| e.to_string())?;
+                client.write_all(body).map_err(|e| e.to_string())?;
+                client
+                    .shutdown(std::net::Shutdown::Write)
+                    .map_err(|e| e.to_string())?;
+
+                let mut request = match read_request(&mut server, &mut Vec::new(), 0, &viewer) {
+                    Ok(request) => request,
+                    Err(ReadStop::Reply(reply)) => {
+                        return Err(format!("unexpected refusal reply: status {}", reply.status));
+                    }
+                    Err(ReadStop::Io(e)) => return Err(e.to_string()),
+                    Err(ReadStop::CleanClose) => return Err("unexpected clean close".to_string()),
+                };
+
+                if request.body != body {
+                    return Err("request body mismatch".to_string());
+                }
+
+                let mut charge = BodyCharge {
+                    viewer: &viewer,
+                    bytes: request.body_charge,
+                    counted: request.body_counted,
+                    slot: request.body_slot.take(),
+                };
+
+                let (reply, _home) = route(&viewer, request, None, &mut charge);
+                drop(charge);
+
+                if viewer.memory_census().inflight != 0 {
+                    return Err("inflight not zero after charge drop".to_string());
+                }
+
+                let expected_status: u16 = if valid { 200 } else { 422 };
+
+                if reply.status != expected_status {
+                    return Err(format!(
+                        "status mismatch: {} != {}",
+                        reply.status, expected_status
+                    ));
+                }
+                if reply.content_type != "application/json" {
+                    return Err(format!("content_type mismatch: {}", reply.content_type));
+                }
+                if reply.error.is_some() {
+                    return Err("unexpected error field".to_string());
+                }
+
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&reply.body).map_err(|e| e.to_string())?;
+
+                if parsed != expected {
+                    return Err(format!("body mismatch: {} != {}", parsed, expected));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parse_instance_request_headers_full_valid_metadata_succeeds() {
+        let valid = "POST /dicweb/instance HTTP/1.1\r\nContent-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\nX-Wado-Study-Instance-UID:2.25.1\r\nX-Wado-Series-Instance-UID:2.25.2\r\nX-Wado-SOP-Instance-UID:2.25.3\r\nX-Wado-Source-Nonce:00000000000000000000000000000000\r\nX-Wado-Generation:1\r\n\r\n";
+        assert_eq!(
+            parse_instance_request_headers(valid),
+            Ok(InstanceRequestHeaders {
+                identity: crate::dicomweb::InstanceIdentity {
+                    study_uid: "2.25.1".to_string(),
+                    series_uid: "2.25.2".to_string(),
+                    instance_uid: "2.25.3".to_string(),
+                },
+                source_nonce: "00000000000000000000000000000000".to_string(),
+                generation: 1,
+                boundary: "f245-wado-boundary".to_string(),
+            })
+        );
+        let canonical_max =
+            valid.replace("X-Wado-Generation:1", "X-Wado-Generation:9007199254740991");
+        assert_eq!(
+            parse_instance_request_headers(&canonical_max),
+            Ok(InstanceRequestHeaders {
+                identity: crate::dicomweb::InstanceIdentity {
+                    study_uid: "2.25.1".to_string(),
+                    series_uid: "2.25.2".to_string(),
+                    instance_uid: "2.25.3".to_string(),
+                },
+                source_nonce: "00000000000000000000000000000000".to_string(),
+                generation: 9007199254740991,
+                boundary: "f245-wado-boundary".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_instance_request_headers_single_fault_variants_fail() {
+        let valid = "POST /dicweb/instance HTTP/1.1\r\nContent-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\nX-Wado-Study-Instance-UID:2.25.1\r\nX-Wado-Series-Instance-UID:2.25.2\r\nX-Wado-SOP-Instance-UID:2.25.3\r\nX-Wado-Source-Nonce:00000000000000000000000000000000\r\nX-Wado-Generation:1\r\n\r\n";
+        assert_eq!(
+            parse_instance_request_headers(valid),
+            Ok(InstanceRequestHeaders {
+                identity: crate::dicomweb::InstanceIdentity {
+                    study_uid: "2.25.1".to_string(),
+                    series_uid: "2.25.2".to_string(),
+                    instance_uid: "2.25.3".to_string(),
+                },
+                source_nonce: "00000000000000000000000000000000".to_string(),
+                generation: 1,
+                boundary: "f245-wado-boundary".to_string(),
+            })
+        );
+        let no_content_type = valid.replace("Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n", "");
+        assert_eq!(
+            parse_instance_request_headers(&no_content_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+        let duplicate_content_type = valid.replace("X-Wado-Study-Instance-UID:2.25.1", "Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\nX-Wado-Study-Instance-UID:2.25.1");
+        assert_eq!(
+            parse_instance_request_headers(&duplicate_content_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+        let wrong_media_type = valid.replace(
+            "multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"",
+            "application/json",
+        );
+        assert_eq!(
+            parse_instance_request_headers(&wrong_media_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+        let no_study_uid = valid.replace("X-Wado-Study-Instance-UID:2.25.1\r\n", "");
+        assert_eq!(
+            parse_instance_request_headers(&no_study_uid),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let no_series_uid = valid.replace("X-Wado-Series-Instance-UID:2.25.2\r\n", "");
+        assert_eq!(
+            parse_instance_request_headers(&no_series_uid),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let no_sop_uid = valid.replace("X-Wado-SOP-Instance-UID:2.25.3\r\n", "");
+        assert_eq!(
+            parse_instance_request_headers(&no_sop_uid),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let malformed_study_uid = valid.replace("2.25.1", "2..25.1");
+        assert_eq!(
+            parse_instance_request_headers(&malformed_study_uid),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let duplicate_sop_uid = valid.replace(
+            "X-Wado-Generation:1",
+            "X-Wado-SOP-Instance-UID:2.25.3\r\nX-Wado-Generation:1",
+        );
+        assert_eq!(
+            parse_instance_request_headers(&duplicate_sop_uid),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let nonce_uppercase = valid.replace(
+            "00000000000000000000000000000000",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        assert_eq!(
+            parse_instance_request_headers(&nonce_uppercase),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let nonce_short = valid.replace(
+            "00000000000000000000000000000000",
+            "0000000000000000000000000000000",
+        );
+        assert_eq!(
+            parse_instance_request_headers(&nonce_short),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let generation_leading_zero = valid.replace("X-Wado-Generation:1", "X-Wado-Generation:01");
+        assert_eq!(
+            parse_instance_request_headers(&generation_leading_zero),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let generation_plus_one = valid.replace("X-Wado-Generation:1", "X-Wado-Generation:+1");
+        assert_eq!(
+            parse_instance_request_headers(&generation_plus_one),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let generation_overflow =
+            valid.replace("X-Wado-Generation:1", "X-Wado-Generation:9007199254740992");
+        assert_eq!(
+            parse_instance_request_headers(&generation_overflow),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let qido_nonce_name = valid.replace("X-Wado-Source-Nonce:", "X-Qido-Source-Nonce:");
+        assert_eq!(
+            parse_instance_request_headers(&qido_nonce_name),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+        let qido_generation_name = valid.replace("X-Wado-Generation:", "X-Qido-Generation:");
+        assert_eq!(
+            parse_instance_request_headers(&qido_generation_name),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+    }
+
     use crate::held::{GREY_CAP, N_MAX_PIXELS};
 
     /// A root holding `packages/core/dist/index.js` and dcmjs's ES build.
@@ -3225,6 +4940,7 @@ mod tests {
                 points: PointsHeader::Absent,
                 shape: None,
                 region: None,
+                dicweb: None,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,
@@ -3285,6 +5001,193 @@ mod tests {
             return Err(format!(
                 "one pooled post projected and built planes {work:?} times"
             ));
+        }
+        Ok(())
+    }
+
+    type ParsedReply = (String, Vec<(String, String)>, Vec<u8>);
+
+    fn parse_reply(reply: Vec<u8>) -> Result<ParsedReply, String> {
+        let separator = b"\r\n\r\n";
+        let split = reply
+            .windows(separator.len())
+            .position(|window| window == separator)
+            .ok_or_else(|| "no header body separator".to_owned())?;
+        let head = reply
+            .get(..split)
+            .ok_or_else(|| "invalid header split".to_owned())?;
+        let head = String::from_utf8(head.to_vec()).map_err(|error| error.to_string())?;
+        let body = reply
+            .get(split + separator.len()..)
+            .ok_or_else(|| "invalid body split".to_owned())?
+            .to_vec();
+        let mut lines = head.split("\r\n");
+        let status = lines.next().unwrap_or("").to_owned();
+        let headers = lines
+            .filter_map(|line| line.split_once(": "))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect();
+        Ok((status, headers, body))
+    }
+
+    fn get_once(addr: std::net::SocketAddr, path: &str) -> Result<ParsedReply, String> {
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let request = format!(
+            "GET {} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            path
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        parse_reply(reply)
+    }
+
+    fn post_once(
+        addr: std::net::SocketAddr,
+        path: &str,
+        headers: &str,
+        body: &[u8],
+    ) -> Result<ParsedReply, String> {
+        let mut stream = TcpStream::connect(addr).map_err(|error| error.to_string())?;
+        let request = format!(
+            "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            path,
+            headers,
+            body.len()
+        );
+        stream
+            .write_all(request.as_bytes())
+            .map_err(|error| error.to_string())?;
+        stream.write_all(body).map_err(|error| error.to_string())?;
+        let mut reply = Vec::new();
+        stream
+            .read_to_end(&mut reply)
+            .map_err(|error| error.to_string())?;
+        parse_reply(reply)
+    }
+
+    fn context_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+
+    #[test]
+    fn configured_context_serves_config_and_the_configured_main_policy_only_on_the_image_page()
+    -> Result<(), String> {
+        let config = match crate::dicomweb::viewer_dicomweb_config_from_pair(
+            Some("https://pacs.example:8443/dicom-web"),
+            Some("https://pacs.example:8443/wado"),
+        ) {
+            Ok(Some(config)) => config,
+            Ok(None) => return Err("the pair produced no config".to_owned()),
+            Err(error) => return Err(error.to_string()),
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let served = Arc::new(ServeContext::configured(
+            Arc::new(Viewer::server(ViewerConfig {
+                cache_bytes: 1024 * 1024,
+            })),
+            Some(config),
+        ));
+        std::thread::spawn(move || {
+            let _ = serve_on_in(listener, served);
+        });
+        let (_, _, config_body) = get_once(addr, "/dicweb/config")?;
+        let config_json: serde_json::Value =
+            serde_json::from_slice(&config_body).map_err(|error| error.to_string())?;
+        if config_json
+            != serde_json::json!({
+                "studiesServiceUrl": "https://pacs.example:8443/dicom-web",
+                "wadoUriUrl": "https://pacs.example:8443/wado",
+            })
+        {
+            return Err("the dicomweb config did not match the pair".to_owned());
+        }
+
+        for path in ["/", "/index.html"] {
+            let (status, headers, _) = get_once(addr, path)?;
+            if !status.starts_with("HTTP/1.1 200") {
+                return Err(format!("{path} was not served"));
+            }
+            let policy = context_header(&headers, "Content-Security-Policy")
+                .ok_or_else(|| format!("{path} had no policy"))?;
+            let expected = crate::csp::configured_main_policy(
+                PAGE,
+                &[String::from("https://pacs.example:8443")],
+            );
+            if policy != expected {
+                return Err(format!("{path} did not serve the configured main policy"));
+            }
+        }
+        for (path, page) in [("/use", USE_PAGE), ("/more", MORE)] {
+            let (status, headers, _) = get_once(addr, path)?;
+            if !status.starts_with("HTTP/1.1 200") {
+                return Err(format!("{path} was not served"));
+            }
+            let policy = context_header(&headers, "Content-Security-Policy")
+                .ok_or_else(|| format!("{path} had no policy"))?;
+            if policy != crate::csp::page_policy(page) {
+                return Err(format!("{path} policy was not the page policy"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn local_serve_on_has_no_remote_routes_and_the_cached_main_policy() -> Result<(), String> {
+        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| error.to_string())?;
+        let addr = listener.local_addr().map_err(|error| error.to_string())?;
+        let viewer = Arc::new(Viewer::server(ViewerConfig {
+            cache_bytes: 1024 * 1024,
+        }));
+        let served = Arc::clone(&viewer);
+        std::thread::spawn(move || {
+            let _ = serve_on(listener, served);
+        });
+        // The unconfigured config probe answers with a JSON null body, so a
+        // page load never logs a missing route for it.
+        let (status, headers, body) = get_once(addr, "/dicweb/config")?;
+        if !status.starts_with("HTTP/1.1 200") {
+            return Err("the config probe was not answered".to_owned());
+        }
+        let content_type = context_header(&headers, "Content-Type")
+            .ok_or_else(|| "the config probe had no content type".to_owned())?;
+        if content_type != "application/json" {
+            return Err("the config probe was not json".to_owned());
+        }
+        if body != b"null" {
+            return Err("the unconfigured config probe was not a JSON null body".to_owned());
+        }
+        // The native DICOMweb POST routes do not exist without a configured
+        // service, so the native parser is not reachable in local-only mode.
+        // The headers are the valid forms, so the refusal is the missing
+        // configuration and not a malformed request.
+        let qido_headers = "Content-Type: application/dicom+json\r\nX-Qido-Level: study\r\nX-Qido-Source-Nonce: 00000000000000000000000000000000\r\nX-Qido-Generation: 1\r\n";
+        let instance_headers = "Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\nX-Wado-Study-Instance-UID: 2.25.1\r\nX-Wado-Series-Instance-UID: 2.25.2\r\nX-Wado-SOP-Instance-UID: 2.25.3\r\nX-Wado-Source-Nonce: 00000000000000000000000000000000\r\nX-Wado-Generation: 1\r\n";
+        for (path, headers) in [
+            ("/dicweb/qido", qido_headers),
+            ("/dicweb/instance", instance_headers),
+        ] {
+            let (status, _, body) = post_once(addr, path, headers, b"[]")?;
+            if !status.starts_with("HTTP/1.1 404") {
+                return Err(format!("{path} existed without configuration"));
+            }
+            if body != b"not found" {
+                return Err(format!("{path} was not the missing route reply"));
+            }
+        }
+        let (_, headers, _) = get_once(addr, "/")?;
+        let policy = context_header(&headers, "Content-Security-Policy")
+            .ok_or_else(|| "no policy on /".to_owned())?;
+        if policy != crate::csp::page_policy(PAGE) {
+            return Err("the local server did not serve the cached main policy".to_owned());
         }
         Ok(())
     }
@@ -3374,11 +5277,16 @@ mod tests {
             }
             let typed =
                 statement.starts_with("import type") || statement.starts_with("export type");
-            if !typed
-                && let Some((_, rest)) = statement.split_once("\"./")
-                && let Some((name, _)) = rest.split_once(".js\"")
-            {
-                found.push(name.to_owned());
+            if !typed {
+                if let Some((_, rest)) = statement.split_once("\"./")
+                    && let Some((name, _)) = rest.split_once(".js\"")
+                {
+                    found.push(name.to_owned());
+                } else if let Some((_, rest)) = statement.split_once("'./")
+                    && let Some((name, _)) = rest.split_once(".js'")
+                {
+                    found.push(name.to_owned());
+                }
             }
             statement.clear();
         }
@@ -3512,6 +5420,7 @@ mod tests {
                 points: PointsHeader::Absent,
                 shape: None,
                 region: None,
+                dicweb: None,
                 close: true,
                 body_charge: capacity,
                 body_counted: false,
@@ -6186,7 +8095,7 @@ mod tests {
         std::thread::spawn(move || {
             let started = std::time::Instant::now();
             let deadline = started + Duration::from_secs(2);
-            let written = write_reply_by(&mut server, &reply, false, deadline);
+            let written = write_reply_by(&mut server, &reply, false, None, deadline);
             let _ = tx.send((written.is_err(), started.elapsed()));
         });
         // The guard: a write that ignores its deadline fails here, not by hanging.
@@ -6201,6 +8110,599 @@ mod tests {
             return Err(format!("the write ended {took:?} after it started"));
         }
         Ok(())
+    }
+    #[test]
+    fn f245_dicweb_http_caps_before_body_read() -> Result<(), &'static str> {
+        struct Case {
+            label: &'static str,
+            header: String,
+            want: Want,
+        }
+        #[derive(Clone, Copy)]
+        enum Want {
+            P413Json,
+            EndedEarly,
+            NativeEndedEarly,
+        }
+        let qido_header = {
+            let length = 2097153_usize;
+            let mut header = String::new();
+            header.push_str("POST /dicweb/qido HTTP/1.1\r\n");
+            header.push_str("Host: 127.0.0.1\r\n");
+            header.push_str("Content-Type: application/dicom+json\r\n");
+            header.push_str("X-Qido-Level: study\r\n");
+            header.push_str("X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n");
+            header.push_str("X-Qido-Generation: 1\r\n");
+            header.push_str(&format!("Content-Length: {length}\r\n"));
+            header.push_str("Connection: close\r\n");
+            header.push_str("\r\n");
+            header
+        };
+        let wado_header = {
+            let length = 33554433_usize;
+            let mut header = String::new();
+            header.push_str("POST /dicweb/instance HTTP/1.1\r\n");
+            header.push_str("Host: 127.0.0.1\r\n");
+            header.push_str(
+                "Content-Type: multipart/related; type=\"application/dicom\"; boundary=\"f245-wado-boundary\"\r\n",
+            );
+            header.push_str("X-Wado-Study-Instance-UID: 2.25.1\r\n");
+            header.push_str("X-Wado-Series-Instance-UID: 2.25.2\r\n");
+            header.push_str("X-Wado-SOP-Instance-UID: 2.25.3\r\n");
+            header.push_str("X-Wado-Source-Nonce: 00000000000000000000000000000000\r\n");
+            header.push_str("X-Wado-Generation: 1\r\n");
+            header.push_str(&format!("Content-Length: {length}\r\n"));
+            header.push_str("Connection: close\r\n");
+            header.push_str("\r\n");
+            header
+        };
+        let legacy_header = {
+            let length = 33554433_usize;
+            let mut header = String::new();
+            header.push_str("POST /file HTTP/1.1\r\n");
+            header.push_str("Host: 127.0.0.1\r\n");
+            header.push_str(&format!("Content-Length: {length}\r\n"));
+            header.push_str("Connection: close\r\n");
+            header.push_str("\r\n");
+            header
+        };
+        let qido_exact_header = qido_header
+            .clone()
+            .replace("Content-Length: 2097153\r\n", "Content-Length: 2097152\r\n");
+        let wado_exact_header = wado_header.clone().replace(
+            "Content-Length: 33554433\r\n",
+            "Content-Length: 33554432\r\n",
+        );
+        let qido_over_post_header = qido_header.clone().replace(
+            "POST /dicweb/qido HTTP/1.1\r\n",
+            "GET /dicweb/qido HTTP/1.1\r\n",
+        );
+        let cases = [
+            Case {
+                label: "qido above two MiB",
+                header: qido_header,
+                want: Want::P413Json,
+            },
+            Case {
+                label: "wado above 32 MiB",
+                header: wado_header,
+                want: Want::P413Json,
+            },
+            Case {
+                label: "qido exactly two MiB",
+                header: qido_exact_header,
+                want: Want::NativeEndedEarly,
+            },
+            Case {
+                label: "wado exactly 32 MiB",
+                header: wado_exact_header,
+                want: Want::NativeEndedEarly,
+            },
+            Case {
+                label: "qido above two MiB via GET",
+                header: qido_over_post_header,
+                want: Want::EndedEarly,
+            },
+            Case {
+                label: "legacy file body read",
+                header: legacy_header,
+                want: Want::EndedEarly,
+            },
+        ];
+        for case in &cases {
+            let viewer = Viewer::new(ViewerConfig {
+                cache_bytes: 8 * 1024 * 1024,
+            });
+            let listener = TcpListener::bind("127.0.0.1:0")
+                .map_err(|_| "the loopback listener could not bind")?;
+            let local = listener
+                .local_addr()
+                .map_err(|_| "the listener address was missing")?;
+            let mut client =
+                TcpStream::connect(local).map_err(|_| "the client could not connect")?;
+            let mut server = listener
+                .accept()
+                .map_err(|_| "the server stream was not accepted")?
+                .0;
+            client
+                .write_all(case.header.as_bytes())
+                .map_err(|_| "the request header could not be written")?;
+            drop(client);
+            let mut pending = Vec::new();
+            let stop = read_request(&mut server, &mut pending, 0, &viewer);
+            drop(server);
+            match (case.want, stop) {
+                (Want::P413Json, Err(ReadStop::Reply(reply))) => {
+                    if reply.status != 413 {
+                        return Err("the refusal status was not 413");
+                    }
+                    if reply.content_type != "application/json" {
+                        return Err("the refusal content type was not application/json");
+                    }
+                    if reply.error.is_some() {
+                        return Err("the refusal carried an error label");
+                    }
+                    let parsed: serde_json::Value = serde_json::from_slice(&reply.body)
+                        .map_err(|_| "the refusal body was not JSON")?;
+                    if parsed != serde_json::json!({"code": "AllocationRefused"}) {
+                        return Err("the refusal body was not the exact refusal JSON");
+                    }
+                }
+                (Want::NativeEndedEarly, Err(ReadStop::Reply(reply))) => {
+                    if reply.status != 400 {
+                        return Err("the native ended-early status was not 400");
+                    }
+                    if reply.content_type != "application/json" {
+                        return Err("the native ended-early content type was not application/json");
+                    }
+                    if reply.error.is_some() {
+                        return Err("the native ended-early carried an error label");
+                    }
+                    let parsed: serde_json::Value = serde_json::from_slice(&reply.body)
+                        .map_err(|_| "the native ended-early body was not JSON")?;
+                    if parsed != serde_json::json!({"code": "InvalidRequest"}) {
+                        return Err("the native ended-early body was not the exact refusal JSON");
+                    }
+                }
+                (Want::NativeEndedEarly, Err(ReadStop::Io(_))) => {
+                    return Err("the native ended-early read surfaced Io instead of the reply");
+                }
+                (Want::EndedEarly, Err(ReadStop::Reply(reply))) => {
+                    if reply.status != 400 {
+                        return Err("the ended-early status was not 400");
+                    }
+                    if reply.error != Some("length") {
+                        return Err("the ended-early error label was not Some(\"length\")");
+                    }
+                    if reply.content_type != "text/plain; charset=utf-8" {
+                        return Err(
+                            "the ended-early content type was not text/plain; charset=utf-8",
+                        );
+                    }
+                    if reply.body != b"the preview request ended early" {
+                        return Err("the ended-early body was not the exact ended-early text");
+                    }
+                }
+                (Want::EndedEarly, Err(ReadStop::Io(_))) => {
+                    return Err(match case.label {
+                        "qido exactly two MiB" => {
+                            "the qido exact read surfaced Io instead of the ended-early reply"
+                        }
+                        "wado exactly 32 MiB" => {
+                            "the wado exact read surfaced Io instead of the ended-early reply"
+                        }
+                        "qido above two MiB via GET" => {
+                            "the qido GET read surfaced Io instead of the ended-early reply"
+                        }
+                        _ => "the legacy body read surfaced Io instead of the ended-early reply",
+                    });
+                }
+                (Want::P413Json, Err(ReadStop::Io(_))) => {
+                    return Err(match case.label {
+                        "qido above two MiB" => "the qido refusal did not happen before body read",
+                        "wado above 32 MiB" => "the wado refusal did not happen before body read",
+                        _ => "the refusal did not happen before body read",
+                    });
+                }
+                (_, Err(ReadStop::CleanClose)) => {
+                    return Err("the read ended with a clean close instead of the wanted stop");
+                }
+                (_, Ok(_)) => {
+                    return Err("the read unexpectedly succeeded instead of stopping");
+                }
+            }
+        }
+        Ok(())
+    }
+    #[test]
+    fn qido_request_headers_parses_study_series_instance_metadata_successfully() {
+        fn build_header(
+            level: &str,
+            parent_study: Option<&str>,
+            parent_series: Option<&str>,
+        ) -> String {
+            let mut header = String::from(
+                "POST /dicweb/qido HTTP/1.1\r\nContent-Type: application/dicom+json\r\n",
+            );
+            if let Some(study) = parent_study {
+                header.push_str("X-Qido-Parent-Study: ");
+                header.push_str(study);
+                header.push_str("\r\n");
+            }
+            if let Some(series) = parent_series {
+                header.push_str("X-Qido-Parent-Series: ");
+                header.push_str(series);
+                header.push_str("\r\n");
+            }
+            header.push_str("X-Qido-Level: ");
+            header.push_str(level);
+            header.push_str("\r\n");
+            header.push_str("X-Qido-Source-Nonce: 00000000000000000000000000000000\r\n");
+            header.push_str("X-Qido-Generation: 1\r\n");
+            header.push_str("\r\n");
+            header
+        }
+
+        let study_header = build_header("study", None, None);
+        let study_parsed = parse_qido_request_headers(&study_header);
+        assert_eq!(
+            study_parsed,
+            Ok(QidoRequestHeaders {
+                scope: QidoScope::Study,
+                source_nonce: String::from("00000000000000000000000000000000"),
+                generation: 1,
+            })
+        );
+
+        let series_header = build_header("series", Some("2.25.1"), None);
+        let series_parsed = parse_qido_request_headers(&series_header);
+        assert_eq!(
+            series_parsed,
+            Ok(QidoRequestHeaders {
+                scope: QidoScope::Series {
+                    study_uid: String::from("2.25.1"),
+                },
+                source_nonce: String::from("00000000000000000000000000000000"),
+                generation: 1,
+            })
+        );
+
+        let instance_header = build_header("instance", Some("2.25.1"), Some("2.25.2"));
+        let instance_parsed = parse_qido_request_headers(&instance_header);
+        assert_eq!(
+            instance_parsed,
+            Ok(QidoRequestHeaders {
+                scope: QidoScope::Instance {
+                    study_uid: String::from("2.25.1"),
+                    series_uid: String::from("2.25.2"),
+                },
+                source_nonce: String::from("00000000000000000000000000000000"),
+                generation: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn qido_request_headers_rejects_single_mutation_negative_cases() {
+        fn baseline_header() -> String {
+            String::from(
+                "POST /dicweb/qido HTTP/1.1\r\nContent-Type: application/dicom+json\r\nX-Qido-Level: study\r\nX-Qido-Source-Nonce: 00000000000000000000000000000000\r\nX-Qido-Generation: 1\r\n\r\n",
+            )
+        }
+
+        assert_eq!(
+            parse_qido_request_headers(&baseline_header()),
+            Ok(QidoRequestHeaders {
+                scope: QidoScope::Study,
+                source_nonce: String::from("00000000000000000000000000000000"),
+                generation: 1,
+            })
+        );
+
+        let missing_content_type =
+            baseline_header().replace("Content-Type: application/dicom+json\r\n", "");
+        assert_eq!(
+            parse_qido_request_headers(&missing_content_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+
+        let duplicate_content_type = baseline_header().replace(
+            "X-Qido-Level: study\r\n",
+            "X-Qido-Level: study\r\nContent-Type: application/dicom+json\r\n",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&duplicate_content_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+
+        let wrong_media_type = baseline_header().replace(
+            "Content-Type: application/dicom+json",
+            "Content-Type: text/plain",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&wrong_media_type),
+            Err(DicwebHeaderError::ContentType)
+        );
+
+        let missing_level = baseline_header().replace("X-Qido-Level: study\r\n", "");
+        assert_eq!(
+            parse_qido_request_headers(&missing_level),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let duplicate_level = baseline_header().replace(
+            "X-Qido-Source-Nonce",
+            "X-Qido-Level: study\r\nX-Qido-Source-Nonce",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&duplicate_level),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let uppercase_level =
+            baseline_header().replace("X-Qido-Level: study", "X-Qido-Level: STUDY");
+        assert_eq!(
+            parse_qido_request_headers(&uppercase_level),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let unknown_level =
+            baseline_header().replace("X-Qido-Level: study", "X-Qido-Level: patient");
+        assert_eq!(
+            parse_qido_request_headers(&unknown_level),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let parent_study_on_study_scope = baseline_header().replace(
+            "X-Qido-Source-Nonce",
+            "X-Qido-Parent-Study: 2.25.1\r\nX-Qido-Source-Nonce",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&parent_study_on_study_scope),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let nonce_uppercase_a = baseline_header().replace(
+            "X-Qido-Source-Nonce: 00000000000000000000000000000000",
+            "X-Qido-Source-Nonce: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&nonce_uppercase_a),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let nonce_31_zeros = baseline_header().replace(
+            "X-Qido-Source-Nonce: 00000000000000000000000000000000",
+            "X-Qido-Source-Nonce: 0000000000000000000000000000000",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&nonce_31_zeros),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let generation_01 =
+            baseline_header().replace("X-Qido-Generation: 1", "X-Qido-Generation: 01");
+        assert_eq!(
+            parse_qido_request_headers(&generation_01),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let generation_plus_one =
+            baseline_header().replace("X-Qido-Generation: 1", "X-Qido-Generation: +1");
+        assert_eq!(
+            parse_qido_request_headers(&generation_plus_one),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let generation_above_max = baseline_header().replace(
+            "X-Qido-Generation: 1",
+            "X-Qido-Generation: 9007199254740992",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&generation_above_max),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let space_before_colon_level =
+            baseline_header().replace("X-Qido-Level: study", "X-Qido-Level : study");
+        assert_eq!(
+            parse_qido_request_headers(&space_before_colon_level),
+            Err(DicwebHeaderError::InvalidRequest)
+        );
+
+        let generation_max_canonical = baseline_header().replace(
+            "X-Qido-Generation: 1",
+            "X-Qido-Generation: 9007199254740991",
+        );
+        assert_eq!(
+            parse_qido_request_headers(&generation_max_canonical),
+            Ok(QidoRequestHeaders {
+                scope: QidoScope::Study,
+                source_nonce: String::from("00000000000000000000000000000000"),
+                generation: 9007199254740991,
+            })
+        );
+    }
+    #[test]
+    fn dicweb_instance_boundary_accepts_canonical_inputs() {
+        let cases: &[(&str, &str)] = &[
+            (
+                "multipart/related; type=application/dicom; boundary=abc",
+                "abc",
+            ),
+            (
+                "multipart/related; type=\"application/dicom\"; boundary=\"abc\"",
+                "abc",
+            ),
+            (
+                "Multipart/Related; Type=Application/DICOM; Boundary=abc",
+                "abc",
+            ),
+            (
+                "multipart/related; type=application/dicom; transfer-syntax=*; boundary=abc",
+                "abc",
+            ),
+            (
+                "multipart/related; type=\"application/dicom\"; note=\"a;b\"; boundary=abc",
+                "abc",
+            ),
+            (
+                "multipart/related; type=application/dicom; boundary=\"a B_1.c\"",
+                "a B_1.c",
+            ),
+            (
+                "multipart/related; type=application/dicom; boundary=\"a\\(b\"",
+                "a(b",
+            ),
+            (
+                "multipart/related; type=application/dicom; boundary=\"a(b\"",
+                "a(b",
+            ),
+        ];
+        for (header, expected) in cases {
+            assert_eq!(
+                dicweb_instance_boundary(header),
+                Ok(expected.to_string()),
+                "boundary mismatch for header: {}",
+                header
+            );
+        }
+        let long_boundary = "a".repeat(70);
+        let long_header = format!(
+            "multipart/related; type=application/dicom; boundary={}",
+            long_boundary
+        );
+        assert_eq!(
+            dicweb_instance_boundary(&long_header),
+            Ok(long_boundary.clone()),
+            "70-character boundary must be accepted"
+        );
+    }
+
+    #[test]
+    fn dicweb_instance_boundary_rejects_faulty_inputs() {
+        let wrong_base = "application/dicom; type=application/dicom; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(wrong_base),
+            Err(DicwebHeaderError::ContentType),
+            "wrong base type must be rejected"
+        );
+        let wrong_type = "multipart/related; type=application/pdf; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(wrong_type),
+            Err(DicwebHeaderError::ContentType),
+            "wrong type parameter must be rejected"
+        );
+        let missing_type = "multipart/related; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(missing_type),
+            Err(DicwebHeaderError::ContentType),
+            "missing type parameter must be rejected"
+        );
+        let missing_boundary = "multipart/related; type=application/dicom";
+        assert_eq!(
+            dicweb_instance_boundary(missing_boundary),
+            Err(DicwebHeaderError::ContentType),
+            "missing boundary parameter must be rejected"
+        );
+        let duplicate_boundary_lower =
+            "multipart/related; type=application/dicom; boundary=abc; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(duplicate_boundary_lower),
+            Err(DicwebHeaderError::ContentType),
+            "duplicate boundary (lowercase) must be rejected"
+        );
+        let duplicate_boundary_mixed =
+            "multipart/related; type=application/dicom; boundary=abc; BOUNDARY=abc";
+        assert_eq!(
+            dicweb_instance_boundary(duplicate_boundary_mixed),
+            Err(DicwebHeaderError::ContentType),
+            "duplicate boundary (mixed case) must be rejected"
+        );
+        let duplicate_type =
+            "multipart/related; type=application/dicom; type=application/dicom; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(duplicate_type),
+            Err(DicwebHeaderError::ContentType),
+            "duplicate type parameter must be rejected"
+        );
+        let duplicate_unknown =
+            "multipart/related; type=application/dicom; note=a; note=b; boundary=abc";
+        assert_eq!(
+            dicweb_instance_boundary(duplicate_unknown),
+            Err(DicwebHeaderError::ContentType),
+            "duplicate unknown parameter must be rejected"
+        );
+        let empty_boundary = "multipart/related; type=application/dicom; boundary= ";
+        assert_eq!(
+            dicweb_instance_boundary(empty_boundary),
+            Err(DicwebHeaderError::ContentType),
+            "empty boundary must be rejected"
+        );
+        let quoted_trailing_space = "multipart/related; type=application/dicom; boundary=\"abc \"";
+        assert_eq!(
+            dicweb_instance_boundary(quoted_trailing_space),
+            Err(DicwebHeaderError::ContentType),
+            "quoted trailing-space boundary must be rejected"
+        );
+        let tilde_boundary = "multipart/related; type=application/dicom; boundary=ab~c";
+        assert_eq!(
+            dicweb_instance_boundary(tilde_boundary),
+            Err(DicwebHeaderError::ContentType),
+            "illegal tilde boundary must be rejected"
+        );
+        let long_boundary = "a".repeat(71);
+        let long_header = format!(
+            "multipart/related; type=application/dicom; boundary={}",
+            long_boundary
+        );
+        assert_eq!(
+            dicweb_instance_boundary(&long_header),
+            Err(DicwebHeaderError::ContentType),
+            "71-character boundary must be rejected"
+        );
+        let unclosed_quote = "multipart/related; type=application/dicom; boundary=\"abc";
+        assert_eq!(
+            dicweb_instance_boundary(unclosed_quote),
+            Err(DicwebHeaderError::ContentType),
+            "unclosed quote must be rejected"
+        );
+        let dangling_escape = "multipart/related; type=application/dicom; boundary=\"abc\\";
+        assert_eq!(
+            dicweb_instance_boundary(dangling_escape),
+            Err(DicwebHeaderError::ContentType),
+            "dangling escape must be rejected"
+        );
+    }
+
+    #[test]
+    fn runtime_imports_handles_quote_forms_and_type_only() {
+        let cases: Vec<(&str, Vec<String>)> = vec![
+            (
+                r#"export { bulkCreate, bulkDelete } from "./bulk.js";"#,
+                vec!["bulk".to_string()],
+            ),
+            (
+                r#"export { bulkCreate, bulkDelete } from './bulk.js';"#,
+                vec!["bulk".to_string()],
+            ),
+            (
+                "export {\n  bulkCreate,\n  bulkDelete,\n} from './bulk.js';",
+                vec!["bulk".to_string()],
+            ),
+            (
+                r#"import type { BulkOptions } from './bulk.js'; export type { BulkOptions };"#,
+                vec![],
+            ),
+            (
+                r#"import { applyOptions, resetOptions } from './options.js';"#,
+                vec!["options".to_string()],
+            ),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(runtime_imports(input), expected);
+        }
     }
 }
 

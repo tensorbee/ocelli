@@ -1,7 +1,7 @@
 # Feature availability
 
-**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067, F-240
-**Last updated:** 2026-11-09
+**F-IDs that contributed:** F-037, F-041, F-X001, F-X003, F-056, F-X004, F-X005, F-063, F-064, F-065, F-066, F-067, F-240, F-245
+**Last updated:** 2026-11-11
 
 The contract every tier-gated feature declares, and the distinction between a
 working primary path, a declared fallback and an unavailable feature. This is
@@ -187,6 +187,17 @@ texel is built, so no GPU route bakes device RGB beside a profile it cannot
 apply. A profile the subset refused keeps the CPU route's own bytes on every
 tier, which is deviation D-30, and is not a quiet second answer. The
 refusals are named in `docs/lld/pixel-pipeline.md`.
+
+The F-245 DICOMweb source path declares the same answer in every tier. QIDO
+search, the WADO-RS instance fetch, bounded Part 10 UID reading and staging
+run identically on the native parser in tier A, tier B and tier C, because the
+path adds no pixel, geometry or render arithmetic and resolves no adapter.
+Remote display is `Unavailable` in all three tiers until F-202, and the fixed
+product status says so rather than showing a substitute. The existing local
+render path is unchanged, so its tier rows are whatever they were before this
+story. No GPU fallback is introduced and no claim is made about unrunnable
+hardware. The viewer's configured `connect-src` is an origin policy question,
+not a tier question, and it is identical in every tier.
 
 ## What this contract does not build
 

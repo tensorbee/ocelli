@@ -9,7 +9,7 @@
 
 use ocelli_render::{
     BlendMode, FrameOutcome, PassKind, PipelineFamily, PipelineKey, RenderGraph, Section183Error,
-    Tier, ViewportId, read_section_18_3, resolve_native_gl,
+    Tier, ViewportId, read_section_18_3, read_stage_one_pairs, resolve_native_gl,
 };
 
 /// Not widened. Matches `tests/voi_shader.rs` and `tests/upload.rs`.
@@ -140,6 +140,60 @@ fn native_gl_section_18_3_or_a_recorded_miss() {
                     "native GL drew matching numbers on tier {tier:?}. This is not a tier B run."
                 );
             }
+        }
+    }
+}
+
+/// **AC5's native vehicle: the F-227 stage-1 pairs through the folded table
+/// on a native GL adapter, when one opens.**
+///
+/// A miss is recorded and is not the run, exactly like the section 18.3 row
+/// above. The pair displays are pinned from the F-227 review's measured
+/// bits: 2371.0 and 2372.0 through pair A's table draw exactly 0.0 and
+/// 255.0 under LINEAR_EXACT centre `0x44E7C30D` width `0x38FFFFD5`, and
+/// 56893.0 through pair B's table draws exactly 127.5 under centre
+/// `0xBC9A0000` width `0x39D1B717`.
+#[test]
+#[ignore = "native GL is not this host's tier B. A miss is recorded and is not the run."]
+fn native_gl_stage_one_pairs_or_a_recorded_miss() {
+    let mut clock = native_clock();
+    let Some(adapter) = pollster::block_on(resolve_native_gl(&mut clock)) else {
+        println!("native Backends::GL found no adapter. This is not a tier B run.");
+        return;
+    };
+    let mut context = match pollster::block_on(adapter.open()) {
+        Ok(context) => context,
+        Err(error) => {
+            println!("native GL adapter did not open a device: {error}. This is not a tier B run.");
+            return;
+        }
+    };
+    let tier = context.caps().tier;
+    println!("native GL opened tier {tier:?} renderer stage one pairs continue");
+    match read_stage_one_pairs(&mut context, &adapter) {
+        Err(Section183Error::Unavailable) => {
+            println!("native GL stage one pass is unavailable and drew nothing.");
+        }
+        Err(Section183Error::TierC) => {
+            println!("native GL resolved tier C. This is not a tier B run.");
+        }
+        Err(error @ (Section183Error::NotSubmitted | Section183Error::Readback(_))) => {
+            assert!(
+                matches!(error, Section183Error::Unavailable),
+                "native GL stage one draw failed: {error:?}"
+            );
+        }
+        Ok(pairs) => {
+            println!(
+                "native GL format {} tier {tier:?}",
+                ocelli_render::stored_format_name(pairs.format)
+            );
+            assert_ne!(pairs.format, wgpu::TextureFormat::Rgba8Unorm);
+            let low = pairs.window_ends.first().copied().unwrap_or(f32::NAN);
+            let high = pairs.window_ends.get(1).copied().unwrap_or(f32::NAN);
+            assert_close(low, 0.0);
+            assert_close(high, 255.0);
+            assert_close(pairs.cancellation_single, 127.5);
         }
     }
 }

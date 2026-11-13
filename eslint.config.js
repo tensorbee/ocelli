@@ -557,7 +557,15 @@ const config = tseslint.config(
         // fetches the synthetic study's slices under node.
         notes: "readonly",
         keyImages: "readonly",
+        // F-245 dicomweb.mjs hashes the canvas with crypto.subtle and reads the
+        // page documents and cache generation to prove remote steps keep them.
+        // The staged-release steps read the page's provider through
+        // remoteProvider.
+        crypto: "readonly",
+        sessionDocuments: "readonly",
+        cacheGeneration: "readonly",
         fetch: "readonly",
+        remoteProvider: "readonly",
         // F-225's conformance.mjs times the page's paints and its report
         // requests from an init script, and reads the page's checks state
         // and its two busy counts when each request is sent. It raises and
@@ -579,6 +587,19 @@ const config = tseslint.config(
         seriesOf: "readonly",
         cacheKey: "readonly",
         PLAIN_VIEW: "readonly",
+        // F-205's preferences.mjs spies on the page's storage accessor,
+        // reads the whole origin's stores and counts the page's greys.
+        Storage: "readonly",
+        indexedDB: "readonly",
+        caches: "readonly",
+        // F-204's one-to-one.mjs reads the page's fitScale to compute the
+        // clamp expectations from the measured cell, its entry centring case
+        // reads the page's clientToImage, and its in-page decode and
+        // init-script callback use the Image and MediaQueryList constructors.
+        fitScale: "readonly",
+        clientToImage: "readonly",
+        Image: "readonly",
+        MediaQueryList: "readonly",
       },
     },
   },

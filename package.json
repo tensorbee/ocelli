@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --build",
     "test": "vitest run",
-    "dev": "bin/example-dev.sh",
+    "dev": "bin/folder-viewer-dev.mjs",
+    "dev:boundary-demo": "bin/example-dev.sh",
     "bench": "node tools/bench/run.mjs",
     "oracle": "node tools/oracle/run.mjs"
   },

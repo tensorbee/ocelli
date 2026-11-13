@@ -1,7 +1,12 @@
-// Thick slab. Host samples are already in the 3D texture.
-// `slab_blend` is a pipeline override, so each compiled pipeline keeps one arm.
-// 0 composite is the centre sample. 1 MIP, 2 MinIP and 3 average reduce
-// stored values. `lut_chain` runs once after that reduction.
+// Thick slab. Host samples are already in the 3D texture, and on a
+// pre-applied slab they are modality values that the graph's CPU stage 1
+// computed with the pass's rescale. `slab_blend` is a pipeline override, so
+// each compiled pipeline keeps one arm. 0 composite is the centre sample.
+// 1 MIP, 2 MinIP and 3 average reduce whatever the texture holds: on a
+// pre-applied slab that is modality values, and for a positive slope MIP
+// and MinIP select the same texel they would on raw samples while for a
+// negative slope they swap. `lut_chain` runs once after that reduction, and
+// its stage 1 returns its input because the slab's route flag is 0.
 // An absent pixel is mask 0. Discard runs before any value load.
 
 override slab_blend : u32;

@@ -6095,3 +6095,139 @@ AC16, operator browser evidence on the operator's study, release build, Chromium
 AC17, run on 2026-11-11 by the coordinator with `bin/ocelli.sh bench viewer.open viewer.first_image`, release build, nine samples each, host class darwin 27.0.0 arm64 Apple M4 Max, 16 CPUs, 48 GiB, record key `darwin|27.0.0|arm64|Apple_M4_Max|16|51539607552`. `viewer.open` median 940 ms against 1,100 ms. First image CT median 10.1 ms against 20 ms, DX median 28.2 ms against 250 ms. `thresholds_met` true. Informational `pet_no_window` first image median 14 ms, against the expectation stated before measurement of under 30 ms, and `pet_no_window` open median 106 ms. `restart_recovered` true. The run record is private evidence kept outside the checkout. That key is the one F-216's viewer baselines are recorded under in `ci/bench-baseline.json`, so the host class is F-216's. That it is the same physical machine is not established by the record. Conditions: coordinator lanes paused, the operator's foreground applications open, load average 3.20 before and 4.20 after. The host was therefore not otherwise idle as the plan's resources line asks, and the thresholds were met under that load. The sampled-image second decode cost was observed separately on 2026-11-09 and is in `docs/lld/benchmarks.md`. It was not measured again in this run.
 
 The shader's fused rescale on Apple GPUs is F-235's, and the comparative benchmark against cornerstone3D 5.8.2 is F-223, carried to F-273.
+
+## F-268, Rustdoc links resolve, completed 2026-11-11
+
+**What was built.** Nine public Rust documentation reference lines across seven files now name items a public doc can link to, or render as code text where the target is private. A new `docs` floor gate, `bin/ocelli.sh gate docs`, runs `cargo doc --workspace --no-deps --locked --keep-going` as a child with `rustdoc::private_intra_doc_links` and `rustdoc::broken_intra_doc_links` denied, unsetting the inherited encoded rustdoc flags variable for that child only and keeping the caller's `CARGO_TARGET_DIR`. CI's Rust job runs it by name, and two deep guard probes show it refusing each lint on a synthetic two-member workspace.
+
+**HLD sections implemented.** none, build and documentation hygiene.
+**Deviations.** none
+**Crates / packages modified.** `crates/ocelli-geom/src/lib.rs`, `crates/ocelli-native/src/lib.rs`, `crates/ocelli-render/src/graph.rs` and `src/interpolation.rs`, `crates/ocelli-viewport/src/snapshot.rs`, `crates/ocelli-volume/src/ortho.rs`, `examples/folder-viewer/src/measure.rs`, doc comments only. `bin/ocelli.sh`, `.github/workflows/ci.yml`, `scripts/guards/catalogue.py`, `ci/guard-probe-budget.json`, the regenerated `docs/runbooks/guard-verification.md`, `.claude/WORKFLOW.md`, `.claude/commands/verify.md` and its two adapters.
+**Tests added.** `unit`, three in `scripts/tests/test_guard_catalogue.py`, among them `test_run_docs_gate_rejects_noop_transport`. `probe`, two deep docs probes, one per denied lint, each requiring a nonzero exit and the lint's text, with a healthy control that requires both rendered `index.html` files.
+**Fixture provenance.** no pixel arithmetic. The probe workspace is synthetic.
+**Verification.** Independent review passes 4 and 5 by Claude on the GLM fix head f5079387, the last clean with one nitpick corrected at integration. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Documentation and a build gate only.
+**LLD updated.** `docs/lld/build-targets.md`, the F-268 section on the docs floor and gate, with F-268 on its contributor line, and the matching row of `docs/lld/README.md`.
+**User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
+**Deviations from the design plan.** The handoff named head 188dfd61, and the integrated head is the reviewed fix f5079387 that followed it. The `docs)` arm comment was reworded by the coordinator at integration to say the whole encoded variable is unset.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude.
+
+## F-269, Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87, completed 2026-11-11
+
+**What was built.** Every factual comment block in `vendor/ritk-codecs-0.6.0/src/jpeg_ls` was audited against the code below it and the T.87 clause it names, and each false one was corrected or removed. Corrections landed in four files, comments only, with no code token changed. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md` records each block's rating with a locator measured from the final bytes, the four F-243 pass 8 items first, and the cap on k recorded as resting on the coded range checks. The vendored pins and the provenance hash are refreshed from the bytes.
+
+**HLD sections implemented.** none, a vendored source audit.
+**Deviations.** D-20, its description refreshed to name the F-269 audit and the four files.
+**Crates / packages modified.** `vendor/ritk-codecs-0.6.0/src/jpeg_ls/context/mod.rs`, `context/tests.rs`, `encoder.rs` and `scan.rs`, comments only. `vendor/ritk-codecs-0.6.0/PATCH-PROVENANCE.md`, `scripts/pin_and_size_check.py` and `scripts/tests/test_pin_and_size_check.py`, `docs/hld/DEVIATIONS.md`.
+**Tests added.** `unit`, the pin test's patched-file list gains `context/tests.rs`. No arithmetic test, the story changes no code.
+**Fixture provenance.** no pixel arithmetic. Clauses were checked against the T.87 text whose PDF SHA-256 is recorded in the provenance file.
+**Verification.** Independent review passes 7 to 10 by Claude on the GLM fix commits, the last with no defect or smell after the coordinator regenerated the stale handoff. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. No code changed.
+**LLD updated.** none, no LLD describes the vendored comments.
+**User-facing documentation.** none, README, `use.html` and `more.html` name nothing this story changed.
+**Deviations from the design plan.** Pass 7's D4 premise, that the decoder clamps on one run-mode branch, was the reviewer's error. Pass 8 corrected it, and the encoder comment was then corrected rather than rated doubtful, so corrections landed in four files rather than three. The integrated head is a35cc608 with the regenerated handoff f253e41b, after the head the original handoff named.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 10's nitpick, the encoder.rs 246 banner entry's clause range, is carried in its review file.
+
+## F-266, Built example viewer loads its core from its own output, completed 2026-11-11
+
+**What was built.** A `vite build` of `examples/viewer-react` with the wasm package present gives a dist whose worker imports the bundled glue and wasm chunk from its own output, so the dist serves from a static host at its root and reads `core ready`. The worker's preflight fetch is gone and readiness needs the import and the default init. `scripts/viewer_build_check.py` refuses an emitted file that spells the temporary build base, the real checkout root, raw or URL-encoded, as a standalone path token or after a `.` or `..` segment, or any `/@fs` route. The dev server's `fs.allow` uses the decoded `fileURLToPath` of the repository root, so a checkout path with a space, unicode or a percent sign serves the package.
+
+**HLD sections implemented.** none, packaging and the example build.
+**Deviations.** none
+**Crates / packages modified.** `examples/viewer-react/vite.config.ts`, `src/core-worker.ts` and `csp-probe.mjs`, `scripts/viewer_build_check.py` and its tests, `scripts/guards/catalogue.py`, the regenerated `docs/runbooks/guard-verification.md`, README, `docs/lld/build-targets.md` and `typescript-packaging.md`, CHANGELOG.
+**Tests added.** `unit`, the build-check suite in `scripts/tests/test_viewer_build_check.py`, 62 cases, each root and boundary branch pinned by a mutant. `browser`, the csp-probe built-dist positive on a plain static server requiring `core ready`, five 200s, no `/@fs` request and byte-equal assets.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Independent review passes 5 to 9 by Claude on the GLM fix commits, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the story reads no corpus row.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. A build and serving story.
+**LLD updated.** `docs/lld/build-targets.md`, what the check refuses and the host-prefixed trade-off, and `docs/lld/typescript-packaging.md`, the built dist's loading.
+**User-facing documentation.** `README.md`, static hosting at a host's root, the wasm package before `vite build`, and `npm run build` first for the package dists.
+**Deviations from the design plan.** The operator narrowed the promise on 2026-11-11 from no absolute build-machine path to no checkout-root or `/@fs` reach, because the shipped wasm carries cargo registry paths in panic locations, and filed F-281. The coordinator corrected the CHANGELOG bullet at integration to match. A root spelled behind an `http://host:port` or `file://host` prefix is not refused, an accepted trade-off named in the LLD.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode, reviewed by Claude. Pass 9's two nitpicks are carried in its review file.
+
+## F-272, Oracle tests write nothing into the checkout, completed 2026-11-11
+
+**What was built.** Every `tools/oracle/src/produce.rs` test that runs the producer now writes into a per-process scratch directory, so `cargo test` never creates or overwrites `tools/oracle/compare-out`. The guard `guard_no_checkout_write` runs the producer tests in a child process against a fresh temporary mirror root, selected through one test helper reading an environment override. The mirror copies `tools/oracle/out`, holds a directory symlink to the real `corpus/data` (never a copy), and the child's working directory is inside the mirror, so any write by a selected test appears as a new entry under the mirror's `tools/oracle`. A source scan in the test module requires the manifest-dir read once in the real-root helper and every real-root helper reference inside an allowlist.
+
+**HLD sections implemented.** none, test hygiene for the oracle.
+**Deviations.** none
+**Crates / packages modified.** `tools/oracle/src/produce.rs`, inside `mod tests` only, and `docs/lld/oracle.md`.
+**Tests added.** `unit`, the guard, the mirror and corpus-link tests, the child-cwd test, the scratch-owner and concurrency tests, and the two source-scan tests, each proven red by a planted mutant in a scratch copy.
+**Fixture provenance.** no pixel arithmetic.
+**Verification.** Independent review passes 4 to 10 by Claude, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the guard links the corpus and opens no corpus file.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Test plumbing only.
+**LLD updated.** `docs/lld/oracle.md`, what the guard covers and the open forms it does not.
+**User-facing documentation.** none.
+**Deviations from the design plan.** The lead amendment of 2026-11-11 (a8dc0bbe) replaced the in-process snapshot with the mirror root, superseding AC3's no-copy sentence for `tools/oracle/out` only. The scan stops two literal patterns, and its stated open forms are a rewrite through the protected-tree helper, macro-built environment names, a root walked from `current_exe` or `file!()`, a call to an allowlisted function that reads the real root, and two string-literal evasions. An identical rewrite of an existing file stays undetected. The coordinator wrote the final documentation commit 9c1b5346.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over five fix rounds, reviewed by Claude. Pass 10's nitpick is carried in its review file.
+
+## F-267, Folder viewer corners on enhanced multiframe CT and MR, completed 2026-11-12
+
+**What was built.** The local folder viewer's corner text on an enhanced multiframe CT or MR now reads slice thickness, kVp, mAs, TR and TE for the shown frame from its functional groups. Each value is read from the top-level attribute first when it carries a usable value, then from the frame's per-frame group, then from the shared group. mAs reads the top-level Exposure, then Exposure in uAs over 1000, then the frame's CT Exposure group's Exposure in mAs, and TE on an enhanced MR comes from Effective Echo Time. A field that is absent everywhere, unusable, or inside a sequence carrying several items, such as a Multi-energy CT's X-Ray Details or Exposure Sequence, leaves its line out rather than guessing. The server carries the tokens as reply headers and the page prints them per frame.
+
+**HLD sections implemented.** none, the local example only.
+**Deviations.** none
+**Crates / packages modified.** `examples/folder-viewer/src/corners.rs`, `preview.rs`, `serve.rs`, `lib.rs`, `page.html`, its `tests/preview.rs` and the new browser check `tests/browser/corners.mjs`, the `viewer-browser` arm of `bin/ocelli.sh`, and README.
+**Tests added.** `fixture`, the corner token tests in `tests/preview.rs` with hand-built enhanced CT and MR groups citing PS3.3 C.7.6.16.2.1, C.8.13.5.2, C.8.13.5.4, C.8.15.3.8 and C.8.15.3.9, each row proven red by a named mutant. `browser`, `corners.mjs`, an enhanced CT, a classic CT and an enhanced MR whose corners must name each frame's own values, with the header names and the TR and TE keys pinned by mutants.
+**Fixture provenance.** no pixel arithmetic. The values are attribute text reprinted as stored, with the citing PS3.3 section per field.
+**Verification.** Independent review passes 1 and 2 by Claude on the GLM commits and the coordinator's pass 3, the last with no defect, smell or nitpick. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the fixtures are synthetic.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Corner text only.
+**LLD updated.** none, the local example is not the published API and `ocelli-dicom` did not change.
+**User-facing documentation.** `README.md`, the corner sentence in step 8 of the local series viewer, with the per-sequence Multi-energy rule and the usable top-level value rule.
+**Deviations from the design plan.** The plan's six inline `FrameFacts` fields became one boxed `CornerTokens`, because the frame cache charges a held frame by its struct size. The box's 136 bytes and the token strings stay uncharged per held frame, the same as the edge letters, and the field's comment says so.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over two fix rounds, reviewed by Claude, with one coordinator comment commit.
+
+## F-235, VOI shader stage 1 matches LutChain on every tier, completed 2026-11-12
+
+**What was built.** The GPU window stage no longer computes the modality rescale itself, which a backend that fuses multiply and add rounded differently from `ocelli_pixel::modality`. Integer stacks read a folded 256-wide modality table built by `ocelli_pixel::modality`, and interpolated routes (MPR, slab, ray and fusion samples) apply stage 1 on the CPU before upload, so stage 1 exists only in `ocelli-pixel`. The render graph carries the route, refuses a declared container that disagrees, marks a viewport stale on a rescale change and recovers on the next upload. Every viewport rendering into a shared target follows one rule: any stale viewport marks every co-target viewport dirty, the first pass encoded clears, later passes load, and stale passes draw nothing. A viewport bound to a surface groups with no other viewport, the first pass into a freshly acquired surface texture clears it, and a debug assert holds the surface flag and the attached surface in agreement.
+
+**HLD sections implemented.** 18.4, the VOI shader's uniform and stage composition, without changing binding 0.
+**Deviations.** none
+**Crates / packages modified.** `ocelli-render` (`voi.wgsl`, `slab.wgsl`, `raycast.wgsl`, `fusion.wgsl`, `graph.rs`, `voi.rs`, `fusion.rs`, `tier_b.rs` and its tests), `ocelli-pixel` (`auto_window.rs`), `ocelli-wasm` (`canvas.rs`), `tools/oracle`, `tools/tier-b/run.mjs`, the LLD, and the folder viewer's Use and More pages.
+**Tests added.** `fixture`, the stage-one and cancellation pairs from the F-227 reviews pinned as hex bits and hand-computed against PS3.3 C.11.1 and C.11.2.1.3.2 in `tests/voi_shader.rs`. `gpu`, `tests/modality_route.rs`, `tests/slab.rs`, `tests/raycast.rs` and the graph's `surface_grouping_tests`, every AC's named wrong implementation proven red by a mutant. `unit`, the route refusals, the slot arithmetic and the load-op table.
+**Fixture provenance.** Hand-computed from PS3.3 C.11.1 (Modality LUT) and C.11.2.1.3.2 (LINEAR_EXACT), with the F-227 measured inputs as hex bits. AC3, the semantic red, ran on the base commit e6b913e1 with the round-1 harness shape: stored 2371.0 and 2372.0, rescale slope `0x3571C0F8` intercept `0x44E7C2FC`, LINEAR_EXACT centre `0x44E7C30D` width `0x38FFFFD5`, output 0 to 255. The CPU chain gives 0.0 and 255.0, and the base shader drew 0.0 and 0.0, failing with "the fused stage 1 drew 2372.0's ymin instead of the CPU's ymax: was 0, wanted 255".
+**Verification.** Independent review passes 1 to 7 by Claude on the GLM commits and the coordinator's pass 8, the last with no defect or smell. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the fixtures are synthetic.
+**Tier coverage.** A (WebGPU) full, the M4 Max Metal adapter under `gate gpu`. B (WebGL2 downlevel) through the browser vehicle `tools/tier-b/run.mjs`, the native GL tests recording a miss on a host without a GL adapter as the pass 1 amendment allows. C (CPU) n/a, the CPU tier already draws through `ocelli-pixel`.
+**LLD updated.** `docs/lld/pixel-pipeline.md`, the stage 1 routes and the measured bit-equality claim, and `docs/lld/render-graph.md`, the route, the shared-target rule and the surface grouping.
+**User-facing documentation.** `examples/folder-viewer/src/use.html`, the GPU route sentence, and `examples/folder-viewer/src/more.html`.
+**Deviations from the design plan.** The lead amendments after implementation review passes 1, 2, 4 and 5 replaced the stale-slab-only rule with one shared-target rule, made the graph enforce the surface grouping, and required the first pass into an acquired surface texture to clear. The debug assert's fixture placement uses a `#[cfg(test)]` exemption set because the harness cannot acquire a native surface without `unsafe`.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over six fix rounds, reviewed by Claude, with one coordinator doc commit. The tier B browser vehicle was re-run on the integrated tree on 2026-11-12 on ANGLE Metal, Apple M4 Max, and the section 18.3 values and both stage-one pairs matched within 0.001 in R32Float.
+
+## F-205, Validated shared preferences in the single showcase viewer, completed 2026-11-13
+
+**What was built.** The folder viewer keeps five choices, the mouse profile, the play rate, the two side columns and a default CT window preset, in one versioned JSON record, `ocelli.prefs`, for its address, shared by its local-folder and DICOMweb sources. Every value comes from a closed set. F-214's four legacy keys are migrated and kept in step as the downgrade channel. A document that is not a supported version is refused whole and never rewritten. Every refused stored value and every choice the browser could not keep is named, the profile's in the MOUSE section and every other in the line under the image. A save re-reads the record, writes only validated values and changes only its own field, and a storage listener refreshes other tabs without writing. The default preset applies once per viewport per series load, only where the image offers it, behind a first-paint hold tied to the load token, so a series is never drawn at two windows. Nothing about a patient, a study or a folder is stored.
+
+**HLD sections implemented.** none, no HLD section covers preferences.
+**Deviations.** none
+**Crates / packages modified.** `examples/folder-viewer/src/page.html`, `more.html`, its `tests/preview.rs` pins and the new browser check `tests/browser/preferences.mjs`, `dicomweb.mjs` for one export, the `viewer-browser` arm of `bin/ocelli.sh`, `eslint.config.js`, README, BACKLOG and `docs/lld/public-api.md`.
+**Tests added.** `browser`, `preferences.mjs`, AC1 to AC18 plus the pass 1 to pass 3 regressions: migration, refused shapes, per-field refusals, write failures, persistence across a real server restart and browser relaunch on a fixed port, a second port as a second origin, the whole-origin no-patient-data sweep, the default preset's hold, release and supersession, cross-tab updates with and without the storage event, and the listener's baseline. `unit`, the `tests/preview.rs` pins for the sentence table, the preset tokens, the guarded storage helpers and the README and More sentences. Every named wrong implementation was proven red by a mutant.
+**Fixture provenance.** no pixel arithmetic. The stored-window and preset cases use synthetic CT and MR files written by the suite.
+**Verification.** Independent implementation review passes 1 to 3 by Claude on the GLM commits and the coordinator's pass 4, the last with no defect, smell or nitpick. The feature profile on the integrated tree is recorded in the verify ledger with this commit.
+**Corpus.** absent, the fixtures are synthetic.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. Page state only.
+**LLD updated.** `docs/lld/public-api.md`, the Example measurement section names F-249 for the metadata browser and records the React panel's preferences as retired.
+**User-facing documentation.** `README.md`, the preferences sentences, the OCELLI_PORT scope shared by `cargo run` and `npm run dev`, the log level setting the library keeps and the cost of a downgrade. `examples/folder-viewer/src/more.html`, the preferences row and section. `use.html` no change, it names no preference.
+**Deviations from the design plan.** The lead amendment after implementation review pass 1 admits one foreign key, `loglevel`, which dcmjs's bundled loglevel writes when `@ocelli/core` loads, with its value held to the six level names and the page never naming it. F-205 integrated before F-204, reversing the planned order, because F-204 was still in rework, and F-204 merges onto it.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode over three fix rounds, reviewed by Claude.
+
+## F-204, One stored pixel per device pixel in the single showcase viewer, completed 2026-11-13
+
+**What was built.** The folder viewer has a one-to-one zoom mode, entered with the One to one button or the `\` key. In the mode the viewport's canvas is a whole-CSS-pixel box sized up to cover its cell, its backing is that box times the device pixel ratio, and the page writes stored pixels one to one into backing pixels at an integer device offset carrying the centring, the pan and the alignment, with rotation and flips applied by index. A non-square-pixel frame enters with its rows one to one and its columns nearest-resampled, labelled `Zoom 1:1 rows`, matching cornerstone3D 5.8.2 by the operator's decision. A frame smaller than the device pixel ratio is refused with a named reason that shows only while it holds. A ratio change re-lays out through a resolution media query watcher. Fit, `0` and a series open leave the mode, linked viewports take it through their own guards, and the stored-size backing is restored on every exit.
+
+**HLD sections implemented.** none, the local example only.
+**Deviations.** none
+**Crates / packages modified.** `examples/folder-viewer/src/page.html`, `more.html`, the new browser check `tests/browser/one-to-one.mjs`, the `viewer-browser` arm of `bin/ocelli.sh`, `eslint.config.js`, README and `docs/lld/build-targets.md`.
+**Tests added.** `browser`, `one-to-one.mjs`: extents, observed origins and screenshot bytes at device pixel ratios 1, 1.25, 1.5 and 2 on square-pixel fixtures and after a pan, the four probe ratios, rotation and flip permutations, the anisotropic rows on both spacing orders, coverage of both cell edges and a fractional middle cell, the clamp, the link, the ratio watcher, the below-ratio and no-step refusals, the magnifier, invert and the backing restore. Every named wrong implementation was proven red by a mutant.
+**Fixture provenance.** Hand-computed display identity, PS3.3 C.11.2.1.2.1 with Window Center 128, Width 256 and LINEAR on 8-bit stored values, the byte taken through `display_index`'s rounding, and INVERSE per PS3.3 C.11.6.1.2.
+**Verification.** Independent implementation review passes 1 to 4 by Claude, the last with no defect or smell. The feature profile on the integrated tree, which also holds F-205, is recorded in the verify ledger with this commit.
+**Corpus.** absent, the fixtures are synthetic.
+**Tier coverage.** A (WebGPU) n/a. B (WebGL2 downlevel) n/a. C (CPU) n/a. The page's own 2D canvas.
+**LLD updated.** `docs/lld/build-targets.md`, the one-to-one suite, its registration before `launcher.mjs` and its eslint globals.
+**User-facing documentation.** `README.md`, the toolbar, the `\` key and the mode paragraph with its emulation limit. `examples/folder-viewer/src/more.html`, the matrix row and section, Implemented on images. `use.html` no change, it documents the library API.
+**Deviations from the design plan.** The lead amendments after implementation review passes 1 and 2 replaced decision 10's CSS-scaled stored-size canvas with a device-sized backing and sized the box up to the cell, removing the larger-view refusal. The remote seam moved to F-202 by the lead amendment after design review round 4. Verification is under DevTools device scale emulation in the pinned Chromium, not a physical display. Fix round 1 was implemented by a Claude agent while the GLM server was down.
+**Notes for future sessions.** Days actual is not measured. Implemented by GLM through opencode and one Claude agent over three fix rounds, reviewed by Claude. Pass 4's three nitpicks are carried in its review file.

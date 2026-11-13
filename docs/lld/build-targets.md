@@ -1,10 +1,23 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244
-**Last updated:** 2026-11-09
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266, F-245, F-204
+**Last updated:** 2026-11-13
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
+
+## F-268: workspace docs floor and gate
+
+The public workspace documentation builds with native/default scope. A named
+`docs` floor gate and a Rust-job CI step invoke `bin/ocelli.sh gate docs`, which
+spawns `cargo doc --workspace --no-deps --locked --keep-going` as a child with
+`RUSTDOCFLAGS='-D rustdoc::private_intra_doc_links -D
+rustdoc::broken_intra_doc_links'`, removing only the child's encoded variable,
+while the caller's `CARGO_TARGET_DIR` is preserved. Lints are denied, never
+suppressed. API-preserving comment fixes are the remedy. Permanent deep Cargo
+probes use a two-member synthetic workspace whose encoded allow flags are
+inherited, with the fault outside `default-members`, a fresh owned target per
+run, a healthy control checked for real docs, and target cleanup after.
 
 ## The two targets, and the two crates that are not shared
 
@@ -51,6 +64,8 @@ dev-profile size measurement is not a smaller version of the same number. It
 is a different number.
 
 `crates/ocelli-wasm/pkg/` is generated and gitignored.
+
+When the pkg is PRESENT, the build uses a decoded /@fs specifier during Rollup compilation and Rollup rewrites it into a bundled emitted chunk. The story's promise is narrowed to no checkout-root or /@fs reach in any emitted file: the viewer build check refuses a PRESENT dist whose emitted files spell the temporary build base or the real checkout root, raw or URL-encoded, matched as a path prefix with a boundary, or carry the standalone /@fs marker. The boundary is byte-level. A root preceded by relative dots, the `.` and `..` segments a sourcemap's relative sources spell through the symlinked packages, is a left boundary. A root glued to a host name's last letter or digit, as in an `http://localhost:5173/...` or `file://localhost/...` spelling of the checkout, is accepted rather than refused: bytes alone cannot tell that host prefix from the github URL name the boundary must not fire on. It bans no other absolute path. The check builds with the stand-in pkg and never scans the real `ocelli_wasm_bg.wasm`, which carries Rust panic location strings with absolute cargo registry paths under the builder home directory. F-281 removes those registry paths. When ABSENT, the build keeps the encoded /@fs specifier as an external runtime import. Dev uses the encoded URL in both states. Dev fs.allow is the decoded checkout root. A rejected import or default-init failure leaves core not built.
 
 `bin/ocelli.sh wasm-decode` builds the same crate with
 `--no-default-features --features decode-worker` into
@@ -889,3 +904,83 @@ and a sandbox-denied browser startup. Corrected data inspection and the
 unchanged browser command with required OS permission passed. Those are
 checker/setup diagnostics, not product failures. Source and physical index
 remained unchanged throughout.
+
+## The F-245 npm dev launcher, and the viewer browser suite
+
+F-245 adds `bin/folder-viewer-dev.mjs`. The root `npm run dev` runs it. It
+builds `@ocelli/core` first, then runs
+`cargo build -p ocelli-folder-viewer --message-format=json`, selects the one
+native bin compiler-artifact executable from the build output rather than any
+hardcoded target path, and runs that binary as a direct child. A custom
+`CARGO_TARGET_DIR` is honoured. The launcher spawns each phase in its own
+POSIX process group, forwards `SIGINT` and `SIGTERM` to the owned group,
+preserves the first signal, gives the group a 2000 ms grace then `SIGKILL`
+and a further 2000 ms confirmation, and never signals a pid it does not own.
+The legacy React demo keeps `bin/example-dev.sh` under
+`npm run dev:boundary-demo`, unchanged.
+
+The launcher's unit is `tools/bench/tests/folder_viewer_dev_test.mjs`. It is
+registered in both the `bench` gate's `node --test` list in `bin/ocelli.sh`
+and the `tools/bench/package.json` test script. The synthetic fixtures copy
+the tracked launcher byte for byte and refuse a missing one with
+`MISSING_IMPLEMENTATION`.
+
+`examples/folder-viewer/tests/browser/dicomweb.mjs` is the new browser
+workflow suite. It builds its wholly synthetic DICOMweb upstream in the
+script, starts the release viewer with `OCELLI_PORT` and stops it by its PID.
+The suite picks its own port, so the gate command is plain
+`node examples/folder-viewer/tests/browser/dicomweb.mjs` with no port in the
+environment. It is registered in the `viewer-browser` gate's module list in
+`bin/ocelli.sh` after `auto.mjs` and before `one-to-one.mjs`.
+
+`examples/folder-viewer/tests/browser/launcher.mjs` is the launcher's browser
+control. It starts the viewer the way a user does, through `npm run dev`, with
+a private `CARGO_TARGET_DIR` under the repository's ignored `target/`,
+distinct from the default `target/debug`, so a path under it can only be the
+one cargo's own compiler artifact named. The directory is kept between runs,
+so the first run is a cold full debug graph build and later runs are
+incremental. The binary is also identified at the process layer: the pid
+listening on the launcher's port is resolved with `lsof` and its process
+command is read with `ps -o command=`, which begins with the executable
+path the spawner set. That command must begin with the private target
+directory followed by a path separator, so a launcher that ignored the
+compiler artifact and ran a stale build from the default target directory
+fails there. It waits for the one URL
+the backend prints, opens the page in headless Chromium, asserts the boot
+status and source chooser, fetches the same page from a plain native start of
+the release binary, and asserts the two bodies are identical. It signals the
+npm process group by the npm PID and asserts the port stops serving, so a
+backend orphaned by an unhandled signal fails the suite. It is registered in
+the `viewer-browser` gate's module list last, after `preferences.mjs`.
+
+`eslint.config.js` gains one comment-conditional globals entry for that
+suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
+`remoteProvider`, added where the browser context requires them, with no rule
+disabled and no allowlist widened. `fetch` was already a browser global there.
+
+`examples/folder-viewer/tests/browser/one-to-one.mjs` is the F-204 browser
+suite. It writes seven wholly synthetic identity fixtures into a temporary
+folder, plus an eighth leave restore fixture written after the default cell
+is measured, sized so the mode's box there times the ratio is its stored
+frame on both axes. It starts the release viewer with `OCELLI_PORT=0` and
+stops it by its PID, and drives the one-to-one mode in headless Chromium at
+device pixel ratios 1, 1.25, 1.5, 2, 3 and the four ulp probes. It observes
+the painted box as the opaque box in the canvas backing and reads device
+pixels through a screenshot clip on the device-aligned grid decoded in-page,
+cropped at that observed origin, and for the rows whose picture exceeds the
+cell cropped to the opaque box's visible part inside the cell. It is
+registered in the `viewer-browser` gate's module list after `dicomweb.mjs` and
+before `preferences.mjs` and `launcher.mjs`, which stays last. `eslint.config.js`
+gains `fitScale`, `clientToImage`, `Image` and `MediaQueryList` in that
+suite's existing browser context, with no rule disabled and no allowlist
+widened.
+`scripts/guards/catalogue.py` gains the `folder-viewer-dev` guard for
+`bin/folder-viewer-dev.mjs`, and `ci/guard-probe-budget.json` budgets that
+guard at six probes. Each probe drives the launcher's own refusal through a
+driver copy of the launcher file: a stop on a pid that is not a positive
+integer or is the launcher's own, a stop signal that is neither `SIGINT` nor
+`SIGTERM`, a group liveness probe that fails with something other than
+`ESRCH`, a group signal that fails the same way, an owned group still alive
+after the `SIGKILL` confirmation deadline, and an owned phase whose stop
+rejected. Each probe has a control invocation against a dead group that must
+settle quietly.

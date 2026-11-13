@@ -63,10 +63,11 @@ GATES=(
   "unsafe|no|no unsafe outside the two permitted files (HLD 27.2 R5)"
   "pins|no|wgpu pinned exactly (HLD 15.2, 27.2 R4)"
   "nostd|no|no_std crates reach no dependency std feature (D-09)"
+  "docs|no|cargo doc paired intra-doc denials (F-268)"
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, changed.mjs, marks.mjs, conformance.mjs colour.mjs and auto.mjs (F-208, F-209, F-226, F-213, F-224, F-215, F-225, F-239, F-227)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs, one-to-one.mjs, preferences.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245, F-204, F-205)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -107,6 +108,9 @@ run_gate() {
     fmt)         cargo fmt --all --check ;;
     clippy)      cargo clippy --workspace --all-targets -- -D warnings ;;
     test)        cargo test --workspace ;;
+    # F-268. The inherited encoded rustdoc flags variable is unset for this child only.
+    docs)
+        env -u CARGO_ENCODED_RUSTDOCFLAGS RUSTDOCFLAGS='-D rustdoc::private_intra_doc_links -D rustdoc::broken_intra_doc_links' cargo doc --workspace --no-deps --locked --keep-going ;;
     # F-239, D-31, the lead ruling after the codec part's review pass 4 (S1).
     # The two vendored decoders are excluded from the workspace, so the `test`
     # arm above never reaches their unit tests, and AC25's 1e-4 coefficient
@@ -192,13 +196,43 @@ run_gate() {
     # still each hide the readout, and a move shows it again. F-209's
     # reference line check follows, then F-226's forget check: the process
     # forgets the folder the page left, a late reply does not post the old
-    # file again, and leaving the page forgets the folder open. F-224's
-    # changed-file check is last: a file rewritten on disk after the folder
+    # file again, and leaving the page forgets the folder open. F-267's
+    # corners.mjs check follows window.mjs: the acquisition corner lines
+    # name the shown frame's own values, a repaint with the next image's
+    # reply held paints the scan values and never a previous frame's
+    # facts, the stored -12.50 prints as -12.5, and an enhanced MR names
+    # its own TR and TE from its reply headers. F-224's
+    # changed-file check follows: a file rewritten on disk after the folder
     # was opened is refused rather than shown, choosing the folder again
-    # shows the new bytes, and the probe reads one byte a file. Chained on
-    # `&&` because a case arm returns the status of its last command. It needs that browser install and a release build of
-    # the viewer, so it is outside the floor. The CI step that runs it is the
-    # `viewer-browser` job, which installs both.
+    # shows the new bytes, and the probe reads one byte a file. After the
+    # marks, conformance, colour and auto checks, F-245's dicomweb.mjs
+    # check follows: a synthetic DICOMweb upstream is browsed
+    # from the page, a refused and a validated instance leave the local image
+    # untouched, a pending fetch that a local source change cancels never
+    # labels that changed image, and the served More row states the partial
+    # status. F-204's one-to-one.mjs check follows: in the one-to-one mode the
+    # painted box observed in the canvas backing is the stored count of device
+    # pixels at ratios 1, 1.25, 1.5 and 2, and at 3 for the linked square
+    # pixel cells, its observed origin is a whole device pixel, and the
+    # screenshot bytes at that origin equal the stored pattern on square
+    # pixels at every byte row case, after the mid pan and at the four probe
+    # ratios too, its inverse after an invert redraws the same frame, and its
+    # permutation under each rotation and flip. The anisotropic rows draw one
+    # device row per stored row with the columns an in-order subsample, the
+    # magnifier shows the stored pixel under the pointer, and the clamp, the
+    # below-ratio refusal reason, the link and the ratio watcher behave as
+    # the design states. F-205's preferences.mjs check follows: the five
+    # validated choices migrate and win, every refused shape and field names its
+    # sentence, the stored default applies once per series load behind the
+    # first-paint hold, a second port is a different origin, and the origin
+    # holds only the five allowed keys beside dcmjs's own loglevel write.
+    # F-245's launcher.mjs check is last: the page is served through the
+    # real npm launcher under a custom CARGO_TARGET_DIR, boots in
+    # Chromium, is byte-identical to the native start, and the owned stop
+    # leaves the port closed. Chained on `&&` because a case arm returns
+    # the status of its last command. It needs that browser install and a
+    # release build of the viewer, so it is outside the floor. The CI step
+    # that runs it is the `viewer-browser` job, which installs both.
     viewer-browser)
                  if [ ! -d tools/bench/node_modules ]; then
                    echo "The benchmark harness's browser is not installed." >&2
@@ -210,11 +244,16 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/link.mjs &&
                  node examples/folder-viewer/tests/browser/forget.mjs &&
                  node examples/folder-viewer/tests/browser/window.mjs &&
+                 node examples/folder-viewer/tests/browser/corners.mjs &&
                  node examples/folder-viewer/tests/browser/changed.mjs &&
                  node examples/folder-viewer/tests/browser/marks.mjs &&
                  node examples/folder-viewer/tests/browser/conformance.mjs &&
                  node examples/folder-viewer/tests/browser/colour.mjs &&
-                 node examples/folder-viewer/tests/browser/auto.mjs ;;
+                 node examples/folder-viewer/tests/browser/auto.mjs &&
+                 node examples/folder-viewer/tests/browser/dicomweb.mjs &&
+                 node examples/folder-viewer/tests/browser/one-to-one.mjs &&
+                 node examples/folder-viewer/tests/browser/preferences.mjs &&
+                 node examples/folder-viewer/tests/browser/launcher.mjs ;;
     bench)       python3 scripts/bench_check.py &&
                  python3 -m unittest discover -s scripts/tests \
                    -p test_bench_check.py &&
@@ -230,6 +269,7 @@ run_gate() {
                    tools/bench/tests/decode_htj2k_test.mjs \
                    tools/bench/tests/decode_jpeg2000_test.mjs \
                    tools/bench/tests/decode_jpegls_test.mjs \
+                   tools/bench/tests/folder_viewer_dev_test.mjs \
                    tools/bench/tests/tier_startup_test.mjs \
                    tools/bench/tests/viewer_work_test.mjs \
                    tools/bench/tests/viewer_colour_frame_test.mjs \

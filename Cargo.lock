@@ -1257,6 +1257,7 @@ version = "0.1.0"
 dependencies = [
  "dicom-core",
  "dicom-object",
+ "flate2",
  "mimalloc",
  "ocelli-cache",
  "ocelli-codec",
@@ -1266,8 +1267,10 @@ dependencies = [
  "ocelli-pixel",
  "ocelli-render",
  "ocelli-viewport",
+ "serde_json",
  "sha2",
  "thiserror",
+ "uriparse",
 ]
 
 [[package]]

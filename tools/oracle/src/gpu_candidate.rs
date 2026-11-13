@@ -5,7 +5,7 @@ use ocelli_core::Stored;
 use ocelli_pixel::PhotometricInterpretation;
 use ocelli_render::{
     BlendMode, ColourLut, FrameOutcome, GpuContext, Pass, PresetId, RenderGraph, ResolvedAdapter,
-    StackPass, Tier, TierRequest, VoiParams, resolve_adapter,
+    StackPass, StoredRoute, Tier, TierRequest, VoiParams, resolve_adapter,
 };
 use ocelli_viewport::presentation::Presentation;
 use ocelli_viewport::view::View;
@@ -54,6 +54,7 @@ impl GpuStack {
         stored: &[Stored],
         source: [u32; 2],
         target: [u32; 2],
+        route: StoredRoute,
     ) -> Result<Vec<u8>, &'static str> {
         let limit = self.context.device().limits().max_texture_dimension_2d;
         if source
@@ -94,6 +95,7 @@ impl GpuStack {
                     voi,
                     blend: BlendMode::Composite,
                 }),
+                route,
             )
             .map_err(|_| "gpu-upload-refused")?;
         let drawn = (|| {
@@ -234,13 +236,27 @@ mod tests {
         let samples: Vec<_> = (0..256)
             .map(|i| Stored(if i < 128 { -160.0 } else { 40.0 }))
             .collect();
-        let actual = gpu.draw(&View::new(), &presentation, &samples, [16, 16], [16, 16])?;
+        let actual = gpu.draw(
+            &View::new(),
+            &presentation,
+            &samples,
+            [16, 16],
+            [16, 16],
+            StoredRoute::PreApplied,
+        )?;
         for (index, pixel) in actual.chunks_exact(4).enumerate() {
             let expected = if index < 128 { 0 } else { 128 };
             assert_eq!(pixel, &[expected, expected, expected, 255]);
         }
         assert_eq!(
-            gpu.draw(&View::new(), &presentation, &samples, [16, 16], [0, 16]),
+            gpu.draw(
+                &View::new(),
+                &presentation,
+                &samples,
+                [16, 16],
+                [0, 16],
+                StoredRoute::PreApplied
+            ),
             Err("gpu-texture-extent-refused")
         );
         Ok(())

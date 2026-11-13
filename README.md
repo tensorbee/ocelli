@@ -116,9 +116,9 @@ packages/
   react/            @ocelli/react
 
 examples/
-  viewer-react/     the example viewer, and the manual smoke test
-  example-server/   loopback helper for the example viewer's frame-open, series-open and overlay panels
-  folder-viewer/    local series page for a folder on this machine
+  viewer-react/     the boundary demo, kept under the dev:boundary-demo script
+  example-server/   loopback helper for the boundary demo's frame-open, series-open and overlay panels
+  folder-viewer/    the showcase viewer, local series and DICOMweb sources
 
 tools/
   oracle/           the differential harness against cornerstone3D
@@ -146,19 +146,53 @@ bin/ocelli.sh gate --floor
 
 ## Start the example viewer
 
-The showcase is `examples/viewer-react`, package `@ocelli/example-viewer`.
-From the repository root:
+The showcase is the folder viewer, `examples/folder-viewer`. It is one
+ordinary HTML page with one native backend, served the same way by the npm
+dev path and by cargo. From the repository root:
 
 ```bash
 npm ci
-bin/ocelli.sh wasm
 npm run dev
 ```
 
-Open <http://localhost:5173>. Vite prints that address when the server is ready.
+`npm run dev` runs `bin/folder-viewer-dev.mjs`. The launcher builds
+`@ocelli/core`, builds the native backend with cargo, selects the binary from
+cargo's compiler-artifact output rather than a hardcoded target path, and
+runs it. A custom `CARGO_TARGET_DIR` is honoured. The backend prints its
+address on stdout, an ephemeral port unless `OCELLI_PORT` is set, and opening
+that address shows the viewer. `SIGINT` or `SIGTERM` to the launcher stops
+the backend it started. The same page is served by
+`cargo run -p ocelli-folder-viewer`, which is the native path. The two paths
+share the choices the browser keeps only when they run on the same
+`OCELLI_PORT`, because the browser scopes them to the address.
 
-`npm run dev` also starts `ocelli-example-server` on `127.0.0.1`. The helper
-prints only its base URL. The Frame open section posts to it through Vite.
+The page opens a local folder or the synthetic study, and with
+`OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set it
+also offers a DICOMweb source, described under Start the local series viewer
+below. The Use book the viewer serves at `/use` and the More page at `/more`
+carry the user-facing detail.
+
+### The boundary demo
+
+The earlier React Vite demo, `examples/viewer-react`, package
+`@ocelli/example-viewer`, is kept under its own script and is not the
+showcase:
+
+```bash
+npm run dev:boundary-demo
+```
+
+The demo page loads the wasm module, so build it first when it is missing:
+
+```bash
+bin/ocelli.sh wasm
+```
+
+Open <http://localhost:5173>. Vite prints that address when the server is ready.
+The script is `bin/example-dev.sh`, which also starts
+`ocelli-example-server` on `127.0.0.1`. The helper
+prints only its base URL. The Frame open
+section posts to it through Vite.
 The synthetic button asks the helper to map stored 50 through LINEAR_EXACT
 centre 100 and width 200, then shows the display value and the padding count.
 The Series section posts three synthetic objects, or a multipart body of files
@@ -173,15 +207,32 @@ the wasm module.
 
 `bin/ocelli.sh wasm` writes the module to `crates/ocelli-wasm/pkg`. That
 directory is a build artefact and is not committed, so a clean clone still
-opens with the header on `core not built`. After that build, reload the page.
-The worker loads the module, and the header reads `core ready` only after
-that load succeeds. The build alone does not flip the header. The module a
+opens with the header on `core not built`. In `npm run dev:boundary-demo`,
+after that build, reload the page. The worker loads the module, and the header reads
+`core ready` only after that load succeeds. The build alone does not flip
+the header. The module a
 published consumer gets is `@ocelli/wasm`, which `npm pack` stages from this
 build with the decode module, the two third-party files and a build id
 naming the HEAD the modules were built from, the tree of the staged index,
 and whether the working tree had unstaged tracked changes. The packages gate
 refuses a build id recorded with unstaged tracked changes, or one that does
 not name the index it was staged from.
+
+A built dist of the example serves from a static host's document root, and
+not from a subpath. `vite.config.ts` leaves Vite's default `base` of `/`, so
+the emitted `index.html` references its assets at absolute `/assets/` URLs
+and a host serving the dist below its root cannot resolve them.
+`npm run build -w @ocelli/example-viewer` emits `examples/viewer-react/dist`
+and resolves `@ocelli/core` and `@ocelli/react` from their built
+`packages/*/dist`. The viewer's own build script is `vite build` alone, so
+those dists come from `npm run build`, which must run first. A plain static
+server over that directory at its root reads
+`core ready` like `npm run dev:boundary-demo` does. The dist does not pick up a module
+built later. `vite build` reads `crates/ocelli-wasm/pkg` once, when the
+build starts, so the package must exist before that build. A dist built
+without it keeps the external `/@fs` import of the pkg-absent build, and
+its header stays `core not built` on every host until the dist is rebuilt
+with the package present.
 
 ### The Content Security Policy an embedding page needs
 
@@ -196,7 +247,7 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval
 In Chromium the worker's policy comes from its own response and not from the
 page's, so a header on the HTML document alone leaves the worker
 unrestricted, and a header on the worker alone without `'wasm-unsafe-eval'`
-breaks the compile. Send the same header on every response.
+breaks the compile. Send the same header on every response. The folder viewer's image page sets `connect-src` to `'self'` plus the studies service origin configured at startup, while Use and More keep the self-only policy, and IPv6 literal hosts are refused at startup because browsers do not match them in `connect-src`.
 `worker-src 'self'` is an explicit pin rather than a requirement, because
 the worker is also allowed through the fallback to `script-src 'self'`: the
 pin keeps a later widening of `script-src` from widening worker construction
@@ -220,13 +271,18 @@ directive's minimality:
 
 ```bash
 bin/ocelli.sh wasm
+npm run build
 npm run build -w @ocelli/example-viewer
 node examples/viewer-react/csp-probe.mjs
 ```
 
-The probe serves the built example and the built wasm package through
-Playwright routes on invented origins, so it binds no port and starts no
-server. The policy exists once in
+The probe first exercises the unmodified built dist as a genuine positive on
+a real plain static HTTP server bound to localhost, then serves the built
+example and the built wasm package for the remaining policy cases through
+Playwright routes on invented origins, so those cases bind no port and start
+no server. The workspace build needs the built `@ocelli/core` and
+`@ocelli/react`, which `npm run build` creates, and the dist serves at the
+host's document root, as above. The policy exists once in
 `examples/viewer-react/src/csp-policy.ts`. Its test checks marked policy
 blocks in this document, `docs/lld/typescript-packaging.md` and the Use page.
 Each block contains exactly one expected header, inside a Markdown text fence
@@ -267,6 +323,8 @@ machine only.
 ```bash
 cargo run --release -p ocelli-folder-viewer
 ```
+
+With `OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL` set to absolute http or https URLs, the viewer shows a DICOMweb source that searches studies, series and instances and fetches one selected instance the native backend parses and validates. Remote images are not displayed yet, and the local study, its marks, documents and checks stay as they are. Choosing a local source cancels a pending remote request and releases a staged body, so a late remote reply cannot claim the local image is unchanged. The remote panel itself returns to its idle line. With neither value set the viewer runs local only, the remote panel stays hidden, and the native DICOMweb POST routes are refused. Setting only one value, or an invalid value, stops startup with a fixed message that does not echo the value.
 
 The debug build is about ten times slower on a window step. Each file is posted once while the process holds it, and posted again after eviction or a restart. `OCELLI_CACHE_MIB` sets that cache in mebibytes and the default is 256. A multiframe in which any frame's window comes from a per-frame functional group also keeps every frame's inspect reply, so the page can ask for a frame's window list by file id after the posted bytes are dropped. The parts no frame changes are kept once. No other file keeps one. This pool is outside `OCELLI_CACHE_MIB`, is charged at the bytes it holds, stays under a fixed 16 MiB across every file, and `GET /held` reports it as `kept`. Replies that would pass that cap after the files holding nothing are dropped are not kept, and that file's `/inspect` by id answers 410 once its bytes are gone. A forget drops a file's replies, and so does a file the cache has evicted, when it is next asked for. The folder viewer keeps at most four request bodies at once, which is the coefficient of `S_max` in the resident set bound, and decodes on two threads, which is `P` in that bound. Every preview decodes on those threads, one that carries the file's bytes included, and a decode permit ends with its decode, so a client that stops reading holds no permit. A request body is freed on the thread that allocated it. A decoded frame's sample buffer that leaves the cache is parked on a free list keyed by its exact byte length when cached bytes plus free bytes still fit the budget, and is freed otherwise. That list is inside the same 256 MiB budget, and the cache evicts to make room for a frame or for a free buffer. A decode takes a parked buffer of its length when there is one. When no free buffer has the length and a held file's frame does not fit beside the cached and free bytes, its decode takes the samples of the least recently used cached frame of that length only when no reply is still reading that frame, and allocates otherwise. A preview that carries the file's bytes never evicts and never takes a cached frame's samples, because its frame is not stored. At most two automatic series windows are computed at once, each holding up to 4 MiB outside `OCELLI_CACHE_MIB` while it runs, which is the bound's term `P * 4 MiB`, and a third waits for one of them to finish. Every grey byte the folder viewer holds counts against one fixed cap of 17,400,000 bytes, which is the bound's grey term `P * N_max`, with `N_max` the 3000 by 2900 frame the bound is stated for. A reply's grey counts from the moment its render is admitted until it is written. Each decode thread keeps at most one written grey to render into next, and that grey counts for as long as it is kept. A decode thread frees the grey it kept while any preview waits for room, and before it renders a grey less than half that size. A frame of more than 17,400,000 pixels, whose grey alone is over the cap, draws alone. Its grey is admitted only when no other grey is held, and while it is held no other grey is admitted, so grey bytes stay within the larger of the cap and that one frame. Its decode thread frees that grey after the write and does not keep it. Previews that wait for room are served in the order they first waited. A waiting preview is admitted only when every preview that waited before it has been admitted or has stopped waiting, and only when its grey fits. A preview that fits is admitted at once only when no preview waits, so it cannot pass one that waited first. No frame is refused for its size below the preview library's limit of 67,108,864 pixels. The resident bound is stated for frames within the design size. A frame over the design size can raise resident memory above that bound. Measured on the release binary with a synthetic 4740 by 5928 frame, the preview answered 200 with 28,098,720 grey bytes in 49.8 ms decoded and 25.5 ms cached. A smaller preview waited while that grey was held and was served 3.8 ms after it was released. Two such previews read together peaked at 28,098,720 grey bytes, one frame. With two clients previewing two such frames in a loop and reading every reply, twenty 512 by 512 previews sent among them all answered 200, the slowest in 42.0 ms. A preview whose grey does not fit waits for room for up to the 60 second write timeout, and answers 503 busy if none comes. A whole reply must be written within that timeout. `GET /held` reports `grey`, every grey byte under the cap, and `grey_replies`, the part held by replies not yet written. A page that abandons a request closes its connection, which releases its grey at once, within a millisecond when measured. A client that keeps a connection open without reading holds its grey until the write timeout, measured at 60.0 seconds. When such clients fill the cap, other previews wait up to the write timeout and then answer 503 busy. Measured with twenty such clients, five of six later previews answered 503 busy at 60.0 seconds and one was served at 58.95 seconds, when a stalled write timed out. While body-form previews wait, a file post can wait as long, because each of up to four waiting previews keeps its request body slot. Measured with four waiting, a file post waited 58.99 seconds. The folder viewer binary uses mimalloc as its global allocator. The pin is exact in the workspace manifest. No other crate does.
 
@@ -335,8 +393,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Recommended Display Frame Rate or Cine Rate the local process refuses, or a file
    whose frames this page could not read. A step that takes longer than the
    interval is not skipped, so play can run slower than the file asks, and the
-   line says so. The FPS control runs from 1 to 30, starts at 10 and is kept
-   in this browser.
+   line says so. The FPS control runs from 1 to 30 and starts at 10 by default.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
    W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`,
@@ -345,11 +402,11 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    display (Pointer cross, Magnifier, Corners, Orientation letters), the
    layout (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
    which shows four neighbouring images in the outlined viewport, Link and
-   Reference lines, which have no key), and Key image, Headers, Fit, Reset
-   and Full screen. Key image flags the image, and Save marks writes the
-   flags as a Key Object Selection. The view, window, Fit, Reset, Key image
-   and Headers act on the outlined viewport. The mouse profile picks the
-   tool that starts active, Scroll or W/L, and choosing a profile also
+   Reference lines, which have no key), and Key image, Headers, Fit, One to
+   one, Reset and Full screen. Key image flags the image, and Save marks
+   writes the flags as a Key Object Selection. The view, window, Fit, Reset,
+   Key image and Headers act on the outlined viewport. The mouse profile picks
+   the tool that starts active, Scroll or W/L, and choosing a profile also
    switches the current tool to that one, from a drawing tool too. The right
    column holds the window list, the marks and the mouse and key lists. The
    icons at either end of the top bar, or the `[` and `]` keys, hide and show
@@ -358,10 +415,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    in file order, each named by its Window Center & Width Explanation, or
    `Window n` when it has none. On any other image it lists the file's windows
    only. A monochrome image that stores no window lists one row, `Auto window`,
-   after the presets on a CT, and it chooses the series' automatic window. The keys `1` to `9` choose rows 1 to 9, and `0` stays Fit. Each VOI
-   LUT Sequence item is listed as a row that cannot be chosen, because this
-   preview does not apply one, and while a file has one its other rows cannot
-   be chosen either. A multiframe whose windows change per frame lists the
+   after the presets on a CT, and it chooses the series' automatic window. The
+   keys `1` to `9` choose rows 1 to 9, `0` stays Fit and `\` shows one stored
+   pixel on one device pixel. Each VOI LUT Sequence item is listed as a row
+   that cannot be chosen, because this preview does not apply one, and while a
+   file has one its other rows cannot be chosen either. A multiframe whose
+   windows change per frame lists the
    shown frame's own, asked for by file id, which the process answers from the
    replies it keeps for such a file after the posted bytes are dropped. Until
    that list arrives the frame is drawn at its own first usable window, then at
@@ -398,9 +457,47 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    right button zooming. Window on left starts on W/L, with the middle button
    panning and the right button zooming. Control with the left button pans in
    all three. The browser keeps the profile for this address, so a kept
-   profile returns after a restart only on the same `OCELLI_PORT`. A pinch, or
+   profile returns after a restart only on the same `OCELLI_PORT`. What
+   this browser keeps is five validated choices: the mouse profile, the
+   play rate, whether each of the two side columns is hidden and a default
+   window preset. The browser also holds the library's log level setting,
+   which dcmjs writes when the page loads the library, and nothing else.
+   The Default preset control in the WINDOW section
+   starts every newly opened series at that preset when the image is a CT
+   whose preset rows are choosable, once per series load. Reset returns the
+   file's own window and the preset does not come back until the next
+   series load. An MR, a colour image or a file with a VOI LUT Sequence
+   takes no preset, and a stored preset the viewer does not offer is named
+   in the line under the image and skipped. Any other choice the browser did not
+   keep, or a stored choice it could not use, is named in that line too,
+   never applied quietly. A profile change the browser did not keep is
+   named in the MOUSE section. The choices live beside the four keys an
+   older version of the viewer reads, which stay current, so an older
+   binary keeps working beside this one. A choice made in an older binary
+   between two runs of the new one is lost, because the document wins on
+   the next load and the two stores give no order to detect that. A pinch, or
    Ctrl with the wheel, zooms at the pointer. A sideways
-   swipe does not change the image. Zoom keeps the image aspect ratio. The
+   swipe does not change the image. Zoom keeps the image aspect ratio. One to
+   one, the `\` key or its toolbar button, shows one stored pixel on one
+   device pixel for the local images the page draws, with the factor computed
+   in the page from the device pixel ratio and the corner line reading Zoom
+   1:1, or Zoom 1:1 rows on a frame whose pixels are not square, where the
+   rows are exact and the columns are resampled. In the mode the canvas is a
+   whole CSS pixel box sized up past its cell, the smallest whole multiple of
+   the ratio's whole CSS pixel step that covers the cell plus one step for
+   the alignment shift, so its size times the device pixel ratio is whole,
+   its backing has that many device pixels, and the stored pixels are
+   written into the backing one to one, as cornerstone3D 5.8.2 sizes its
+   backing at the device resolution. The cell's own clipping cuts the box's
+   excess, so no part of the cell inside the frame is left unpainted. On
+   square pixels the mode is verified byte for byte in screenshots under the
+   emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is
+   DevTools device scale emulation and not a physical display. Pan keeps the
+   mode, and zooming reaches the scale and leaves it like any other, so on a
+   frame wider than its cell zooming out from one to one goes below it. A
+   stored frame smaller than the device pixel ratio keeps its view, and the
+   corner line shows the reason while that holds. Opening another series and
+   Reset return to fit. The
    viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. A count on the Headers button is the
    number of findings in the shown file's conformance report, whether the file
@@ -420,8 +517,17 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    labels, with a person name in family, given order and a date as
    year-month-day. They also show the birth date, sex, age, study time,
    institution, slice location and thickness, kVp, mAs, TR and TE when the
-   file has them. With no Patient's Age, the age is worked out from the birth
-   date at the study date.
+   file has them. On an enhanced multiframe CT or MR the thickness, kVp,
+   mAs, TR and TE lines show the shown frame's own values from its
+   functional groups, with mAs from Exposure in mAs and TE on an enhanced
+   MR from Effective Echo Time, and a field the file does not carry leaves
+   its line out. A Multi-energy CT whose CT X-Ray Details Sequence
+   carries several items leaves the kVp line out by design, and one
+   whose CT Exposure Sequence carries several items leaves the mAs line
+   out. Where a classic top-level attribute and a group value both
+   exist, the top-level attribute wins when it has a value the viewer
+   can use. With no Patient's Age, the age is worked out
+   from the birth date at the study date.
    Edge letters show the patient direction from Image Orientation (Patient),
    or from Patient Orientation on an image without it, such as a projection
    radiograph, and hide while the picture is flipped or rotated. An image
@@ -662,8 +768,8 @@ is safe because nothing calls it.
 
 `OcelliViewport` renders a host `div`. Pass `session={null}` when you have no
 wasm session. The frame pump starts only after the session's `memory` is the
-built module. `examples/viewer-react/src/App.tsx` is the mount this repository
-runs.
+built module. `examples/viewer-react/src/App.tsx` is the boundary demo's
+mount, served by `npm run dev:boundary-demo`.
 
 ```tsx
 import { viewportId } from "@ocelli/core";

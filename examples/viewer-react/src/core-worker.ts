@@ -127,10 +127,13 @@ async function openPackage(): Promise<WasmGlue> {
   if (__OCELLI_WASM_URL__ === "") {
     throw new Error("wasm package is absent");
   }
-  const probed = await fetch(__OCELLI_WASM_URL__);
-  if (!probed.ok) {
-    throw new Error("wasm package is absent");
-  }
+  // Import-only: the import itself is the availability probe. With the pkg
+  // present at build time the specifier was rewritten to the emitted glue
+  // chunk; with it absent the external runtime import fails, which is the
+  // named not-built absence. There is no preflight fetch: Vite's dev and
+  // preview servers answer a missing path with the HTML fallback at 200, so
+  // a fetch proves nothing, and a plain static host answers 404 only for a
+  // reach the build should never emit.
   const imported = (await import(
     /* @vite-ignore */
     __OCELLI_WASM_URL__

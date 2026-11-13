@@ -1,17 +1,19 @@
 // Volume composite ray. Appended to voi.wgsl and table_index.
 // One step is one voxel. A residency flag of 0 skips the step before any
 // brick is read. Each ready brick is its own texture_3d. The residency
-// texture is the last binding in group 1. Opacity is a 256-entry uniform
-// at group 0 binding 2. The address is table_index of the display value
-// with last 255. Entries are packed as vec4 so the uniform stride is 16.
-// Shade weights are a 16-byte uniform at group 0 binding 3. The default
-// the host writes is ambient 1 and diffuse 0. The normal is the central
-// difference of stored samples. A missing neighbour contributes 0. The
-// light is the unit walk axis toward the near end, which is decreasing
+// texture is the last binding in group 1. The voi.wgsl reservations put the
+// route uniform at group 0 binding 1 and the folded modality table at
+// binding 2, so this file's uniforms start at binding 3. Opacity is a
+// 256-entry uniform at group 0 binding 4. The address is table_index of the
+// display value with last 255. Entries are packed as vec4 so the uniform
+// stride is 16. Shade weights are a 16-byte uniform at group 0 binding 5.
+// The default the host writes is ambient 1 and diffuse 0. The normal is the
+// central difference of stored samples. A missing neighbour contributes 0.
+// The light is the unit walk axis toward the near end, which is decreasing
 // index. Shade is ambient when the gradient length is 0, otherwise
 // ambient + diffuse * max(0, dot(n, light)). The shaded value is
 // colour * shade. Transfer opacity is not multiplied by the shade.
-// Clip planes are a 256-byte uniform at group 0 binding 4. The patient
+// Clip planes are a 256-byte uniform at group 0 binding 6. The patient
 // point uses the volume origin, spacing and direction. A sample is kept
 // when dot(point - plane_origin, normal) >= 0, which includes the plane.
 // A disabled slot has normal.w of 0. A discarded sample adds nothing.
@@ -19,7 +21,7 @@
 //
 // volume_ray_module fills the slot count, the brick bindings and the load
 // cases. The slot count is the device's sampled-texture room after the
-// residency binding.
+// residency binding and the modality table.
 
 struct RayParams {
     axis : u32,
@@ -37,13 +39,13 @@ struct RayParams {
     coords : array<vec4<u32>, __RAY_SLOTS__>,
 }
 
-@group(0) @binding(1) var<uniform> ray : RayParams;
+@group(0) @binding(3) var<uniform> ray : RayParams;
 
 struct OpacitySamples {
     values : array<vec4<f32>, 64>,
 }
 
-@group(0) @binding(2) var<uniform> opacity : OpacitySamples;
+@group(0) @binding(4) var<uniform> opacity : OpacitySamples;
 
 struct ShadeParams {
     ambient : f32,
@@ -52,7 +54,7 @@ struct ShadeParams {
     pad1 : f32,
 }
 
-@group(0) @binding(3) var<uniform> shade : ShadeParams;
+@group(0) @binding(5) var<uniform> shade : ShadeParams;
 
 struct CropSlot {
     origin : vec4<f32>,
@@ -67,7 +69,7 @@ struct CropParams {
     planes : array<CropSlot, 6>,
 }
 
-@group(0) @binding(4) var<uniform> crop : CropParams;
+@group(0) @binding(6) var<uniform> crop : CropParams;
 
 fn opacity_of(index : i32) -> f32 {
     var lane = 0u;

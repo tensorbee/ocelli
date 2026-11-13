@@ -1,4 +1,5 @@
-//! ISO 14495-1 context model for JPEG-LS lossless decoding.
+//! ISO 14495-1 context model for JPEG-LS lossless and near-lossless coding,
+//! shared by the scan decoder and the encoder.
 //!
 //! # Context Selection (ISO 14495-1 §A.3)
 //! For each sample, three local gradients D1, D2, D3 are computed from the
@@ -12,7 +13,8 @@
 //! - `a`: accumulated absolute error sum (initialized to `a_init = max(2, (RANGE+32)/64)`)
 //! - `b`: accumulated signed error sum for bias tracking
 //! - `c`: bias correction applied to predictor (clamped to [-128, 127])
-//! - `n`: sample count (initialized to 1 to avoid division by zero)
+//! - `n`: sample count (initialized to 1 per ISO 14495-1 §A.2.1 step 2, not a
+//!   division-avoidance device, since A.5.1's k selection is a shift comparison)
 
 /// ISO 14495-1 context state for one regular or run-interrupt context.
 #[derive(Debug, Clone, Copy)]
@@ -23,7 +25,7 @@ pub(crate) struct ContextState {
     pub(crate) b: i32,
     /// Predictor bias correction value (C, clamped to [MIN_C, MAX_C]).
     pub(crate) c: i32,
-    /// Sample count (N, initialized to 1).
+    /// Sample count (N, initialized to 1 per ISO 14495-1 §A.2.1 step 2).
     pub(crate) n: u32,
 }
 
@@ -112,6 +114,22 @@ impl RunInterruptionContext {
         self.run_interruption_type
     }
 
+    /// Golomb parameter k for a run-interruption context (T.87 A.7.2 item 5,
+    /// with TEMP from item 4, Code segment A.20), the smallest k with
+    /// `n_test >= TEMP` where the compared value is
+    /// `TEMP = A + (N >> 1) * run_interruption_type`, with the type supplied
+    /// by `new`: 0 for the different-neighbours context (`run_int_diff`) and
+    /// 1 for the same-neighbours context (`run_int_same`). Bounded by `qbpp`.
+    ///
+    /// Caller premise, decoder: the decoded error is held to the coded-error
+    /// range by `in_coded_range` (`scan.rs`) **before** the run-interruption
+    /// `update`, so the state stays within the A.2.1 steps 2 and 4
+    /// initialization bounds and the A.7.2 Code segment A.23 reset bound.
+    /// Caller premise, encoder: no refusal. `modulo_reduce` is applied
+    /// before the update instead (T.87 A.4.5). Shared premises with the
+    /// regular contexts: initial `A = max(2, floor((RANGE + 32)/64))` and
+    /// `N = 1` from A.2.1 step 2 via `CodingParams::new`, `RANGE` and
+    /// `qbpp` from the same constructor, and `RESET = 64`.
     #[inline(always)]
     pub(crate) fn compute_k(self, qbpp: u32) -> u32 {
         let temp = self.a + (self.n >> 1) * self.run_interruption_type;
@@ -210,6 +228,23 @@ pub(crate) fn error_correction(ctx: &ContextState, k_or_near: u32) -> i32 {
 
 /// Golomb parameter k, the smallest k with `N * 2^k >= A` (T.87 A.5.1 Code
 /// segment A.10), bounded here by qbpp.
+///
+/// Caller premise, decoder: the decoder computes k before any update, and
+/// `k < qbpp` never binds because the A and N state stays within the
+/// initialization and reset bounds of A.2.1 and A.6.1, which rests on
+/// `in_coded_range` (`scan.rs`) refusing a decoded
+/// error outside `[-floor(RANGE/2), ceil(RANGE/2) - 1]` **before** the A and
+/// N updates. F-243 working pass 8 measured at its tip that with that refusal
+/// disabled the cap binds about two million times on damaged streams. The
+/// refusal is the decoder's, measured by pass 8's damaged-stream decoder
+/// sweep and not re-proven here. Caller premise, encoder: the encoder has no
+/// refusal. Its own premise is `modulo_reduce`, applied before the state
+/// updates, so every error entering the update is already in the canonical
+/// range by T.87 A.4.5. `in_coded_range` is not shared with the encoder.
+///
+/// Shared premises, both callers: initial `A = max(2, floor((RANGE + 32)/64))`
+/// and `N = 1` from T.87 A.2.1 step 2 via `CodingParams::new`, `RANGE` and
+/// `qbpp = ceil(log2 RANGE)` from the same constructor, and `RESET = 64`.
 #[inline(always)]
 pub(crate) fn compute_k(a: u32, n: u32, qbpp: u32) -> u32 {
     let mut k = 0u32;
@@ -285,15 +320,23 @@ pub(crate) fn context_index(q1: i32, q2: i32, q3: i32) -> usize {
 
 /// Compute default gradient thresholds T1, T2, T3 from MAXVAL and NEAR.
 ///
-/// ISO 14495-1 §C.2.4.1.1.1 default preset parameters (no LSE marker):
-/// `FACTOR = (min(MAXVAL, 4095) + 128) / 256`, then
-/// `T1 = FACTOR·(BASIC_T1 − 2) + 2 + 3·NEAR`,
-/// `T2 = FACTOR·(BASIC_T2 − 3) + 3 + 5·NEAR`,
-/// `T3 = FACTOR·(BASIC_T3 − 4) + 4 + 7·NEAR`,
-/// with `BASIC = (3, 7, 21)`, each passed through `CLAMP(i, NEAR + 1 / T1 /
-/// T2, MAXVAL)`.
-/// For `MAXVAL < 128` the FACTOR term scales the basic values down instead;
-/// DICOM data is ≥ 8-bit so the high branch is the production path.
+/// ISO 14495-1 §C.2.4.1.1.1 default preset parameters (no LSE marker),
+/// Table C.3 `BASIC = (BASIC_T1, BASIC_T2, BASIC_T3) = (3, 7, 21)`, and the
+/// clamping function of Figure C.3 over integers, `CLAMP(i, j) = j` when
+/// `i > MAXVAL` or `i < j`, otherwise `i`, with MAXVAL ambient.
+/// For `MAXVAL >= 128`, Figure C.4:
+/// `FACTOR = floor((min(MAXVAL, 4095) + 128) / 256)`,
+/// `T1 = CLAMP(FACTOR·(BASIC_T1 - 2) + 2 + 3·NEAR, NEAR + 1)`,
+/// `T2 = CLAMP(FACTOR·(BASIC_T2 - 3) + 3 + 5·NEAR, T1)`,
+/// `T3 = CLAMP(FACTOR·(BASIC_T3 - 4) + 4 + 7·NEAR, T2)`.
+/// For `MAXVAL < 128`, Figure C.5: `FACTOR = floor(256 / (MAXVAL + 1))`,
+/// `T1 = CLAMP(max(2, floor(BASIC_T1 / FACTOR) + 3·NEAR), NEAR + 1)`,
+/// `T2 = CLAMP(max(3, floor(BASIC_T2 / FACTOR) + 5·NEAR), T1)`,
+/// `T3 = CLAMP(max(4, floor(BASIC_T3 / FACTOR) + 7·NEAR), T2)`.
+/// At MAXVAL 127, NEAR 0 the low branch gives FACTOR 2 and thresholds
+/// (2, 3, 10). The decoder accepts P from 2, and PS3.5 8.2.3 permits Bits
+/// Stored below 8 in an 8 or 16-bit container, so a `MAXVAL < 128` frame can
+/// reach this branch and the low arm is not dead code.
 pub(crate) fn default_thresholds(maxval: i32, near: i32) -> (i32, i32, i32) {
     if maxval >= 128 {
         let factor = (maxval.min(4095) + 128) / 256;
@@ -312,8 +355,9 @@ pub(crate) fn default_thresholds(maxval: i32, near: i32) -> (i32, i32, i32) {
     }
 }
 
-/// ISO 14495-1 §C.2.4.1.1.1 `CLAMP(i, j, MAXVAL)`: `j` when `i > MAXVAL` or
-/// `i < j`, otherwise `i`. Not a saturating clamp: a value above MAXVAL falls
+/// ISO 14495-1 §C.2.4.1.1.1 Figure C.3 `CLAMP(i, j)` over integers: `j` when
+/// `i > MAXVAL` or `i < j`, otherwise `i`, with MAXVAL ambient and not an
+/// argument. Not a saturating clamp: a value above MAXVAL falls
 /// to the lower bound `j` (Ocelli F-243).
 fn clamp_threshold(i: i32, j: i32, maxval: i32) -> i32 {
     if i > maxval || i < j {

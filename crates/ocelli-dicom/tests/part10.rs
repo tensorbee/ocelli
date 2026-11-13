@@ -11,7 +11,10 @@ use flate2::{Compression, write::DeflateEncoder};
 use proptest::prelude::*;
 
 use dicom_object::{StandardDataDictionary, mem::InMemDicomObject};
-use ocelli_dicom::{DispatchPath, MAX_SEQUENCE_DEPTH, MetadataSet, ParseError, Tag, parse_part10};
+use ocelli_dicom::{
+    DispatchPath, MAX_SEQUENCE_DEPTH, MetadataSet, ParseError, ParseLimits, Tag, parse_part10,
+    parse_part10_with_limits,
+};
 
 const IMPLICIT_VR_LE: &str = "1.2.840.10008.1.2";
 const EXPLICIT_VR_LE: &str = "1.2.840.10008.1.2.1";
@@ -1762,4 +1765,59 @@ proptest! {
         };
         prop_assert_eq!(outcome, expected, "depth {}", depth);
     }
+}
+
+#[test]
+fn f245_bounded_explicit_dataset_accepts_exact_length_and_refuses_length_minus_one() {
+    let data_set = explicit_little_data_set();
+    let decoded_len = data_set.len();
+    let bytes = part10(EXPLICIT_VR_LE, &data_set);
+
+    let exact = ParseLimits {
+        decoded_dataset_max: decoded_len,
+    };
+    assert!(parse_part10_with_limits(&bytes, &exact).is_ok());
+
+    let tighter = ParseLimits {
+        decoded_dataset_max: decoded_len - 1,
+    };
+    let refused = parse_part10_with_limits(&bytes, &tighter).err();
+    assert!(matches!(refused, Some(ParseError::SizeLimit)));
+
+    assert!(parse_part10(&bytes).is_ok());
+}
+
+#[test]
+fn f245_bounded_deflated_dataset_expands_to_explicit_length_and_enforces_cap() {
+    let decoded_len = explicit_little_data_set().len();
+    let bytes = part10(DEFLATED_EXPLICIT_VR_LE, DEFLATED_DATA_SET);
+    assert_ne!(DEFLATED_DATA_SET.len(), decoded_len);
+
+    let exact = ParseLimits {
+        decoded_dataset_max: decoded_len,
+    };
+    assert!(parse_part10_with_limits(&bytes, &exact).is_ok());
+
+    let tighter = ParseLimits {
+        decoded_dataset_max: decoded_len - 1,
+    };
+    let refused = parse_part10_with_limits(&bytes, &tighter).err();
+    assert!(matches!(refused, Some(ParseError::SizeLimit)));
+
+    assert!(parse_part10(&bytes).is_ok());
+}
+
+#[test]
+fn f245_bounded_deflated_dataset_with_trailing_suffix_is_invalid_regardless_of_cap() {
+    let mut data_set = DEFLATED_DATA_SET.to_vec();
+    data_set.extend_from_slice(&[1, 2]);
+    let bytes = part10(DEFLATED_EXPLICIT_VR_LE, &data_set);
+
+    let generous = ParseLimits {
+        decoded_dataset_max: usize::MAX,
+    };
+    let refused = parse_part10_with_limits(&bytes, &generous).err();
+    assert!(matches!(refused, Some(ParseError::InvalidDataSet)));
+
+    assert_eq!(parse_part10(&bytes).err(), Some(ParseError::InvalidDataSet));
 }

@@ -15,7 +15,7 @@ use ocelli_pixel::{
 };
 use ocelli_render::{
     BlendMode, FrameOutcome, GraphError, Interpolation, OrthoError, Pass, RenderGraph, StackPass,
-    Tier, VoiParams, present_plane,
+    StoredRoute, Tier, VoiParams, present_plane,
 };
 use ocelli_volume::{
     Level, OrthoImage, OrthoPlane, PlaneSample, SlicePresence, Volume, VoxelKind, VoxelStore,
@@ -299,6 +299,10 @@ fn axial_upload_matches_the_lut_chain() {
             voi: params(&chain),
             blend: BlendMode::Composite,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     );
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
@@ -364,6 +368,10 @@ fn an_absent_plane_does_not_replace_the_texture() {
             voi: params(&chain),
             blend: BlendMode::Composite,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     );
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
@@ -419,6 +427,10 @@ fn a_linear_stack_refuses_the_orthographic_plane() {
             voi: params(&chain),
             blend: BlendMode::Composite,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     );
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };
@@ -455,6 +467,10 @@ fn a_linear_selection_after_an_orthographic_upload_is_refused() {
             voi: params(&chain),
             blend: BlendMode::Composite,
         }),
+        StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
     );
     assert!(registered.is_ok());
     let Ok(viewport) = registered else { return };

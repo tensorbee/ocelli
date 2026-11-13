@@ -44,6 +44,34 @@ struct VoiParams {
 };
 @group(0) @binding(0) var<uniform> voi : VoiParams;
 
+// The modality route, F-235. Stage 1 exists once, in `ocelli-pixel`, and this
+// shader is given its RESULTS rather than a second copy of the formula:
+//
+//   - `tabled` 1 reads the folded modality table, whose entries are
+//     `ocelli_pixel::modality`'s own outputs for the container's whole
+//     range. `first` is the container's smallest stored value and `fold`
+//     the texels per row, so the index of a stored value `v` is
+//     `i32(v) - first`, split as `x = index % fold`, `y = index / fold`,
+//     identically to the CPU builder. The route is resolved on the CPU and
+//     this shader still makes no LUT decision.
+//   - `tabled` 0 returns its input unchanged, because the texture already
+//     holds modality values that a CPU pre-apply staged. The uniform's
+//     `slope` and `intercept` are then not read at all, and a caller that
+//     hands raw stored values with flag 0 draws them unrescaled, by
+//     contract.
+//
+// The Rust validation keeps every index inside the table: an all-integral
+// upload with a sample outside the declared container is refused before any
+// write, and the pre-applied routes never index at all.
+struct ModalityRoute {
+    tabled : u32, // 1 reads the folded table, 0 returns its input
+    first : i32,  // the container's smallest stored value
+    fold : u32,   // texels per table row
+    pad : u32,
+};
+@group(0) @binding(1) var<uniform> modality_route : ModalityRoute;
+@group(0) @binding(2) var modality_table : texture_2d<f32>;
+
 // PS3.3 C.11.2.1.2 -- LINEAR. Requires w >= 1.
 // c' = c - 0.5 ; w' = w - 1
 // x <= c' - w'/2 -> ymin
@@ -115,14 +143,24 @@ fn voi_window(x : f32) -> f32 {
 
 // Stages 1 to 3, in PS3.3 C.11's order, applied once each.
 //
-// The input is a STORED value, not a Modality value. Section 18.4 puts `slope`
-// and `intercept` in the uniform, so stage 1 is the shader's too.
-fn lut_chain(stored : f32) -> f32 {
-    // Stage 1, section 18.1. Stored -> Modality.
-    let m = stored * voi.slope + voi.intercept;
+// The input of `lut_chain` is a STORED value, not a Modality value. Section
+// 18.1's stage 1 reads the folded table this file reserves at binding 2, or
+// returns its input when the route flag says the bytes are already modality
+// values. Sections 18.2 and C.11.6 are evaluated below, from the section
+// 18.4 uniform.
+fn modality_stage_one(stored : f32) -> f32 {
+    if (modality_route.tabled != 0u) {
+        let index = i32(stored) - modality_route.first;
+        let x = index % i32(modality_route.fold);
+        let y = index / i32(modality_route.fold);
+        return textureLoad(modality_table, vec2<i32>(x, y), 0).r;
+    }
+    return stored;
+}
 
+fn voi_stages(modality_value : f32) -> f32 {
     // Stage 2, section 18.2. Modality -> Display.
-    var d = voi_window(m);
+    var d = voi_window(modality_value);
 
     // Stage 3, PS3.3 C.11.6. A reflection about the midpoint of the output
     // range, NOT `ymax - d`, which is correct only when ymin is zero. The flag
@@ -131,6 +169,10 @@ fn lut_chain(stored : f32) -> f32 {
         d = voi.ymin + voi.ymax - d;
     }
     return d;
+}
+
+fn lut_chain(stored : f32) -> f32 {
+    return voi_stages(modality_stage_one(stored));
 }
 
 // THERE IS NO ENTRY POINT IN THIS FILE, DELIBERATELY.
@@ -144,14 +186,15 @@ fn lut_chain(stored : f32) -> f32 {
 // So this file is COMPOSED rather than compiled on its own. WGSL has no
 // include directive, so a consumer concatenates `ocelli_render::VOI_WGSL` ahead
 // of its own entry point and bindings. `@group(0) @binding(0)` is section
-// 18.4's and is reserved by this file. Bindings 1 upward belong to the
-// consumer.
+// 18.4's, and bindings 1 and 2 are the route uniform and the folded table
+// reserved by this file. Bindings 3 upward belong to the consumer.
 //
-// Today there is exactly one consumer and it is a test:
-// `tests/voi_shader.rs` appends a compute entry point over two storage buffers,
-// because it needs to push arbitrary inputs in and read exact f32 values back,
-// and it runs natively on a machine this project resolves as tier A. **That
-// harness is tier A only and this shader is not.** F-038's render graph and
-// F-040's texture upload are what append a fragment entry point sampling a
-// stored value from a texture, which is the tier-B-legal production path, and
-// they append it to this same text.
+// Today there are several consumers and they are all in this crate: the
+// render graph's stack body, the volume ray, the slab and the fusion, and
+// `tests/voi_shader.rs`, which appends compute entry points over two storage
+// buffers because it needs to push arbitrary inputs in and read exact f32
+// values back. The harness binds its storage at bindings 3 and 4, past the
+// reserved set. **That harness is tier A only and this shader is not.** The
+// consumers above append fragment entry points sampling a stored value from a
+// texture, which is the tier-B-legal production path, and they append it to
+// this same text.

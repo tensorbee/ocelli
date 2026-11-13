@@ -29,6 +29,12 @@ definition. This file does not duplicate the list, and it does not state how
 many there are either, because two lists drift and then nobody knows which is
 the gate, and a number is just the shortest possible second list.
 
+For /verify, a docs gate runs native and default public workspace targets
+only, not all features, cfgs, or WASM. It removes
+CARGO_ENCODED_RUSTDOCFLAGS from the Cargo child and sets RUSTDOCFLAGS to deny
+rustdoc::broken_intra_doc_links and rustdoc::private_intra_doc_links,
+preserving the caller environment and CARGO_TARGET_DIR.
+
 ## The GPU tier, and why it is not optional here
 
 CI runs no GPU and no corpus (`docs/hld/DEVIATIONS.md` D-04). That makes

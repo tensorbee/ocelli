@@ -36,6 +36,7 @@
 use std::collections::BTreeMap;
 
 use ocelli_cache::{Brick, BrickKey, VolumeId};
+use ocelli_core::Stored;
 use ocelli_pixel::LutChain;
 use ocelli_volume::{OrthoImage, PlaneSample, SlabImage, Volume};
 use wgpu::util::DeviceExt;
@@ -54,7 +55,10 @@ use crate::probe::ResolvedAdapter;
 use crate::progressive::{self, ProgressError, ProgressReport};
 use crate::shade::{ShadeWeights, spacing_mm_ok};
 use crate::slab::{self, SlabError};
-use crate::voi::{VOI_WGSL, VoiParams, VoiParamsError};
+use crate::voi::{
+    MODALITY_FOLD, ModalityRoute, RouteError, StoredRoute, VOI_WGSL, VoiParams, VoiParamsError,
+    check_container, fill_modality_table,
+};
 
 /// HLD section 22 listed stack, volume raycast and segmentation overlay.
 /// F-054 adds the thick slab.
@@ -373,6 +377,14 @@ pub enum GraphError {
     /// The normal length is zero in f64, or its f32 image has length zero.
     #[error("a clip plane normal has length zero")]
     ClipZeroNormal,
+    /// A `Tabled` route declaration this pass or container cannot serve.
+    ///
+    /// A range outside the accepted 16-bit union, a `Tabled` declaration on
+    /// a slab pass, whose samples the graph stages itself pre-applied, and
+    /// a `Tabled` declaration on a segmentation overlay, which composes no
+    /// VOI text, all land here. `PreApplied` is legal on every pass.
+    #[error("the declared container route is refused for this pass")]
+    RouteInvalid,
 }
 
 /// Preferred stored-sample format. The constant stays `R32Float`.
@@ -381,7 +393,9 @@ pub enum GraphError {
 /// `TEXTURE_BINDING` and `COPY_DST`. Tier A reports
 /// [`UploadError::FormatUnavailable`] when it does not. Tier B may then use
 /// `Rg32Float` and, only if that also lacks those usages, `Rgba32Float`.
-/// `Rgba8Unorm` is not a candidate.
+/// `Rgba8Unorm` is not a candidate. A folded modality table follows the
+/// selection where an adapter is available, and falls back to this
+/// constant in `register` and `rebind`, which receive no adapter.
 pub const STORED_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 /// Colour table format. Height 1. Not a stored-sample candidate.
@@ -552,6 +566,32 @@ pub(crate) fn stored_float_channels(format: wgpu::TextureFormat) -> Option<u32> 
     }
 }
 
+/// One container value as the exact `f32` the shader indexes with.
+///
+/// The accepted union keeps every value inside `u16` or `i16`, so the
+/// conversion is exact. `std` has no `From<i32>` for `f32` and a direct
+/// `as` is a denied truncation cast.
+fn container_value(value: i64) -> Result<f32, UploadError> {
+    let value = i32::try_from(value).map_err(|_| UploadError::SampleOutsideTable)?;
+    Ok(if value >= 0 {
+        f32::from(u16::try_from(value).map_err(|_| UploadError::SampleOutsideTable)?)
+    } else {
+        f32::from(i16::try_from(value).map_err(|_| UploadError::SampleOutsideTable)?)
+    })
+}
+
+/// Stage 1 on the CPU, through `ocelli_pixel::modality`, for one upload.
+///
+/// One `Vec` of `samples.len()`, 4 bytes per sample, freed at the end of the
+/// call. The same class as the padded wide-format path, and not a frame
+/// allocation.
+fn pre_apply(samples: &[f32], slope: f32, intercept: f32) -> Vec<f32> {
+    samples
+        .iter()
+        .map(|sample| ocelli_pixel::modality(Stored(*sample), slope, intercept).0)
+        .collect()
+}
+
 fn stored_bytes_per_row(width: u32, format: wgpu::TextureFormat) -> Result<u32, UploadError> {
     let channels = stored_float_channels(format).ok_or(UploadError::FormatUnavailable)?;
     let bytes_per_texel = channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?;
@@ -607,16 +647,26 @@ pub enum UploadError {
     /// Registration beyond the capacity fixed at creation.
     #[error("viewport registration beyond the capacity fixed at graph creation")]
     CapacityExhausted,
+    /// A `Tabled` route declaration this pass or container cannot serve.
+    /// The same rejection [`GraphError::RouteInvalid`] names, mapped into
+    /// this error type because `register_stored` returns it.
+    #[error("the declared container route is refused for this pass")]
+    RouteInvalid,
+    /// An all-integral upload with a sample outside the declared container
+    /// range. Nothing was written.
+    #[error("an integral sample lies outside the declared container range")]
+    SampleOutsideTable,
 }
 
 /// The fragment entry appended to `VOI_WGSL` at module build.
 ///
 /// Group 0 binding 0 is section 18.4's and stays reserved by `voi.wgsl`.
-/// Group 0 binding 1 is the colour-table address. Group 0 binding 2 is the
-/// column-major camera matrix. Group 1 binding 0 is the caller's
-/// stored-value texture. Group 1 binding 1 is the `Rgba8Unorm` colour table.
-/// Both textures are read with `textureLoad`. No sampler state decides
-/// anything and no compute or storage buffer appears.
+/// Group 0 bindings 1 and 2 are the route uniform and the folded modality
+/// table, also reserved by `voi.wgsl`. Group 0 binding 3 is the colour-table
+/// address. Group 0 binding 4 is the column-major camera matrix. Group 1
+/// binding 0 is the caller's stored-value texture. Group 1 binding 1 is the
+/// `Rgba8Unorm` colour table. Both textures are read with `textureLoad`. No
+/// sampler state decides anything and no compute or storage buffer appears.
 ///
 /// `colour.mode` 2 indexes the table by the stored sample and does not call
 /// `lut_chain`. `colour.mode` 1 calls `lut_chain` and indexes by that display
@@ -636,12 +686,12 @@ struct ColourParams {
     pad : u32,
 };
 
-@group(0) @binding(1) var<uniform> colour : ColourParams;
+@group(0) @binding(3) var<uniform> colour : ColourParams;
 struct DeviceCamera {
     css: mat4x4<f32>,
     scale: vec4<f32>,
 }
-@group(0) @binding(2) var<uniform> camera : DeviceCamera;
+@group(0) @binding(4) var<uniform> camera : DeviceCamera;
 @group(1) @binding(0) var stored_tex : texture_2d<f32>;
 @group(1) @binding(1) var colour_lut : texture_2d<f32>;
 
@@ -914,15 +964,17 @@ fn clipped_brick(dims: [u32; 3], coord: [u32; 3], edge: u32) -> Option<[u32; 3]>
     ])
 }
 
-/// Brick textures that fit beside the residency texture.
+/// Brick textures that fit beside the residency texture and the table.
 ///
-/// The sampled-texture limit and the bind-group limit both have to hold
-/// the bricks and that one residency texture. A smaller ready set is not
-/// substituted when the count does not fit.
+/// The ray's fragment stage samples the brick slots, that one residency
+/// texture and the folded modality table, so the per-stage sampled limit
+/// has to hold `slots + 2`. The bind-group limit has to hold the bricks
+/// and the residency texture in group 1, so it bounds `slots + 1`. A
+/// smaller ready set is not substituted when the count does not fit.
 fn brick_slot_count(limits: &wgpu::Limits) -> u32 {
     let sampled = limits.max_sampled_textures_per_shader_stage;
     let group = limits.max_bindings_per_bind_group;
-    sampled.saturating_sub(1).min(group.saturating_sub(1))
+    sampled.saturating_sub(2).min(group.saturating_sub(1))
 }
 
 fn clip_error(error: crate::clip::ClipError) -> GraphError {
@@ -936,10 +988,11 @@ fn clip_error(error: crate::clip::ClipError) -> GraphError {
 /// Whether a volume ray may be bound on `tier`.
 ///
 /// Tier C returns [`GraphError::TierCUnavailable`] and produces no image.
-/// A sampled-texture limit of zero, a ready count of zero, or a ready count
-/// that leaves no binding for the residency texture, returns
-/// [`GraphError::SampledTextureLimit`]. Nothing is drawn in either case.
-/// A ready count that fits is not reduced to a smaller set.
+/// A sampled-texture limit of zero, a ready count of zero, or a ready
+/// count that leaves no binding for the residency texture and the folded
+/// modality table, returns [`GraphError::SampledTextureLimit`]. Nothing is
+/// drawn in either case. A ready count that fits is not reduced to a
+/// smaller set.
 ///
 /// # Errors
 ///
@@ -952,7 +1005,9 @@ pub fn volume_ray_admission(
     if tier == Tier::Cpu {
         return Err(GraphError::TierCUnavailable);
     }
-    let room = sampled_limit.saturating_sub(1);
+    // The residency texture and the modality table are the two sampled
+    // bindings the ray composes beside its bricks.
+    let room = sampled_limit.saturating_sub(2);
     if sampled_limit == 0 || ready_bricks == 0 || ready_bricks > room {
         return Err(GraphError::SampledTextureLimit);
     }
@@ -977,6 +1032,33 @@ struct HeldColour {
     bytes: Vec<u8>,
 }
 
+/// How the bytes now in a viewport's stored texture are to be read.
+///
+/// This is not the declaration. The declaration is the [`StoredRoute`] fixed
+/// at registration. The effective route starts there and follows the bytes:
+/// a pre-applied upload to a declared-`Tabled` viewport flips it, and an
+/// integral upload flips it back. The shader's route uniform carries this
+/// route's flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectiveRoute {
+    /// Raw whole-integer samples the folded table serves.
+    Tabled,
+    /// Modality values a pre-applied upload staged.
+    PreApplied,
+}
+
+/// What a viewport's stored texture currently holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContentKind {
+    /// Raw whole-integer samples inside the declared container.
+    RawIntegral,
+    /// Raw samples that are not all whole integers. Only a palette colour
+    /// mode keeps these, because its branches never reach stage 1.
+    RawFractional,
+    /// Modality values staged with a recorded rescale pair.
+    PreApplied,
+}
+
 /// One registered viewport's decision state.
 struct SlotState {
     dirty: Dirty,
@@ -989,6 +1071,20 @@ struct SlotState {
     /// The preserving format chosen for that texture. Absent when the
     /// viewport has no owned stored texture.
     stored_format: Option<wgpu::TextureFormat>,
+    /// The route declared at registration. Fixed for the slot's life.
+    route: StoredRoute,
+    /// How the bytes now in the texture are to be read. Starts at the
+    /// declaration and flips with the content.
+    effective: EffectiveRoute,
+    /// What the texture currently holds.
+    content: ContentKind,
+    /// Whether staged content was computed with a rescale the pass no
+    /// longer records. Only stack and caller-view content carries this
+    /// flag. A slab's staleness is derived from its stamp instead.
+    content_stale: bool,
+    /// The format the folded table was created with. Absent on a
+    /// pre-applied route, which binds the 1x1 stand-in.
+    table_format: Option<wgpu::TextureFormat>,
     /// The colour table selected for this viewport. Absent until a selection.
     colour: Option<HeldColour>,
     /// Column-major CSS camera. Identity until `set_view`.
@@ -1007,6 +1103,11 @@ struct SlotState {
     interpolation: Interpolation,
     /// The stored texture is a host orthographic plane. A stack upload clears it.
     orthographic: bool,
+    /// Whether a surface is bound through [`RenderGraph::bind_surface`]. The
+    /// viewport draws into the texture it acquires, which no other viewport
+    /// renders into, so the grouping excludes it from its registered view
+    /// and its staleness decides only its acquired texture.
+    surface_bound: bool,
 }
 
 /// The stored-sample texture one viewport owns.
@@ -1022,6 +1123,85 @@ struct StoredTexture {
     format: wgpu::TextureFormat,
 }
 
+/// The shared route rejection, one check for both registrations.
+///
+/// A `Tabled` declaration is refused on a slab pass, whose samples the
+/// graph stages itself pre-applied, and on a segmentation overlay, which
+/// composes no VOI text. Everything else goes to the container check, so a
+/// range outside the accepted union is refused with the same error.
+/// `PreApplied` is legal on every pass.
+fn route_decision(pass: &Pass, route: StoredRoute) -> Result<(), RouteError> {
+    if matches!(route, StoredRoute::PreApplied) {
+        return Ok(());
+    }
+    match pass {
+        Pass::Slab(_) | Pass::SegOverlay(_) => Err(RouteError::PassRefusesTable),
+        Pass::Stack(_) | Pass::VolumeRaycast(_) => check_container(route),
+    }
+}
+
+/// The content half of a colour selection, one check for every caller.
+///
+/// A palette is indexed by the stored sample, so it is refused wherever the
+/// bytes are or will be modality values: on a declared-`PreApplied`
+/// viewport before any upload, and on staged pre-applied content. A
+/// non-palette table is indexed by the display value, so it is refused on
+/// raw fractional content, which has no correct stage 1 path in the shader.
+/// The device refusal keeps the previous binding either way.
+fn colour_decision(
+    palette: bool,
+    declared_pre_applied: bool,
+    content: ContentKind,
+) -> Result<(), GraphError> {
+    if palette && (declared_pre_applied || content == ContentKind::PreApplied) {
+        // The palette would index modality values as raw.
+        return Err(GraphError::ColourUnavailable);
+    }
+    if !palette && content == ContentKind::RawFractional {
+        // Raw fractional samples have no correct stage 1 path here.
+        return Err(GraphError::ColourUnavailable);
+    }
+    Ok(())
+}
+
+/// Whether a volume ray's derived container agrees with the declaration.
+///
+/// The declaration is the source of truth for the table. The bricks' own
+/// format must agree with it, and neither silently overrides the other.
+fn ray_route_agrees(declared: StoredRoute, format: wgpu::TextureFormat) -> bool {
+    let derived = match format {
+        wgpu::TextureFormat::R8Uint => StoredRoute::Tabled {
+            first: 0,
+            count: 256,
+        },
+        wgpu::TextureFormat::R16Uint => StoredRoute::Tabled {
+            first: 0,
+            count: 65_536,
+        },
+        _ => return false,
+    };
+    derived == declared
+}
+
+/// Height of the folded table for a container of `count` values.
+///
+/// `count.div_ceil(256)`, so a count that is not a multiple of the fold is
+/// accepted and its last row is padded. A truncating `count / 256` would
+/// leave the last row's values addressable only out of bounds, which WGSL
+/// resolves to zero or a neighbouring texel, quietly.
+fn modality_table_height(count: u32) -> u32 {
+    count.div_ceil(MODALITY_FOLD)
+}
+
+/// Height of the folded table a route declares, or `None` when the route
+/// declares no container.
+fn modality_table_height_of(route: StoredRoute) -> Option<u32> {
+    match route {
+        StoredRoute::Tabled { count, .. } => Some(modality_table_height(count)),
+        StoredRoute::PreApplied => None,
+    }
+}
+
 /// One registered viewport's GPU resources, created at registration.
 struct GpuSlot {
     target: wgpu::TextureView,
@@ -1029,6 +1209,14 @@ struct GpuSlot {
     /// object changes. Caller-owned views have no texture beside this one.
     source: wgpu::TextureView,
     uniform: wgpu::Buffer,
+    /// The 16-byte route uniform at group 0 binding 1.
+    route_uniform: wgpu::Buffer,
+    /// The folded modality table at group 0 binding 2. A 1x1 stand-in when
+    /// the effective route is pre-applied, which nothing reads.
+    modality_table: wgpu::Texture,
+    modality_table_view: wgpu::TextureView,
+    /// The float format the table was created with.
+    table_format: wgpu::TextureFormat,
     colour_uniform: wgpu::Buffer,
     camera: wgpu::Buffer,
     colour_texture: wgpu::Texture,
@@ -1062,6 +1250,10 @@ struct SlabStamp {
     index_bits: [u64; 3],
     samples: Vec<SlabSampleStamp>,
     blend: BlendMode,
+    /// The rescale pair the staged values were computed with, as bits. A
+    /// rescale change makes a same-image re-stage compare unequal, which is
+    /// what lets a `show_slab` after `set_voi` recover.
+    staged: (u32, u32),
 }
 
 impl SlabStamp {
@@ -1072,6 +1264,7 @@ impl SlabStamp {
             && self.step_bits == other.step_bits
             && self.index_bits == other.index_bits
             && self.samples == other.samples
+            && self.staged == other.staged
     }
 }
 
@@ -1162,6 +1355,25 @@ struct RayHeader {
     spacing_z: f32,
 }
 
+/// What an accepted upload writes, decided before anything is written.
+enum UploadContent<'a> {
+    /// The caller's raw samples. `kind` records whether every sample was
+    /// a whole integer, because a palette colour mode keeps fractional
+    /// raw content that no other route can serve. `flip_back` rewrites
+    /// the route uniform to flag 1 and the VOI uniform to the recorded
+    /// pair, because the folded table serves again.
+    Raw {
+        samples: &'a [f32],
+        kind: ContentKind,
+        flip_back: bool,
+        first: i32,
+    },
+    /// Modality values staged on the CPU with the recorded rescale.
+    /// `flip` rewrites the route uniform to flag 0 and the VOI uniform
+    /// to identity, because the texture now holds modality values.
+    PreApplied { staged: Vec<f32>, flip: bool },
+}
+
 /// The pure registration and dirty registry, sized at creation.
 struct Registry {
     states: Vec<Option<SlotState>>,
@@ -1174,7 +1386,15 @@ impl Registry {
         Self { states }
     }
 
-    fn register(&mut self, pass: Pass) -> Result<ViewportId, GraphError> {
+    fn register(&mut self, pass: Pass, route: StoredRoute) -> Result<ViewportId, GraphError> {
+        let effective = match route {
+            StoredRoute::Tabled { .. } => EffectiveRoute::Tabled,
+            StoredRoute::PreApplied => EffectiveRoute::PreApplied,
+        };
+        let content = match route {
+            StoredRoute::Tabled { .. } => ContentKind::RawIntegral,
+            StoredRoute::PreApplied => ContentKind::PreApplied,
+        };
         for (index, slot) in self.states.iter_mut().enumerate() {
             if slot.is_none() {
                 *slot = Some(SlotState {
@@ -1183,11 +1403,17 @@ impl Registry {
                     representation: ocelli_seg::Representation::Labelmap,
                     stored: None,
                     stored_format: None,
+                    route,
+                    effective,
+                    content,
+                    content_stale: false,
+                    table_format: None,
                     colour: None,
                     camera: IDENTITY_CAMERA,
                     dpr: 1.0,
                     interpolation: Interpolation::Nearest,
                     orthographic: false,
+                    surface_bound: false,
                     opacity: OpacityTable::preset(OpacityPreset::Flat),
                     shade: ShadeWeights::unlit(),
                     clip: ClipList::empty(),
@@ -1316,6 +1542,11 @@ pub struct RenderGraph {
     /// Surface textures acquired for this frame, presented after the submit.
     /// Capacity is fixed at creation so a tick does not grow it.
     frame_textures: Vec<Option<wgpu::SurfaceTexture>>,
+    /// Which viewports began a render pass on the frame now encoding.
+    /// Capacity is fixed at creation so a tick does not grow it. The
+    /// shared-target stale rule reads it to find the first pass encoded
+    /// into a target, which is the pass that clears it.
+    frame_passes: Vec<bool>,
     keys: Vec<CompiledKey>,
     pipelines: Vec<wgpu::RenderPipeline>,
     uniform_layout: wgpu::BindGroupLayout,
@@ -1336,6 +1567,9 @@ pub struct RenderGraph {
     uploads: u64,
     /// Successful `select_colour_lut` calls. `set_voi` does not touch this.
     lut_uploads: u64,
+    /// Folded-table content writes driven by `set_voi`. A registration, an
+    /// upload and a device-loss rebuild do not increment it.
+    modality_uploads: u64,
     /// One 3D texture per uploaded brick. `set_voi` does not touch this.
     bricks: BrickResidency,
     /// Bytes last accepted for each brick. Cleared with the textures.
@@ -1346,6 +1580,13 @@ pub struct RenderGraph {
     /// This is not a [`Pass`]. A viewport with no fusion binding keeps its
     /// stack pipeline. The tick encodes this view in the same encoder.
     fusion: Option<FusionGpu>,
+    /// Viewport indices whose `surface_bound` flag a grouping fixture
+    /// placed without an attached surface. The tick's grouping assert
+    /// exempts exactly these, because the fixture seam is the plan's own
+    /// sanction and any other flag without an object is a violated
+    /// invariant.
+    #[cfg(test)]
+    test_surface_exemptions: Vec<usize>,
 }
 
 /// Blend compiled for the stack and the volume ray.
@@ -1432,6 +1673,17 @@ impl RenderGraph {
         self.lut_uploads
     }
 
+    /// How many folded-table content writes `set_voi` has driven.
+    ///
+    /// One per rescale change on a declared-`Tabled` viewport, whatever the
+    /// effective route is, because rule D3 rebuilds the table so a flip-back
+    /// reads the recorded pair's values. A window-only change, a
+    /// registration, an upload and a device-loss rebuild do not increment
+    /// it.
+    pub fn modality_uploads(&self) -> u64 {
+        self.modality_uploads
+    }
+
     /// How many brick uploads have been written.
     ///
     /// One per successful [`RenderGraph::upload_brick`]. A refusal, a window
@@ -1463,6 +1715,12 @@ impl RenderGraph {
 
     /// The VOI uniform a stack viewport will draw with.
     ///
+    /// The rescale follows the viewport's effective route: the recorded
+    /// pair while the folded table serves raw integral content, identity
+    /// once the texture holds modality values, because the shader's stage 1
+    /// then returns its input and a surviving rescale would apply stage 1
+    /// twice.
+    ///
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
@@ -1475,7 +1733,11 @@ impl RenderGraph {
         ) {
             return Err(GraphError::PassHasNoUniform);
         }
-        Ok(voi_of(&state.pass))
+        let voi = voi_of(&state.pass);
+        Ok(match state.effective {
+            EffectiveRoute::PreApplied => voi.with_identity_rescale(),
+            EffectiveRoute::Tabled => voi,
+        })
     }
 
     fn slot_state(&self, id: ViewportId) -> Result<&SlotState, GraphError> {
@@ -1530,11 +1792,14 @@ impl RenderGraph {
         surfaces.resize_with(capacity, || None);
         let mut frame_textures = Vec::new();
         frame_textures.resize_with(capacity, || None);
+        let mut frame_passes = Vec::new();
+        frame_passes.resize_with(capacity, || false);
         Ok(Self {
             registry: Registry::new(capacity),
             gpu,
             surfaces,
             frame_textures,
+            frame_passes,
             keys: compiled.keys,
             pipelines: compiled.pipelines,
             uniform_layout: compiled.uniform_layout,
@@ -1551,9 +1816,12 @@ impl RenderGraph {
             submissions: 0,
             uploads: 0,
             lut_uploads: 0,
+            modality_uploads: 0,
             bricks: BrickResidency::new(),
             brick_stamps: BTreeMap::new(),
             fusion: None,
+            #[cfg(test)]
+            test_surface_exemptions: Vec::new(),
         })
     }
 
@@ -1596,25 +1864,14 @@ impl RenderGraph {
             },
             count: None,
         };
-        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ocelli graph uniform"),
-            entries: &[uniform_binding(0), uniform_binding(1), uniform_binding(2)],
-        });
-        // The ray keeps the VOI uniform at binding 0, ray params at binding 1,
-        // the 256-entry opacity table at binding 2, the shade weights at
-        // binding 3 and the clip planes at binding 4. It does not take the
-        // colour table or the camera. The stack layout stays three bindings.
-        let volume_uniform_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("ocelli volume ray uniform"),
-                entries: &[
-                    uniform_binding(0),
-                    uniform_binding(1),
-                    uniform_binding(2),
-                    uniform_binding(3),
-                    uniform_binding(4),
-                ],
-            });
+        // The stack keeps the VOI uniform at binding 0 and the route uniform
+        // and folded table at bindings 1 and 2, which `voi.wgsl` reserves.
+        // Colour moves to binding 3 and the camera to binding 4. The ray
+        // keeps the VOI uniform at binding 0, the route at 1, its table at
+        // 2, ray params at binding 3, the 256-entry opacity table at
+        // binding 4, the shade weights at binding 5 and the clip planes at
+        // binding 6. It does not take the colour table or the camera.
+        //
         // `textureLoad` has no sampler. A non-filterable float binding accepts
         // the stored float formats and `Rgba8Unorm`.
         let texture_binding = |binding| wgpu::BindGroupLayoutEntry {
@@ -1627,6 +1884,29 @@ impl RenderGraph {
             },
             count: None,
         };
+        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("ocelli graph uniform"),
+            entries: &[
+                uniform_binding(0),
+                uniform_binding(1),
+                texture_binding(2),
+                uniform_binding(3),
+                uniform_binding(4),
+            ],
+        });
+        let volume_uniform_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("ocelli volume ray uniform"),
+                entries: &[
+                    uniform_binding(0),
+                    uniform_binding(1),
+                    texture_binding(2),
+                    uniform_binding(3),
+                    uniform_binding(4),
+                    uniform_binding(5),
+                    uniform_binding(6),
+                ],
+            });
         let source_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ocelli graph source"),
             entries: &[texture_binding(0), texture_binding(1)],
@@ -1701,7 +1981,7 @@ impl RenderGraph {
         let slab_uniform_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("ocelli slab uniform"),
-                entries: &[uniform_binding(0)],
+                entries: &[uniform_binding(0), uniform_binding(1), texture_binding(2)],
             });
         let slab_value = wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -1818,29 +2098,43 @@ impl RenderGraph {
     /// Register a viewport rendering `pass` into `target` from `source`.
     ///
     /// Its uniform buffer and bind groups are created here, at registration,
-    /// and never inside a frame. It starts fully dirty.
+    /// and never inside a frame. It starts fully dirty. The `route`
+    /// declaration is checked here: a `Tabled` declaration on a pass that
+    /// stages its own samples or composes no VOI text, or a container
+    /// outside the accepted union, is refused and nothing is registered.
     ///
     /// # Errors
     ///
     /// [`GraphError::CapacityExhausted`] beyond the capacity fixed at
-    /// creation, changing no existing slot.
+    /// creation, changing no existing slot. [`GraphError::RouteInvalid`]
+    /// for a refused route declaration.
     pub fn register(
         &mut self,
         ctx: &GpuContext,
         target: wgpu::TextureView,
         source: wgpu::TextureView,
         pass: Pass,
+        route: StoredRoute,
     ) -> Result<ViewportId, GraphError> {
+        route_decision(&pass, route).map_err(|_| GraphError::RouteInvalid)?;
         let voi = voi_of(&pass);
-        let id = self.registry.register(pass)?;
-        let slot = self.create_gpu_slot(
-            ctx,
-            target,
-            source,
-            (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
-            None,
-            None,
-        );
+        // The slot is created before the registry is occupied, so a failed
+        // creation leaves no half state: no id is issued and no state exists.
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                source,
+                (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
+                None,
+                None,
+                route,
+                // No adapter is available to a caller-view registration, so
+                // the table uses the preferred stored format.
+                STORED_FORMAT,
+            )
+            .map_err(|_| GraphError::RouteInvalid)?;
+        let id = self.registry.register(pass, route)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1853,13 +2147,14 @@ impl RenderGraph {
     /// Register `pass` into `target` and create its stored-sample texture.
     ///
     /// The texture is created here, at registration.
-    /// [`selected_stored_format`] asks the adapter for `R32Float`, then
+    /// `selected_stored_format` asks the adapter for `R32Float`, then
     /// `Rg32Float`, then `Rgba32Float`. `R32Float` is used on every tier when
     /// it can be sampled and written. Tier B may use the next float format
     /// when `R32Float` cannot, because `textureLoad` still returns the stored
     /// value as `f32`. Tier A does not substitute. `Rgba8Unorm` is never
     /// chosen. The slot starts fully dirty. Nothing is copied yet, so
-    /// [`RenderGraph::uploads`] stays put.
+    /// [`RenderGraph::uploads`] stays put. The `route` declaration is checked
+    /// before anything is created.
     ///
     /// # Errors
     ///
@@ -1867,9 +2162,13 @@ impl RenderGraph {
     /// and written. [`UploadError::EmptyExtent`] when an axis is zero.
     /// [`UploadError::ExtentUnavailable`] when an axis is longer than the
     /// device `max_texture_dimension_2d`. [`UploadError::ExtentOverflow`]
-    /// when the extent does not fit the copy. Nothing is registered in those
+    /// when the extent does not fit the copy. [`UploadError::RouteInvalid`]
+    /// for a refused route declaration. Nothing is registered in those
     /// cases. [`UploadError::CapacityExhausted`] beyond the capacity fixed at
     /// creation, changing no existing slot.
+    // The route is the plan's final parameter and the rest are the existing
+    // registration shape, so the width is the API, not an accident.
+    #[allow(clippy::too_many_arguments)]
     pub fn register_stored(
         &mut self,
         ctx: &GpuContext,
@@ -1878,7 +2177,9 @@ impl RenderGraph {
         width: u32,
         height: u32,
         pass: Pass,
+        route: StoredRoute,
     ) -> Result<ViewportId, UploadError> {
+        route_decision(&pass, route).map_err(|_| UploadError::RouteInvalid)?;
         let format = selected_stored_format(adapter.wgpu_adapter(), self.tier)?;
         let upload = Upload::from_extent(
             width,
@@ -1886,14 +2187,6 @@ impl RenderGraph {
             ctx.device().limits().max_texture_dimension_2d,
         )?;
         let voi = voi_of(&pass);
-        let id = self
-            .registry
-            .register(pass)
-            .map_err(|_| UploadError::CapacityExhausted)?;
-        if let Some(state) = self.registry.state_mut(id) {
-            state.stored = Some(upload);
-            state.stored_format = Some(format);
-        }
         let texture = create_stored_texture(ctx.device(), upload, format);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let stored = StoredTexture {
@@ -1902,14 +2195,33 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(
-            ctx,
-            target,
-            view,
-            (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
-            Some(stored),
-            None,
-        );
+        // The slot is created before the registry is occupied, so a failed
+        // creation leaves no half state: no id is issued and no state exists.
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                view,
+                (voi, IDENTITY_CAMERA, 1.0, Interpolation::Nearest),
+                Some(stored),
+                None,
+                route,
+                // The table, real or stand-in, uses the format the
+                // adapter's own selection chose.
+                format,
+            )
+            .map_err(|_| UploadError::RouteInvalid)?;
+        let id = self
+            .registry
+            .register(pass, route)
+            .map_err(|_| UploadError::CapacityExhausted)?;
+        if let Some(state) = self.registry.state_mut(id) {
+            state.stored = Some(upload);
+            state.stored_format = Some(format);
+            if matches!(route, StoredRoute::Tabled { .. }) {
+                state.table_format = Some(format);
+            }
+        }
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -1919,6 +2231,10 @@ impl RenderGraph {
         Ok(id)
     }
 
+    // The arguments are the recorded state a slot is built from, the same
+    // values the registry keeps, so a rebuild after device loss can supply
+    // them again without reading live state.
+    #[allow(clippy::too_many_arguments)]
     fn create_gpu_slot(
         &self,
         ctx: &GpuContext,
@@ -1927,8 +2243,21 @@ impl RenderGraph {
         uniforms: (VoiParams, [f32; 16], f64, Interpolation),
         stored: Option<StoredTexture>,
         colour: Option<HeldColour>,
-    ) -> GpuSlot {
+        route: StoredRoute,
+        table_format: wgpu::TextureFormat,
+    ) -> Result<GpuSlot, RouteError> {
         let (voi, camera, dpr, mode) = uniforms;
+        let effective = match route {
+            StoredRoute::Tabled { .. } => EffectiveRoute::Tabled,
+            StoredRoute::PreApplied => EffectiveRoute::PreApplied,
+        };
+        // The uniform a pre-applied viewport draws with carries identity,
+        // because its texture already holds modality values. A surviving
+        // rescale would apply stage 1 twice.
+        let written = match effective {
+            EffectiveRoute::PreApplied => voi.with_identity_rescale(),
+            EffectiveRoute::Tabled => voi,
+        };
         let uploaded = device_camera(camera, dpr, mode);
         let device = ctx.device();
         // A table wider than this device is not a texture. Selection already
@@ -1938,9 +2267,13 @@ impl RenderGraph {
         });
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ocelli graph voi"),
-            contents: bytemuck::bytes_of(&voi),
+            contents: bytemuck::bytes_of(&written),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        let (route_uniform, modality_table) =
+            create_route_state(device, ctx.queue(), route, voi, table_format)?;
+        let modality_table_view =
+            modality_table.create_view(&wgpu::TextureViewDescriptor::default());
         let params = colour
             .as_ref()
             .map(|held| held.params)
@@ -1967,19 +2300,31 @@ impl RenderGraph {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: colour_uniform.as_entire_binding(),
+                    resource: route_uniform.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&modality_table_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: colour_uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: camera_buffer.as_entire_binding(),
                 },
             ],
         });
         let bind_source = self.bind_source_group(device, &source, &colour_view);
-        GpuSlot {
+        Ok(GpuSlot {
             target,
             source,
             uniform,
+            route_uniform,
+            modality_table,
+            modality_table_view,
+            table_format,
             colour_uniform,
             camera: camera_buffer,
             colour_texture,
@@ -1989,7 +2334,7 @@ impl RenderGraph {
             ray: None,
             slab: None,
             labelmap: None,
-        }
+        })
     }
 
     fn bind_source_group(
@@ -2053,6 +2398,13 @@ impl RenderGraph {
     /// `get_current_texture`, which panics on a surface that was never
     /// configured.
     ///
+    /// A bound viewport draws into the texture it acquires, so the graph
+    /// groups it with no other viewport: no viewport sharing its registered
+    /// view is marked or held back by its staleness, and its staleness
+    /// decides only whether it draws. The first pass into the acquired
+    /// texture clears it, because an acquired texture's contents are
+    /// undefined.
+    ///
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
@@ -2085,6 +2437,7 @@ impl RenderGraph {
         });
         if let Some(state) = self.registry.state_mut(id) {
             state.dirty.camera = true;
+            state.surface_bound = true;
         }
         Ok(())
     }
@@ -2148,7 +2501,11 @@ impl RenderGraph {
     /// `install_recovered` drops every per-viewport object the dead device
     /// owned. The caller re-supplies the target and source views on the new
     /// device, and this recreates the uniform buffer and bind groups from
-    /// the pass the registry still holds.
+    /// the pass the registry still holds. The fresh view is by contract
+    /// content staged with the recorded chain, so the effective route is
+    /// reset to the declaration, the content-stale flag is reset and the
+    /// slot is marked fully dirty: the tick skips a slot with no dirty
+    /// bits, and a stale frame already cleared them.
     ///
     /// # Errors
     ///
@@ -2162,7 +2519,7 @@ impl RenderGraph {
         target: wgpu::TextureView,
         source: wgpu::TextureView,
     ) -> Result<(), GraphError> {
-        let (voi, camera, dpr, interpolation, colour) = {
+        let (voi, camera, dpr, interpolation, colour, route) = {
             let state = self
                 .registry
                 .states
@@ -2178,16 +2535,35 @@ impl RenderGraph {
                 state.dpr,
                 state.interpolation,
                 state.colour.clone(),
+                state.route,
             )
         };
-        let slot = self.create_gpu_slot(
-            ctx,
-            target,
-            source,
-            (voi, camera, dpr, interpolation),
-            None,
-            colour,
-        );
+        if let Some(state) = self.registry.state_mut(id) {
+            state.effective = match route {
+                StoredRoute::Tabled { .. } => EffectiveRoute::Tabled,
+                StoredRoute::PreApplied => EffectiveRoute::PreApplied,
+            };
+            state.content = match route {
+                StoredRoute::Tabled { .. } => ContentKind::RawIntegral,
+                StoredRoute::PreApplied => ContentKind::PreApplied,
+            };
+            state.content_stale = false;
+            state.dirty = Dirty::full();
+        }
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                source,
+                (voi, camera, dpr, interpolation),
+                None,
+                colour,
+                route,
+                // No adapter is available to a caller-view rebind, so the
+                // table uses the preferred stored format.
+                STORED_FORMAT,
+            )
+            .map_err(|_| GraphError::RouteInvalid)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2203,7 +2579,10 @@ impl RenderGraph {
     /// creates it again at the extent registration recorded and does not
     /// increment [`RenderGraph::uploads`] or [`RenderGraph::lut_uploads`].
     /// A colour table the registry still holds is written again here. The
-    /// caller then uploads samples.
+    /// caller then uploads samples. The route state is restored from the
+    /// registry, the effective route resets to the declaration, the content
+    /// and stale flags clear, the table rebuilds from the pass's rescale,
+    /// and the slot is marked fully dirty.
     ///
     /// # Errors
     ///
@@ -2222,7 +2601,7 @@ impl RenderGraph {
         id: ViewportId,
         target: wgpu::TextureView,
     ) -> Result<(), UploadError> {
-        let (upload, voi, camera, dpr, interpolation, format, colour) = {
+        let (upload, voi, camera, dpr, interpolation, format, colour, route, table_format) = {
             let state = self
                 .registry
                 .states
@@ -2239,6 +2618,8 @@ impl RenderGraph {
                 state.interpolation,
                 format,
                 state.colour.clone(),
+                state.route,
+                state.table_format,
             )
         };
         let features = adapter.wgpu_adapter().get_texture_format_features(format);
@@ -2258,14 +2639,33 @@ impl RenderGraph {
             height: upload.height(),
             format,
         };
-        let slot = self.create_gpu_slot(
-            ctx,
-            target,
-            view,
-            (voi, camera, dpr, interpolation),
-            Some(stored),
-            colour,
-        );
+        if let Some(state) = self.registry.state_mut(id) {
+            state.effective = match route {
+                StoredRoute::Tabled { .. } => EffectiveRoute::Tabled,
+                StoredRoute::PreApplied => EffectiveRoute::PreApplied,
+            };
+            state.content = match route {
+                StoredRoute::Tabled { .. } => ContentKind::RawIntegral,
+                StoredRoute::PreApplied => ContentKind::PreApplied,
+            };
+            state.content_stale = false;
+            state.dirty = Dirty::full();
+        }
+        let slot = self
+            .create_gpu_slot(
+                ctx,
+                target,
+                view,
+                (voi, camera, dpr, interpolation),
+                Some(stored),
+                colour,
+                route,
+                // The remembered table format for a tabled route, and the
+                // remembered stored format for a pre-applied one, whose
+                // stand-in follows the same selection.
+                table_format.unwrap_or(format),
+            )
+            .map_err(|_| UploadError::RouteInvalid)?;
         if let Some(held) = self
             .gpu
             .get_mut(usize::try_from(id.0).unwrap_or(usize::MAX))
@@ -2298,10 +2698,27 @@ impl RenderGraph {
     /// Write a resolved chain's thirty-two uniform bytes and mark VOI dirty.
     ///
     /// This is the only route that sets the VOI flag, so a window change
-    /// cannot update bytes without scheduling the frame that shows them.
+    /// cannot update bytes without scheduling the frame that shows it.
     /// It does not increment [`RenderGraph::uploads`],
     /// [`RenderGraph::lut_uploads`] or [`RenderGraph::brick_uploads`], and
     /// it does not write the stored texture, the colour table or a brick.
+    /// A rescale change on a declared-`Tabled` viewport rebuilds the folded
+    /// table in place once and increments [`RenderGraph::modality_uploads`],
+    /// whatever the effective route is, because the table must hold the
+    /// recorded pair's values when an integral upload flips back to it.
+    /// When the content is currently pre-applied that rebuild marks it
+    /// stale: its staged bytes were computed with the old pair, and the
+    /// written VOI uniform carries identity until a pre-apply or a rebind
+    /// replaces them. On a declared-`PreApplied` viewport a rescale change
+    /// records the chain and marks the content stale, because the raw
+    /// samples are gone and the next pre-apply reads the recorded pair.
+    /// The uniform's rescale follows the effective route: the real pair
+    /// while the table serves, identity while the texture holds modality
+    /// values. The stale content feeds the frame's shared-target rule: on
+    /// every tick that reaches the frame's encode while the staleness
+    /// lasts, the graph marks every viewport rendering into the same target
+    /// dirty, the first pass encoded into the target clears it, and the
+    /// stale viewport's own pass draws nothing.
     ///
     /// Validation runs state first and the chain last, so the answer names
     /// the first thing that is wrong in the order a caller can act on it.
@@ -2346,13 +2763,56 @@ impl RenderGraph {
             return Err(GraphError::ViewportNotRebound);
         }
         let params = VoiParams::from_chain(chain)?;
+        let (declared, effective, content, old_pair) = {
+            let state = self
+                .registry
+                .states
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            let voi = voi_of(&state.pass);
+            (
+                state.route,
+                state.effective,
+                state.content,
+                (voi.slope, voi.intercept),
+            )
+        };
+        // As bits, like the slab stamp's staged pair and the fusion stamp's:
+        // `0.0` and `-0.0` are equal values and different recorded pairs.
+        let rescale_changed = (old_pair.0.to_bits(), old_pair.1.to_bits())
+            != (params.slope.to_bits(), params.intercept.to_bits());
+        let written = match effective {
+            EffectiveRoute::PreApplied => params.with_identity_rescale(),
+            EffectiveRoute::Tabled => params,
+        };
+        // The table is refilled before the uniform is written, so a failed
+        // refill leaves the old uniform over the old table, one consistent
+        // old frame, instead of new uniform bytes over old table entries.
+        if matches!(declared, StoredRoute::Tabled { .. }) && rescale_changed {
+            let slot = self
+                .gpu
+                .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::ViewportNotRebound)?;
+            let table_format = slot.table_format;
+            self.refill_modality_table(
+                ctx,
+                id,
+                slot,
+                params.slope,
+                params.intercept,
+                table_format,
+            )?;
+            self.modality_uploads += 1;
+        }
         let slot = self
             .gpu
             .get(usize::try_from(id.0).unwrap_or(usize::MAX))
             .and_then(Option::as_ref)
             .ok_or(GraphError::ViewportNotRebound)?;
         ctx.queue()
-            .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&params));
+            .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&written));
         if let Some(state) = self.registry.state_mut(id) {
             match &mut state.pass {
                 Pass::Stack(stack) => stack.voi = params,
@@ -2362,7 +2822,71 @@ impl RenderGraph {
             }
             state.dirty.voi = true;
         }
+        if content == ContentKind::PreApplied && rescale_changed {
+            // The raw samples are gone and the texture holds modality values
+            // computed with the old pair. Refusing here would pin the old
+            // rescale forever, because the recorded chain is the only thing
+            // the next pre-apply reads. A slab carries no stored flag: its
+            // staleness is derived from its stamp's staged pair.
+            if let Some(state) = self.registry.state_mut(id)
+                && !matches!(state.pass, Pass::Slab(_))
+            {
+                state.content_stale = true;
+            }
+        }
         Ok(())
+    }
+
+    /// Rewrite the folded table's content in place with a new rescale pair.
+    ///
+    /// One `write_texture` into the same texture. The extent never changes
+    /// after registration, because the container range is fixed, so no bind
+    /// group is rebuilt and nothing is allocated in the frame loop.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphError::UnknownViewport`] for an id this graph never issued,
+    /// or [`GraphError::RouteInvalid`] when the recorded route no longer
+    /// fills, which cannot happen after the registration check.
+    fn refill_modality_table(
+        &self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        slot: &GpuSlot,
+        slope: f32,
+        intercept: f32,
+        table_format: wgpu::TextureFormat,
+    ) -> Result<(), GraphError> {
+        let state = self
+            .registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(GraphError::UnknownViewport)?;
+        let height = modality_table_height_of(state.route).ok_or(GraphError::RouteInvalid)?;
+        let entries = usize::try_from(
+            MODALITY_FOLD
+                .checked_mul(height)
+                .ok_or(GraphError::RouteInvalid)?,
+        )
+        .map_err(|_| GraphError::RouteInvalid)?;
+        let mut data = vec![0.0_f32; entries];
+        fill_modality_table(state.route, slope, intercept, &mut data)
+            .map_err(|_| GraphError::RouteInvalid)?;
+        let upload = Upload::from_extent(
+            MODALITY_FOLD,
+            height,
+            ctx.device().limits().max_texture_dimension_2d,
+        )
+        .map_err(|_| GraphError::RouteInvalid)?;
+        write_stored_samples(
+            ctx.queue(),
+            &slot.modality_table,
+            upload,
+            table_format,
+            &data,
+        )
+        .map_err(|_| GraphError::RouteInvalid)
     }
 
     /// Write the CSS camera and the device pixel ratio, and mark the camera dirty.
@@ -2509,14 +3033,22 @@ impl RenderGraph {
     /// A palette is indexed by the stored sample. The bytes are the table
     /// [`ColourLut`] already baked, so the shader does not walk the descriptor.
     ///
+    /// A palette is refused on a declared-`PreApplied` viewport before any
+    /// upload, because every upload that viewport accepts will stage
+    /// modality values and the palette would index them as raw, and on
+    /// staged pre-applied content for the same reason. A non-palette table
+    /// is refused on raw fractional content, which has no correct stage 1
+    /// path in the shader. Each refusal preserves the previous binding.
+    ///
     /// # Errors
     ///
     /// [`GraphError::UnknownViewport`] for an id this graph never issued.
     /// [`GraphError::ViewportNotRebound`] when a rebuild has not yet
     /// recreated the slot. [`GraphError::ColourUnavailable`] when
     /// `Rgba8Unorm` cannot be sampled and copied, the table has no texels,
-    /// or the table is wider than the device `max_texture_dimension_2d`.
-    /// Nothing is counted in that case. The texture is not created.
+    /// or the table is wider than the device `max_texture_dimension_2d`, or
+    /// for one of the content refusals above. Nothing is counted in that
+    /// case. The texture is not created.
     pub fn select_colour_lut(
         &mut self,
         ctx: &GpuContext,
@@ -2525,19 +3057,24 @@ impl RenderGraph {
         lut: &ColourLut,
     ) -> Result<(), GraphError> {
         let index = usize::try_from(id.0).unwrap_or(usize::MAX);
-        let known = self
-            .registry
-            .states
-            .get(index)
-            .and_then(Option::as_ref)
-            .is_some();
-        if !known {
-            return Err(GraphError::UnknownViewport);
-        }
+        let (declared_pre_applied, content) = {
+            let state = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(GraphError::UnknownViewport)?;
+            (
+                matches!(state.route, StoredRoute::PreApplied),
+                state.content,
+            )
+        };
         let rebound = self.gpu.get(index).and_then(Option::as_ref).is_some();
         if !rebound {
             return Err(GraphError::ViewportNotRebound);
         }
+        let palette = lut.mode() == 2;
+        colour_decision(palette, declared_pre_applied, content)?;
         let features = adapter
             .wgpu_adapter()
             .get_texture_format_features(COLOUR_LUT_FORMAT);
@@ -2587,10 +3124,12 @@ impl RenderGraph {
     /// length must be `width * height`. A wrong length returns before the copy
     /// and before [`RenderGraph::uploads`] changes. A matching extent reuses
     /// the texture. A different extent replaces it at this call, after asking
-    /// the adapter for the format registration remembered. The `R32Float` copy
-    /// uses `bytemuck::cast_slice` on the caller slice and allocates no
-    /// buffer. A wider float format pads the `.r` sample at this call, which
-    /// is an upload and not a frame.
+    /// the adapter for the format registration remembered. Two cases name the
+    /// allocation: the `R32Float` copy of raw samples uses
+    /// `bytemuck::cast_slice` on the caller slice and allocates no buffer,
+    /// while a pre-applied upload or a wider float format stages a scratch
+    /// `Vec` at this call and frees it before returning, which is an upload
+    /// and not a frame.
     /// `uploads` increments by one and `Dirty.data` is set. Samples are not
     /// clamped.
     ///
@@ -2603,8 +3142,9 @@ impl RenderGraph {
     /// rebuild has not yet recreated the slot. [`UploadError::FormatUnavailable`]
     /// when a new extent cannot be sampled, in which case the old texture
     /// stays. [`UploadError::ExtentUnavailable`] when an axis is longer than
-    /// the device `max_texture_dimension_2d`. The old texture stays and
-    /// `uploads` does not change.
+    /// the device `max_texture_dimension_2d`. [`UploadError::SampleOutsideTable`]
+    /// when an all-integral upload has a sample outside the declared
+    /// container range. The old texture stays and `uploads` does not change.
     pub fn upload_stored(
         &mut self,
         ctx: &GpuContext,
@@ -2631,6 +3171,9 @@ impl RenderGraph {
         if !slot_present {
             return Err(UploadError::NotRebound);
         }
+        // The content decision reads the state before anything is written,
+        // so a refusal below leaves the old texture and the old content.
+        let decision = self.route_upload_decision(id, samples)?;
         if current.width() != upload.width() || current.height() != upload.height() {
             let features = adapter.wgpu_adapter().get_texture_format_features(format);
             if !binding_available(features) {
@@ -2638,7 +3181,11 @@ impl RenderGraph {
             }
             self.replace_stored(ctx, id, upload, format)?;
         }
-        self.write_slot(ctx, id, upload, samples)?;
+        let to_write: &[f32] = match &decision {
+            UploadContent::Raw { samples, .. } => samples,
+            UploadContent::PreApplied { staged, .. } => staged,
+        };
+        self.write_slot(ctx, id, upload, to_write)?;
         self.uploads += 1;
         if let Some(state) = self.registry.state_mut(id) {
             state.stored = Some(upload);
@@ -2646,6 +3193,164 @@ impl RenderGraph {
             // A stack upload replaces a host reslice. `show_ortho` sets this
             // again after its own upload returns.
             state.orthographic = false;
+        }
+        self.apply_upload_decision(ctx, id, &decision)?;
+        Ok(())
+    }
+
+    /// Decide what an accepted upload writes and which flags it moves.
+    ///
+    /// A declared-`Tabled` viewport writes raw while every sample is a whole
+    /// integer inside the declared container, and refuses
+    /// [`UploadError::SampleOutsideTable`] without writing when one is
+    /// outside. Any fractional sample pre-applies stage 1 on the CPU with
+    /// the pass's recorded rescale, unless the viewport's colour mode is 2,
+    /// whose palette indexes the raw sample and whose branches never reach
+    /// stage 1. A declared-`PreApplied` viewport always pre-applies. The
+    /// flip-back rewrites the route uniform and the VOI uniform so the table
+    /// serves again, which is why rule D3 rebuilt it on the rescale change.
+    fn route_upload_decision<'a>(
+        &self,
+        id: ViewportId,
+        samples: &'a [f32],
+    ) -> Result<UploadContent<'a>, UploadError> {
+        let state = self
+            .registry
+            .states
+            .get(usize::try_from(id.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .ok_or(UploadError::UnknownViewport)?;
+        let voi = voi_of(&state.pass);
+        let colour_mode_2 = state
+            .colour
+            .as_ref()
+            .map(|held| held.params.mode == 2)
+            .unwrap_or(false);
+        match state.route {
+            StoredRoute::Tabled { first, count } => {
+                let all_integral = samples.iter().all(|sample| sample.fract() == 0.0);
+                if all_integral {
+                    let span = i64::from(count) - 1;
+                    let last = i64::from(first)
+                        .checked_add(span)
+                        .ok_or(UploadError::SampleOutsideTable)?;
+                    // The bounds go through the 16-bit types, exact for
+                    // every value the accepted union covers.
+                    let low = container_value(i64::from(first))?;
+                    let high = container_value(last)?;
+                    if samples.iter().any(|sample| *sample < low || *sample > high) {
+                        return Err(UploadError::SampleOutsideTable);
+                    }
+                    let flip_back = state.effective == EffectiveRoute::PreApplied;
+                    return Ok(UploadContent::Raw {
+                        samples,
+                        kind: ContentKind::RawIntegral,
+                        flip_back,
+                        first,
+                    });
+                }
+                if colour_mode_2 {
+                    return Ok(UploadContent::Raw {
+                        samples,
+                        kind: ContentKind::RawFractional,
+                        flip_back: false,
+                        first,
+                    });
+                }
+                Ok(UploadContent::PreApplied {
+                    staged: pre_apply(samples, voi.slope, voi.intercept),
+                    flip: state.effective == EffectiveRoute::Tabled,
+                })
+            }
+            StoredRoute::PreApplied => Ok(UploadContent::PreApplied {
+                staged: pre_apply(samples, voi.slope, voi.intercept),
+                flip: false,
+            }),
+        }
+    }
+
+    /// Write the bytes a decision named and move the flags and uniforms it
+    /// implies. Runs after the texture write, so a refusal above changed
+    /// nothing.
+    fn apply_upload_decision(
+        &mut self,
+        ctx: &GpuContext,
+        id: ViewportId,
+        decision: &UploadContent<'_>,
+    ) -> Result<(), UploadError> {
+        let index = usize::try_from(id.0).unwrap_or(usize::MAX);
+        let voi = {
+            let state = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(UploadError::UnknownViewport)?;
+            voi_of(&state.pass)
+        };
+        let slot = self
+            .gpu
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or(UploadError::NotRebound)?;
+        match decision {
+            UploadContent::Raw {
+                flip_back, first, ..
+            } => {
+                if *flip_back {
+                    ctx.queue().write_buffer(
+                        &slot.route_uniform,
+                        0,
+                        bytemuck::bytes_of(&ModalityRoute {
+                            tabled: 1,
+                            first: *first,
+                            fold: MODALITY_FOLD,
+                            pad: 0,
+                        }),
+                    );
+                    ctx.queue()
+                        .write_buffer(&slot.uniform, 0, bytemuck::bytes_of(&voi));
+                }
+            }
+            UploadContent::PreApplied { flip, .. } => {
+                if *flip {
+                    ctx.queue().write_buffer(
+                        &slot.route_uniform,
+                        0,
+                        bytemuck::bytes_of(&ModalityRoute {
+                            tabled: 0,
+                            first: 0,
+                            fold: MODALITY_FOLD,
+                            pad: 0,
+                        }),
+                    );
+                    ctx.queue().write_buffer(
+                        &slot.uniform,
+                        0,
+                        bytemuck::bytes_of(&voi.with_identity_rescale()),
+                    );
+                }
+            }
+        }
+        if let Some(state) = self.registry.state_mut(id) {
+            match decision {
+                UploadContent::Raw {
+                    kind, flip_back, ..
+                } => {
+                    state.content = *kind;
+                    state.content_stale = false;
+                    if *flip_back {
+                        state.effective = EffectiveRoute::Tabled;
+                    }
+                }
+                UploadContent::PreApplied { flip, .. } => {
+                    state.content = ContentKind::PreApplied;
+                    state.content_stale = false;
+                    if *flip {
+                        state.effective = EffectiveRoute::PreApplied;
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -2828,7 +3533,7 @@ impl RenderGraph {
         if ready_bricks > self.brick_slots {
             return Err(GraphError::SampledTextureLimit);
         }
-        let (axis, from_far, opacity, shade, clip) = {
+        let (axis, from_far, opacity, shade, clip, declared) = {
             let state = self.slot_state(id)?;
             match &state.pass {
                 Pass::VolumeRaycast(volume) => (
@@ -2837,6 +3542,7 @@ impl RenderGraph {
                     state.opacity,
                     state.shade,
                     state.clip,
+                    state.route,
                 ),
                 _ => return Err(GraphError::RayUnavailable),
             }
@@ -2901,6 +3607,14 @@ impl RenderGraph {
             if extent[0] < need[0] || extent[1] < need[1] || extent[2] < need[2] {
                 return Err(GraphError::RayUnavailable);
             }
+        }
+        // The declaration is the source of truth for the table. The bricks'
+        // own format must agree with it, and neither silently overrides the
+        // other: a PreApplied declaration cannot serve raw integer bricks,
+        // and a Tabled declaration for the wrong container is refused.
+        let brick_format = brick_format.ok_or(GraphError::RayUnavailable)?;
+        if !ray_route_agrees(declared, brick_format) {
+            return Err(GraphError::RayUnavailable);
         }
         let needed = wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST;
         let residency_features = adapter
@@ -3032,18 +3746,26 @@ impl RenderGraph {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: params_buffer.as_entire_binding(),
+                        resource: slot.route_uniform.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: opacity_buffer.as_entire_binding(),
+                        resource: wgpu::BindingResource::TextureView(&slot.modality_table_view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 3,
-                        resource: shade_buffer.as_entire_binding(),
+                        resource: params_buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 4,
+                        resource: opacity_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: shade_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
                         resource: clip_buffer.as_entire_binding(),
                     },
                 ],
@@ -3491,7 +4213,20 @@ impl RenderGraph {
         if self.gpu.get(index).and_then(Option::as_ref).is_none() {
             return Err(UploadError::NotRebound);
         }
-        let incoming = slab_stamp(image, blend)?;
+        // The incoming stamp is computed from the pass's current pair, so a
+        // rescale change makes a same-image re-stage compare unequal and
+        // re-stage with the new pair instead of returning early.
+        let staged = {
+            let state = self
+                .registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or(UploadError::UnknownViewport)?;
+            let voi = voi_of(&state.pass);
+            (voi.slope, voi.intercept)
+        };
+        let incoming = slab_stamp(image, blend, staged)?;
         let held = self
             .gpu
             .get(index)
@@ -3500,6 +4235,9 @@ impl RenderGraph {
             .map(|binding| binding.stamp.clone());
         if let Some(held) = held {
             if held == incoming {
+                // Equal content re-stages nothing, but it marks data dirty so
+                // a frame that a stale clear wiped draws again.
+                self.mark_slab_blend(id, blend);
                 return Ok(());
             }
             if held.same_pixels(&incoming) {
@@ -3516,7 +4254,7 @@ impl RenderGraph {
             }
         }
         let format = selected_stored_format(adapter.wgpu_adapter(), self.tier)?;
-        let staged = {
+        let staged_binding = {
             let slot = self
                 .gpu
                 .get(index)
@@ -3527,13 +4265,16 @@ impl RenderGraph {
                 &self.slab_uniform_layout,
                 &self.slab_source_layout,
                 &slot.uniform,
+                &slot.route_uniform,
+                &slot.modality_table_view,
                 image,
+                staged,
                 format,
                 incoming,
             )?
         };
         if let Some(slot) = self.gpu.get_mut(index).and_then(Option::as_mut) {
-            slot.slab = Some(staged);
+            slot.slab = Some(staged_binding);
         }
         self.mark_slab_blend(id, blend);
         Ok(())
@@ -3873,7 +4614,38 @@ impl RenderGraph {
         }
         for state in self.registry.states.iter_mut().flatten() {
             state.dirty = Dirty::full();
+            // The surfaces were dropped with the dead device and the shell
+            // re-binds them, so the bound state clears with them.
+            state.surface_bound = false;
         }
+    }
+
+    /// Place `SlotState::surface_bound` for a grouping fixture.
+    ///
+    /// The fixtures hold no bound object, because a native surface needs a
+    /// window handle the harness cannot fabricate, and the plan sanctions
+    /// placing the flag through the registry. The tick's grouping assert
+    /// reads both directions, so a flag without an object is a violation
+    /// everywhere except this sanctioned seam: the helper records the index
+    /// so the assert exempts exactly the fixture placements.
+    #[cfg(test)]
+    fn place_surface_bound_for_fixture(&mut self, index: usize) {
+        if let Some(Some(state)) = self.registry.states.get_mut(index) {
+            state.surface_bound = true;
+        }
+        self.test_surface_exemptions.push(index);
+    }
+
+    /// Whether `index` is a sanctioned fixture placement of the bound flag.
+    #[cfg(test)]
+    fn surface_flag_exempt(&self, index: usize) -> bool {
+        self.test_surface_exemptions.contains(&index)
+    }
+
+    /// No fixture seam exists outside a test build, so nothing is exempt.
+    #[cfg(not(test))]
+    fn surface_flag_exempt(&self, _index: usize) -> bool {
+        false
     }
 
     /// One frame tick, driven by the caller's requestAnimationFrame.
@@ -3893,6 +4665,26 @@ impl RenderGraph {
             self.discard_frame_textures();
             return FrameOutcome::DeviceLost;
         }
+        // The acquisition and the colour attachment read the attached
+        // surface and the grouping reads the bound flag, so the two must
+        // agree in both directions: an attached surface is marked bound,
+        // and a marked bound viewport has an attached surface.
+        // `bind_surface` writes both together and the dead-device rebuild
+        // clears both together. The surface grouping fixture is the one
+        // sanctioned placement of the flag without an object, and its
+        // index is in the exemption set the placement helper records.
+        debug_assert!(
+            self.surfaces.iter().enumerate().all(|(index, attached)| {
+                let bound = self
+                    .registry
+                    .states
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|state| state.surface_bound);
+                (attached.is_some() == bound) || self.surface_flag_exempt(index)
+            }),
+            "surface grouping: an attached surface must be marked bound and a marked bound viewport must have an attached surface"
+        );
         let mut first_unavailable: Option<ViewportId> = None;
         let mut any_encodable = false;
         for (index, state) in self.registry.states.iter().enumerate() {
@@ -3923,6 +4715,7 @@ impl RenderGraph {
                 None => FrameOutcome::Noop,
             };
         }
+        self.mark_shared_targets_stale();
         self.acquire_dirty_surfaces();
         self.encode_frame(ctx, first_unavailable)
     }
@@ -3930,6 +4723,48 @@ impl RenderGraph {
     fn discard_frame_textures(&mut self) {
         for held in &mut self.frame_textures {
             *held = None;
+        }
+    }
+
+    /// Mark every viewport rendering into a stale target dirty for this frame.
+    ///
+    /// The shared-target stale rule, from the lead amendment after
+    /// implementation review pass 2: when any viewport rendering into a
+    /// target is stale on a frame, every viewport rendering into that
+    /// target is marked dirty, so the frame recomposites. The first pass
+    /// encoded into the target then clears it, the fresh viewports redraw
+    /// beneath the stale one, and the stale pass itself draws nothing.
+    /// Without the marking, a viewport that is alone dirty on the target
+    /// would clear or load against a composite a stale viewport must stop
+    /// holding.
+    ///
+    /// A surface-bound viewport is skipped both ways. It draws into the
+    /// texture it acquires, which no other viewport renders into, so its
+    /// staleness marks no co-target, and no co-target's staleness marks it.
+    ///
+    /// This runs after the frame is known to encode and before the surface
+    /// textures are acquired. A tick that returns before the encode marks
+    /// nothing.
+    fn mark_shared_targets_stale(&mut self) {
+        let RenderGraph { registry, gpu, .. } = self;
+        for index in 0..gpu.len() {
+            if gpu.get(index).and_then(Option::as_ref).is_none() {
+                continue;
+            }
+            let bound = registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|state| state.surface_bound);
+            if bound {
+                continue;
+            }
+            if !target_is_stale(registry, gpu, index) {
+                continue;
+            }
+            if let Some(state) = registry.states.get_mut(index).and_then(Option::as_mut) {
+                state.dirty.data = true;
+            }
         }
     }
 
@@ -3979,6 +4814,7 @@ impl RenderGraph {
             gpu,
             surfaces,
             frame_textures,
+            frame_passes,
             pipelines,
             keys,
             submissions,
@@ -3990,6 +4826,7 @@ impl RenderGraph {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("ocelli render graph frame"),
             });
+        frame_passes.fill(false);
         let mut encoded: u32 = 0;
         for index in 0..registry.states.len() {
             let key = {
@@ -4016,6 +4853,34 @@ impl RenderGraph {
             if !gpu_binding_ready(key.pass, Some(slot)) {
                 continue;
             }
+            // A stale viewport draws nothing: its staged bytes were computed
+            // with a rescale the pass no longer records. A slab's staleness
+            // is derived from its stamp's staged pair, never stored, so it
+            // cannot outlive a return to the staged pair. The pass still
+            // begins, and the load op below decides what it reads. The load
+            // op's rule is `frame_load_op`'s, which documents it once.
+            let stale = viewport_is_stale(registry, gpu, index);
+            let bound = registry
+                .states
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_some_and(|state| state.surface_bound);
+            // The grouping answers belong to the registered texture. A bound
+            // viewport draws into the texture it acquires, which no other
+            // viewport renders into, so the grouping answers nothing for it
+            // and the bound branch of the load op decides alone.
+            let load = if bound {
+                frame_load_op(true, false, false, key.pass)
+            } else {
+                let stale_target = target_is_stale(registry, gpu, index);
+                let first_into_target = {
+                    let texture = slot.target.texture();
+                    !slots_on_texture(registry, gpu, texture)
+                        .take_while(|other| *other < index)
+                        .any(|other| frame_passes.get(other).copied().unwrap_or(false))
+                };
+                frame_load_op(false, stale_target, first_into_target, key.pass)
+            };
             let has_surface = surfaces.get(index).and_then(Option::as_ref).is_some();
             let surface_view = frame_textures
                 .get(index)
@@ -4030,6 +4895,9 @@ impl RenderGraph {
             let caller = &slot.target;
             let view = surface_view.as_ref().unwrap_or(caller);
             {
+                if let Some(begun) = frame_passes.get_mut(index) {
+                    *begun = true;
+                }
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("ocelli render graph pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -4037,39 +4905,38 @@ impl RenderGraph {
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: if key.pass == PassKind::Slab {
-                                wgpu::LoadOp::Load
-                            } else {
-                                wgpu::LoadOp::Clear(wgpu::Color::BLACK)
-                            },
+                            load,
                             store: wgpu::StoreOp::Store,
                         },
                     })],
                     ..Default::default()
                 });
-                pass.set_pipeline(pipeline);
-                if let Some(ray) = slot
-                    .ray
-                    .as_ref()
-                    .filter(|_| key.pass == PassKind::VolumeRaycast)
-                {
-                    pass.set_bind_group(0, &ray.bind_uniform, &[]);
-                    pass.set_bind_group(1, &ray.bind_source, &[]);
-                } else if let Some(slab) = slot.slab.as_ref().filter(|_| key.pass == PassKind::Slab)
-                {
-                    pass.set_bind_group(0, &slab.bind_uniform, &[]);
-                    pass.set_bind_group(1, &slab.bind_source, &[]);
-                } else if let Some(label) = slot
-                    .labelmap
-                    .as_ref()
-                    .filter(|_| key.pass == PassKind::SegOverlay)
-                {
-                    pass.set_bind_group(0, &label.bind, &[]);
-                } else if key.pass != PassKind::SegOverlay {
-                    pass.set_bind_group(0, &slot.bind_uniform, &[]);
-                    pass.set_bind_group(1, &slot.bind_source, &[]);
+                if !stale {
+                    pass.set_pipeline(pipeline);
+                    if let Some(ray) = slot
+                        .ray
+                        .as_ref()
+                        .filter(|_| key.pass == PassKind::VolumeRaycast)
+                    {
+                        pass.set_bind_group(0, &ray.bind_uniform, &[]);
+                        pass.set_bind_group(1, &ray.bind_source, &[]);
+                    } else if let Some(slab) =
+                        slot.slab.as_ref().filter(|_| key.pass == PassKind::Slab)
+                    {
+                        pass.set_bind_group(0, &slab.bind_uniform, &[]);
+                        pass.set_bind_group(1, &slab.bind_source, &[]);
+                    } else if let Some(label) = slot
+                        .labelmap
+                        .as_ref()
+                        .filter(|_| key.pass == PassKind::SegOverlay)
+                    {
+                        pass.set_bind_group(0, &label.bind, &[]);
+                    } else if key.pass != PassKind::SegOverlay {
+                        pass.set_bind_group(0, &slot.bind_uniform, &[]);
+                        pass.set_bind_group(1, &slot.bind_source, &[]);
+                    }
+                    pass.draw(0..3, 0..1);
                 }
-                pass.draw(0..3, 0..1);
             }
             encoded += 1;
             if let Some(state) = registry.states.get_mut(index).and_then(Option::as_mut) {
@@ -4202,6 +5069,110 @@ fn gpu_binding_ready(kind: PassKind, slot: Option<&GpuSlot>) -> bool {
     }
 }
 
+/// Whether this viewport's content is stale on the frame now encoding.
+///
+/// A stack's or a caller view's staleness is the stored flag, which a
+/// rescale change sets when the texture holds modality values computed
+/// with an old pair. A slab's staleness is derived, never stored: its
+/// stamp's staged pair against the pass's recorded pair. A volume ray is
+/// never stale.
+fn viewport_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize) -> bool {
+    let Some(state) = registry.states.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    match state.pass.kind() {
+        PassKind::Slab => {
+            let recorded = voi_of(&state.pass);
+            let staged = gpu
+                .get(index)
+                .and_then(Option::as_ref)
+                .and_then(|slot| slot.slab.as_ref())
+                .map(|binding| binding.stamp.staged);
+            match staged {
+                Some(staged) => staged != (recorded.slope.to_bits(), recorded.intercept.to_bits()),
+                None => false,
+            }
+        }
+        PassKind::VolumeRaycast => false,
+        _ => state.content_stale,
+    }
+}
+
+/// The slot indices whose target renders into `texture`.
+///
+/// Two views of one texture are different view objects, so the comparison
+/// goes through the texture each view names, which wgpu compares by
+/// resource identity. A slot with a bound surface is never returned: it
+/// draws into the texture it acquires, which no other slot renders into,
+/// so it groups with no other viewport.
+fn slots_on_texture<'a>(
+    registry: &'a Registry,
+    gpu: &'a [Option<GpuSlot>],
+    texture: &'a wgpu::Texture,
+) -> impl Iterator<Item = usize> + 'a {
+    gpu.iter().enumerate().filter_map(move |(index, held)| {
+        let slot = held.as_ref()?;
+        if registry
+            .states
+            .get(index)
+            .and_then(Option::as_ref)
+            .is_some_and(|state| state.surface_bound)
+        {
+            return None;
+        }
+        (slot.target.texture() == texture).then_some(index)
+    })
+}
+
+/// Whether any viewport that renders into `texture` through a registered
+/// view is stale on the frame now encoding. A surface-bound viewport is
+/// never returned by the grouping, so neither its staleness nor a share of
+/// its registered view reaches this answer.
+fn target_is_stale(registry: &Registry, gpu: &[Option<GpuSlot>], index: usize) -> bool {
+    let Some(slot) = gpu.get(index).and_then(Option::as_ref) else {
+        return false;
+    };
+    let texture = slot.target.texture();
+    slots_on_texture(registry, gpu, texture).any(|other| viewport_is_stale(registry, gpu, other))
+}
+
+/// The load op for one frame pass, from the decisions the frame computed.
+///
+/// A bound viewport draws into the surface texture it acquired this frame.
+/// The acquired texture's contents are undefined, and no other viewport
+/// renders into it, so the bound viewport's pass is the first pass into its
+/// target and clears, whatever the pass's staleness or kind. The bound
+/// branch reads neither grouping answer, so the caller passes two false
+/// placeholders for it. A later pass into an acquired texture in the same
+/// frame may load what the first pass drew, but none can arise today,
+/// because the grouping excludes a bound viewport in both directions.
+///
+/// For an unbound viewport the two grouping answers decide. When the target
+/// holds a stale viewport this frame, the first pass encoded into it clears
+/// and every later pass loads, so the fresh viewports recomposite beneath
+/// the stale one. A target with no stale viewport keeps the state table's
+/// rule: a slab loads, every other pass kind clears.
+fn frame_load_op(
+    bound: bool,
+    stale_target: bool,
+    first_into_target: bool,
+    pass: PassKind,
+) -> wgpu::LoadOp<wgpu::Color> {
+    if bound {
+        wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+    } else if stale_target {
+        if first_into_target {
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+        } else {
+            wgpu::LoadOp::Load
+        }
+    } else if pass == PassKind::Slab {
+        wgpu::LoadOp::Load
+    } else {
+        wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+    }
+}
+
 fn voi_of(pass: &Pass) -> VoiParams {
     match pass {
         Pass::Stack(stack) => stack.voi,
@@ -4220,7 +5191,11 @@ fn voi_of(pass: &Pass) -> VoiParams {
     }
 }
 
-fn slab_stamp(image: &SlabImage, blend: BlendMode) -> Result<SlabStamp, UploadError> {
+fn slab_stamp(
+    image: &SlabImage,
+    blend: BlendMode,
+    staged: (f32, f32),
+) -> Result<SlabStamp, UploadError> {
     let width = usize::try_from(image.width).map_err(|_| UploadError::ExtentOverflow)?;
     let height = usize::try_from(image.height).map_err(|_| UploadError::ExtentOverflow)?;
     let count = usize::try_from(image.sample_count).map_err(|_| UploadError::ExtentOverflow)?;
@@ -4249,21 +5224,48 @@ fn slab_stamp(image: &SlabImage, blend: BlendMode) -> Result<SlabStamp, UploadEr
         index_bits: [step_i.to_bits(), step_j.to_bits(), step_k.to_bits()],
         samples,
         blend,
+        staged: (staged.0.to_bits(), staged.1.to_bits()),
     })
 }
 
+/// The slab image with stage 1 applied to every present sample.
+///
+/// Absent samples are skipped and their columns stay at the zero fill, which
+/// keeps the staging comment's absent-column sentence true. One clone per
+/// staging, which is an upload and not a frame.
+fn pre_apply_slab(image: &SlabImage, slope: f32, intercept: f32) -> SlabImage {
+    let mut applied = image.clone();
+    for sample in &mut applied.samples {
+        if let PlaneSample::Present(value) = sample {
+            *value = ocelli_pixel::modality(Stored(*value), slope, intercept).0;
+        }
+    }
+    applied
+}
+
+// The slot's own uniform, route uniform and table view are passed in
+// beside the layouts, because the slot is borrowed immutably here and the
+// staging reads them.
+#[allow(clippy::too_many_arguments)]
 fn stage_slab(
     ctx: &GpuContext,
     uniform_layout: &wgpu::BindGroupLayout,
     source_layout: &wgpu::BindGroupLayout,
     uniform: &wgpu::Buffer,
+    route_uniform: &wgpu::Buffer,
+    modality_table_view: &wgpu::TextureView,
     image: &SlabImage,
+    staged: (f32, f32),
     format: wgpu::TextureFormat,
     stamp: SlabStamp,
 ) -> Result<SlabBinding, UploadError> {
     let channels = stored_float_channels(format).ok_or(UploadError::FormatUnavailable)?;
     let texel = channels.checked_mul(4).ok_or(UploadError::ExtentOverflow)?;
     let device = ctx.device();
+    // The slab's samples are interpolated, so stage 1 is applied on the CPU
+    // with the pass's recorded rescale and the texture holds modality values.
+    // Absent samples are skipped and their columns stay at the zero fill.
+    let applied = pre_apply_slab(image, staged.0, staged.1);
     let values = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("ocelli slab values"),
         size: wgpu::Extent3d {
@@ -4304,7 +5306,7 @@ fn stage_slab(
     // up to 256 bytes inside the queue, so a wide slab must not upload a
     // column at a time. An absent column stays the zero fill. The mask is 0
     // there, and the shader discards that pixel before it loads a value.
-    let value_bytes = slab_value_bytes(image, channels, row_bytes)?;
+    let value_bytes = slab_value_bytes(&applied, channels, row_bytes)?;
     ctx.queue().write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &mask,
@@ -4348,10 +5350,20 @@ fn stage_slab(
     let bind_uniform = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("ocelli slab voi"),
         layout: uniform_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform.as_entire_binding(),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: route_uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(modality_table_view),
+            },
+        ],
     });
     let bind_source = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("ocelli slab source"),
@@ -4601,6 +5613,86 @@ fn colour_texture_for(
     texture
 }
 
+/// The route uniform and the folded table one viewport binds at group 0.
+///
+/// A `Tabled` route creates the `256 x count.div_ceil(256)` table and fills
+/// it with `ocelli_pixel::modality`'s own outputs for the pass's own
+/// rescale, through `write_stored_samples`, which pads the `.r` channel on
+/// a wide format. A `PreApplied` route binds a 1x1 stand-in, which nothing
+/// reads, and a flag-0 route uniform. The route is a runtime uniform and
+/// not a module shape, so the HLD 22 pipeline cache key gains nothing.
+///
+/// # Errors
+///
+/// [`RouteError`] when the container is illegal, the extent does not fit,
+/// or the write is refused.
+fn create_route_state(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    route: StoredRoute,
+    voi: VoiParams,
+    table_format: wgpu::TextureFormat,
+) -> Result<(wgpu::Buffer, wgpu::Texture), RouteError> {
+    let flag = match route {
+        StoredRoute::Tabled { first, count: _ } => (1_u32, first),
+        StoredRoute::PreApplied => (0_u32, 0_i32),
+    };
+    let extent = match route {
+        StoredRoute::Tabled { count, .. } => {
+            let height = modality_table_height(count);
+            wgpu::Extent3d {
+                width: MODALITY_FOLD,
+                height,
+                depth_or_array_layers: 1,
+            }
+        }
+        StoredRoute::PreApplied => wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("ocelli modality table"),
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: table_format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    if let StoredRoute::Tabled { .. } = route {
+        let entries = usize::try_from(
+            MODALITY_FOLD
+                .checked_mul(extent.height)
+                .ok_or(RouteError::RangeOutside)?,
+        )
+        .map_err(|_| RouteError::RangeOutside)?;
+        let mut data = vec![0.0_f32; entries];
+        fill_modality_table(route, voi.slope, voi.intercept, &mut data)?;
+        let upload = Upload::from_extent(
+            extent.width,
+            extent.height,
+            device.limits().max_texture_dimension_2d,
+        )
+        .map_err(|_| RouteError::RangeOutside)?;
+        write_stored_samples(queue, &texture, upload, table_format, &data)
+            .map_err(|_| RouteError::BufferShort)?;
+    }
+    let route_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("ocelli modality route"),
+        contents: bytemuck::bytes_of(&ModalityRoute {
+            tabled: flag.0,
+            first: flag.1,
+            fold: MODALITY_FOLD,
+            pad: 0,
+        }),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+    Ok((route_uniform, texture))
+}
+
 fn create_stored_texture(
     device: &wgpu::Device,
     upload: Upload,
@@ -4682,6 +5774,7 @@ mod tests {
         BlendMode, FrameOutcome, Pass, PassKind, PipelineFamily, PipelineKey, RayAxis, RenderGraph,
         Upload, UploadError, ViewportId, VolumePass,
     };
+    use crate::voi::StoredRoute;
     use ocelli_volume::{PlaneSample, SlabImage};
 
     fn slab_of(width: u32, height: u32, depth: u32, absent_at: (u32, u32)) -> SlabImage {
@@ -4929,6 +6022,57 @@ mod tests {
         ));
     }
 
+    /// The load op clears the first pass into an acquired surface texture.
+    ///
+    /// The lead amendment after implementation review passes 4 and 5: the
+    /// first pass to draw into a freshly acquired surface texture in a
+    /// frame clears it, because an acquired texture's contents are
+    /// undefined. A bound viewport's pass is that first pass, so neither
+    /// its staleness nor its kind can turn the clear into a load. This
+    /// unit test pins `frame_load_op`'s own branch rows. The first two
+    /// bound rows pass the exact arguments the encode path passes, two
+    /// false placeholders for grouping answers it never computed. The
+    /// third bound row passes a staleness the encode path never supplies
+    /// for a bound viewport, pinning the branch against it. The call site
+    /// that passes those arguments is pinned on the device by
+    /// `a_surface_bound_slab_groups_with_nothing_and_clears_when_stale`,
+    /// whose all-absent frame dies if the encode site passes grouping
+    /// answers instead of the bound flag. The unbound rows are the
+    /// shared-target rule of the pass 2 amendment and the state table.
+    #[test]
+    fn the_load_op_clears_the_first_pass_into_an_acquired_texture() {
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let load = wgpu::LoadOp::Load;
+        assert_eq!(
+            super::frame_load_op(true, false, false, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(true, false, false, PassKind::Stack),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(true, true, false, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(false, true, true, PassKind::Slab),
+            clear
+        );
+        assert_eq!(
+            super::frame_load_op(false, true, false, PassKind::Stack),
+            load
+        );
+        assert_eq!(
+            super::frame_load_op(false, false, true, PassKind::Slab),
+            load
+        );
+        assert_eq!(
+            super::frame_load_op(false, false, false, PassKind::Stack),
+            clear
+        );
+    }
+
     /// PS3.3 values stay `f32` after `textureLoad`. `Rgba8Unorm` is not a
     /// candidate. Tier A does not substitute when `R32Float` cannot be sampled.
     #[test]
@@ -4969,13 +6113,13 @@ mod tests {
     #[test]
     fn removal_clears_the_slot_and_reregistration_reuses_it_fully_dirty() {
         let mut registry = Registry::new(1);
-        let first = registry.register(Pass::VolumeRaycast(any_volume()));
+        let first = registry.register(Pass::VolumeRaycast(any_volume()), StoredRoute::PreApplied);
         assert!(first.is_ok());
         if let Ok(id) = first {
             assert!(registry.remove(id));
             assert!(!registry.remove(id));
         }
-        let again = registry.register(Pass::VolumeRaycast(any_volume()));
+        let again = registry.register(Pass::VolumeRaycast(any_volume()), StoredRoute::PreApplied);
         assert!(matches!(again, Ok(id) if id.0 == 0));
         if let Ok(id) = again {
             let state = registry
@@ -4989,9 +6133,9 @@ mod tests {
     #[test]
     fn registry_refuses_beyond_capacity_and_starts_fully_dirty() {
         let mut registry = Registry::new(1);
-        let first = registry.register(Pass::VolumeRaycast(any_volume()));
+        let first = registry.register(Pass::VolumeRaycast(any_volume()), StoredRoute::PreApplied);
         assert!(first.is_ok());
-        let second = registry.register(Pass::VolumeRaycast(any_volume()));
+        let second = registry.register(Pass::VolumeRaycast(any_volume()), StoredRoute::PreApplied);
         assert!(second.is_err());
         if let Ok(id) = first {
             let state = registry
@@ -5000,5 +6144,996 @@ mod tests {
                 .and_then(Option::as_ref);
             assert!(matches!(state, Some(SlotState { dirty, .. }) if *dirty == Dirty::full()));
         }
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::{
+        ContentKind, EffectiveRoute, Registry, RouteError, SlabPass, StackPass, StoredRoute,
+        brick_slot_count, modality_table_height, route_decision,
+    };
+    use crate::graph::{BlendMode, Pass, SegPass};
+
+    /// **AC9's shared decision, floor-runnable.**
+    ///
+    /// A `Tabled` declaration on a slab pass is refused, because the graph
+    /// stages the slab's samples itself pre-applied. On a segmentation
+    /// overlay it is refused, because that pass composes no VOI text. A
+    /// container outside the accepted union is refused through the same
+    /// check, `count` 0 included, because `div_ceil(0)` would otherwise
+    /// reach `create_texture` as a zero extent. `PreApplied` is legal on
+    /// every pass.
+    #[test]
+    fn the_route_decision_refuses_slab_and_overlay_and_the_bad_ranges() {
+        let stack = Pass::Stack(StackPass {
+            voi: crate::voi::VoiParams {
+                center: 0.0,
+                width: 1.0,
+                slope: 1.0,
+                intercept: 0.0,
+                ymin: 0.0,
+                ymax: 255.0,
+                fn_kind: 1,
+                invert: 0,
+            },
+            blend: BlendMode::Composite,
+        });
+        let slab = Pass::Slab(SlabPass {
+            blend: BlendMode::Average,
+            voi: crate::voi::VoiParams {
+                center: 0.0,
+                width: 1.0,
+                slope: 1.0,
+                intercept: 0.0,
+                ymin: 0.0,
+                ymax: 255.0,
+                fn_kind: 1,
+                invert: 0,
+            },
+        });
+        let overlay = Pass::SegOverlay(SegPass {
+            blend: BlendMode::Composite,
+        });
+        let tabled_16 = StoredRoute::Tabled {
+            first: 0,
+            count: 65_536,
+        };
+        assert_eq!(
+            route_decision(&slab, tabled_16),
+            Err(RouteError::PassRefusesTable),
+            "a slab's samples are staged pre-applied by the graph itself"
+        );
+        assert_eq!(
+            route_decision(&overlay, tabled_16),
+            Err(RouteError::PassRefusesTable),
+            "an overlay composes no VOI text"
+        );
+        assert_eq!(
+            route_decision(&stack, StoredRoute::Tabled { first: 0, count: 0 }),
+            Err(RouteError::RangeOutside),
+            "count 0 would reach create_texture as a zero extent"
+        );
+        assert!(route_decision(&stack, tabled_16).is_ok());
+        assert!(route_decision(&slab, StoredRoute::PreApplied).is_ok());
+        assert!(route_decision(&overlay, StoredRoute::PreApplied).is_ok());
+    }
+
+    /// **AC11's slot arithmetic.**
+    ///
+    /// The ray's fragment stage samples the brick slots, the residency
+    /// texture and the folded modality table, so a 16 per-stage limit
+    /// compiles 14 slots and the M4 Max's 96 compiles 94. The bind-group
+    /// limit of `u32::MAX`, which the Metal backend reports as No limit,
+    /// never binds first.
+    #[test]
+    fn brick_slots_leave_room_for_the_residency_and_the_table() {
+        let sixteen = wgpu::Limits {
+            max_sampled_textures_per_shader_stage: 16,
+            max_bindings_per_bind_group: 1000,
+            ..wgpu::Limits::default()
+        };
+        assert_eq!(brick_slot_count(&sixteen), 14);
+        let metal = wgpu::Limits {
+            max_sampled_textures_per_shader_stage: 96,
+            max_bindings_per_bind_group: u32::MAX,
+            ..wgpu::Limits::default()
+        };
+        assert_eq!(brick_slot_count(&metal), 94);
+        let floor = wgpu::Limits {
+            max_sampled_textures_per_shader_stage: 2,
+            max_bindings_per_bind_group: 1000,
+            ..wgpu::Limits::default()
+        };
+        assert_eq!(brick_slot_count(&floor), 0);
+    }
+
+    /// **AC15 and AC16's height arithmetic.**
+    ///
+    /// A count that is not a multiple of the fold pads its last row:
+    /// 4095 values fill 16 rows of 256, and the last row's final texel is
+    /// padding no validated index reaches. A count below the fold is one
+    /// row, not zero, or `create_texture` would refuse the extent.
+    #[test]
+    fn the_fold_height_pads_a_non_multiple_and_keeps_small_containers() {
+        assert_eq!(modality_table_height(4_095), 16);
+        assert_eq!(modality_table_height(16), 1);
+        assert_eq!(modality_table_height(256), 1);
+        assert_eq!(modality_table_height(65_536), 256);
+        assert_eq!(modality_table_height(1), 1);
+    }
+
+    /// The starting state a registration records comes from the declaration.
+    ///
+    /// A `Tabled` route starts table-served over raw integral content and a
+    /// `PreApplied` route starts pre-applied. Red under a mutation that
+    /// flips either mapping, which is the starting point every flip and
+    /// flip-back row builds on.
+    #[test]
+    fn the_declared_route_maps_to_its_starting_state() {
+        let stack = Pass::Stack(StackPass {
+            voi: crate::voi::VoiParams {
+                center: 0.0,
+                width: 1.0,
+                slope: 1.0,
+                intercept: 0.0,
+                ymin: 0.0,
+                ymax: 255.0,
+                fn_kind: 1,
+                invert: 0,
+            },
+            blend: BlendMode::Composite,
+        });
+        let mut registry = Registry::new(2);
+        let tabled = match registry.register(
+            stack,
+            StoredRoute::Tabled {
+                first: 0,
+                count: 256,
+            },
+        ) {
+            Ok(id) => id,
+            Err(_) => unreachable!("the tabled registration fits"),
+        };
+        let tabled_state = registry
+            .states
+            .get(usize::try_from(tabled.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .unwrap_or_else(|| unreachable!("the tabled viewport is registered"));
+        assert_eq!(
+            tabled_state.effective,
+            EffectiveRoute::Tabled,
+            "a declared-Tabled viewport starts on the table"
+        );
+        assert_eq!(
+            tabled_state.content,
+            ContentKind::RawIntegral,
+            "a declared-Tabled viewport starts raw integral"
+        );
+        let pre = registry
+            .register(
+                Pass::Stack(StackPass {
+                    voi: crate::voi::VoiParams {
+                        center: 0.0,
+                        width: 1.0,
+                        slope: 1.0,
+                        intercept: 0.0,
+                        ymin: 0.0,
+                        ymax: 255.0,
+                        fn_kind: 1,
+                        invert: 0,
+                    },
+                    blend: BlendMode::Composite,
+                }),
+                StoredRoute::PreApplied,
+            )
+            .unwrap_or_else(|_| unreachable!("the pre-applied registration fits"));
+        let pre_state = registry
+            .states
+            .get(usize::try_from(pre.0).unwrap_or(usize::MAX))
+            .and_then(Option::as_ref)
+            .unwrap_or_else(|| unreachable!("the pre-applied viewport is registered"));
+        assert_eq!(
+            pre_state.effective,
+            EffectiveRoute::PreApplied,
+            "a declared-PreApplied viewport starts pre-applied"
+        );
+        assert_eq!(
+            pre_state.content,
+            ContentKind::PreApplied,
+            "a declared-PreApplied viewport starts with pre-applied content"
+        );
+    }
+
+    /// **AC9's colour refusals, floor-runnable.**
+    ///
+    /// A palette is refused wherever the bytes are or will be modality
+    /// values, before any upload and on staged content, and a non-palette
+    /// table is refused on raw fractional content. Red under a mutation
+    /// that drops either refusal arm, which is the guard
+    /// `select_colour_lut` runs before any byte is written.
+    #[test]
+    fn the_colour_refusals_keep_their_error_shape() {
+        use super::colour_decision;
+        // A palette on a declared-PreApplied viewport, before any upload.
+        assert_eq!(
+            colour_decision(true, true, ContentKind::PreApplied),
+            Err(super::GraphError::ColourUnavailable),
+            "the palette would index the modality values every upload stages"
+        );
+        // A palette on staged pre-applied content.
+        assert_eq!(
+            colour_decision(true, false, ContentKind::PreApplied),
+            Err(super::GraphError::ColourUnavailable),
+            "the palette would index modality values as raw"
+        );
+        // A non-palette on raw fractional content, which only a palette
+        // colour mode keeps.
+        assert_eq!(
+            colour_decision(false, false, ContentKind::RawFractional),
+            Err(super::GraphError::ColourUnavailable),
+            "raw fractional samples have no correct stage 1 path in the shader"
+        );
+        // The positive controls: a palette on raw integral content, and a
+        // non-palette on pre-applied or raw integral content.
+        assert_eq!(
+            colour_decision(true, false, ContentKind::RawIntegral),
+            Ok(())
+        );
+        assert_eq!(
+            colour_decision(false, true, ContentKind::RawIntegral),
+            Ok(())
+        );
+        assert_eq!(
+            colour_decision(false, false, ContentKind::PreApplied),
+            Ok(())
+        );
+    }
+}
+
+/// The surface grouping fixture, on a real adapter.
+///
+/// `bind_surface` cannot run here. A native `wgpu::Surface` is created from
+/// a `SurfaceTarget`, and the safe native variants hold a
+/// `Box<dyn WindowHandle>` whose macOS handle value is a live `NSView`
+/// pointer, which needs an Objective-C runtime dependency the plan does not
+/// name, and fabricating the pointer is undefined behaviour behind
+/// `SurfaceTargetUnsafe`, which is `unsafe`. The fixture therefore places
+/// the one decision state the grouping reads, `SlotState::surface_bound`,
+/// through the graph's own registry, and holds no bound object. That is the
+/// narrowest real seam that exercises the state on the real frame path.
+/// `bind_surface` also writes the attached surface itself, which decides
+/// the acquisition and the colour attachment, and this fixture does not
+/// exercise that choice. With the state present and no object, the
+/// viewport's pass falls back to its registered view, which is the encode
+/// the reviewed failure describes for the viewport that goes first.
+#[cfg(test)]
+mod surface_grouping_tests {
+    use crate::caps::TierRequest;
+    use crate::gpu::GpuContext;
+    use crate::graph::{
+        BlendMode, FrameOutcome, Pass, RenderGraph, SlabPass, StackPass, ViewportId,
+    };
+    use crate::voi::VoiParams;
+    use ocelli_pixel::{
+        LutChain, ModalityTransform, PhotometricInterpretation, PresentationLutEvidence,
+        VoiFunction, VoiTransform,
+    };
+    use ocelli_volume::{PlaneSample, SlabImage};
+
+    fn from_bits(bits: u32) -> f32 {
+        f32::from_bits(bits)
+    }
+
+    /// The F-227 rescale pairs and windows, pinned as bits, as the sibling
+    /// fixtures in `tests/slab.rs` pin them.
+    fn pair_chain(slope: u32, intercept: u32, center: u32, width: u32) -> LutChain {
+        let modality =
+            ModalityTransform::new(None, Some(from_bits(slope)), Some(from_bits(intercept)));
+        let voi = VoiTransform::new(
+            None,
+            &[from_bits(center)],
+            &[from_bits(width)],
+            0,
+            VoiFunction::LinearExact,
+            0.0,
+            255.0,
+        );
+        assert!(modality.is_ok() && voi.is_ok());
+        let (Ok(modality), Ok(voi)) = (modality, voi) else {
+            unreachable!("asserted immediately above")
+        };
+        let built = LutChain::new(
+            modality,
+            voi,
+            PhotometricInterpretation::Monochrome2,
+            PresentationLutEvidence::Absent,
+        );
+        assert!(built.is_ok());
+        match built {
+            Ok(chain) => chain,
+            Err(_) => unreachable!("asserted immediately above"),
+        }
+    }
+
+    fn params(chain: &LutChain) -> VoiParams {
+        match VoiParams::from_chain(chain) {
+            Ok(voi) => voi,
+            Err(_) => unreachable!("the fixture chain expresses a uniform"),
+        }
+    }
+
+    fn float_source(device: &wgpu::Device, queue: &wgpu::Queue, value: f32) -> wgpu::TextureView {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping source"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let bytes = [value];
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&bytes),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    fn read_target(context: &GpuContext, target: &wgpu::Texture) -> [f32; 4] {
+        let device = context.device();
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("surface grouping readback"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("surface grouping readback"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        context.queue().submit(std::iter::once(encoder.finish()));
+        let slice = buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        let _ = receiver.recv();
+        let Ok(data) = slice.get_mapped_range() else {
+            return [0.0; 4];
+        };
+        let Some(row) = data
+            .get(0..16)
+            .and_then(|slice| <[u8; 16]>::try_from(slice).ok())
+        else {
+            return [0.0; 4];
+        };
+        let mut pixels = [0.0_f32; 4];
+        for (index, word) in pixels.iter_mut().enumerate() {
+            let Some(chunk) = row
+                .get(index * 4..index * 4 + 4)
+                .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
+            else {
+                continue;
+            };
+            *word = f32::from_le_bytes(chunk);
+        }
+        pixels
+    }
+
+    fn within_two_ulp(got: f32, expected: f32) -> bool {
+        if got.to_bits() == expected.to_bits() {
+            return true;
+        }
+        if got.is_sign_negative() != expected.is_sign_negative() {
+            return false;
+        }
+        got.to_bits().abs_diff(expected.to_bits()) <= 2
+    }
+
+    /// **The reviewed failure: a surface-bound viewport must group with no
+    /// other viewport on its registered target.**
+    ///
+    /// Two stack viewports are registered on two views of one 1x1 texture
+    /// T, and the first carries the decision state `bind_surface` writes.
+    /// PS3.3 C.11.1 pins the pair-A rescale as bits, slope `0x3571C0F8` and
+    /// intercept `0x44E7C2FC`, applied as multiply then add, so the stored
+    /// viewport's uploaded 2372.5 stages `0x44E7C30E`
+    /// (1854.095458984375). PS3.3 C.11.2.1.3.2, LINEAR_EXACT centre
+    /// `0x44E7C333` width `0x3C23D70A` output 0 to 255, displays it
+    /// 12.32666015625, normalized over 255 to 0.04833984375. The bound
+    /// viewport's own caller view is `PreApplied`, so its 1x1 texel value
+    /// 2371.5 is read as a modality value and staged with nothing. The
+    /// first frame draws both, the registration order putting the stored
+    /// viewport last, so T holds its 0.04833984375 composite.
+    ///
+    /// `set_voi` with pair B (`0x3D47EF8C`, `0xC52D91AC`, window centre
+    /// `0xC5265588` width 2.0) makes the stored viewport stale. A
+    /// window-only `set_voi` with the bound viewport's own pair A marks
+    /// it dirty, not stale, in the same tick as the rescale change, which
+    /// is the production pan. Its pass encodes first, so the
+    /// first-into-target decision must not read it: a grouping that keeps
+    /// the bound viewport makes the stale pass load the 1.0 the bound
+    /// viewport just drew instead of clearing to `0.0, 0.0, 0.0, 1.0` on
+    /// `Rgba32Float`. The fresh upload then re-pre-applies with the
+    /// recorded pair, staged `0xC52654C0`, displayed 133.7255859375,
+    /// normalized 0.5244140625. A rescale change back to pair A with the
+    /// bound viewport clean marks no co-target: the bound viewport does
+    /// not encode. The bound viewport's own rescale change marks no
+    /// co-target either, so only its clear-only pass encodes.
+    #[test]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn a_surface_bound_viewport_groups_with_nothing_on_its_registered_target() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // One texture T, two views: the reviewed shared registered target.
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let bound_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stale_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xC526_5588, 0x4000_0000);
+
+        let registered = graph.register(
+            &context,
+            bound_view,
+            float_source(context.device(), context.queue(), 2371.5),
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(bound) = registered else { return };
+        assert_eq!(bound, ViewportId(0));
+        // The state `bind_surface` writes for a bound viewport. No bound
+        // object can exist in this harness, so the pass falls back to the
+        // registered view. The helper records the index in the exemption
+        // set the tick's grouping assert reads.
+        graph.place_surface_bound_for_fixture(usize::try_from(bound.0).unwrap_or(usize::MAX));
+
+        let stored = graph.register_stored(
+            &context,
+            &adapter,
+            stale_view,
+            1,
+            1,
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(stored.is_ok());
+        let Ok(stored) = stored else { return };
+        assert_eq!(stored, ViewportId(1));
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let composited = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(composited[0], 0.048_339_844_f32),
+            "the first frame is not the stored viewport's composite: {got}",
+            got = composited[0]
+        );
+
+        // A window-only `set_voi` with the viewport's own pair A marks the
+        // bound viewport dirty, not stale, which is the production pan: a
+        // pan and a co-target's rescale change in one tick. Its pass
+        // encodes first, so the first-into-target decision must not read
+        // it. Under the unfiltered grouping the stale pass would load the
+        // 1.0 the bound viewport just drew instead of clearing.
+        assert!(graph.set_voi(&context, bound, &pair_a).is_ok());
+        // The rescale change makes the stored viewport stale. The bound
+        // viewport draws into the texture it acquires, so it is in no
+        // grouping: it is not marked, and the stale viewport's pass is
+        // the first into T among the grouped viewports, which clears.
+        assert!(graph.set_voi(&context, stored, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let cleared = read_target(&context, &texture);
+        assert_eq!(
+            cleared[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the shared target did not clear: {got}",
+            got = cleared[0]
+        );
+        assert_eq!(cleared[1].to_bits(), 0.0_f32.to_bits());
+        assert_eq!(cleared[2].to_bits(), 0.0_f32.to_bits());
+        assert_eq!(cleared[3].to_bits(), 1.0_f32.to_bits());
+
+        // The fresh upload re-pre-applies with the recorded pair and the
+        // stored viewport draws its new composite into T.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let fresh = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(fresh[0], 0.524_414_06_f32),
+            "the stored viewport did not draw its fresh composite: {got}",
+            got = fresh[0]
+        );
+
+        // A rescale change back to pair A with the bound viewport clean
+        // again. The stale co-target must not mark it: the bound viewport
+        // does not encode, so the frame is the stale viewport alone.
+        assert!(graph.set_voi(&context, stored, &pair_a).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let restaled = read_target(&context, &texture);
+        assert_eq!(
+            restaled[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the restaled target did not clear: {got}",
+            got = restaled[0]
+        );
+
+        // The recovery upload, so the last frame's target holds no stale
+        // viewport. The recorded pair is pair A, so the staged value is
+        // `0x44E7C30E` again and the readback is its 0.04833984375.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let recovered = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(recovered[0], 0.048_339_844_f32),
+            "the recovered composite is not the pair-A display: {got}",
+            got = recovered[0]
+        );
+
+        // The bound viewport's own rescale change marks no co-target: only
+        // its clear-only pass encodes, and the stored viewport does not.
+        assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        // Its stale pass is the first and only pass on its target this
+        // frame, so the readback is the clear colour, not the loaded
+        // composite from the frame before it.
+        let rebound_target = read_target(&context, &texture);
+        assert_eq!(
+            rebound_target[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the bound viewport's clear-only pass did not clear its target: {got}",
+            got = rebound_target[0]
+        );
+    }
+
+    /// **The same rule for a surface-bound slab, whose staleness is derived.**
+    ///
+    /// A slab viewport carries the decision state and a stack viewport
+    /// shares its registered view. The slab stages pair A's mean of 2371.5
+    /// and 2372.5, the shader-order mean `0x44E7C30E`, which pair A's
+    /// window displays 12.32666015625, the red channel 0.04833984375, as
+    /// AC10 pins. The first frame draws both, the registration order
+    /// putting the stack last, so T holds 0.04833984375.
+    ///
+    /// The pan and the rescale change in one tick: the slab's pass encodes
+    /// first and the stale stack's pass must clear, not load what the slab
+    /// drew, which is the unfiltered-grouping kill on the slab path. After
+    /// the recovery, an all-absent re-stage of the bound slab runs while
+    /// the target still holds the stack's fresh composite: the mask
+    /// discards every fragment, so the pass writes nothing and the
+    /// readback is whatever the load op left. A call site that passed
+    /// grouping answers instead of the bound flag, or a bound branch that
+    /// loads for a slab, leaves the fresh composite standing there, which
+    /// is the mutant that frame kills. The pair-B frame after it pins that
+    /// the rescale change encodes a pass: a rescale change that failed to
+    /// mark the slab dirty would report no pass at all. A
+    /// forced-false staleness is not killed in this fixture, because the
+    /// absent mask discards whatever its re-enabled draw writes, so that
+    /// mutant dies in `the_stale_slab_clears_and_recovers_on_a_restage`,
+    /// whose slab has present pixels. The stack does not encode at the
+    /// pair-B frame, so the slab's staleness marks no co-target.
+    #[test]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn a_surface_bound_slab_groups_with_nothing_and_clears_when_stale() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 2, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // One texture T, two views: the shared registered target.
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping slab target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let bound_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let stale_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let pair_b = pair_chain(0x3D47_EF8C, 0xC52D_91AC, 0xC526_5588, 0x4000_0000);
+
+        let registered = graph.register(
+            &context,
+            bound_view,
+            // A slab pass reads its staged value texture, so this source is
+            // never sampled.
+            float_source(context.device(), context.queue(), 0.0),
+            Pass::Slab(SlabPass {
+                blend: BlendMode::Average,
+                voi: params(&pair_a),
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(bound) = registered else { return };
+        assert_eq!(bound, ViewportId(0));
+        // The state `bind_surface` writes for a bound viewport. No bound
+        // object can exist in this harness, so the pass falls back to the
+        // registered view. The helper records the index in the exemption
+        // set the tick's grouping assert reads.
+        graph.place_surface_bound_for_fixture(usize::try_from(bound.0).unwrap_or(usize::MAX));
+
+        let stored = graph.register_stored(
+            &context,
+            &adapter,
+            stale_view,
+            1,
+            1,
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(stored.is_ok());
+        let Ok(stored) = stored else { return };
+        assert_eq!(stored, ViewportId(1));
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+
+        let image = SlabImage {
+            width: 1,
+            height: 1,
+            step_mm: 2.5,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: 2,
+            samples: vec![PlaneSample::Present(2371.5), PlaneSample::Present(2372.5)],
+        };
+        assert!(
+            graph
+                .show_slab(&context, &adapter, bound, &image, BlendMode::Average)
+                .is_ok()
+        );
+
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let composited = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(composited[0], 0.048_339_844_f32),
+            "the first frame is not the stack's composite: {got}",
+            got = composited[0]
+        );
+
+        // The pan and the rescale change in one tick: the slab draws its
+        // composite first and the stale stack's pass clears over it.
+        assert!(graph.set_voi(&context, bound, &pair_a).is_ok());
+        assert!(graph.set_voi(&context, stored, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 2,
+                passes: 2
+            }
+        );
+        let cleared = read_target(&context, &texture);
+        assert_eq!(
+            cleared[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the shared target did not clear: {got}",
+            got = cleared[0]
+        );
+
+        // The fresh upload re-pre-applies and the stack draws its new
+        // composite into T.
+        assert!(
+            graph
+                .upload_stored(&context, &adapter, stored, 1, 1, &[2372.5])
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let fresh = read_target(&context, &texture);
+        assert!(
+            within_two_ulp(fresh[0], 0.524_414_06_f32),
+            "the stack did not draw its fresh composite: {got}",
+            got = fresh[0]
+        );
+
+        // The acquired-surface clear is pinned at the call site, not only
+        // in `frame_load_op`'s own rows, and this frame runs while T still
+        // holds the fresh composite. No sample is present, so the mask is
+        // all zeros and every fragment discards before any value load:
+        // the pass writes nothing, and the readback is whatever the load
+        // op left. A call site that passed grouping answers instead of the
+        // bound flag would load here, because the re-staged slab is fresh,
+        // and so would a bound branch that loads for a slab. Either way
+        // the readback is the fresh composite above and not the clear
+        // colour, which is the mutant this frame kills.
+        let absent = SlabImage {
+            width: 1,
+            height: 1,
+            step_mm: 2.5,
+            index_step: [0.0, 0.0, 1.0],
+            sample_count: 2,
+            samples: vec![PlaneSample::Absent, PlaneSample::Absent],
+        };
+        assert!(
+            graph
+                .show_slab(&context, &adapter, bound, &absent, BlendMode::Average)
+                .is_ok()
+        );
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let absent_read = read_target(&context, &texture);
+        assert_eq!(
+            absent_read[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the fresh bound slab with no present sample did not clear its target: {got}",
+            got = absent_read[0]
+        );
+
+        // Pair B on the slab: the staged pair is still pair A, so the
+        // derived staleness holds and the clear-only pass is the first and
+        // only pass on its target this frame. The outcome pins the encode:
+        // a rescale change that failed to mark the slab dirty would report
+        // no pass at all. A forced-false staleness survives this frame,
+        // because the absent mask above discards whatever its re-enabled
+        // draw writes, and dies in
+        // `the_stale_slab_clears_and_recovers_on_a_restage`, whose slab
+        // has present pixels. A load mutant dies on the all-absent frame
+        // above and the test ends there, so this frame adds no load
+        // coverage.
+        assert!(graph.set_voi(&context, bound, &pair_b).is_ok());
+        assert_eq!(
+            graph.tick(&context),
+            FrameOutcome::Submitted {
+                viewports: 1,
+                passes: 1
+            }
+        );
+        let restaled = read_target(&context, &texture);
+        assert_eq!(
+            restaled[0].to_bits(),
+            0.0_f32.to_bits(),
+            "the stale bound slab did not clear its target: {got}",
+            got = restaled[0]
+        );
+    }
+
+    /// The grouping assert's reverse direction, driven through the real
+    /// tick.
+    ///
+    /// A mutant detach path that clears the attached surface and leaves
+    /// the flag ends in exactly the state this test places: a bound flag
+    /// with no object, outside the fixture exemption, because the
+    /// placement helper is the only sanctioned writer and this test does
+    /// not call it. The real tick must refuse that state, and does so in
+    /// a debug build, where the assert exists. The panic is caught rather
+    /// than expected with `#[should_panic]`, because a machine that
+    /// resolves tier C has no device to drive the tick with and must
+    /// report that it did not apply instead of failing.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[ignore = "needs a real GPU adapter, which the CI floor does not have (D-04)"]
+    fn the_tick_refuses_a_bound_flag_placed_outside_the_fixture_seam() {
+        let start = std::time::Instant::now();
+        let mut clock = move || u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let Some(adapter) =
+            pollster::block_on(crate::probe::resolve_adapter(TierRequest::Auto, &mut clock))
+        else {
+            println!("this machine resolved tier C, so there is no device");
+            return;
+        };
+        let opened = pollster::block_on(adapter.open());
+        assert!(opened.is_ok(), "an adapter resolved and no device opened");
+        let Ok(mut context) = opened else { return };
+
+        let built = RenderGraph::new(&mut context, 1, wgpu::TextureFormat::Rgba32Float);
+        assert!(built.is_ok());
+        let Ok(mut graph) = built else { return };
+
+        // A renderable target, so the only panic this state can produce is
+        // the grouping assert and not a validation error from the pass
+        // falling back to a view that cannot be rendered into.
+        let target = context.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface grouping assert target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let pair_a = pair_chain(0x3571_C0F8, 0x44E7_C2FC, 0x44E7_C333, 0x3C23_D70A);
+        let registered = graph.register(
+            &context,
+            target.create_view(&wgpu::TextureViewDescriptor::default()),
+            float_source(context.device(), context.queue(), 0.0),
+            Pass::Stack(StackPass {
+                voi: params(&pair_a),
+                blend: BlendMode::Composite,
+            }),
+            crate::voi::StoredRoute::PreApplied,
+        );
+        assert!(registered.is_ok());
+        let Ok(registered) = registered else { return };
+
+        // The state a buggy detach leaves: the surface gone, the flag
+        // standing, and no exemption recorded, because the placement
+        // helper was not called.
+        if let Some(Some(state)) = graph
+            .registry
+            .states
+            .get_mut(usize::try_from(registered.0).unwrap_or(usize::MAX))
+        {
+            state.surface_bound = true;
+        }
+
+        let drove = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| graph.tick(&context)));
+        assert!(
+            drove.is_err(),
+            "the tick accepted a bound flag with no attached surface outside the fixture exemption"
+        );
     }
 }

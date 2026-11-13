@@ -3174,17 +3174,15 @@
       "weeks": 12,
       "depends_eids": [
         "E38.24",
-        "E38.32",
         "E5.9",
         "E38.37"
       ],
       "depends_fids": [
         "F-214",
-        "F-223",
         "F-231",
         "F-239"
       ],
-      "notes": "Decided by the operator on 2026-11-07: file a video story now. Ocelli refuses YBR_PARTIAL_420 by name after F-239, and no decoder handles the video transfer syntaxes. cornerstone3D 5.8.2 is the floor and Ocelli must be better on a stated measured axis. Questions 1 to 9 answered by the operator on 2026-11-07: WebCodecs in a worker for both targets, no shipped software H.264 or HEVC decoder, MPEG-2 decoded in Rust by F-242, the stream's colour description first, the VideoFrame held in the worker accepted as D-32, one F-ID in two parts. E4.11 rather than E4.9, which F-145's recorded defect declares.",
+      "notes": "Decided by the operator on 2026-11-07: file a video story now. Ocelli refuses YBR_PARTIAL_420 by name after F-239, and no decoder handles the video transfer syntaxes. cornerstone3D 5.8.2 is the floor and Ocelli must be better on a stated measured axis. Questions 1 to 9 answered by the operator on 2026-11-07: WebCodecs in a worker for both targets, no shipped software H.264 or HEVC decoder, MPEG-2 decoded in Rust by F-242, the stream's colour description first, the VideoFrame held in the worker accepted as D-32, one F-ID in two parts. E4.11 rather than E4.9, which F-145's recorded defect declares. The S47 design round dropped F-223 from the dependencies on 2026-11-11, because AC25 needs only the --compare-cornerstone harness already on the sprint branch.",
       "milestone": "M20",
       "sprint": "S47"
     },
@@ -5915,7 +5913,7 @@
         "E38.27",
         "E38.34"
       ],
-      "story": "Built example viewer loads its core from its own output: a vite build with the wasm package present gives a dist whose worker reaches the bundled wasm chunk on any static host, with no absolute build-machine path left in any emitted file, proven by a headless Chromium run of the built dist on a plain static server that reads core ready, and the dev server's fs.allow decoded so a checkout path with a space, unicode or a percent sign serves the package",
+      "story": "Built example viewer loads its core from its own output: a vite build with the wasm package present gives a dist whose worker reaches the bundled wasm chunk on any static host, with no checkout-root or /@fs reach left in any emitted file, proven by a headless Chromium run of the built dist on a plain static server that reads core ready, and the dev server's fs.allow decoded so a checkout path with a space, unicode or a percent sign serves the package",
       "sprint": "S47",
       "weeks": 1,
       "layer": "TS",
@@ -5924,7 +5922,7 @@
         "F-217",
         "F-228"
       ],
-      "notes": "Filed from the recovered S46 close draft, original item 1, with the scope kept. Read-only inspection of this tree at 31323a79 still finds examples/viewer-react/vite.config.ts building the wasm URL as /@fs plus the decoded pkg path, defining __OCELLI_WASM_URL__ from it and allowing the percent-encoded repoRoot.pathname, and the worker probing that URL before importing. The recovered drafting evidence records an /@fs probe answering 404 on a plain static server while the bundled chunk answered 200, and vite preview answering 200 text/html for the missing path. The real package was never exercised in a browser in that pass, so the browser run is an acceptance row and not a recorded observation. F-228's csp-probe.mjs serves the built dist by mapping /@fs paths to repository files, so it does not catch this. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Lands in S47 after F-237 packaging and beside F-245's one showcase distribution contract, because the built example viewer is the built front door and its dist must load its own core on any static host. No new viewer is created. Both dependencies must be DONE before implementation. If F-228 carries out of S46, this story follows its completion and does not concurrently edit its CSP probe."
+      "notes": "Filed from the recovered S46 close draft, original item 1, with the scope kept. Read-only inspection of this tree at 31323a79 still finds examples/viewer-react/vite.config.ts building the wasm URL as /@fs plus the decoded pkg path, defining __OCELLI_WASM_URL__ from it and allowing the percent-encoded repoRoot.pathname, and the worker probing that URL before importing. The recovered drafting evidence records an /@fs probe answering 404 on a plain static server while the bundled chunk answered 200, and vite preview answering 200 text/html for the missing path. The real package was never exercised in a browser in that pass, so the browser run is an acceptance row and not a recorded observation. F-228's csp-probe.mjs serves the built dist by mapping /@fs paths to repository files, so it does not catch this. Estimate 1w is inherited from the recovered draft and is PROVISIONAL, lead-suggested and not capacity-approved. Lands in S47 after F-237 packaging and beside F-245's one showcase distribution contract, because the built example viewer is the built front door and its dist must load its own core on any static host. No new viewer is created. Both dependencies must be DONE before implementation. If F-228 carries out of S46, this story follows its completion and does not concurrently edit its CSP probe. Narrowed by the S47 design round on 2026-11-11: the shipped wasm still carries cargo registry paths in panic locations, which F-281 removes."
     },
     {
       "fid": "F-267",
@@ -6217,6 +6215,44 @@
       "notes": "Filed from the S46 whole-sprint review pass 3, which found the third late window reply in a third setter. Pass 3 N3, a double tile paint in one pump iteration, folds in. Pass 5 N1, a failed series-window request kept as a refusal for the whole open, and N6, refreshFrameWindows painting tiles without the series-window guard, fold in as well. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved.",
       "milestone": "M20",
       "sprint": "S48"
+    },
+    {
+      "fid": "F-281",
+      "eid": "E19.9",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "depends_eids": [
+        "E38.61"
+      ],
+      "story": "Shipped wasm carries no build-machine path: the wasm package is built with --remap-path-prefix for the cargo registry, the toolchain and the checkout, so ocelli_wasm_bg.wasm holds no absolute path under the builder's home directory, proven by a scan of the built module for the home and registry prefixes, with the wasm size budget and the oracle candidate re-recorded",
+      "sprint": "S48",
+      "weeks": 1,
+      "layer": "Build",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-266"
+      ],
+      "notes": "Filed by the S47 design round on 2026-11-11 when the operator narrowed F-266 to no checkout-root or /@fs reach. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved."
+    },
+    {
+      "fid": "F-282",
+      "eid": "E19.10",
+      "phase": "P1",
+      "epic": "E19 Hardening & release",
+      "epic_key": "E19",
+      "depends_eids": [
+        "E6.9"
+      ],
+      "story": "Dirt on one layer of a shared render target reaches every layer: when one viewport rendering into a texture shared with other viewports is redrawn, every viewport on that texture is redrawn in index order on the same frame, so a fresh slab is never wiped by a base layer that clears beneath it, with a fixture for each pass kind pairing",
+      "sprint": "S48",
+      "weeks": 1,
+      "layer": "Rust",
+      "milestone": "M20",
+      "depends_fids": [
+        "F-235"
+      ],
+      "notes": "Filed by the F-235 implementation review pass 3 on 2026-11-12: after a stale state recovers through a re-upload only the uploaded viewport is dirty, which predates F-235. Estimate 1w is a provisional lead suggestion, not measured and not capacity-approved."
     }
   ]
 }

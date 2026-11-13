@@ -1,7 +1,7 @@
 # DICOMweb
 
-**F-IDs that contributed:** F-021, F-101, F-198, F-230, F-224
-**Last updated:** 2026-11-06
+**F-IDs that contributed:** F-021, F-101, F-198, F-230, F-224, F-245
+**Last updated:** 2026-11-11
 
 The DICOMweb path has two explicit owners. `@ocelli/core` owns HTTP fetch,
 authentication injection, status handling, content negotiation, and
@@ -174,6 +174,52 @@ nesting, SQ, and binary carriers. Accessors expose both null positions and the
 mapping from an original position to the compact typed index. An all-null
 Value array retains its multiplicity. Empty SQ items remain empty JSON objects,
 and SQ null slots are refused.
+
+## The viewer provider and its native routes
+
+F-245 adds `DicomwebProvider` in `packages/core/src/dicomweb-viewer.ts`,
+exported from `@ocelli/core`. It composes on top of the unchanged
+`DicomwebClient`: the client keeps fetch, status handling, abort and the
+bounded delivery branch, and the provider adds typed QIDO envelopes and one
+staged WADO-RS instance. Its constructor takes `studiesServiceUrl`,
+`wadoUriUrl` and `fetch`. The methods are `searchStudies`,
+`searchSeries(studyUid)`, `searchInstances(studyUid, seriesUid)`,
+`fetchSelectedInstance(identity)`, `readStagedInfo`, `takeStagedInstance`,
+`releaseStaged`, `cancelPending` and `dispose`.
+
+A QIDO envelope is frozen and carries `level`, `capturedScope`, `rows`,
+`sourceNonce` as 32 lowercase hex, `generation` as a safe decimal no greater
+than 9007199254740991, and `rawBodySha256`. Study scope has zero keys, series
+scope exactly `studyUid`, and instance scope exactly `studyUid` and
+`seriesUid`. Study rows carry only `studyUid`, series rows `seriesUid` plus an
+optional `returnedStudyUid`, and instance rows `instanceUid` plus optional
+`returnedStudyUid` and `returnedSeriesUid`. The Rust decoder validates the
+shapes and the parent matching, and no browser JavaScript parses upstream
+DICOM JSON.
+
+`fetchSelectedInstance` stages one instance. The staged receipt is deeply
+frozen and carries the nested `Readonly` `InstanceIdentity`, `rawBodySha256`,
+`sourceNonce`, `generation`, `byteLength` and a representation of field
+`wado-rs-instances` and the validated boundary. `takeStagedInstance(expected)`
+deep-compares every field against the caller's expected receipt and returns
+the owned body once, and stale, missing or already taken state returns null.
+A new intent or a cancel releases the staged body only. The fixed product
+status is that the instance is fetched and validated, remote image display is
+not available yet, and the local image is unchanged. F-202 owns remote
+display, and no decode or render runs on this path.
+
+The native viewer serves `GET /dicweb/config` with the two full URLs when the
+pair of `OCELLI_VIEWER_STUDIES_SERVICE_URL` and `OCELLI_VIEWER_WADO_URI_URL`
+startup values is present, and answers the probe with a JSON null body when
+the pair is absent, so an unconfigured page load logs no missing route. A URL
+pair on port 0 is refused at startup, because a browser cannot fetch it. The
+native `POST /dicweb/qido` and `POST /dicweb/instance` routes exist only when
+the pair is present, and answer with the `X-Qido-` and `X-Wado-` prefixed
+metadata headers then. The reply serialization cap belongs to the viewer
+layer, at a fixed
+16 MiB reply with a 2 MiB query body cap, a 32 MiB encoded instance cap and a
+128 MiB decoded cap. The parser limits live in `crates/ocelli-dicom`, and
+`docs/lld/dicom-ingest.md` records their signatures.
 
 ## Targets
 

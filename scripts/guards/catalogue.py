@@ -49,6 +49,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -703,6 +704,97 @@ def _shift_openjph_ict_coefficient(box: Sandbox) -> None:
     box.substitute("vendor/openjph-core-0.1.0/src/transform/colour.rs",
                    "pub const GAMMA_CB2G: f32 = 0.34413;",
                    "pub const GAMMA_CB2G: f32 = 0.35413;")
+
+
+def _write_docs_fixture(box: Sandbox, fault: str) -> None:
+    if fault == "healthy":
+        subject_src = (
+            "/// Detailed documentation links to [std::option::Option].\n"
+            "pub fn f268_healthy_fn() -> u32 {\n"
+            "    1\n"
+            "}\n"
+        )
+    elif fault == "private":
+        subject_src = (
+            "/// Detailed documentation links to [f268_private_target].\n"
+            "pub fn f268_subject_fn() -> u32 {\n"
+            "    f268_private_target()\n"
+            "}\n"
+            "\n"
+            "fn f268_private_target() -> u32 {\n"
+            "    2\n"
+            "}\n"
+        )
+    elif fault == "broken":
+        subject_src = (
+            "/// Detailed documentation links to [f268_missing_target].\n"
+            "pub fn f268_subject_fn() -> u32 {\n"
+            "    3\n"
+            "}\n"
+        )
+    else:
+        raise ValueError(f"unknown fault: {fault!r}")
+    box.write(
+        "Cargo.toml",
+        "[workspace]\n"
+        "members = [\"docs-healthy\", \"docs-subject\"]\n"
+        "default-members = [\"docs-healthy\"]\n"
+        "resolver = \"2\"\n",
+    )
+    box.write(
+        "Cargo.lock",
+        "version = 4\n"
+        "\n"
+        "[[package]]\n"
+        "name = \"f268-healthy\"\n"
+        "version = \"0.1.0\"\n"
+        "\n"
+        "[[package]]\n"
+        "name = \"f268-subject\"\n"
+        "version = \"0.1.0\"\n",
+    )
+    box.write(
+        "docs-healthy/Cargo.toml",
+        "[package]\n"
+        "name = \"f268-healthy\"\n"
+        "version = \"0.1.0\"\n"
+        "edition = \"2021\"\n",
+    )
+    box.write(
+        "docs-healthy/src/lib.rs",
+        "/// Detailed documentation links to [std::option::Option].\n"
+        "pub fn f268_healthy_fn() -> u32 {\n"
+        "    1\n"
+        "}\n",
+    )
+    box.write(
+        "docs-subject/Cargo.toml",
+        "[package]\n"
+        "name = \"f268-subject\"\n"
+        "version = \"0.1.0\"\n"
+        "edition = \"2021\"\n",
+    )
+    box.write("docs-subject/src/lib.rs", subject_src)
+
+
+def _run_docs_gate(box: Sandbox, fault: str) -> subprocess.CompletedProcess[str]:
+    _write_docs_fixture(box, fault)
+    encoded = chr(31).join(['-A', 'rustdoc::private_intra_doc_links', '-A', 'rustdoc::broken_intra_doc_links'])
+    child_env = {
+        'CARGO_ENCODED_RUSTDOCFLAGS': encoded,
+        'RUSTDOCFLAGS': '-A rustdoc::private_intra_doc_links -A rustdoc::broken_intra_doc_links',
+        'CARGO_BUILD_JOBS': '2',
+    }
+    with tempfile.TemporaryDirectory(prefix='ocelli-docs-probe-') as target:
+        child_env['CARGO_TARGET_DIR'] = target
+        done = box.run(['bin/ocelli.sh', 'gate', 'docs'], env=child_env, timeout=300)
+        if done.returncode == 0:
+            doc_dir = Path(target) / 'doc'
+            healthy = doc_dir / 'f268_healthy' / 'index.html'
+            subject = doc_dir / 'f268_subject' / 'index.html'
+            if not (healthy.is_file() and subject.is_file()):
+                raise AssertionError('docs gate passed without real rendered docs')
+    return done
 
 
 def _run_vendor_tests_gate(box: Sandbox) -> "subprocess.CompletedProcess[str]":
@@ -5363,6 +5455,7 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
     runner = box.read("bin/ocelli.sh")
     unseen = ci_floor_check.unseen_commands(runner)
     visible = ci_floor_check.gate_commands(runner)
+    bodies = ci_floor_check.arm_bodies(runner)
     excluded = _not_in_floor(box)
     workflow = box.read(".github/workflows/ci.yml")
     for gate in re.findall(r'^\s*"([a-z-]+)\|no\|', runner, re.M):
@@ -5375,6 +5468,18 @@ def _a_gate_with_an_unextractable_arm_command(box: Sandbox) -> str:
         # with every command wrapped, and picking it turned this builder
         # into a StopIteration the probe reported as its own error.
         if not any(command in runner for command in visible[gate]):
+            continue
+        # The substitution needs a surviving visible command next to the one
+        # it removes, and the expansion needs the first unseen command to sit
+        # on its own physical line after a line ending in `&&` so the edit
+        # stays inside one arm without touching a wrapped first statement.
+        if len(visible[gate]) < 2:
+            continue
+        body = bodies.get(gate, "")
+        head = unseen[gate][0].split()[0]
+        lines = body.split("\n")
+        index = next((i for i, line in enumerate(lines) if line.lstrip().startswith(head + " ")), None)
+        if index is None or index == 0 or not lines[index - 1].rstrip().endswith("&&"):
             continue
         if f"bin/ocelli.sh gate {gate}" in workflow:
             return gate
@@ -7389,6 +7494,132 @@ def _example_dev_reaches_a_url(
     return box.run(["bin/example-dev.sh"])
 
 
+# F-245. The launcher's refusals are probed through its own extracted
+# functions rather than a full launcher run, because the deadlines are real
+# seconds and the failure states are process states a sandbox CLI cannot
+# reach from outside. Each driver carries the tracked launcher's own
+# stopOwnedGroup and startOwnedPhase text, sliced from the sandbox copy, so a
+# reword of either function changes the slice and the probe follows the
+# product. The dead-group control spawns a detached child that has already
+# exited, so the pid it names leads no process group and no real signal is
+# sent to anyone.
+
+_LAUNCHER_PROBE_IMPORTS = """\
+import { spawn } from 'node:child_process'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
+import process from 'node:process'
+"""
+
+# A detached child that has already exited. Its pid leads no group, so the
+# group probe answers ESRCH, no signal is sent, and stopOwnedGroup settles.
+_LAUNCHER_DEAD_GROUP_BODY = """\
+const child = spawn(process.execPath, ['-e', 'process.exit(0)'], {
+  detached: true
+})
+await new Promise((resolve) => child.on('exit', resolve))
+await stopOwnedGroup(child.pid, 'SIGTERM', Promise.resolve())
+console.log('settled')
+"""
+
+
+def _launcher_probe(name: str, body: str) -> Invoke:
+    """A driver that calls the launcher's own extracted functions."""
+    def run(box: Sandbox) -> subprocess.CompletedProcess[str]:
+        source = box.read("bin/folder-viewer-dev.mjs")
+        start = source.index("async function stopOwnedGroup")
+        end = source.index("async function runPhase")
+        box.write(
+            f"target/f245-launcher-probe/{name}.mjs",
+            _LAUNCHER_PROBE_IMPORTS + source[start:end] + "\n" + body)
+        return box.run(["node", f"target/f245-launcher-probe/{name}.mjs"],
+                       timeout=120)
+    return Invoke(key=f"launcher-probe {name}", run=run)
+
+
+_LAUNCHER_SETTLE_INVOKE = _launcher_probe(
+    "settle", _LAUNCHER_DEAD_GROUP_BODY)
+_LAUNCHER_PHASE_SETTLE_INVOKE = _launcher_probe(
+    "phase-settle", """\
+const phase = startOwnedPhase(process.execPath, ['-e', 'process.exit(0)'], {})
+await phase.done
+console.log('settled')
+""")
+_LAUNCHER_INVALID_PID_BODY = """\
+try {
+  await stopOwnedGroup(process.pid, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_INVALID_SIGNAL_BODY = """\
+try {
+  await stopOwnedGroup(1, 'SIGKILL', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_PROBE_FAILED_BODY = """\
+const realKill = process.kill.bind(process)
+process.kill = (pid, signal) => {
+  if (signal === 0) {
+    const error = new Error('operation not permitted')
+    error.code = 'EPERM'
+    throw error
+  }
+  return realKill(pid, signal)
+}
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_SIGNAL_FAILED_BODY = """\
+process.kill = (pid, signal) => {
+  if (signal === 0) return true
+  const error = new Error('operation not permitted')
+  error.code = 'EPERM'
+  throw error
+}
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', Promise.resolve())
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_NEVER_SETTLES_BODY = """\
+process.kill = () => true
+try {
+  await stopOwnedGroup(12345, 'SIGTERM', new Promise(() => {}))
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+_LAUNCHER_PHASE_FAILED_BODY = """\
+process.kill = () => true
+const phase = startOwnedPhase(process.execPath, ['-e', 'process.exit(0)'], {})
+phase.stop('SIGTERM')
+try {
+  await phase.done
+} catch (error) {
+  console.log(error.message)
+  process.exit(1)
+}
+console.log('settled')
+"""
+
+
 # F-218. The snippets call the pure functions on synthetic reports. The GHSA
 # ids are fixtures, not the live advisory list, so a moving database cannot
 # move a probe. `left-pad` stands in for a closure package that has no row.
@@ -7679,50 +7910,101 @@ print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 
-# The viewer build check's two states, as emitted names and worker text. The
+# The viewer build check's two states, per the F-266 amendment: every
+# fixture passes the raw-byte emitted map and the explicit build base. The
 # inputs come from the refusal sentences, a clean-clone build that keeps the
-# runtime import and its probe and a pkg build that emits its own wasm files,
-# and not from the regular expressions the check uses to read them.
+# runtime import and a pkg build that emits its own wasm files with no reach
+# at the build machine's absolute path, and not from the regular expressions
+# the check uses to read them. F-266 removed the worker's preflight fetch, so
+# the healthy shapes import only and the fetched-URL shapes are refusals.
 _VIEWER_URL = "/@fs/w/crates/ocelli-wasm/pkg/ocelli_wasm.js"
 _VIEWER_ABSENT_BUNDLED = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
-         'ocelli_wasm_bg-d4.wasm']
-worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
-bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'import("./ocelli_wasm-c3.js")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.absent_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_ABSENT_HEALTHY = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js']
-worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
-bad = v.absent_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js']
+worker = 'import("{_VIEWER_URL}")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry'}}
+bad = v.absent_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_PRESENT_EXTERNAL = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js']
-worker = 'fetch("{_VIEWER_URL}");import("{_VIEWER_URL}")'
-bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js']
+worker = 'import("{_VIEWER_URL}")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
 _VIEWER_PRESENT_HEALTHY = f"""\
 import sys
 sys.path.insert(0, 'scripts')
+from pathlib import Path
 import viewer_build_check as v
-names = ['core-worker-a1.js', 'index-b2.js', 'ocelli_wasm-c3.js',
-         'ocelli_wasm_bg-d4.wasm']
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'import("./ocelli_wasm-c3.js")'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_MISSING_GLUE = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+from pathlib import Path
+import viewer_build_check as v
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
+worker = 'const booted=true;'
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
+print('\\n'.join(bad))
+sys.exit(1 if bad else 0)
+"""
+_VIEWER_PRESENT_FETCH = f"""\
+import sys
+sys.path.insert(0, 'scripts')
+from pathlib import Path
+import viewer_build_check as v
+names = ['assets/core-worker-a1.js', 'assets/index-b2.js',
+         'assets/ocelli_wasm-c3.js', 'assets/ocelli_wasm_bg-d4.wasm']
 worker = 'fetch("{_VIEWER_URL}");import("./ocelli_wasm-c3.js")'
-bad = v.present_problems(names, worker, '{_VIEWER_URL}')
+raw = {{'assets/core-worker-a1.js': worker.encode('utf-8'),
+       'assets/index-b2.js': b'entry',
+       'assets/ocelli_wasm-c3.js': b'glue',
+       'assets/ocelli_wasm_bg-d4.wasm': b'\\x00asm\\x01'}}
+bad = v.present_problems(names, raw, '{_VIEWER_URL}', Path('/w'))
 print('\\n'.join(bad))
 sys.exit(1 if bad else 0)
 """
@@ -9794,6 +10076,50 @@ GUARDS: tuple[Guard, ...] = (
                   note="F-110. A decode wasm with no bindings file is not a "
                        "measured module."),
         ),
+    ),
+
+    Guard(
+        id='docs',
+        file='bin/ocelli.sh',
+        gate='docs',
+        spec="Approved design .claude/plans/F-268-design.md, acceptance criteria AC4, AC5, AC8.",
+        refuses="Rejects public doc links whose target is private or missing, even when inherited encoded allow flags are present.",
+        claims=(),
+        probes=(
+            Probe(
+                id='docs.private-link-encoded-override',
+                mutate=None,
+                invoke=Invoke(
+                    'docs private encoded override',
+                    lambda box: _run_docs_gate(box, 'private'),
+                ),
+                expect='f268_private_target',
+                needs='cargo',
+                profile='deep',
+                level=3,
+                control=Invoke(
+                    'docs healthy encoded override',
+                    lambda box: _run_docs_gate(box, 'healthy'),
+                ),
+            ),
+            Probe(
+                id='docs.broken-link-encoded-override',
+                mutate=None,
+                invoke=Invoke(
+                    'docs broken encoded override',
+                    lambda box: _run_docs_gate(box, 'broken'),
+                ),
+                expect='f268_missing_target',
+                needs='cargo',
+                profile='deep',
+                level=3,
+                control=Invoke(
+                    'docs healthy encoded override',
+                    lambda box: _run_docs_gate(box, 'healthy'),
+                ),
+            ),
+        ),
+        silent="Rustdoc diagnostic text is owned by Cargo, not a refusal literal stored in or discoverable from repository source.",
     ),
 
     # -- the vendored coefficient contract, F-239 D-31 ----------------------
@@ -13281,15 +13607,23 @@ GUARDS: tuple[Guard, ...] = (
         file="scripts/viewer_build_check.py",
         gate="packages",
         spec="F-217 AC18 in `.claude/plans/F-217-design.md`, the viewer's "
-             "`vite build` passing in CI, and the lead decision that a build "
+             "`vite build` passing in CI, the lead decision that a build "
              "without `crates/ocelli-wasm/pkg` passes and leaves the import "
-             "to runtime, where it fails and the core reads as not built",
+             "to runtime, where it fails and the core reads as not built, "
+             "and F-266 in `.claude/plans/F-266-design.md`: the worker's "
+             "prefetch is gone, the emitted surface is inspected in raw "
+             "bytes across every recursive dist output, and no emitted file "
+             "may reach the build machine's absolute path.",
         refuses="A viewer build that fails with the wasm pkg absent, or that "
                 "then emits a wasm file or drops the runtime import of the "
-                "pkg URL or the fetch probe in front of it. A viewer build "
-                "that fails with a pkg present, or that then emits no wasm "
-                "glue chunk or no `.wasm` asset, or still imports the pkg URL "
-                "at runtime.",
+                "pkg URL. A viewer build that fails with a pkg present, or "
+                "that then emits no wasm glue chunk or no `.wasm` asset, or "
+                "whose worker does not import the emitted wasm glue chunk, or "
+                "where any emitted file reaches the build machine's absolute "
+                "path: the temporary build base or the real checkout root, "
+                "raw or URL-encoded as a path prefix with a boundary, or the "
+                "standalone `/@fs` marker, in a fetch, an import or any "
+                "other position.",
         claims=("*",),
         probes=(
             Probe(
@@ -13305,7 +13639,7 @@ GUARDS: tuple[Guard, ...] = (
                      "bundled chunk and which emitted wasm files, which is "
                      "what a build that found a pkg it should not have "
                      "looks like. The control keeps the runtime import and "
-                     "the probe and emits no wasm file."),
+                     "emits no wasm file."),
             Probe(
                 "viewer-build.present-external", None,
                 python_snippet("viewer_build_check.present_problems",
@@ -13319,6 +13653,40 @@ GUARDS: tuple[Guard, ...] = (
                      "external, which is what a config that always marks it "
                      "external produces. The control emits the glue chunk and "
                      "the `.wasm` and imports the chunk."),
+            Probe(
+                "viewer-build.present-missing-glue-import", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_MISSING_GLUE),
+                "does not import the emitted ocelli_wasm glue chunk",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1, F-266. A pkg-present build whose worker "
+                     "does not import the emitted ocelli_wasm glue chunk, so "
+                     "the wasm glue would not load. The fixture keeps every "
+                     "healthy name and byte except the worker body, so only "
+                     "the missing-glue-import refusal causes the RED; the "
+                     "healthy control is the same emission set with the "
+                     "hashed glue import in place."),
+            Probe(
+                "viewer-build.present-absolute-fetch", None,
+                python_snippet("viewer_build_check.present_problems",
+                               _VIEWER_PRESENT_FETCH),
+                "reaches the build machine's absolute path",
+                level=1,
+                control=python_snippet(
+                    "viewer_build_check.present_problems, healthy",
+                    _VIEWER_PRESENT_HEALTHY),
+                note="Level 1, F-266. A pkg-present build whose worker "
+                     "prefetches the absolute `/@fs` pkg URL ahead of its "
+                     "bundled import, the removed preflight shape. The "
+                     "fixture keeps the valid glue and `.wasm` names and the "
+                     "hashed import, so only the absolute-reach refusal "
+                     "causes the RED; the healthy control is the same "
+                     "emission set with the fetch line gone. The scan covers "
+                     "every emitted file in raw bytes, so the refusal is not "
+                     "worker-only."),
         ),
         limit="The two builds need an npm install, and `node_modules` is "
               "ignored and therefore absent from the `git ls-files` sandbox, "
@@ -13496,6 +13864,94 @@ GUARDS: tuple[Guard, ...] = (
                      "can reach the wait, and shortens that wait. The control "
                      "stubs the build, writes one URL and stubs Vite, and "
                      "must not print this refusal."),
+        ),
+    ),
+
+    # -- the folder viewer dev launcher -----------------------------------
+    Guard(
+        id="folder-viewer-dev",
+        file="bin/folder-viewer-dev.mjs",
+        gate="-",
+        spec="`.claude/commands/implement-feature.md` section 3, a new "
+             "refusal arrives with its probe, and the F-245 plan's launcher "
+             "section, owned INT and TERM cleanup controlled by the launcher",
+        refuses="Stopping an owned process group named by a pid that is not "
+                "a positive integer other than the launcher's own, or with a "
+                "signal that is neither SIGINT nor SIGTERM; a group "
+                "liveness probe or a group signal that fails with something "
+                "other than ESRCH; an owned group still alive after the "
+                "SIGKILL confirmation deadline; and an owned phase whose "
+                "stop rejected, rather than reporting the failure and "
+                "exiting non-zero.",
+        claims=("*",),
+        covered_by=("tools/bench/tests/folder_viewer_dev_test.mjs",),
+        probes=(
+            Probe(
+                "folder-viewer-dev.invalid-owned-pid",
+                None,
+                _launcher_probe("invalid-owned-pid",
+                                _LAUNCHER_INVALID_PID_BODY),
+                "invalid owned pid",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="The pid check runs before anything else, so the "
+                     "driver names the launcher's own pid and no real group "
+                     "is signalled. The control stops an already exited "
+                     "detached child's pid, which leads no group, and "
+                     "settles."),
+            Probe(
+                "folder-viewer-dev.invalid-stop-signal",
+                None,
+                _launcher_probe("invalid-stop-signal",
+                                _LAUNCHER_INVALID_SIGNAL_BODY),
+                "invalid stop signal",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="The signal check runs before the first kill, so pid 1 "
+                     "is never contacted. The control is the same dead "
+                     "group settle."),
+            Probe(
+                "folder-viewer-dev.group-probe-failed",
+                None,
+                _launcher_probe("group-probe-failed",
+                                _LAUNCHER_PROBE_FAILED_BODY),
+                "group probe failed",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="process.kill is replaced for the liveness signal 0 "
+                     "only, so the probe throws EPERM where the launcher "
+                     "expects ESRCH or success, and no real group 12345 is "
+                     "contacted. The control leaves kill alone."),
+            Probe(
+                "folder-viewer-dev.group-signal-failed",
+                None,
+                _launcher_probe("group-signal-failed",
+                                _LAUNCHER_SIGNAL_FAILED_BODY),
+                "group signal failed",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="process.kill answers the liveness probe true and "
+                     "throws on the real signal, so the refusal is the send "
+                     "and not the probe. The control leaves kill alone."),
+            Probe(
+                "folder-viewer-dev.stop-did-not-settle",
+                None,
+                _launcher_probe("never-settles",
+                                _LAUNCHER_NEVER_SETTLES_BODY),
+                "owned group stop did not settle",
+                control=_LAUNCHER_SETTLE_INVOKE,
+                note="kill always answers true and the child-closed promise "
+                     "never resolves, so both deadlines pass at about four "
+                     "seconds and the refusal is the hard deadline. The "
+                     "control settles at once on a dead group."),
+            Probe(
+                "folder-viewer-dev.phase-stop-failed",
+                None,
+                _launcher_probe("phase-failed",
+                                _LAUNCHER_PHASE_FAILED_BODY),
+                "owned phase stop failed",
+                control=_LAUNCHER_PHASE_SETTLE_INVOKE,
+                note="The phase's own child exits at once, but the replaced "
+                     "kill keeps the group probe alive past the hard "
+                     "deadline, so stopOwnedGroup rejects and done() "
+                     "converts that into the phase refusal. The control is "
+                     "the same phase against a real dead group."),
         ),
     ),
 
@@ -15123,7 +15579,8 @@ GUARDS: tuple[Guard, ...] = (
               "harness preconditions, not additional repository policy. "
               "The positive traversal probes also require the real guard's "
               "baseline plus exactly one followed path, and their negative "
-              "companions require the planted file's group allow to refuse.",
+              "companions require the planted file's group allow to refuse. "
+              "DocProbeHarnessPreconditions covers harness preconditions only: _write_docs_fixture refusing an unknown fault and _run_docs_gate rejecting a zero-output no-op transport that reports success without rendered docs.",
     ),
     Guard(
         id="event-catalogue",
