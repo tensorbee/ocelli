@@ -35,7 +35,7 @@
   body {
     display: grid;
     grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
-    grid-template-rows: 44px auto minmax(0, 1fr) 40px 28px;
+    grid-template-rows: 44px auto minmax(0, 1fr) 40px 28px auto;
     font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Liberation Sans", Arial, sans-serif;
     overflow: hidden;
     transition: grid-template-columns 0.18s ease;
@@ -428,6 +428,18 @@
     text-overflow: ellipsis;
     min-width: 0;
   }
+  #prefs-note {
+    grid-column: 2;
+    grid-row: 6;
+    margin: 0;
+    padding: 2px 10px 4px;
+    color: var(--muted);
+    font-size: 12px;
+    background: var(--ground);
+    border-top: 1px solid var(--line);
+    min-width: 0;
+  }
+  #prefs-note span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #inspector {
     grid-column: 3;
     grid-row: 2 / -1;
@@ -868,11 +880,20 @@
   <span id="counter">0 / 0</span>
 </div>
 <p id="sentence"></p>
+<p id="prefs-note" class="note-text" hidden></p>
 <aside id="inspector">
   <section>
     <h2>WINDOW</h2>
     <div id="window-list"></div>
     <p class="note-text" id="window-note">Drag with the W/L tool, or over a region with the region window tool, to set your own window. Reset returns to the first usable window in the file.</p>
+    <label class="profile-row">Default preset
+      <select id="default-preset" aria-label="Default preset">
+        <option value="none">None</option>
+        <option value="soft_tissue">Soft tissue</option>
+        <option value="lung">Lung</option>
+        <option value="bone">Bone</option>
+      </select>
+    </label>
   </section>
   <section>
     <h2>MARKS</h2>
@@ -914,7 +935,7 @@
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
     <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
-    <p class="note-text">This browser keeps the profile and the play rate for this address, so they return after a restart only on the same OCELLI_PORT.</p>
+    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. Any other choice the browser did not keep, or a choice it could not use, says so in the line under the image. A profile change the browser did not keep is named in the MOUSE section.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -1005,6 +1026,36 @@ const MOUSE_TEXT = { scroll: "Next or previous image", pan: "Pan", zoom: "Zoom a
 const MOUSE_KEY = "ocelli.mouse";
 const FPS_KEY = "ocelli.fps";
 const FPS_VALUES = Array.from({ length: 30 }, (_, at) => String(at + 1));
+// F-205. The page's choices live in one versioned document, `ocelli.prefs`,
+// and the four legacy keys stay beside it so an older binary keeps reading
+// them. Every field is one of a closed set, so no free text, path, URL or
+// identifier is ever stored. `none` means no default preset.
+const PREFS_KEY = "ocelli.prefs";
+const PREFS_VERSION = 1;
+const PREFS_FIELDS = ["mouseProfile", "cineFps", "hideSeries", "hideInspector", "defaultPreset"];
+const PREFS_DEFAULTS = Object.freeze({ mouseProfile: "ocelli", cineFps: 10, hideSeries: false, hideInspector: false, defaultPreset: "none" });
+const PREFS_LEGACY_KEYS = Object.freeze({ mouseProfile: MOUSE_KEY, cineFps: FPS_KEY, hideSeries: "ocelli.no-series", hideInspector: "ocelli.no-inspector" });
+const PREFS_ALL_KEYS = Object.freeze([PREFS_KEY, MOUSE_KEY, FPS_KEY, "ocelli.no-series", "ocelli.no-inspector"]);
+const DEFAULT_PRESETS = Object.freeze(["none", "soft_tissue", "lung", "bone"]);
+// The refusal sentences. No sentence echoes a stored value, because a
+// refused value is arbitrary text of unknown origin and the page does not
+// propagate it into the DOM.
+const PREFS_REFUSALS = Object.freeze({
+  mouseProfile: "The saved mouse profile is not one this viewer knows, so the Ocelli profile is used.",
+  cineFps: "The saved play rate is not a whole number from 1 to 30, so 10 is used.",
+  hideSeries: "The saved series column choice is not readable, so the series list is shown.",
+  hideInspector: "The saved tools column choice is not readable, so the tools column is shown.",
+  defaultPreset: "The saved default preset is not one this viewer knows, so no default preset is applied.",
+  document: "The saved preferences could not be used, so the viewer's usual choices apply and the saved document is left unchanged.",
+  notOffered: "The saved default preset is not offered on this image, so it is not applied.",
+  legacyPartial: "The choice was kept in this browser, but the copy that older versions of this viewer read was not updated."
+});
+const PREFS_WRITE_FAILURES = Object.freeze({
+  cineFps: "This browser did not keep the play rate. It applies until you reload.",
+  hideSeries: "This browser did not keep the series column choice. It applies until you reload.",
+  hideInspector: "This browser did not keep the tools column choice. It applies until you reload.",
+  defaultPreset: "This browser did not keep the default preset. It applies until you reload."
+});
 const SENTENCE = {
   "tool-scroll": "Drag up or down to move through the images.",
   "tool-pan": "Drag to move the image.",
@@ -1051,7 +1102,8 @@ const SENTENCE = {
   "toggle-inspector": "Hide or show the window list, marks and key list."
 };
 // The window list. Every name and number in it comes from the local
-// process's inspect reply. The page keeps no preset and no window number.
+// process's inspect reply. The page stores choices only through the
+// preference schema, and the numbers it shows come from the local process.
 const PRESET_ROW = "A preset from the library, in Hounsfield units. The local process offers the presets on CT only.";
 const FILE_ROW = "A window stored in the file, named by its Window Center & Width Explanation, or by its place in the file when it has none.";
 const VOI_LUT_ROW = "This preview does not apply a VOI LUT Sequence.";
@@ -1165,6 +1217,8 @@ const checksMessage = document.getElementById("checks-message");
 const checksWrap = document.getElementById("checks-wrap");
 const checksRows = document.getElementById("checks-rows");
 const sentence = document.getElementById("sentence");
+const prefsNote = document.getElementById("prefs-note");
+const defaultPresetSelect = document.getElementById("default-preset");
 const marksEl = document.getElementById("marks");
 const swatches = document.getElementById("swatches");
 const sizeRow = document.getElementById("size-row");
@@ -1249,7 +1303,15 @@ function resetFolderState() {
   sessionTracking.clear();
 }
 let marksModule = null;
-let activeProfile = readPreference(MOUSE_KEY, PROFILE_IDS, "ocelli");
+// The page's kept choices and the sentences still outstanding about them.
+// `loadPreferences` fills both from storage, and the save helpers keep them
+// current. `resolved` holds the choices storage last held as this page knows
+// them, advanced by each resolve and by this page's own kept writes, so the
+// listener can tell a write of a failed field itself from a write of another
+// field. Nothing here reaches the DOM.
+const prefs = { values: { ...PREFS_DEFAULTS }, resolved: { ...PREFS_DEFAULTS }, sentences: [], writeFailures: {}, legacyPartial: false };
+loadPreferences();
+let activeProfile = prefs.values.mouseProfile;
 let tool = PROFILES[activeProfile].start;
 let showCorners = true;
 let showCross = false;
@@ -1372,6 +1434,10 @@ function blankViewport(cell) {
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
     // F-225. The file of the last image this viewport drew.
     paintedFile: null,
+    // F-205. The load whose stored-default trial holds the first paint, and
+    // whether the viewport names a stored preset the process does not offer.
+    // Both are per viewport and reset with the record.
+    paintHold: null, presetNotOffered: false,
     loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
     scrollDir: 1,
     mainBusy: false, mainTail: Promise.resolve(),
@@ -1609,9 +1675,8 @@ for (const button of document.querySelectorAll("[data-open]")) {
 }
 document.getElementById("toggle-series").addEventListener("click", () => togglePanel("no-series"));
 document.getElementById("toggle-inspector").addEventListener("click", () => togglePanel("no-inspector"));
-for (const name of ["no-series", "no-inspector"]) {
-  if (readPreference("ocelli." + name, ["0", "1"], "0") === "1") document.body.classList.add(name);
-}
+if (prefs.values.hideSeries) document.body.classList.add("no-series");
+if (prefs.values.hideInspector) document.body.classList.add("no-inspector");
 syncPanels();
 profileSelect.value = activeProfile;
 paintMouseKeys();
@@ -1626,8 +1691,10 @@ profileSelect.addEventListener("change", () => {
   if (!profileKeyed) profileSelect.blur();
   profileKeyed = false;
 });
-fpsInput.value = readPreference(FPS_KEY, FPS_VALUES, "10");
+fpsInput.value = String(prefs.values.cineFps);
 fpsValue.textContent = fpsInput.value;
+defaultPresetSelect.value = prefs.values.defaultPreset;
+paintPrefsNote();
 useSliderButton.addEventListener("click", () => {
   useSlider = !useSlider;
   syncCineLine();
@@ -1749,7 +1816,56 @@ modal.addEventListener("click", closeModal);
 filter.addEventListener("input", paintHeaderRows);
 playButton.addEventListener("click", togglePlay);
 fpsInput.addEventListener("input", () => { fpsValue.textContent = fpsInput.value; });
-fpsInput.addEventListener("change", () => { writePreference(FPS_KEY, fpsInput.value); });
+fpsInput.addEventListener("change", () => { savePreference("cineFps", Number(fpsInput.value)); });
+defaultPresetSelect.addEventListener("change", () => { savePreference("defaultPreset", defaultPresetSelect.value); });
+// Another same-origin page's write. The same resolve the load uses runs
+// again and refreshes the state and the visible controls without a reload
+// and without writing. The current tool is kept, and a running cine reads
+// its rate from the slider on its next step. A field whose own write
+// failed this session keeps the value in effect and its sentence when the
+// other tab writes a different field, and takes the stored value again
+// only when the stored value for that field itself moved, which is the
+// other tab's kept write of the same field.
+window.addEventListener("storage", (event) => {
+  if (event.key !== null && !PREFS_ALL_KEYS.includes(event.key)) return;
+  const resolved = resolvePreferences();
+  const moved = {};
+  for (const field of PREFS_FIELDS) moved[field] = resolved.values[field] !== prefs.resolved[field];
+  prefs.resolved = resolved.values;
+  const values = { ...prefs.values };
+  for (const field of ["cineFps", "hideSeries", "hideInspector", "defaultPreset"]) {
+    if (!prefs.writeFailures[field] || moved[field]) {
+      values[field] = resolved.values[field];
+      delete prefs.writeFailures[field];
+    }
+  }
+  // The profile's failed write keeps its own paragraph instead of a note
+  // line, and the same rule moves it: the stored profile itself is what
+  // decides, because this tab now holds the document's profile only once
+  // the document's profile changed.
+  const profileRefreshed = moved.mouseProfile || mouseUnsaved.hidden;
+  if (profileRefreshed) {
+    values.mouseProfile = resolved.values.mouseProfile;
+    activeProfile = values.mouseProfile;
+    profileSelect.value = activeProfile;
+    paintMouseKeys();
+    mouseUnsaved.hidden = true;
+  }
+  prefs.values = values;
+  prefs.sentences = resolved.sentences;
+  // A successful document write rewrites all four legacy keys, so another
+  // tab's change repairs a copy an older version of this viewer reads.
+  prefs.legacyPartial = false;
+  if (!prefs.writeFailures.cineFps) {
+    fpsInput.value = String(values.cineFps);
+    fpsValue.textContent = fpsInput.value;
+  }
+  if (!prefs.writeFailures.hideSeries) document.body.classList.toggle("no-series", values.hideSeries);
+  if (!prefs.writeFailures.hideInspector) document.body.classList.toggle("no-inspector", values.hideInspector);
+  if (!prefs.writeFailures.hideSeries || !prefs.writeFailures.hideInspector) syncPanels();
+  if (!prefs.writeFailures.defaultPreset) defaultPresetSelect.value = values.defaultPreset;
+  paintPrefsNote();
+});
 scrubber.addEventListener("input", () => {
   const vp = activeViewport();
   showIndex(vp, Number(scrubber.value));
@@ -2011,22 +2127,20 @@ async function postHeaders(file) {
 function togglePanel(name) {
   const on = !document.body.classList.contains(name);
   document.body.classList.toggle(name, on);
-  writePreference("ocelli." + name, on ? "1" : "0");
+  savePreference(name === "no-series" ? "hideSeries" : "hideInspector", on);
   syncPanels();
 }
 
 // Every read and write of this browser's storage is in these two, inside try
-// and catch, because a private window or blocked site data can throw. A
-// missing key, a value outside `allowed` or a throw gives `fallback`, and
-// nothing is written back.
-function readPreference(key, allowed, fallback) {
-  let stored = null;
+// and catch, because a private window or blocked site data can throw. They
+// are the page's only two storage accessors, and the preference schema above
+// them owns every closed set, refusal and sentence.
+function readPreference(key) {
   try {
-    stored = localStorage.getItem(key);
+    return localStorage.getItem(key);
   } catch {
-    return fallback;
+    return null;
   }
-  return allowed.includes(stored) ? stored : fallback;
 }
 
 // False when the browser did not keep the value.
@@ -2039,13 +2153,222 @@ function writePreference(key, value) {
   }
 }
 
+// The document's shape on read. Anything that is not a usable version 1
+// object is refused whole: unparsable text, null, an array, a number, or an
+// object whose version is not exactly the number 1.
+function parsePrefsDocument(raw) {
+  if (raw == null) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (parsed.version !== PREFS_VERSION) return null;
+  return parsed;
+}
+
+// The closed set of each field. A missing field, a field of the wrong JSON
+// type and a value outside its set are all the same refusal.
+function prefValueValid(field, value) {
+  switch (field) {
+    case "mouseProfile": return typeof value === "string" && PROFILE_IDS.includes(value);
+    case "cineFps": return Number.isInteger(value) && value >= 1 && value <= 30;
+    case "hideSeries":
+    case "hideInspector": return typeof value === "boolean";
+    case "defaultPreset": return typeof value === "string" && DEFAULT_PRESETS.includes(value);
+    default: return false;
+  }
+}
+
+// The document exactly as it is stored: the version and the five fields, in
+// this order, each a validated value. Unknown fields never survive a write.
+function prefsDocumentJSON(values) {
+  return JSON.stringify({
+    version: PREFS_VERSION,
+    mouseProfile: values.mouseProfile,
+    cineFps: values.cineFps,
+    hideSeries: values.hideSeries,
+    hideInspector: values.hideInspector,
+    defaultPreset: values.defaultPreset
+  });
+}
+
+// The legacy encoding of a validated value. The rate is its decimal string
+// and the columns are "0" and "1", so an older binary reads them unchanged.
+function prefLegacyValue(field, value) {
+  if (field === "cineFps") return String(value);
+  if (field === "hideSeries" || field === "hideInspector") return value ? "1" : "0";
+  return value;
+}
+
+// Reads the stored choices without writing anything. The page load and the
+// storage listener share this one resolve. A usable document wins. Without
+// one, whether the stored document is absent or refused whole, the four
+// legacy keys are used, each validated against its own set, a value outside
+// its set naming that key and taking the default.
+function resolvePreferences() {
+  const values = { ...PREFS_DEFAULTS };
+  const sentences = [];
+  const raw = readPreference(PREFS_KEY);
+  const stored = parsePrefsDocument(raw);
+  if (stored !== null) {
+    for (const field of PREFS_FIELDS) {
+      if (prefValueValid(field, stored[field])) values[field] = stored[field];
+      else sentences.push(PREFS_REFUSALS[field]);
+    }
+    return { values, sentences, refused: false, sawLegacy: false };
+  }
+  const refused = raw != null;
+  if (refused) sentences.push(PREFS_REFUSALS.document);
+  let sawLegacy = false;
+  const mouse = readPreference(MOUSE_KEY);
+  if (mouse != null) {
+    sawLegacy = true;
+    if (PROFILE_IDS.includes(mouse)) values.mouseProfile = mouse;
+    else sentences.push(PREFS_REFUSALS.mouseProfile);
+  }
+  const fps = readPreference(FPS_KEY);
+  if (fps != null) {
+    sawLegacy = true;
+    if (FPS_VALUES.includes(fps)) values.cineFps = Number(fps);
+    else sentences.push(PREFS_REFUSALS.cineFps);
+  }
+  for (const field of ["hideSeries", "hideInspector"]) {
+    const stored = readPreference(PREFS_LEGACY_KEYS[field]);
+    if (stored == null) continue;
+    sawLegacy = true;
+    if (stored === "0" || stored === "1") values[field] = stored === "1";
+    else sentences.push(PREFS_REFUSALS[field]);
+  }
+  return { values, sentences, refused, sawLegacy };
+}
+
+// The page load. When there is no document and any legacy key is present, the
+// document is written once from the validated values and all four legacy keys
+// are rewritten from it, so an invalid legacy value is repaired in place. A
+// refused document is left byte-identical, and a load with neither store
+// writes nothing.
+function loadPreferences() {
+  const resolved = resolvePreferences();
+  prefs.values = resolved.values;
+  prefs.resolved = resolved.values;
+  prefs.sentences = resolved.sentences;
+  if (resolved.refused || !resolved.sawLegacy) return;
+  if (!writePreference(PREFS_KEY, prefsDocumentJSON(resolved.values))) return;
+  const failures = [];
+  for (const field of PREFS_FIELDS) {
+    if (!writePreference(PREFS_LEGACY_KEYS[field], prefLegacyValue(field, resolved.values[field]))) failures.push(field);
+  }
+  prefs.legacyPartial = failures.length > 0;
+}
+
+// Writes one choice. The document is re-read inside this helper and only the
+// named field changes, so a tab that opened earlier cannot drop another
+// tab's field. A field whose re-read value is valid is kept as read, and a
+// field whose re-read value is invalid is written as this tab's value in
+// effect. The field being changed is written at the user's new value. The
+// merged document is only what is written: this session keeps applying its
+// own values, so a later write of another field never replaces an untouched
+// field's choice in effect. A successful document write rewrites all four
+// legacy keys from the written values. A refused document is never written:
+// the change writes the changed field's legacy key only, and a default
+// preset change, which has no legacy key, is kept nowhere. The result names
+// whether the document and the changed field's own legacy key hold the
+// value, which for the default preset is the document's success alone.
+function savePreference(field, value) {
+  if (!prefValueValid(field, value)) return { document: false, legacy: false };
+  const raw = readPreference(PREFS_KEY);
+  const current = parsePrefsDocument(raw);
+  const refused = raw != null && current === null;
+  const inEffect = { ...prefs.values, [field]: value };
+  const next = { ...inEffect };
+  if (current !== null) {
+    for (const name of PREFS_FIELDS) {
+      if (name !== field && prefValueValid(name, current[name])) next[name] = current[name];
+    }
+  }
+  let documentKept = false;
+  let legacyKept = false;
+  if (refused) {
+    const ownKey = PREFS_LEGACY_KEYS[field];
+    if (ownKey) {
+      legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+      // A kept own write is what a load reads while the document is refused,
+      // so the listener's baseline moves with it.
+      if (legacyKept) prefs.resolved = { ...prefs.resolved, [field]: next[field] };
+    }
+  } else {
+    documentKept = writePreference(PREFS_KEY, prefsDocumentJSON(next));
+    if (documentKept) {
+      // The document now holds next, so that is the state a later stored
+      // change is measured against.
+      prefs.resolved = { ...next };
+      const failures = [];
+      for (const name of PREFS_FIELDS) {
+        const legacyKey = PREFS_LEGACY_KEYS[name];
+        if (legacyKey && !writePreference(legacyKey, prefLegacyValue(name, next[name]))) failures.push(name);
+      }
+      prefs.legacyPartial = failures.length > 0;
+      legacyKept = !failures.includes(field);
+    } else {
+      const ownKey = PREFS_LEGACY_KEYS[field];
+      if (ownKey) legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+    }
+  }
+  // The sentence for the changed field. mouseProfile's write failure keeps
+  // its own paragraph in the MOUSE section instead, and in the refused state
+  // a legacy success is a kept choice, so only a real loss names a sentence.
+  if (field !== "mouseProfile") {
+    const kept = documentKept || (refused && legacyKept);
+    if (kept) delete prefs.writeFailures[field];
+    else prefs.writeFailures[field] = true;
+  }
+  prefs.values = inEffect;
+  paintPrefsNote();
+  // What the reader keeps: the document's own success when it is usable,
+  // because it wins on the next load, and the legacy key's success while the
+  // stored document is refused, because the legacy keys are what a load uses
+  // then.
+  return { document: documentKept, legacy: legacyKept, kept: refused ? legacyKept : documentKept };
+}
+
+// One line per outstanding condition, several at once, in the plan's order:
+// the load refusals, the outlined viewport's not-offered sentence, then the
+// write failures and the partial copy.
+function paintPrefsNote() {
+  const lines = [...prefs.sentences];
+  const vp = activeViewport();
+  if (vp && vp.presetNotOffered) lines.push(PREFS_REFUSALS.notOffered);
+  for (const field of ["cineFps", "hideSeries", "hideInspector", "defaultPreset"]) {
+    if (prefs.writeFailures[field]) lines.push(PREFS_WRITE_FAILURES[field]);
+  }
+  if (prefs.legacyPartial) lines.push(PREFS_REFUSALS.legacyPartial);
+  if (!lines.length) {
+    prefsNote.hidden = true;
+    prefsNote.replaceChildren();
+    return;
+  }
+  const nodes = [];
+  for (const line of lines) {
+    const span = document.createElement("span");
+    span.textContent = line;
+    nodes.push(span);
+  }
+  prefsNote.replaceChildren(...nodes);
+  prefsNote.hidden = false;
+}
+
 // A profile change sets the tool left starts on, which cancels a draft
-// first, as any tool change does.
+// first, as any tool change does. The write failure keeps its own paragraph
+// here, so the save result drives `mouse-unsaved` directly.
 function setProfile(id) {
   if (!PROFILE_IDS.includes(id)) return;
   activeProfile = id;
   profileSelect.value = id;
-  mouseUnsaved.hidden = writePreference(MOUSE_KEY, id);
+  const outcome = savePreference("mouseProfile", id);
+  mouseUnsaved.hidden = outcome.kept;
   paintMouseKeys();
   setTool(PROFILES[id].start);
 }
@@ -2505,7 +2828,12 @@ function loadSeries(vp, key) {
     cancelDraft();
   }
   const previous = currentImage(vp);
-  const next = series.images[positions.get(key) || 0] || series.images[0];
+  // The shown image, resolved once through the wrap `showIndex` applies, so
+  // the stored-default trial is judged on the image the viewport will show.
+  const count = series.images.length;
+  const remembered = positions.get(key);
+  const shownAt = count ? ((Number.isInteger(remembered) ? remembered : 0) % count + count) % count : 0;
+  const next = series.images[shownAt] || series.images[0];
   if (previous && next && Boolean(previous.info.colour) !== Boolean(next.info.colour)) vp.invert = false;
   vp.loadToken += 1;
   vp.tileToken += 1;
@@ -2525,15 +2853,63 @@ function loadSeries(vp, key) {
     windowNotice = "";
     syncWindowList();
   }
+  // F-205. The stored default is tried once per series load, after the
+  // viewport has moved, so the trial captures the new series' image. The
+  // single evaluation here is the apply's eligibility, and a trial sets the
+  // first-paint hold under this load's token before the index is shown.
+  vp.presetNotOffered = false;
+  const trialToken = storedDefaultTrial(vp, next);
+  vp.paintHold = trialToken == null ? null : vp.loadToken;
   syncStage(vp);
   syncSeriesRows();
   clearLine(vp);
-  const remembered = positions.get(key);
-  const drawing = showIndex(vp, Number.isInteger(remembered) ? remembered : 0);
-  if (vp.cell === activeCell) probeAfterSeriesDraw(vp, drawing);
+  const drawing = showIndex(vp, shownAt);
+  if (trialToken != null) {
+    const loadToken = vp.loadToken;
+    // Every outcome releases the hold, and a release whose load was
+    // superseded repaints nothing.
+    chooseWindow(vp, { preset: trialToken }, { propagate: false }).finally(() => releasePaintHold(vp, loadToken));
+  }
+  if (vp.cell === activeCell) {
+    probeAfterSeriesDraw(vp, drawing);
+    paintPrefsNote();
+  }
   // A new series in any shown cell needs its line, and a new source moves
   // the others. One coalesced request covers both.
   if (cellShown(vp)) scheduleLink();
+}
+
+// Whether this load will try the stored default preset, and the not-offered
+// sentence when it will not but the rows are choosable. The rows-choosable
+// rule is the window list's own: no VOI LUT listed and the image monochrome.
+// An image with no preset list at all, an MR or a colour image, stays
+// silent, because there is nothing the process could have offered.
+function storedDefaultTrial(vp, image) {
+  const token = prefs.values.defaultPreset;
+  if (token === "none" || !image || !drawable(image.info)) return null;
+  const listed = windowInfo(image);
+  if (listed.voiLuts.length > 0 || !(image.info && image.info.monochrome)) return null;
+  if (presetOffered(image, token)) return token;
+  if (listed.presets.length) vp.presetNotOffered = true;
+  return null;
+}
+
+// The trial of this load is over, whatever it decided. The hold opens and
+// the viewport repaints from its current window state: the preset on a
+// commit, the reader's choice if one landed during the trial, and the
+// window the page would have shown otherwise. A superseded load's token no
+// longer matches, so its release repaints nothing.
+function releasePaintHold(vp, loadToken) {
+  if (vp.paintHold !== loadToken) return;
+  vp.paintHold = null;
+  if (cellShown(vp)) showIndex(vp, vp.viewIndex);
+}
+
+// Whether this viewport's first paint waits for its stored-default trial.
+// The hold names the load it was set under, so a newer load or a changed
+// file frees every paint site without a release.
+function paintHeld(vp) {
+  return vp.paintHold === vp.loadToken;
 }
 
 function drawable(info) {
@@ -2693,13 +3069,15 @@ async function showIndex(vp, next) {
     faultShown(vp, image);
     return;
   }
-  if (vp.tileMode && !seriesWindowWanted(vp, image)) paintTiles(vp);
+  if (vp.tileMode && !paintHeld(vp) && !seriesWindowWanted(vp, image)) paintTiles(vp);
   schedulePrefetch(vp);
   // A series that is still to get its window is drawn only once it has it,
   // so no grey of this image's own window is taken from the cache first.
   const hit = seriesWindowWanted(vp, image) ? null : takeGrey(cacheKey(image, vp));
   if (hit) {
-    applyGrey(vp, hit, image);
+    // A held viewport waits for its trial, and the release repaints from
+    // this cached grey.
+    if (!paintHeld(vp)) applyGrey(vp, hit, image);
     return;
   }
   return pumpMain(vp);
@@ -2737,8 +3115,8 @@ async function pumpMain(vp) {
           await ensureSeriesWindow(seriesOf(vp));
           // After the wait the tiles paint at the series window, or at each
           // image's own window once the series is refused, and a series
-          // still waiting is not painted.
-          if (vp.tileMode && cellShown(vp) && !seriesWindowWanted(vp, currentImage(vp))) paintTiles(vp);
+          // still waiting is not painted. A held viewport waits too.
+          if (vp.tileMode && cellShown(vp) && !paintHeld(vp) && !seriesWindowWanted(vp, currentImage(vp))) paintTiles(vp);
           if (token !== vp.loadToken || vp.viewIndex !== wanted || currentImage(vp) !== image) continue;
           if (vp.cell === activeCell) syncWindowList();
           schedulePrefetch(vp);
@@ -2746,7 +3124,9 @@ async function pumpMain(vp) {
         key = cacheKey(image, vp);
         const grey = await fetchGrey(image, vp);
         if (moved()) continue;
-        applyGrey(vp, grey, image);
+        // The reply is cached either way, so a held viewport repaints from
+        // it when its trial releases the hold.
+        if (!paintHeld(vp)) applyGrey(vp, grey, image);
         break;
       } catch (error) {
         if (moved()) continue;
@@ -4040,8 +4420,11 @@ function chooseRow(vp, number) {
 // The commit point of a window change is a successful preview reply. The
 // change is asked for under its own cache key and the viewport takes it only
 // when its image arrives, so a refusal leaves the state and the shown image
-// alone and puts the refusal in the sentence line.
-async function chooseWindow(vp, next) {
+// alone and puts the refusal in the sentence line. The stored-default apply
+// passes `propagate: false`, so it never copies to the linked viewports and
+// never overwrites a reader-set window in one of them.
+async function chooseWindow(vp, next, options = {}) {
+  const propagate = options.propagate !== false;
   const image = currentImage(vp);
   if (!image || !drawable(image.info)) return false;
   const token = vp.loadToken;
@@ -4075,7 +4458,7 @@ async function chooseWindow(vp, next) {
     showSentence();
   }
   showIndex(vp, vp.viewIndex);
-  copyWindow(vp);
+  if (propagate) copyWindow(vp);
   return true;
 }
 
@@ -4114,7 +4497,7 @@ async function refreshFrameWindows(image) {
   // asks again under its new key.
   for (const vp of shownViewports()) {
     if (currentImage(vp) === image) showIndex(vp, vp.viewIndex);
-    else if (vp.tileMode && tileImages(vp).includes(image)) paintTiles(vp);
+    else if (vp.tileMode && !paintHeld(vp) && tileImages(vp).includes(image)) paintTiles(vp);
   }
   syncWindowList();
 }
@@ -6760,6 +7143,9 @@ function setActive(cell) {
   // is now drawn from it.
   clearLine(viewports[cell]);
   scheduleLink();
+  // The preset note names the outlined viewport's own state, so the new
+  // active cell repaints it.
+  paintPrefsNote();
   // The active series is the one the status counts and the probe reads, so
   // activating a cell does what selecting a series does.
   noteChanged();

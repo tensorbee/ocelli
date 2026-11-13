@@ -611,7 +611,7 @@ is the shared provider's, not each caller's.
 | Any state, change of one choice | Select, slider, toggle | Document re-read inside the helper, one field changed, written back, all four legacy keys rewritten from the document, control state applied | A refused document writes only the changed field's legacy key, and a default-preset change shows the not-kept sentence |
 | Document write succeeded, a legacy write failed | Control | The choice is kept, the partial sentence shows | The next load re-reads the document and repairs the legacy key |
 | Document write failed, the legacy write succeeded | Control | That field's write-failure sentence | The document wins on the next load, so the choice ends at reload |
-| Another tab writes | `storage` event | Resolve re-run, state and controls refreshed | The writing tab is not disturbed |
+| Another tab writes | `storage` event | Resolve re-run, state and controls refreshed. A field whose own write failed this session keeps its value in effect and its sentence unless the stored value for that field itself moved | The writing tab is not disturbed |
 | Series load, stored preset valid and offered | `loadSeries` reset | `chooseWindow` applies it once, no link copy | A reader choice in flight wins via the still checks, nothing re-applies |
 | Series load, MR or colour or VOI LUT rows | `loadSeries` reset | Nothing applied, no fault | The window list is the visible reason |
 | Series load, rows choosable, token not offered | `loadSeries` reset | The S7 sentence, nothing applied | No window request carries the token |
@@ -1142,3 +1142,26 @@ throwing `setItem` makes one key's write fail, the page shows that key's
 partial-write sentence and no other, and an implementation that reports
 every write as failed, or none, fails it, at the integrated browser stage.
 The browser-row summary lists AC2, AC3, AC4 and AC18.
+
+## Lead amendment after implementation review pass 1, 2026-11-12
+
+AC9's whole-origin sweep allows exactly the five schema keys plus
+`loglevel`. That key is written by dcmjs's bundled loglevel at module top
+level (`log.setLevel("warn")`, `dcmjs.es.js` about line 377) when
+`@ocelli/core` loads, not by the page. Its value must be one of `TRACE`,
+`DEBUG`, `INFO`, `WARN`, `ERROR` or `SILENT`. The page text never names
+`loglevel`, which `tests/preview.rs` pins. A sweep taken after a folder open
+and before any library load holds no `loglevel` key. Any other key fails.
+The README and the More page say the browser also holds the library's log
+level setting, and nothing else.
+
+## Lead amendment after implementation review pass 2, 2026-11-12
+
+The storage listener refreshes only the fields this tab has not failed to
+write. A field whose own write failed this session keeps the value in effect
+and its sentence when another tab writes a different field, matching the
+save rule that keeps an untouched field's choice in effect. It takes the
+stored value again only when the stored value for that field itself moved,
+which is the other tab's kept write of the same field, and then its
+write-failure sentence goes with it. The state table row for another tab's
+write above says the same.

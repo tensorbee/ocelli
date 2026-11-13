@@ -177,7 +177,7 @@
     <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state part">Partial</span>The viewer searches studies, series and instances over DICOMweb and fetches one instance the native backend validates, remote image display is not available yet, and local folders open as before</td><td class="delivery">S47: F-245</td></tr>
     <tr data-features="F-249"><th scope="row">Metadata browser</th><td>Metadata APIs. Browser UI belongs to the host</td><td>Typed metadata built</td><td><span class="viewer-state part">Partial</span>Headers are browsable and filterable</td><td class="delivery">S48: F-249</td></tr>
     <tr data-features="F-250"><th scope="row">Metadata compare and copy</th><td>Host application workflow</td><td>Metadata foundations built</td><td><span class="viewer-state none">Not yet</span>No compare or copy workflow</td><td class="delivery">S48: F-250</td></tr>
-    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Four browser settings saved</td><td><span class="viewer-state part">Partial</span>General tool, window and layout preferences remain</td><td class="delivery">S47: F-205</td></tr>
+    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Five validated choices saved, with named refusals</td><td><span class="viewer-state part">Partial</span>Per-key tool bindings and hanging layouts remain</td><td class="delivery">S47: F-205</td></tr>
     <tr><th scope="row">SR measurements and key images</th><td>Adapters and host workflow</td><td>Read and write built</td><td><span class="viewer-state done">Implemented</span>Save marks and reopen SR/KOS in the viewer</td><td class="delivery">S46 preview</td></tr>
     <tr data-features="F-258"><th scope="row">Rendered capture and further document exports</th><td>Adapters and host workflow, format-dependent</td><td>Document APIs built</td><td><span class="viewer-state part">Partial</span>SR/KOS work. Other export actions remain</td><td class="delivery">S50: F-258</td></tr>
     <tr data-features="F-202"><th scope="row">Browser worker decode and render</th><td>DICOM worker decode supported</td><td>Fetch, hand-off and pool built</td><td><span class="viewer-state none">Not yet</span>Local native decoding works. Browser decode is unfinished</td><td class="delivery">S47: F-202</td></tr>
@@ -537,9 +537,9 @@ packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 
   <section class="feature" id="preferences">
     <h2>Preferences</h2>
-    <span class="status part">Partial. Four choices are saved. General viewing, tool and layout preferences remain.</span>
+    <span class="status part">Partial. Five validated choices are saved. Per-key tool bindings and hanging layouts remain.</span>
     <p>Preferences keep a reader's choices between sessions, such as default window presets, tool bindings and hanging layouts.</p>
-    <p>The image page keeps four choices in this browser, the mouse profile, the play rate and whether each of the two side columns is hidden. There is still no preferences module in the crates or packages.</p>
+    <p>The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset. The browser also holds the library's log level setting, which dcmjs writes when the page loads the library, and nothing else. The choices live in one versioned document in the page, validated against closed sets on every read and every write, and any other choice the browser did not keep or could not use is named in a line under the image, never applied quietly. A profile change the browser did not keep is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.</p>
     <p class="where">The session state that does exist is the viewport snapshot, which restores a viewport after a fault and is not a preference store.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>import { parseSnapshot } from "@ocelli/core";
@@ -547,7 +547,7 @@ packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 // What exists: one viewport's state as copied JSON, for recovery.
 const parsed = parseSnapshot(session.snapshot());</code></pre>
 </details>
-    <p class="tiers">The example page reads Preferences unavailable.</p>
+    <p class="tiers">The choices are page-local to the folder viewer, and its local and DICOMweb sources share them. The library has no preference API, and the React demo keeps its Preferences unavailable panel.</p>
   </section>
 
   <section class="feature" id="jpegxl">
