@@ -935,7 +935,7 @@
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
     <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
-    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. A choice it could not use or keep says so in the line under the image, except the profile, which is named in the MOUSE section.</p>
+    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. A choice it could not use or keep says so in the line under the image. A profile change the browser did not keep is named in the MOUSE section.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -1305,8 +1305,10 @@ function resetFolderState() {
 let marksModule = null;
 // The page's kept choices and the sentences still outstanding about them.
 // `loadPreferences` fills both from storage, and the save helpers keep them
-// current. Nothing here reaches the DOM.
-const prefs = { values: { ...PREFS_DEFAULTS }, sentences: [], writeFailures: {}, legacyPartial: false };
+// current. `resolved` holds the choices the last resolve read from storage,
+// so the listener can tell a write of a failed field itself from a write of
+// another field. Nothing here reaches the DOM.
+const prefs = { values: { ...PREFS_DEFAULTS }, resolved: { ...PREFS_DEFAULTS }, sentences: [], writeFailures: {}, legacyPartial: false };
 loadPreferences();
 let activeProfile = prefs.values.mouseProfile;
 let tool = PROFILES[activeProfile].start;
@@ -1818,28 +1820,49 @@ defaultPresetSelect.addEventListener("change", () => { savePreference("defaultPr
 // Another same-origin page's write. The same resolve the load uses runs
 // again and refreshes the state and the visible controls without a reload
 // and without writing. The current tool is kept, and a running cine reads
-// its rate from the slider on its next step.
+// its rate from the slider on its next step. A field whose own write
+// failed this session keeps the value in effect and its sentence when the
+// other tab writes a different field, and takes the stored value again
+// only when the stored value for that field itself moved, which is the
+// other tab's kept write of the same field.
 window.addEventListener("storage", (event) => {
   if (event.key !== null && !PREFS_ALL_KEYS.includes(event.key)) return;
   const resolved = resolvePreferences();
-  prefs.values = resolved.values;
+  const moved = {};
+  for (const field of PREFS_FIELDS) moved[field] = resolved.values[field] !== prefs.resolved[field];
+  prefs.resolved = resolved.values;
+  const values = { ...prefs.values };
+  for (const field of ["cineFps", "hideSeries", "hideInspector", "defaultPreset"]) {
+    if (!prefs.writeFailures[field] || moved[field]) {
+      values[field] = resolved.values[field];
+      delete prefs.writeFailures[field];
+    }
+  }
+  // The profile's failed write keeps its own paragraph instead of a note
+  // line, and the same rule moves it: the stored profile itself is what
+  // decides, because this tab now holds the document's profile only once
+  // the document's profile changed.
+  const profileRefreshed = moved.mouseProfile || mouseUnsaved.hidden;
+  if (profileRefreshed) {
+    values.mouseProfile = resolved.values.mouseProfile;
+    activeProfile = values.mouseProfile;
+    profileSelect.value = activeProfile;
+    paintMouseKeys();
+    mouseUnsaved.hidden = true;
+  }
+  prefs.values = values;
   prefs.sentences = resolved.sentences;
-  // The other tab's write may have kept what this tab's failed write lost,
-  // so the write-failure sentences go and the next failure re-sets them.
-  // The profile's own paragraph goes with them, because the profile this
-  // tab now holds is the document's.
-  prefs.writeFailures = {};
+  // A successful document write rewrites all four legacy keys, so another
+  // tab's change repairs a copy an older version of this viewer reads.
   prefs.legacyPartial = false;
-  mouseUnsaved.hidden = true;
-  activeProfile = prefs.values.mouseProfile;
-  profileSelect.value = activeProfile;
-  paintMouseKeys();
-  fpsInput.value = String(prefs.values.cineFps);
-  fpsValue.textContent = fpsInput.value;
-  document.body.classList.toggle("no-series", prefs.values.hideSeries);
-  document.body.classList.toggle("no-inspector", prefs.values.hideInspector);
-  syncPanels();
-  defaultPresetSelect.value = prefs.values.defaultPreset;
+  if (!prefs.writeFailures.cineFps) {
+    fpsInput.value = String(values.cineFps);
+    fpsValue.textContent = fpsInput.value;
+  }
+  if (!prefs.writeFailures.hideSeries) document.body.classList.toggle("no-series", values.hideSeries);
+  if (!prefs.writeFailures.hideInspector) document.body.classList.toggle("no-inspector", values.hideInspector);
+  if (!prefs.writeFailures.hideSeries || !prefs.writeFailures.hideInspector) syncPanels();
+  if (!prefs.writeFailures.defaultPreset) defaultPresetSelect.value = values.defaultPreset;
   paintPrefsNote();
 });
 scrubber.addEventListener("input", () => {
@@ -2229,6 +2252,7 @@ function resolvePreferences() {
 function loadPreferences() {
   const resolved = resolvePreferences();
   prefs.values = resolved.values;
+  prefs.resolved = resolved.values;
   prefs.sentences = resolved.sentences;
   if (resolved.refused || !resolved.sawLegacy) return;
   if (!writePreference(PREFS_KEY, prefsDocumentJSON(resolved.values))) return;

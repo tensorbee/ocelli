@@ -468,7 +468,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    takes no preset, and a stored preset the viewer does not offer is named
    in the line under the image and skipped. A choice the browser did not
    keep, or a stored choice it could not use, is named in that line too,
-   never applied quietly. The profile is the exception: its own failure is
+   never applied quietly. A profile change the browser did not keep is
    named in the MOUSE section. The choices live beside the four keys an
    older version of the viewer reads, which stay current, so an older
    binary keeps working beside this one. A choice made in an older binary

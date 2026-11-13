@@ -41,6 +41,7 @@ import { fileURLToPath } from "node:url";
 
 import { colourFile } from "./colour.mjs";
 import { startSyntheticDicomweb } from "./dicomweb.mjs";
+import { enhanced } from "./window.mjs";
 import { ensureViewerBinary, longEl, shortEl, startViewer } from "../../../../tools/bench/src/viewer_work.mjs";
 import { loadPlaywright, stopByPid } from "./aspect.mjs";
 
@@ -174,6 +175,10 @@ function makeFolders(root) {
     colour: writeFolder(root, "colour", { "rgb-1.dcm": colourFile({ name: "rgb", columns: 4, samples: [10, 20, 30, 200, 100, 50] }, 1) }),
     // Two CT slices and one MR slice, for the superseding-load case.
     ctMr: writeFolder(root, "ctmr", { "ct-1.dcm": ctSlice("2.25.21701", 1), "ct-2.dcm": ctSlice("2.25.21701", 2), "mr-1.dcm": slice({ sop: "2.25.21501", series: "2.25.21501", number: 1, seriesNumber: "2", modality: "MR", centers: "500", widths: "1000" }) }),
+    // One four-frame enhanced CT whose every frame stores 40\-600 and
+    // 400\1500 explained A{k}\B{k}, so frames 1 to 3 are asked by /inspect,
+    // for the held-inspect tile case.
+    frames: writeFolder(root, "frames", { "tiles.dcm": enhanced([0, 1, 2, 3].map((k) => ({ centers: "40\\-600", widths: "400\\1500", explanation: `A${k}\\B${k}` }))) }),
   };
 }
 
@@ -946,6 +951,74 @@ function listenerClearsUnsavedProblems(seen) {
   return problems;
 }
 
+// N1, review pass 2. A field whose own write failed this session keeps the
+// value in effect and its sentence when another tab writes a different
+// field, and the stored value for the field itself moving is the repair.
+// The document is planted so the other tab's load writes nothing and its
+// different-field write carries the document's rate, never this tab's lost
+// one.
+async function observeListenerKeepsFailedField(url, browser) {
+  return withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(() => {
+      const original = Storage.prototype.setItem;
+      let refused = true;
+      Storage.prototype.setItem = function (key, value) {
+        if (refused) {
+          refused = false;
+          throw new Error("this browser refused the write");
+        }
+        return original.call(this, key, value);
+      };
+    });
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await setRate(page, 20);
+    const shown = await noteLines(page);
+    const rate = await page.evaluate(() => document.getElementById("fps").value);
+    await other.locator("#mouse-profile").selectOption("window-left");
+    await page.waitForTimeout(300);
+    const afterOtherField = {
+      note: await noteLines(page),
+      rate: await page.evaluate(() => document.getElementById("fps").value),
+      profile: await page.evaluate(() => document.getElementById("mouse-profile").value),
+    };
+    await setRate(other, 15);
+    await page.waitForTimeout(300);
+    const afterSameField = {
+      note: await noteLines(page),
+      rate: await page.evaluate(() => document.getElementById("fps").value),
+    };
+    await context.close();
+    return { shown, rate, afterOtherField, afterSameField };
+  });
+}
+
+function listenerKeepsFailedFieldProblems(seen) {
+  const problems = [];
+  if (!seen.shown.lines.includes(LOST_RATE)) {
+    problems.push(`the failed rate write shows ${JSON.stringify(seen.shown)}, not the play rate sentence`);
+  }
+  if (seen.rate !== "20") problems.push(`the failed rate write did not apply 20: ${seen.rate}`);
+  if (seen.afterOtherField.rate !== "20") {
+    problems.push(`another tab's profile write moved the rate to ${seen.afterOtherField.rate}`);
+  }
+  if (!seen.afterOtherField.note.lines.includes(LOST_RATE)) {
+    problems.push(`another tab's profile write cleared the rate sentence: ${JSON.stringify(seen.afterOtherField.note)}`);
+  }
+  if (seen.afterOtherField.profile !== "window-left") {
+    problems.push(`the listener did not refresh the other field: ${seen.afterOtherField.profile}`);
+  }
+  if (seen.afterSameField.rate !== "15") {
+    problems.push(`the other tab's kept rate write did not refresh the rate: ${seen.afterSameField.rate}`);
+  }
+  if (seen.afterSameField.note.lines.includes(LOST_RATE)) {
+    problems.push(`the repaired rate kept its sentence: ${JSON.stringify(seen.afterSameField.note)}`);
+  }
+  return problems;
+}
+
 // AC10. The stored default applies once per series load, Reset returns the
 // file window, scrolling keeps it, play sends no preset header after Reset
 // and only preset headers while the default is applied. The hold cases
@@ -1090,6 +1163,57 @@ async function observeStoredDefault(url, browser, folders) {
     const released = await page.evaluate(() => ({ tiles: window.__tilePaints, labels: Array.from(document.querySelectorAll(".cell.active .tile-label")).map((node) => node.textContent) }));
     return { held, released };
   });
+  // S1, review pass 2. The refreshFrameWindows tile gate. The four-frame
+  // per-frame-window multiframe asks /inspect for frames 1 to 3, held from
+  // before the open. The planted Bone applies at the first open, Lung is
+  // chosen, and the reloaded series' Lung trial is held: the frame lists
+  // are released during that hold and paint no tile, and the release
+  // paints Lung first.
+  seen.inspectTiles = await withPage(browser, async (page) => {
+    await plant(page, { "ocelli.prefs": documentJSON({ ...PLAIN_DOC, defaultPreset: "bone" }) });
+    await page.addInitScript(PAINT_PROBE);
+    let releasePreview;
+    const releaseInspects = [];
+    await page.route("**/inspect", (route) => {
+      const frame = route.request().headers()["x-ocelli-frame"];
+      if (frame === "1" || frame === "2" || frame === "3") {
+        return new Promise((resolve) => releaseInspects.push(resolve)).then(() => route.continue());
+      }
+      return route.continue();
+    });
+    let armPreview = false;
+    await page.route("**/preview", (route) => {
+      if (armPreview && route.request().headers()["x-ocelli-window-preset"]) {
+        armPreview = false;
+        return new Promise((resolve) => { releasePreview = resolve; }).then(() => route.continue());
+      }
+      return route.continue();
+    });
+    await page.goto(url);
+    await openFolder(page, folders.frames, "Bone");
+    await page.keyboard.press("Shift+G");
+    await page.waitForFunction(() => Array.from(document.querySelectorAll(".cell.active .tile-label"))
+      .every((node) => (node.textContent || "").includes("Bone")), null, { timeout: 8000 }).catch(() => {});
+    await page.locator("#default-preset").selectOption("lung");
+    armPreview = true;
+    await page.locator("#series-list button").first().click();
+    await page.waitForTimeout(700);
+    const before = await page.evaluate(() => window.__tilePaints);
+    await Promise.all(releaseInspects.splice(0).map((resolve) => resolve()));
+    await page.waitForTimeout(500);
+    const held = await page.evaluate(() => ({
+      tiles: window.__tilePaints,
+      labels: Array.from(document.querySelectorAll(".cell.active .tile-label")).map((node) => node.textContent),
+    }));
+    releasePreview();
+    await page.waitForFunction(() => Array.from(document.querySelectorAll(".cell.active .tile-label"))
+      .every((node) => (node.textContent || "").includes("Lung")), null, { timeout: 8000 }).catch(() => {});
+    const released = await page.evaluate(() => ({
+      tiles: window.__tilePaints,
+      labels: Array.from(document.querySelectorAll(".cell.active .tile-label")).map((node) => node.textContent),
+    }));
+    return { before, held, released };
+  });
   // The superseding load: the second series' outcome paints during the held
   // trial, and the released trial paints nothing.
   seen.superseded = await withPage(browser, async (page) => {
@@ -1194,7 +1318,7 @@ async function observeStoredDefault(url, browser, folders) {
 
 function storedDefaultProblems(seen) {
   const problems = [];
-  const { main, hold, cacheHit, tiles, superseded, ctSupersede, failedTrial, preMove } = seen;
+  const { main, hold, cacheHit, tiles, inspectTiles, superseded, ctSupersede, failedTrial, preMove } = seen;
   if (main.applied.corner !== "WW 1500  WL -600  Lung" || main.applied.soft !== 236 || main.applied.lung !== 94) {
     problems.push(`the applied default shows ${JSON.stringify(main.applied)}, not Lung with greys 236 and 94`);
   }
@@ -1247,6 +1371,21 @@ function storedDefaultProblems(seen) {
   }
   if (!tiles.released.labels.every((label) => label.includes("Lung"))) {
     problems.push(`the released tiles read ${JSON.stringify(tiles.released.labels)}`);
+  }
+  // The frame lists released during the held trial paint nothing: the
+  // refreshFrameWindows gate keeps the tiles at their pre-hold count and at
+  // the setup's Bone labels, and the release paints Lung first.
+  if (inspectTiles.held.tiles !== inspectTiles.before) {
+    problems.push(`the released frame lists painted ${inspectTiles.held.tiles - inspectTiles.before} tiles, labels ${JSON.stringify(inspectTiles.held.labels)}`);
+  }
+  if (inspectTiles.held.labels.some((label) => !(label || "").includes("Bone"))) {
+    problems.push(`the released frame lists repainted a tile during the hold: ${JSON.stringify(inspectTiles.held.labels)}`);
+  }
+  if (inspectTiles.released.tiles <= inspectTiles.before) {
+    problems.push("the released trial painted no tile");
+  }
+  if (!inspectTiles.released.labels.every((label) => label.includes("Lung"))) {
+    problems.push(`the released tiles read ${JSON.stringify(inspectTiles.released.labels)}`);
   }
   if (superseded.duringHold !== 0) {
     problems.push(`the superseding case painted ${superseded.duringHold} greys during the held CT trial`);
@@ -1689,6 +1828,10 @@ async function main() {
     const clearsUnsaved = await observeListenerClearsUnsaved(origin, browser);
     problems.push(...listenerClearsUnsavedProblems(clearsUnsaved));
     console.log("N1: the listener's refresh clears a stale mouse-unsaved");
+
+    const keepsFailed = await observeListenerKeepsFailedField(origin, browser);
+    problems.push(...listenerKeepsFailedFieldProblems(keepsFailed));
+    console.log("N1: a failed field keeps its value past another field's write and repairs on its own");
 
     const storedDefault = await observeStoredDefault(origin, browser, folders);
     problems.push(...storedDefaultProblems(storedDefault));

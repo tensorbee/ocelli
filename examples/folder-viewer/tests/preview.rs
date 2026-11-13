@@ -1261,7 +1261,8 @@ fn more_says_what_the_page_keeps() -> Result<(), String> {
         &more,
         &[
             "The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset.",
-            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly, except the profile, whose failure is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
+            "The browser also holds the library's log level setting, which dcmjs writes when the page loads the library, and nothing else.",
+            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly. A profile change the browser did not keep is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
             "<li><a href=\"#preferences\">Preferences</a><span class=\"mark\">partial</span></li>",
             "Configurable APIs. Persistence belongs to the host",
             "S47: F-205",
@@ -1274,6 +1275,23 @@ fn more_says_what_the_page_keeps() -> Result<(), String> {
         &["<code>cine_timing(&amp;metadata)</code>"],
         "the Rust parse chapter",
     )
+}
+
+#[test]
+fn the_readme_names_the_log_level_setting() -> Result<(), String> {
+    // F-205 review pass 2, N2. The README sentence about what the browser
+    // holds is pinned beside the More page's, so the two documents cannot
+    // drift apart about the one key the page does not write.
+    let readme = include_str!("../../../README.md");
+    require(
+        readme,
+        &[
+            "The browser also holds the library's log level setting,",
+            "which dcmjs writes when the page loads the library, and nothing else.",
+        ],
+        "F-205 review pass 2 N2",
+    )?;
+    Ok(())
 }
 
 #[test]
