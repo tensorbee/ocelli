@@ -77,9 +77,8 @@ const VIEWPORT = { width: 1600, height: 1000 };
 const EXTENT_EPSILON = 0.5;
 const ORIGIN_EPSILON = 1 / 128;
 const CENTRING_SLACK = 0.5 + 1 / 64;
-const SERIES_COUNT = 6;
+const SERIES_COUNT = 7;
 const REFUSAL = "1:1 needs a frame at least the device pixel ratio big";
-const SMALL_VIEW = "1:1 needs a larger view";
 
 /** The stored value rule of the fixtures, from the pattern above. */
 function stored(x, y) {
@@ -232,6 +231,44 @@ function writeFixtures(folder) {
   ];
   for (const [name, spec, fixture] of files) {
     writeFileSync(join(folder, name), part10(spec, fixture));
+  }
+}
+
+/**
+ * The leave-restore fixture, written after the cell is measured: its stored
+ * frame is sized so that the mode's box in the measured cell, the cell side
+ * plus its step of 1 at ratio 2, times the ratio is the stored frame on both
+ * axes, the size match that once let the restore skip. Its own series, with
+ * the same value rule and identity window as the others.
+ */
+function writeRestoreFixture(folder, fixture) {
+  writeFileSync(
+    join(folder, "f204-r.dcm"),
+    part10({ columns: fixture.columns, rows: fixture.rows, series: "2.25.21353", seriesNumber: 7, instance: 1, sop: "2.25.21354" }, fixture),
+  );
+}
+
+/**
+ * The default 1 by 1 cell's CSS size, measured on a page with no folder
+ * open, because the layout's fixed side columns and its content-sized rows
+ * decide it and a size written here would go stale on another host.
+ */
+async function measureCell(url, chromium) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+    try {
+      await page.goto(url);
+      await page.waitForFunction(() => Boolean(window.activeViewport), null, { timeout: 20000 });
+      return await page.evaluate(() => {
+        const box = activeViewport().dom.cell.getBoundingClientRect();
+        return { w: Math.floor(box.width), h: Math.floor(box.height) };
+      });
+    } finally {
+      await page.close();
+    }
+  } finally {
+    await browser.close();
   }
 }
 
@@ -673,6 +710,265 @@ export function pixelProblems(readings) {
   for (const reading of readings) {
     const fixture = reading.name.endsWith("fixture B") ? FIXTURES.b : FIXTURES.p;
     problems.push(...byteProblems(reading.name, reading.got, fixture.bytes, fixture.columns));
+  }
+  return problems;
+}
+
+// The reach epsilon. The engine quantises laid-out positions to 1/64 of a
+// device pixel, so an exact reach is asserted within half a device pixel.
+const EDGE_EPSILON = 0.5;
+
+/**
+ * Walk the viewport width down from the default until a box rounded down to
+ * the ratio's whole CSS pixel step, centred in the measured cell and snapped
+ * to the step grid the way the mode's alignment lands, would leave the named
+ * cell edge or edges unpainted. The reach rows assert the sized-up box
+ * against a geometry where the floor box provably fails, so the mutant
+ * control is red by the rule and not by the luck of one cell size. The walk
+ * goes down so the box stays under fixture E's 2048 device pixel width and
+ * the picture keeps covering it.
+ */
+async function floorMissCell(page, edge) {
+  for (let width = 1600; width >= 1480; width -= 1) {
+    await page.setViewportSize({ width, height: VIEWPORT.height });
+    const cell = await page.evaluate(() => {
+      const box = activeViewport().dom.cell.getBoundingClientRect();
+      return { x: box.x, w: box.width, dpr: window.devicePixelRatio };
+    });
+    const step = stepFor(cell.dpr);
+    const whole = Math.floor(cell.w);
+    const floorBox = whole - (whole % step);
+    const alignX = Math.round((cell.x + cell.w / 2 - floorBox / 2) / step) * step;
+    const miss = edge === "right"
+      ? alignX + floorBox < cell.x + cell.w - 0.5
+      : alignX > cell.x + 0.5 || alignX + floorBox < cell.x + cell.w - 0.5;
+    if (miss) return cell;
+  }
+  throw new Error(`no viewport width makes a floor box miss the ${edge} cell edge`);
+}
+
+/**
+ * The device bytes of the opaque box's visible part: the box's own opaque
+ * extent intersected with the cell's device extent, inset one device pixel
+ * from the cell edges, because the cell's overflow hidden clips the box and
+ * the screenshot shows it only inside the cell. The clip is a CSS rectangle
+ * stepped to the ratio's grid, so the crop offset in the decoded PNG is an
+ * exact integer device count, and the case first requires the canvas
+ * element's device position to be whole within 1/128, the AC2 epsilon.
+ * Returns the crop's page device start, its width and its bytes.
+ */
+async function captureVisibleBytes(page) {
+  const seen = await view(page);
+  if (seen.mode !== "one") return { error: `the mode is ${seen.mode}, not one` };
+  if (!seen.paintW || !seen.paintH) return { error: "the backing holds no opaque pixels" };
+  const dpr = seen.dpr;
+  const leftDev = seen.x * dpr;
+  const topDev = seen.y * dpr;
+  if (Math.abs(leftDev - Math.round(leftDev)) > 1 / 128 || Math.abs(topDev - Math.round(topDev)) > 1 / 128) {
+    return { error: `the canvas element sits at ${leftDev}, ${topDev} device px, off the device grid` };
+  }
+  const opaqueStart = Math.round(seen.paintX) - Math.round(leftDev);
+  const bx0 = Math.max(opaqueStart, Math.ceil(seen.cellX * dpr - Math.round(leftDev)) + 1);
+  const bx1 = Math.min(opaqueStart + seen.paintW, Math.floor((seen.cellX + seen.cellW) * dpr - Math.round(leftDev)) - 1);
+  if (!(bx1 > bx0)) {
+    return { error: `the visible window ${bx0} to ${bx1} is empty against the cell ${seen.cellX * dpr} to ${(seen.cellX + seen.cellW) * dpr}` };
+  }
+  const step = stepFor(dpr);
+  const firstX = Math.floor(bx0 / dpr / step) * step;
+  const firstY = Math.floor(seen.offsetY / dpr / step) * step;
+  const lastX = Math.ceil(bx1 / dpr / step) * step;
+  const lastY = Math.ceil((seen.offsetY + seen.paintH) / dpr / step) * step;
+  const clip = { x: seen.x + firstX, y: seen.y + firstY, width: lastX - firstX, height: lastY - firstY };
+  const b64 = (await page.screenshot({ scale: "device", clip })).toString("base64");
+  const cropX = Math.round(bx0 - firstX * dpr);
+  const cropY = Math.round(seen.offsetY - firstY * dpr);
+  const shotW = Math.round(clip.width * dpr);
+  const shotH = Math.round(clip.height * dpr);
+  const width = bx1 - bx0;
+  const decoded = await page.evaluate(async ({ b64, cropX, cropY, width, cropH, shotW, shotH }) => {
+    const image = new Image();
+    image.src = "data:image/png;base64," + b64;
+    await image.decode();
+    const scratch = document.createElement("canvas");
+    scratch.width = image.naturalWidth;
+    scratch.height = image.naturalHeight;
+    const context = scratch.getContext("2d");
+    context.drawImage(image, 0, 0);
+    if (scratch.width !== shotW || scratch.height !== shotH) {
+      return { error: `the shot is ${scratch.width} by ${scratch.height}, not the ${shotW} by ${shotH} device pixels of its clip` };
+    }
+    const data = context.getImageData(cropX, cropY, width, cropH).data;
+    const grey = new Array(width * cropH);
+    for (let at = 0; at < width * cropH; at += 1) grey[at] = data[at * 4];
+    return { grey };
+  }, { b64, cropX, cropY, width, cropH: seen.paintH, shotW, shotH });
+  if (decoded.error) return decoded;
+  return { start: Math.round(leftDev) + bx0, width, grey: decoded.grey };
+}
+
+/**
+ * The crop bytes must run on as the stored pattern does, 29 further along a
+ * row and 57 further down one, mod 251, from wherever in the pattern the
+ * visible run starts. Where the run starts is the picture's position in the
+ * cell, which the origin rows pin on the fixtures whose whole picture is
+ * visible; here every visible device pixel must hold the pattern's own next
+ * value, so a dropped, doubled or resampled column breaks the row. The
+ * pattern's period 251 does not interrupt either step, because
+ * stored(251, y) is stored(0, y) and stored(x, 251) is stored(x, 0).
+ */
+function runProblems(name, crop) {
+  if (crop.error) return [`${name}: ${crop.error}`];
+  const rows = crop.grey.length / crop.width;
+  for (let row = 0; row < rows; row += 1) {
+    for (let at = 1; at < crop.width; at += 1) {
+      const index = row * crop.width + at;
+      if (crop.grey[index] !== (crop.grey[index - 1] + 29) % 251) {
+        return [`${name}: device row ${row} column ${at} shows ${crop.grey[index]}, not the stored pattern's next value after ${crop.grey[index - 1]}`];
+      }
+    }
+    if (row > 0) {
+      for (let at = 0; at < crop.width; at += 1) {
+        const index = row * crop.width + at;
+        if (crop.grey[index] !== (crop.grey[index - crop.width] + 57) % 251) {
+          return [`${name}: device row ${row} column ${at} shows ${crop.grey[index]}, not the stored pattern's next row value after ${crop.grey[index - crop.width]}`];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+// The sized-up box covers the cell. On fixture E, 2048 by 8, the frame is
+// wider than the cell at the identity, so the mode's box must reach both
+// cell edges in device pixels: the observed opaque box, which the backing
+// bounds, covers the cell from edge to edge, and the visible bytes run on
+// as the stored pattern does. A box rounded down to a multiple of the step,
+// centred and aligned in this cell, leaves a band inside the cell where the
+// frame continues, which is the defect the sized-up rule removes.
+export async function observeCoverage(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  const readings = [];
+  try {
+    for (const ratio of [1.25, 1.57]) {
+      await withPage(browser, ratio, async (page) => {
+        await openFolder(page, url, folder);
+        await showSeries(page, "#6", SHAPE.e);
+        await floorMissCell(page, "either");
+        await page.keyboard.press("\\");
+        await page.click("#toggle-corners");
+        await page.mouse.move(2, 2);
+        readings.push({
+          name: `coverage dpr ${ratio} fixture E`,
+          ...await view(page),
+          crop: await captureVisibleBytes(page),
+        });
+      });
+    }
+    return readings;
+  } finally {
+    await browser.close();
+  }
+}
+
+export function coverageProblems(readings) {
+  const problems = [];
+  if (!Array.isArray(readings) || readings.length !== 2) {
+    problems.push("the coverage cases were not observed");
+    return problems;
+  }
+  for (const reading of readings) {
+    const name = reading.name;
+    if (reading.mode !== "one") {
+      problems.push(`${name}: the mode is ${reading.mode}, not one`);
+      continue;
+    }
+    if (reading.paintH !== FIXTURES.e.rows) {
+      problems.push(`${name}: the painted height is ${reading.paintH}, not the stored ${FIXTURES.e.rows} rows`);
+    }
+    const left = reading.cellX * reading.dpr;
+    const right = (reading.cellX + reading.cellW) * reading.dpr;
+    if (reading.paintX > left + EDGE_EPSILON || reading.paintX + reading.paintW < right - EDGE_EPSILON) {
+      problems.push(`${name}: the opaque box ${reading.paintX} to ${reading.paintX + reading.paintW} device px does not reach the cell edges ${left.toFixed(3)} to ${right.toFixed(3)}`);
+    }
+    problems.push(...runProblems(name, reading.crop));
+  }
+  return problems;
+}
+
+// Panned to the right cell edge. The picture is dragged right by half the
+// cell plus 25 CSS pixels, which puts its right edge past the cell's right
+// edge at both ratios while the picture's left edge stays inside the cell
+// and the backing, so the observed opaque box reaches the cell's right
+// device edge only when the box itself covers the cell. A box rounded down
+// to a step stops short of the edge by the band the floor rule leaves. The
+// visible bytes are the stored pattern's own columns, offset by the
+// observed distance from the crop's start to the picture's left edge.
+export async function observePannedEdge(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  const readings = [];
+  try {
+    for (const ratio of [1.25, 1.57]) {
+      await withPage(browser, ratio, async (page) => {
+        await openFolder(page, url, folder);
+        await floorMissCell(page, "right");
+        await page.keyboard.press("\\");
+        await page.keyboard.press("p");
+        const cell = await page.evaluate(() => activeViewport().dom.cell.getBoundingClientRect());
+        const box = await page.locator('.cell[data-cell="0"] canvas.view').boundingBox();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + cell.width / 2 + 25, box.y + box.height / 2, { steps: 8 });
+        await page.mouse.up();
+        await page.mouse.move(2, 2);
+        readings.push({
+          name: `panned edge dpr ${ratio} fixture P`,
+          ...await view(page),
+          crop: await captureVisibleBytes(page),
+        });
+      });
+    }
+    return readings;
+  } finally {
+    await browser.close();
+  }
+}
+
+export function pannedEdgeProblems(readings) {
+  const problems = [];
+  if (!Array.isArray(readings) || readings.length !== 2) {
+    problems.push("the panned edge cases were not observed");
+    return problems;
+  }
+  for (const reading of readings) {
+    const name = reading.name;
+    if (reading.mode !== "one") {
+      problems.push(`${name}: the mode is ${reading.mode}, not one`);
+      continue;
+    }
+    if (reading.paintH !== FIXTURES.p.rows) {
+      problems.push(`${name}: the painted height is ${reading.paintH}, not the stored ${FIXTURES.p.rows} rows`);
+    }
+    const right = (reading.cellX + reading.cellW) * reading.dpr;
+    if (reading.paintX + reading.paintW < right - EDGE_EPSILON) {
+      problems.push(`${name}: the opaque box ends at ${reading.paintX + reading.paintW} device px, short of the right cell edge ${right.toFixed(3)}`);
+    }
+    const crop = reading.crop;
+    if (crop.error) {
+      problems.push(`${name}: ${crop.error}`);
+      continue;
+    }
+    const from = crop.start - Math.round(reading.paintX);
+    if (from < 0 || from + crop.width > FIXTURES.p.columns) {
+      problems.push(`${name}: the visible window ${crop.start} to ${crop.start + crop.width} is not inside the picture at ${reading.paintX} with ${FIXTURES.p.columns} columns`);
+      continue;
+    }
+    const want = new Array(FIXTURES.p.rows * crop.width);
+    for (let row = 0; row < FIXTURES.p.rows; row += 1) {
+      for (let at = 0; at < crop.width; at += 1) {
+        want[row * crop.width + at] = FIXTURES.p.bytes[row * FIXTURES.p.columns + from + at];
+      }
+    }
+    problems.push(...byteProblems(name, { grey: crop.grey }, want, crop.width));
   }
   return problems;
 }
@@ -1121,10 +1417,67 @@ export function backingStoreProblems(seen) {
   return problems;
 }
 
+// Leaving the mode restores the stored bytes even when the mode's box times
+// the ratio equals the stored frame, the size match that once let the
+// restore skip a backing that still held the mode's own panned buffer. The
+// restore fixture's stored frame is sized so that the box in the measured
+// cell, the cell side plus its step of 1 at ratio 2, times the ratio is the
+// stored frame on both axes; the mode is entered, the picture is panned
+// 20 CSS px, which shifts the mode buffer inside its equal-size backing, and
+// one zoom tick leaves the mode. The backing must hold the stored pattern.
+export async function observeLeaveRestore(url, chromium, folder, restore) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 2, async (page) => {
+      await openFolder(page, url, folder);
+      await page.locator("#series-list button", { hasText: "#7" }).click();
+      await page.waitForFunction((columns) => activeViewport().imageWidth === columns, restore.columns, { timeout: 20000 });
+      await page.waitForTimeout(200);
+      await page.keyboard.press("\\");
+      const inMode = await view(page);
+      await page.keyboard.press("p");
+      const box = await page.locator('.cell[data-cell="0"] canvas.view').boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2, { steps: 4 });
+      await page.mouse.up();
+      await page.keyboard.press("=");
+      await page.mouse.move(2, 2);
+      const after = await view(page);
+      const backing = await page.evaluate(() => {
+        const canvas = activeViewport().dom.canvas;
+        const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        const red = new Array(canvas.width * canvas.height);
+        for (let at = 0; at < red.length; at += 1) red[at] = data[at * 4];
+        return red;
+      });
+      return { inMode, after, backing };
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function leaveRestoreProblems(seen, restore) {
+  const problems = [];
+  if (!seen || !seen.inMode || !seen.after) return ["the leave restore case was not observed"];
+  if (seen.inMode.mode !== "one") problems.push(`in the mode the mode is ${seen.inMode.mode}, not one`);
+  if (seen.inMode.backingW !== restore.columns || seen.inMode.backingH !== restore.rows) {
+    problems.push(`in the mode the backing is ${seen.inMode.backingW} by ${seen.inMode.backingH}, not the stored ${restore.columns} by ${restore.rows} the case sizes the fixture for`);
+  }
+  if (seen.after.mode !== "free") problems.push(`after the zoom tick the mode is ${seen.after.mode}, not free`);
+  if (seen.after.backingW !== restore.columns || seen.after.backingH !== restore.rows) {
+    problems.push(`after the zoom tick the backing is ${seen.after.backingW} by ${seen.after.backingH}, not the stored ${restore.columns} by ${restore.rows}`);
+  } else {
+    problems.push(...byteProblems("the backing after the zoom tick", { grey: seen.backing }, restore.bytes, restore.columns));
+  }
+  return problems;
+}
+
 // The device backing is repainted on a frame change that leaves the
 // layout stamp alone. Invert redraws the same frame at the same size, and
 // the page flips the monochrome display byte after the chain (preview.rs,
-// its module comment), the inversion PS3.3 C.11.6.1 defines for the
+// its module comment), the inversion PS3.3 C.11.6.1.2 defines for the
 // INVERSE shape, so over the identity window the expected byte is 255
 // minus the stored value, hand-derived: (0, 0) shows 255 and the
 // override at (127, 95) shows 0. A stale backing would still show the
@@ -1280,65 +1633,6 @@ export function belowRatioProblems(seen) {
     problems.push(`back at ratio 3 the held mode did not drop to fit (mode ${seen.dropped && seen.dropped.mode}, label ${seen.dropped && JSON.stringify(seen.dropped.label)})`);
   }
   if (seen.dropped.cornerLast === REFUSAL) problems.push("the drop showed a refusal reason");
-  return problems;
-}
-
-// The box rule's refusal. At ratio 1.57 the whole CSS pixel step is 100,
-// because 100 * 1.57 is the first whole product (stepFor), so a cell under
-// 100 CSS px on either side holds no box whose size times the ratio is
-// whole. The request shows the named reason and changes nothing, the
-// reason goes once the cell is large enough again, and the retry enters.
-export async function observeSmallView(url, chromium, folder) {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    return await withPage(browser, 1.57, async (page) => {
-      await openFolder(page, url, folder);
-      await page.locator("#layout").click();
-      await page.locator('#layout-picker [data-columns="3"][data-rows="3"]').click();
-      await page.keyboard.press("Escape");
-      let height = VIEWPORT.height;
-      let cell = await view(page);
-      while (cell.cellH >= 100 && height > 200) {
-        height -= 20;
-        await page.setViewportSize({ width: VIEWPORT.width, height });
-        await page.waitForTimeout(50);
-        cell = await view(page);
-      }
-      await page.locator('.cell[data-cell="0"]').click();
-      const before = await view(page);
-      await page.keyboard.press("\\");
-      const refused = await view(page);
-      await page.setViewportSize(VIEWPORT);
-      await page.waitForTimeout(300);
-      const grown = await view(page);
-      await page.keyboard.press("\\");
-      await page.waitForTimeout(150);
-      const entered = await view(page);
-      return { before, refused, grown, entered, step: stepFor(refused.dpr) };
-    });
-  } finally {
-    await browser.close();
-  }
-}
-
-export function smallViewProblems(seen) {
-  const problems = [];
-  if (!seen || !seen.refused || !seen.entered) return ["the small view case was not observed"];
-  const { before, refused, grown, entered, step } = seen;
-  if (step !== 100) problems.push(`the step at ratio ${refused.dpr} is ${step}, not the 100 the case assumes`);
-  if (!(refused.cellH < step)) {
-    problems.push(`the cell is ${refused.cellW} by ${refused.cellH} CSS px, not under the ${step} px step, so the case proves nothing`);
-  }
-  if (refused.cornerLast !== SMALL_VIEW) {
-    problems.push(`in the small view the corner reads ${JSON.stringify(refused.cornerLast)}, not ${JSON.stringify(SMALL_VIEW)}`);
-  }
-  if (refused.mode !== before.mode || refused.scale !== before.scale || refused.label !== before.label) {
-    problems.push(`the small view refusal changed the view: mode ${before.mode} to ${refused.mode}, scale ${before.scale} to ${refused.scale}`);
-  }
-  if (grown.cornerLast === SMALL_VIEW) problems.push("after the cell grew the small view reason is still shown");
-  if (entered.mode !== "one" || entered.paintW !== 128 || entered.paintH !== 96) {
-    problems.push(`the retry in the grown cell did not enter the mode with the stored 128 by 96 box (mode ${entered.mode}, ${entered.paintW} by ${entered.paintH})`);
-  }
   return problems;
 }
 
@@ -1627,24 +1921,41 @@ async function main() {
   }
   const { chromium } = await loadPlaywright();
   const binary = await ensureViewerBinary("release", true);
-  const folder = mkdtempSync(join(tmpdir(), "ocelli-f204-"));
-  writeFixtures(folder);
   const server = await startViewer(binary);
+  const folder = mkdtempSync(join(tmpdir(), "ocelli-f204-"));
+  let restore;
+  try {
+    const cell = await measureCell(server.url, chromium);
+    restore = {
+      columns: (cell.w + 1) * 2,
+      rows: (cell.h + 1) * 2,
+      bytes: null,
+    };
+    restore.bytes = buildPattern(restore.columns, restore.rows, null);
+    writeFixtures(folder);
+    writeRestoreFixture(folder, restore);
+  } catch (error) {
+    await stopByPid(server.pid);
+    rmSync(folder, { recursive: true, force: true });
+    throw error;
+  }
   let seen;
   try {
     seen = {
       extents: await observeExtents(server.url, chromium, folder),
       origins: await observeOrigins(server.url, chromium, folder),
       pixels: await observePixels(server.url, chromium, folder),
+      coverage: await observeCoverage(server.url, chromium, folder),
+      pannedEdge: await observePannedEdge(server.url, chromium, folder),
       labelAndSeries: await observeLabelAndSeries(server.url, chromium, folder),
       ratioWatcher: await observeRatioWatcher(server.url, chromium, folder),
       clamp: await observeClamp(server.url, chromium, folder),
       link: await observeLink(server.url, chromium, folder),
       backingStore: await observeBackingStore(server.url, chromium, folder),
+      leaveRestore: await observeLeaveRestore(server.url, chromium, folder, restore),
       sameSize: await observeSameSizeRedraw(server.url, chromium, folder),
       refusals: await observeRefusals(server.url, chromium, folder),
       belowRatio: await observeBelowRatio(server.url, chromium, folder),
-      smallView: await observeSmallView(server.url, chromium, folder),
       transforms: await observeTransforms(server.url, chromium, folder),
       magnifier: await observeMagnifier(server.url, chromium, folder),
       aniso: await observeAniso(server.url, chromium, folder),
@@ -1659,6 +1970,8 @@ async function main() {
     console.log(`${reading.name}: painted ${reading.paintW} by ${reading.paintH} device px at (${reading.paintX}, ${reading.paintY}), mode ${reading.mode}`);
   }
   console.log(`label: ${JSON.stringify(seen.labelAndSeries.inMode.cornerLast)}, after drag ${JSON.stringify(seen.labelAndSeries.afterDrag.label)}, fit ${seen.labelAndSeries.afterFitButton.mode}, zero ${seen.labelAndSeries.afterZeroKey.mode}, series ${seen.labelAndSeries.afterSeries.mode}`);
+  console.log(`coverage: ${seen.coverage.map((reading) => `${reading.name} opaque ${reading.paintW} device px`).join(", ")}`);
+  console.log(`panned edge: ${seen.pannedEdge.map((reading) => `${reading.name} opaque ends ${reading.paintX + reading.paintW}`).join(", ")}`);
   console.log(`ratio watcher: arms ${seen.ratioWatcher.armsAfterTwo} and ${seen.ratioWatcher.armsAfterOne}, resizes ${seen.ratioWatcher.resizeEvents}, probes ${seen.ratioWatcher.probes.map((probe) => `${probe.factor}:${probe.rendering}`).join(" ")}`);
   console.log(`clamp small: fitted ${seen.clamp.small.fitted.toFixed(4)}, identity painted ${seen.clamp.small.identity.paintW}, settled ${(seen.clamp.small.afterOut.w * seen.clamp.small.afterOut.dpr).toFixed(3)}`);
   console.log(`clamp large: fitted ${seen.clamp.large.fitted.toFixed(6)}, identity painted ${seen.clamp.large.identity.paintW}, settled ${(seen.clamp.large.afterOut.w * seen.clamp.large.afterOut.dpr).toFixed(3)}`);
@@ -1666,22 +1979,23 @@ async function main() {
   console.log(`backing store: ${seen.backingStore.inMode.backingW} by ${seen.backingStore.inMode.backingH} in the mode, ${seen.backingStore.afterFit.backingW} by ${seen.backingStore.afterFit.backingH} after Fit`);
   console.log(`refusals: tile ${seen.refusals.tiled.mode}, empty ${seen.refusals.empty.mode}, faults ${seen.refusals.tiled.faultShown} and ${seen.refusals.empty.faultShown}`);
   console.log(`below ratio: refused ${JSON.stringify(seen.belowRatio.refused.cornerLast)}, at two ${JSON.stringify(seen.belowRatio.atTwo.cornerLast)}, entered painted ${seen.belowRatio.entered.paintW} device px`);
-  console.log(`small view: ${seen.smallView.refused.cellW} by ${seen.smallView.refused.cellH} CSS px refused ${JSON.stringify(seen.smallView.refused.cornerLast)}, grown entered ${seen.smallView.entered.mode}`);
   console.log(`aniso: D painted ${seen.aniso.d.paintW} by ${seen.aniso.d.paintH}, D-prime painted ${seen.aniso.d2.paintW} by ${seen.aniso.d2.paintH}`);
   console.log(`pan keeps: moved ${seen.panKeeps.after.paintX - seen.panKeeps.before.paintX} device px, mode ${seen.panKeeps.after.mode}`);
   console.log(`entry centring: the image point at the cell centre moved ${Math.abs(seen.entryCentring.before.x - seen.entryCentring.after.x).toFixed(4)} and ${Math.abs(seen.entryCentring.before.y - seen.entryCentring.after.y).toFixed(4)} stored px`);
   const problems = extentProblems(seen.extents)
     .concat(originProblems(seen.origins))
     .concat(pixelProblems(seen.pixels))
+    .concat(coverageProblems(seen.coverage))
+    .concat(pannedEdgeProblems(seen.pannedEdge))
     .concat(labelAndSeriesProblems(seen.labelAndSeries))
     .concat(ratioWatcherProblems(seen.ratioWatcher))
     .concat(clampProblems(seen.clamp))
     .concat(linkProblems(seen.link))
     .concat(backingStoreProblems(seen.backingStore))
+    .concat(leaveRestoreProblems(seen.leaveRestore, restore))
     .concat(sameSizeRedrawProblems(seen.sameSize))
     .concat(refusalProblems(seen.refusals))
     .concat(belowRatioProblems(seen.belowRatio))
-    .concat(smallViewProblems(seen.smallView))
     .concat(transformProblems(seen.transforms))
     .concat(magnifierProblems(seen.magnifier))
     .concat(anisoProblems(seen.aniso))

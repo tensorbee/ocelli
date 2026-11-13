@@ -1381,11 +1381,13 @@ function blankViewport(cell) {
     // F-204. The one-to-one paint state: the last grey reply, the displayed
     // buffer cached against the frame and transform state, the integer
     // device offset in the backing the buffer was written at while the
-    // mode holds, which the magnifier reads, and the whole CSS pixel
-    // alignment shift the stage margins carry.
+    // mode holds, which the magnifier reads, the whole CSS pixel
+    // alignment shift the stage margins carry, and whether the backing
+    // still holds the mode's buffer, which the restore outside the mode
+    // reads when the sizes match.
     grey: null, oneBuf: null, oneBufGrey: null, oneBufKey: "",
     paintOffsetX: 0, paintOffsetY: 0,
-    oneShiftX: 0, oneShiftY: 0,
+    oneShiftX: 0, oneShiftY: 0, oneBacking: false,
     // F-225. The file of the last image this viewport drew.
     paintedFile: null,
     loadToken: 0, tileToken: 0, liveToken: 0, liveBusy: false, liveDirty: false,
@@ -3643,15 +3645,22 @@ function deviceStep(ratio, limit) {
   return 0;
 }
 
-// The largest whole CSS pixel box side not exceeding the cell side whose
-// product with the ratio is a whole number of device pixels: a multiple of
-// the step. 0 when the cell side is smaller than the step, the view the
-// refusal names as too small.
+// The search cap for the ratio's whole CSS pixel step, the same bound the
+// one-to-one suite's stepFor uses. A ratio with no step under it has no
+// device-aligned box at any cell size.
+const STEP_LIMIT = 2000;
+
+// The box the mode draws into, sized up, never down: the smallest whole
+// multiple of the ratio's step that covers the cell side, plus one step so
+// the alignment shift still covers it, clipped by the cell's own overflow
+// hidden. No part of the cell inside the drawn frame is left unpainted,
+// which the byte rows of one-to-one.mjs check. 0 when no step exists up to
+// the cap, the one case where no device-aligned box exists at all.
 function oneToOneBox(side, ratio) {
   const whole = Math.floor(side);
-  const step = deviceStep(ratio, whole);
+  const step = deviceStep(ratio, STEP_LIMIT);
   if (!step) return 0;
-  return whole - (whole % step);
+  return Math.ceil(whole / step) * step + step;
 }
 
 // The displayed device extents along the stored column and row axes. Rows
@@ -3739,7 +3748,9 @@ function oneToOneBuffer(vp, screenW, screenH) {
 }
 
 // The mode's paint: the backing is the element box times the ratio, and the
-// displayed buffer is written one to one at the integer device offset.
+// displayed buffer is written one to one at the integer device offset. The
+// oneBacking flag records that the backing holds this buffer, so leaving
+// the mode restores the stored bytes even when the sizes happen to match.
 function paintOneToOne(vp, boxW, boxH, screenW, screenH, ox, oy) {
   const ratio = window.devicePixelRatio || 1;
   const backingW = Math.round(boxW * ratio);
@@ -3748,6 +3759,7 @@ function paintOneToOne(vp, boxW, boxH, screenW, screenH, ox, oy) {
     vp.dom.canvas.width = backingW;
     vp.dom.canvas.height = backingH;
   }
+  vp.oneBacking = true;
   const context = vp.viewContext;
   if (!context || !vp.grey) return;
   context.clearRect(0, 0, backingW, backingH);
@@ -3760,13 +3772,17 @@ function layoutViewport(vp) {
   const ratio = window.devicePixelRatio || 1;
   // F-204. The one-to-one guards re-run on every layout of a held mode, so
   // a frame change or a ratio change that leaves the stored frame smaller
-  // than the device pixel ratio, or the cell too small for a whole device
-  // pixel box, drops to fit before any style write. The drop shows no
-  // reason, because nothing claims 1:1 any more.
+  // than the device pixel ratio drops to fit before any style write, and
+  // so does a ratio whose whole CSS pixel step is past the search cap,
+  // where no device-aligned box exists at any cell size. The drop shows no
+  // reason, because nothing claims 1:1 any more. The cell size itself is no
+  // guard: the box is sized up past the cell and the cell's overflow
+  // hidden clips it, matching cornerstone3D 5.8.2, which never refuses for
+  // cell size.
   if (vp.zoomMode === "one") {
     const cellBox = dom.cell.getBoundingClientRect();
     if (vp.imageWidth < ratio || vp.imageHeight < ratio
-      || oneToOneBox(cellBox.width, ratio) < 1 || oneToOneBox(cellBox.height, ratio) < 1) {
+      || !oneToOneBox(cellBox.width, ratio) || !oneToOneBox(cellBox.height, ratio)) {
       vp.zoomMode = "fit";
     }
   }
@@ -3821,13 +3837,16 @@ function layoutViewport(vp) {
   let translateX = vp.panX;
   let translateY = vp.panY;
   if (one) {
-    // F-204, the lead amendment after implementation pass 1. While the mode
-    // holds, the canvas element is sized in whole CSS pixels to its cell,
-    // its backing store is that box times the ratio, and the stored pixels
-    // are written one to one at an integer device offset that carries the
-    // centring, the pan and the snap. Rotation and flips ride the index in
-    // that write, never a CSS transform. The margins carry the last written
-    // alignment shift until the snap below recomputes it.
+    // F-204, the lead amendments after implementation passes 1 and 2. While
+    // the mode holds, the canvas element is sized in whole CSS pixels up
+    // past its cell, the smallest whole multiple of the ratio's step that
+    // covers the cell plus one step for the alignment shift, and the cell's
+    // overflow hidden clips the excess. Its backing store is that box times
+    // the ratio, and the stored pixels are written one to one at an integer
+    // device offset that carries the centring, the pan and the snap.
+    // Rotation and flips ride the index in that write, never a CSS
+    // transform. The margins carry the last written alignment shift until
+    // the snap below recomputes it.
     dom.frame.style.width = boxW + "px";
     dom.frame.style.height = boxH + "px";
     dom.stage.style.width = boxW + "px";
@@ -3910,13 +3929,16 @@ function layoutViewport(vp) {
     if (dom.refs.style.top !== "0px") dom.refs.style.top = "0px";
     if (dom.ink.style.transform) dom.ink.style.transform = "";
     if (dom.refs.style.transform) dom.refs.style.transform = "";
-    // Outside the mode the backing returns to the stored frame size, which
-    // a mode layout may have resized away, and the paint restores it.
-    if (vp.grey && (dom.canvas.width !== vp.grey.width || dom.canvas.height !== vp.grey.height)) {
+    // Outside the mode the backing returns to the stored frame size and
+    // the paint restores the stored bytes, whenever the mode resized the
+    // backing away or the backing still holds the mode's own buffer at the
+    // stored size.
+    if (vp.grey && (vp.oneBacking || dom.canvas.width !== vp.grey.width || dom.canvas.height !== vp.grey.height)) {
       dom.canvas.width = vp.grey.width;
       dom.canvas.height = vp.grey.height;
       paintGrey(vp.viewContext, dom.canvas, vp.grey);
     }
+    vp.oneBacking = false;
     vp.paintOffsetX = 0;
     vp.paintOffsetY = 0;
     vp.oneShiftX = 0;
@@ -4017,12 +4039,13 @@ function paintOverlays(vp) {
   if (warning) windowLine += "\n" + warning;
   if (info.colour && vp.paletteFallback) windowLine += "\nThis palette was read as 8-bit because all its entries fit in 8 bits.";
   // F-204. A refusal reason shows in place of the Zoom suffix only while
-  // its own condition still holds, re-checked from the predicate the guard
-  // evaluated, and is written empty at the first paint where it does not,
-  // so no later paint shows a stale reason.
+  // the condition that produced the stored string is the one that holds,
+  // re-checked from the predicate the guard evaluated, and is written empty
+  // at the first paint where it does not, so no later paint shows a stale
+  // reason.
   let zoomLine = "Zoom " + vp.zoomLabel;
   if (vp.zoomRefusal) {
-    if (zoomRefusalReason(vp)) zoomLine = vp.zoomRefusal;
+    if (zoomRefusalReason(vp) === vp.zoomRefusal) zoomLine = vp.zoomRefusal;
     else vp.zoomRefusal = "";
   }
   assignText(corners.br, windowLine + "\n" + zoomLine);
@@ -4179,19 +4202,14 @@ function fitView(vp) {
   copyZoom(vp);
 }
 
-// F-204. The refusal conditions, re-checked from the same predicates the
-// guards evaluated: a stored frame below the device pixel ratio, or a cell
-// too small for a whole device pixel box at the live ratio. The corner line
-// shows the reason only while one holds, so no stale reason survives.
+// F-204. The refusal condition, re-checked from the same predicate the
+// guard evaluated: a stored frame below the device pixel ratio. The corner
+// line shows the reason only while it holds, so no stale reason survives.
 function zoomRefusalReason(vp) {
   if (!vp.imageWidth) return "";
   const ratio = window.devicePixelRatio || 1;
   if (vp.imageWidth < ratio || vp.imageHeight < ratio) {
     return "1:1 needs a frame at least the device pixel ratio big";
-  }
-  const cellBox = vp.dom.cell.getBoundingClientRect();
-  if (oneToOneBox(cellBox.width, ratio) < 1 || oneToOneBox(cellBox.height, ratio) < 1) {
-    return "1:1 needs a larger view";
   }
   return "";
 }

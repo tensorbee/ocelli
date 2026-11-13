@@ -464,21 +464,22 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    in the page from the device pixel ratio and the corner line reading Zoom
    1:1, or Zoom 1:1 rows on a frame whose pixels are not square, where the
    rows are exact and the columns are resampled. In the mode the canvas is a
-   whole CSS pixel box the size of its cell, rounded down so that its size
-   times the device pixel ratio is whole, its backing has that many device
-   pixels, and the stored pixels are written into the backing one to one, as
-   cornerstone3D 5.8.2 sizes its backing at the device resolution. On square
-   pixels the mode is verified byte for byte in screenshots under the emulated
-   ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is DevTools device
-   scale emulation and not a physical display. Pan keeps the mode, and zooming
-   reaches the scale and leaves it like any other, so on a frame wider than
-   its cell zooming out from one to one goes below it. A stored frame smaller
-   than the device pixel ratio keeps its view, and the corner line says so
-   until the frame or the ratio changes. A view too small to hold a box whose
-   size times the ratio is whole keeps its view as well, and the corner line
-   reads 1:1 needs a larger view until the view grows. Opening another series
-   and Reset return to fit. The viewport clips an image that is larger than
-   the pane.
+   whole CSS pixel box sized up past its cell, the smallest whole multiple of
+   the ratio's whole CSS pixel step that covers the cell plus one step for
+   the alignment shift, so its size times the device pixel ratio is whole,
+   its backing has that many device pixels, and the stored pixels are
+   written into the backing one to one, as cornerstone3D 5.8.2 sizes its
+   backing at the device resolution. The cell's own clipping cuts the box's
+   excess, so no part of the cell inside the frame is left unpainted. On
+   square pixels the mode is verified byte for byte in screenshots under the
+   emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is
+   DevTools device scale emulation and not a physical display. Pan keeps the
+   mode, and zooming reaches the scale and leaves it like any other, so on a
+   frame wider than its cell zooming out from one to one goes below it. A
+   stored frame smaller than the device pixel ratio keeps its view, and the
+   corner line shows the reason while that holds, until the frame or the
+   ratio changes. Opening another series and Reset return to fit. The
+   viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. A count on the Headers button is the
    number of findings in the shown file's conformance report, whether the file
    is drawn or shows a fault such as a colour or refused frame, and the sheet
