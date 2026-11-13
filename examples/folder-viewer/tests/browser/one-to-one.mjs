@@ -467,10 +467,11 @@ function idealOrigin(cellStart, cellSize, dpr, extent, pan) {
  * Walk the viewport width until the ideal centring of a screenW device
  * pixel picture in the measured cell is off the device grid by more than
  * the AC2 epsilon, so the origin cases prove the snap against a centring
- * the engine cannot paint unsnapped. At ratio 1 that is a cell whose width
- * minus the picture width is odd. At a fractional ratio the fraction must
- * also be above 0.55, so a snap that truncates instead of rounding lands
- * more than CENTRING_SLACK from the ideal and fails the case.
+ * the engine cannot paint unsnapped. At ratio 1 and an even picture width
+ * that is a cell whose centre falls on a half CSS pixel. At a fractional
+ * ratio the fraction must also be above 0.55, so a snap that truncates
+ * instead of rounding lands more than CENTRING_SLACK from the ideal and
+ * fails the case.
  */
 async function fractionalCell(page, screenW) {
   for (let width = 1600; width <= 1720; width += 1) {
@@ -1513,6 +1514,14 @@ export function anisoProblems(seen) {
     if (!onGrid(reading.paintY)) {
       problems.push(`the ${name} painted row origin ${reading.paintY} is not a whole device pixel`);
     }
+    // AC18's precondition: the drawn widths, 91 and 179, are odd, so the
+    // unsnapped centring of the columns in the measured cell is a half
+    // device pixel and the snap must move it onto the grid.
+    const idealX = idealOrigin(reading.cellX, reading.cellW, reading.dpr, reading.paintW, reading.panX);
+    if (onGrid(idealX)) problems.push(`the ${name} unsnapped column centring ${idealX} is already whole, so the case proves nothing`);
+    if (!onGrid(reading.paintX)) {
+      problems.push(`the ${name} painted column origin ${reading.paintX} is not a whole device pixel`);
+    }
   }
   problems.push(...anisoRowProblems("D", seen.dCrop, FIXTURES.d, seen.d.paintW));
   problems.push(...anisoRowProblems("D-prime", seen.d2Crop, FIXTURES.d2, seen.d2.paintW));
@@ -1520,8 +1529,8 @@ export function anisoProblems(seen) {
 }
 
 // AC11. A pan drag in the mode keeps the mode, the label and the stored
-// extent, and moves the image by the drag delta through the recorded device
-// offset while the element box stays put.
+// extent, and moves the observed painted origin by the drag delta while the
+// element box stays put.
 export async function observePanKeeps(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
