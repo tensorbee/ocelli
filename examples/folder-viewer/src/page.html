@@ -935,7 +935,7 @@
       <kbd>Pinch</kbd><span>Zoom at the pointer</span>
     </div>
     <p class="note-text" id="mouse-unsaved" hidden>This browser did not keep the choice. It applies until you reload.</p>
-    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. A choice it could not use or keep says so in the line under the image. A profile change the browser did not keep is named in the MOUSE section.</p>
+    <p class="note-text">This browser keeps the profile, the play rate, the two side columns and the default preset for this address, so they return after a restart only on the same OCELLI_PORT. Any other choice the browser did not keep, or a choice it could not use, says so in the line under the image. A profile change the browser did not keep is named in the MOUSE section.</p>
   </section>
   <section>
     <h2>KEYS</h2>
@@ -1305,9 +1305,10 @@ function resetFolderState() {
 let marksModule = null;
 // The page's kept choices and the sentences still outstanding about them.
 // `loadPreferences` fills both from storage, and the save helpers keep them
-// current. `resolved` holds the choices the last resolve read from storage,
-// so the listener can tell a write of a failed field itself from a write of
-// another field. Nothing here reaches the DOM.
+// current. `resolved` holds the choices storage last held as this page knows
+// them, advanced by each resolve and by this page's own kept writes, so the
+// listener can tell a write of a failed field itself from a write of another
+// field. Nothing here reaches the DOM.
 const prefs = { values: { ...PREFS_DEFAULTS }, resolved: { ...PREFS_DEFAULTS }, sentences: [], writeFailures: {}, legacyPartial: false };
 loadPreferences();
 let activeProfile = prefs.values.mouseProfile;
@@ -2292,10 +2293,18 @@ function savePreference(field, value) {
   let legacyKept = false;
   if (refused) {
     const ownKey = PREFS_LEGACY_KEYS[field];
-    if (ownKey) legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+    if (ownKey) {
+      legacyKept = writePreference(ownKey, prefLegacyValue(field, next[field]));
+      // A kept own write is what a load reads while the document is refused,
+      // so the listener's baseline moves with it.
+      if (legacyKept) prefs.resolved = { ...prefs.resolved, [field]: next[field] };
+    }
   } else {
     documentKept = writePreference(PREFS_KEY, prefsDocumentJSON(next));
     if (documentKept) {
+      // The document now holds next, so that is the state a later stored
+      // change is measured against.
+      prefs.resolved = { ...next };
       const failures = [];
       for (const name of PREFS_FIELDS) {
         const legacyKey = PREFS_LEGACY_KEYS[name];

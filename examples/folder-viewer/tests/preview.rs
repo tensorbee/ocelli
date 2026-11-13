@@ -915,6 +915,9 @@ fn the_page_offers_mouse_profiles() -> Result<(), String> {
             "const FPS_KEY = \"ocelli.fps\";",
             "fpsInput.value = String(prefs.values.cineFps);",
             "This browser did not keep the choice. It applies until you reload.",
+            // Review pass 3, N2. The MOUSE section names where a kept
+            // profile's failure shows, beside the paragraph itself.
+            "A profile change the browser did not keep is named in the MOUSE section.",
         ],
         "AC4",
     )?;
@@ -1262,7 +1265,7 @@ fn more_says_what_the_page_keeps() -> Result<(), String> {
         &[
             "The image page keeps five choices in this browser, the mouse profile, the play rate, whether each of the two side columns is hidden and a default window preset.",
             "The browser also holds the library's log level setting, which dcmjs writes when the page loads the library, and nothing else.",
-            "a choice the browser did not keep or could not use is named in a line under the image, never applied quietly. A profile change the browser did not keep is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
+            "and any other choice the browser did not keep or could not use is named in a line under the image, never applied quietly. A profile change the browser did not keep is named in the MOUSE section. Per-key tool bindings and hanging layouts remain, and there is still no preferences module in the crates or packages.",
             "<li><a href=\"#preferences\">Preferences</a><span class=\"mark\">partial</span></li>",
             "Configurable APIs. Persistence belongs to the host",
             "S47: F-205",
@@ -1278,18 +1281,19 @@ fn more_says_what_the_page_keeps() -> Result<(), String> {
 }
 
 #[test]
-fn the_readme_names_the_log_level_setting() -> Result<(), String> {
-    // F-205 review pass 2, N2. The README sentence about what the browser
-    // holds is pinned beside the More page's, so the two documents cannot
-    // drift apart about the one key the page does not write.
+fn the_readme_names_what_the_browser_holds() -> Result<(), String> {
+    // F-205 review pass 3, N2. The two sentences about what the browser
+    // holds are pinned as one adjacent passage each, beside the More page's,
+    // so the documents cannot drift apart about the one key the page does
+    // not write or about where a kept profile's failure is named.
     let readme = include_str!("../../../README.md");
     require(
         readme,
         &[
-            "The browser also holds the library's log level setting,",
-            "which dcmjs writes when the page loads the library, and nothing else.",
+            "The browser also holds the library's log level setting,\n   which dcmjs writes when the page loads the library, and nothing else.",
+            "A profile change the browser did not keep is\n   named in the MOUSE section.",
         ],
-        "F-205 review pass 2 N2",
+        "F-205 review pass 3 N2",
     )?;
     Ok(())
 }

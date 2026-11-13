@@ -466,7 +466,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    file's own window and the preset does not come back until the next
    series load. An MR, a colour image or a file with a VOI LUT Sequence
    takes no preset, and a stored preset the viewer does not offer is named
-   in the line under the image and skipped. A choice the browser did not
+   in the line under the image and skipped. Any other choice the browser did not
    keep, or a stored choice it could not use, is named in that line too,
    never applied quietly. A profile change the browser did not keep is
    named in the MOUSE section. The choices live beside the four keys an

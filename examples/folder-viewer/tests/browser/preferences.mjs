@@ -1019,6 +1019,207 @@ function listenerKeepsFailedFieldProblems(seen) {
   return problems;
 }
 
+// D1, review pass 3. A kept write of the field before the failed one is the
+// baseline the listener measures against, so another field's stored change
+// leaves the failed field and its sentence alone, and a fresh stored change
+// of the field itself replaces both. The refusal is armed after the kept
+// write, so the failed write is the document's alone, and the first write's
+// document is what the other tab reads and rewrites.
+const REFUSE_PREFS_DOCUMENT = `
+  window.__refusePrefsDocument = false;
+  const original = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === "ocelli.prefs" && window.__refusePrefsDocument) {
+      throw new Error("this browser refused the write");
+    }
+    return original.call(this, key, value);
+  };
+`;
+
+const REFUSE_LEGACY_FPS = `
+  window.__refuseLegacyFps = false;
+  const original = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (key === "ocelli.fps" && window.__refuseLegacyFps) {
+      throw new Error("this browser refused the write");
+    }
+    return original.call(this, key, value);
+  };
+`;
+
+async function observeListenerAfterOwnKeptWrite(url, browser) {
+  const refuseDocument = REFUSE_PREFS_DOCUMENT;
+  // (a) The rate, against another field. The stored rate is this tab's own
+  // kept 20, not the planted 10 the page loaded with, so the failed 25 and
+  // its sentence stand.
+  const rateAfterOtherField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(refuseDocument);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await setRate(page, 20);
+    await page.evaluate(() => { window.__refusePrefsDocument = true; });
+    await setRate(page, 25);
+    const before = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await other.locator("#mouse-profile").selectOption("window-left");
+    await page.waitForTimeout(300);
+    const after = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await context.close();
+    return { before, after };
+  });
+  // (b) The rate, against itself. The other tab's kept 10 is a fresh stored
+  // change, so the failed 25 gives way and the sentence goes with it.
+  const rateAfterSameField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(refuseDocument);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await setRate(page, 20);
+    await page.evaluate(() => { window.__refusePrefsDocument = true; });
+    await setRate(page, 25);
+    await setRate(other, 10);
+    await page.waitForTimeout(300);
+    const after = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await context.close();
+    return { after };
+  });
+  // The refused document. What a load reads then is the legacy keys, so the
+  // same two paths hold against them: the kept own write of ocelli.fps
+  // advances the baseline, the failed one does not, and the other tab's
+  // legacy writes decide.
+  const refuseLegacyFps = REFUSE_LEGACY_FPS;
+  const refusedRateAfterOtherField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": "not json", "ocelli.fps": "10" });
+    await page.addInitScript(refuseLegacyFps);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await setRate(page, 20);
+    await page.evaluate(() => { window.__refuseLegacyFps = true; });
+    await setRate(page, 25);
+    const before = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await other.locator("#mouse-profile").selectOption("window-left");
+    await page.waitForTimeout(300);
+    const after = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await context.close();
+    return { before, after };
+  });
+  const refusedRateAfterSameField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": "not json", "ocelli.fps": "10" });
+    await page.addInitScript(refuseLegacyFps);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await setRate(page, 20);
+    await page.evaluate(() => { window.__refuseLegacyFps = true; });
+    await setRate(page, 25);
+    await setRate(other, 10);
+    await page.waitForTimeout(300);
+    const after = { note: await noteLines(page), rate: await page.evaluate(() => document.getElementById("fps").value) };
+    await context.close();
+    return { after };
+  });
+  // (a) The profile, against another field. The stored profile is this tab's
+  // own kept scroll-left, so the failed window-left and its paragraph stand.
+  const profileAfterOtherField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(refuseDocument);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await page.locator("#mouse-profile").selectOption("scroll-left");
+    await page.evaluate(() => { window.__refusePrefsDocument = true; });
+    await page.locator("#mouse-profile").selectOption("window-left");
+    const before = {
+      unsaved: await page.evaluate(() => !document.getElementById("mouse-unsaved").hidden),
+      profile: await page.evaluate(() => document.getElementById("mouse-profile").value),
+    };
+    await setRate(other, 15);
+    await page.waitForTimeout(300);
+    const after = {
+      unsaved: await page.evaluate(() => !document.getElementById("mouse-unsaved").hidden),
+      profile: await page.evaluate(() => document.getElementById("mouse-profile").value),
+    };
+    await context.close();
+    return { before, after };
+  });
+  // (b) The profile, against itself. The other tab's kept Ocelli is a fresh
+  // stored change, so the failed window-left gives way and the paragraph
+  // goes with it.
+  const profileAfterSameField = await withPage(browser, async (page, context) => {
+    await plant(page, { "ocelli.prefs": documentJSON(PLAIN_DOC) });
+    await page.addInitScript(refuseDocument);
+    const other = await context.newPage();
+    await page.goto(url);
+    await other.goto(url);
+    await page.locator("#mouse-profile").selectOption("scroll-left");
+    await page.evaluate(() => { window.__refusePrefsDocument = true; });
+    await page.locator("#mouse-profile").selectOption("window-left");
+    await other.locator("#mouse-profile").selectOption("ocelli");
+    await page.waitForTimeout(300);
+    const after = {
+      unsaved: await page.evaluate(() => !document.getElementById("mouse-unsaved").hidden),
+      profile: await page.evaluate(() => document.getElementById("mouse-profile").value),
+    };
+    await context.close();
+    return { after };
+  });
+  return { rateAfterOtherField, rateAfterSameField, refusedRateAfterOtherField, refusedRateAfterSameField, profileAfterOtherField, profileAfterSameField };
+}
+
+function listenerAfterOwnKeptWriteProblems(seen) {
+  const problems = [];
+  const { rateAfterOtherField, rateAfterSameField, refusedRateAfterOtherField, refusedRateAfterSameField, profileAfterOtherField, profileAfterSameField } = seen;
+  if (rateAfterOtherField.before.rate !== "25" || !rateAfterOtherField.before.note.lines.includes(LOST_RATE)) {
+    problems.push(`the failed rate write did not apply 25 with its sentence: ${JSON.stringify(rateAfterOtherField.before)}`);
+  }
+  if (rateAfterOtherField.after.rate !== "25") {
+    problems.push(`another field's kept write moved the failed rate to ${rateAfterOtherField.after.rate}`);
+  }
+  if (!rateAfterOtherField.after.note.lines.includes(LOST_RATE)) {
+    problems.push(`another field's kept write cleared the rate sentence: ${JSON.stringify(rateAfterOtherField.after.note)}`);
+  }
+  if (rateAfterSameField.after.rate !== "10") {
+    problems.push(`the kept rate write did not apply the fresh stored rate: ${rateAfterSameField.after.rate}`);
+  }
+  if (rateAfterSameField.after.note.lines.includes(LOST_RATE)) {
+    problems.push(`the repaired rate kept its sentence: ${JSON.stringify(rateAfterSameField.after.note)}`);
+  }
+  if (refusedRateAfterOtherField.before.rate !== "25" || !refusedRateAfterOtherField.before.note.lines.includes(LOST_RATE)) {
+    problems.push(`the failed refused-state rate write did not apply 25 with its sentence: ${JSON.stringify(refusedRateAfterOtherField.before)}`);
+  }
+  if (refusedRateAfterOtherField.after.rate !== "25") {
+    problems.push(`another field's kept legacy write moved the failed rate to ${refusedRateAfterOtherField.after.rate}`);
+  }
+  if (!refusedRateAfterOtherField.after.note.lines.includes(LOST_RATE)) {
+    problems.push(`another field's kept legacy write cleared the rate sentence: ${JSON.stringify(refusedRateAfterOtherField.after.note)}`);
+  }
+  if (refusedRateAfterSameField.after.rate !== "10") {
+    problems.push(`the kept legacy rate write did not apply the fresh stored rate: ${refusedRateAfterSameField.after.rate}`);
+  }
+  if (refusedRateAfterSameField.after.note.lines.includes(LOST_RATE)) {
+    problems.push(`the repaired refused-state rate kept its sentence: ${JSON.stringify(refusedRateAfterSameField.after.note)}`);
+  }
+  if (!profileAfterOtherField.before.unsaved || profileAfterOtherField.before.profile !== "window-left") {
+    problems.push(`the failed profile write did not apply window-left with its paragraph: ${JSON.stringify(profileAfterOtherField.before)}`);
+  }
+  if (profileAfterOtherField.after.profile !== "window-left") {
+    problems.push(`another field's kept write moved the failed profile to ${profileAfterOtherField.after.profile}`);
+  }
+  if (!profileAfterOtherField.after.unsaved) {
+    problems.push("another field's kept write cleared the mouse-unsaved paragraph");
+  }
+  if (profileAfterSameField.after.profile !== "ocelli") {
+    problems.push(`the kept profile write did not apply the fresh stored profile: ${profileAfterSameField.after.profile}`);
+  }
+  if (profileAfterSameField.after.unsaved) {
+    problems.push("the repaired profile kept the mouse-unsaved paragraph");
+  }
+  return problems;
+}
+
 // AC10. The stored default applies once per series load, Reset returns the
 // file window, scrolling keeps it, play sends no preset header after Reset
 // and only preset headers while the default is applied. The hold cases
@@ -1832,6 +2033,10 @@ async function main() {
     const keepsFailed = await observeListenerKeepsFailedField(origin, browser);
     problems.push(...listenerKeepsFailedFieldProblems(keepsFailed));
     console.log("N1: a failed field keeps its value past another field's write and repairs on its own");
+
+    const afterOwnKept = await observeListenerAfterOwnKeptWrite(origin, browser);
+    problems.push(...listenerAfterOwnKeptWriteProblems(afterOwnKept));
+    console.log("D1: a kept write before the failed one is the listener's baseline, for the rate and the profile");
 
     const storedDefault = await observeStoredDefault(origin, browser, folders);
     problems.push(...storedDefaultProblems(storedDefault));
