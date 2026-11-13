@@ -816,7 +816,7 @@ async function captureVisibleBytes(page) {
  * row and 57 further down one, mod 251, from wherever in the pattern the
  * visible run starts. Where the run starts is the picture's position in the
  * cell, which the origin rows pin on the fixtures whose whole picture is
- * visible; here every visible device pixel must hold the pattern's own next
+ * visible, here every visible device pixel must hold the pattern's own next
  * value, so a dropped, doubled or resampled column breaks the row. The
  * pattern's period 251 does not interrupt either step, because
  * stored(251, y) is stored(0, y) and stored(x, 251) is stored(x, 0).
@@ -1427,7 +1427,7 @@ export function backingStoreProblems(seen) {
 // restore skip a backing that still held the mode's own panned buffer. The
 // restore fixture's stored frame is sized so that the box in the measured
 // cell, the cell side plus its step of 1 at ratio 2, times the ratio is the
-// stored frame on both axes; the mode is entered, the picture is panned
+// stored frame on both axes. The mode is entered, the picture is panned
 // 20 CSS px, which shifts the mode buffer inside its equal-size backing, and
 // one zoom tick leaves the mode. The backing must hold the stored pattern.
 export async function observeLeaveRestore(url, chromium, folder, restore) {
