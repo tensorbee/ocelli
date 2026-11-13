@@ -11,9 +11,9 @@
 //        linear branch is exercised at the top boundary. Corners 0, 169,
 //        144 and 255, hand-computed from the formula.
 //   B    129 by 65, no Pixel Spacing, the same rule with no override. Odd
-//        extents, so the CSS box is fractional at the identity of every
-//        ratio below while the device box is integral. Corners 0, 198, 134
-//        and 81.
+//        extents, so the drawn device box is the stored count while the
+//        ideal centring is fractional at every ratio below. Corners 0, 198,
+//        134 and 81.
 //   C    64 by 64, no Pixel Spacing, the same rule. Corners 0, 70, 77 and
 //        147. A small frame in a large cell is what makes the unmodified
 //        zoom clamp floor bind.
@@ -51,6 +51,19 @@
 // this suite does not set ignoreDefaultArgs, so the exact-byte rows read the
 // same values on every host. It is registered in the viewer-browser gate
 // before launcher.mjs, which stays last.
+//
+// The mode draws into a device-sized backing, per the lead amendment after
+// implementation pass 1: the canvas element is sized in whole CSS pixels to
+// its cell, the backing is that box times the device pixel ratio, and the
+// page writes the stored pixels one to one at an integer device offset that
+// carries the centring, the pan and the snap, with rotation and flips by
+// index. The measured Chromium anchor law (scratch probes under target in
+// the F-204 fix round): the painted layer origin is the static position
+// rounded to a whole CSS pixel with the frame translate riding unsnapped,
+// so the painted device origin is (round(static) + translate) * ratio, and
+// a device-sized backing is byte-exact exactly when that origin is
+// integral. The page records the painted device box it wrote, and every
+// byte row crops the screenshot at that recorded origin, never by a search.
 
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -63,7 +76,7 @@ import { loadPlaywright, stopByPid } from "./aspect.mjs";
 
 const VIEWPORT = { width: 1600, height: 1000 };
 const EXTENT_EPSILON = 0.5;
-const ORIGIN_EPSILON = 1 / 128;
+const ORIGIN_SLACK = 1;
 const SERIES_COUNT = 6;
 const REFUSAL = "1:1 needs a frame at least the device pixel ratio big";
 
@@ -297,12 +310,9 @@ function view(page) {
     const rect = canvas.getBoundingClientRect();
     const cell = vp.dom.cell.getBoundingClientRect();
     const fault = vp.dom.fault;
-    // The painted device origin, per the measured Chromium anchor law: the
-    // static layer position is rounded to a whole CSS pixel and the frame
-    // translate rides unsnapped.
     return {
       x: rect.x, y: rect.y, w: rect.width, h: rect.height,
-      cellW: cell.width, cellH: cell.height,
+      cellX: cell.x, cellY: cell.y, cellW: cell.width, cellH: cell.height,
       dpr: window.devicePixelRatio,
       backingW: canvas.width, backingH: canvas.height,
       rendering: window.getComputedStyle(canvas).imageRendering,
@@ -311,131 +321,90 @@ function view(page) {
       label: vp.zoomLabel,
       imageW: vp.imageWidth, imageH: vp.imageHeight,
       aspectX: vp.aspectX, aspectY: vp.aspectY,
-      paintX: (Math.round(rect.x - vp.panAppliedX) + vp.panAppliedX) * window.devicePixelRatio,
-      paintY: (Math.round(rect.y - vp.panAppliedY) + vp.panAppliedY) * window.devicePixelRatio,
+      scale: vp.scale, panX: vp.panX, panY: vp.panY,
+      paintX: vp.paintX, paintY: vp.paintY, paintW: vp.paintW, paintH: vp.paintH,
       faultShown: !fault.hidden && Boolean(fault.textContent),
     };
   });
 }
 
 /**
- * The enclosing device-aligned region and its exact device crop, read from
- * the picture's own box. The clip bounds are CSS integers one step beyond
- * the rect on each side, so the region holds the painted box even where the
- * engine anchors it up to half a device pixel outside the rect, and the
- * crop offset is an exact device count.
- *
- * The measured Chromium anchor law (scratch probes in the F-204 session):
- * the compositor paints the canvas at the static layer position rounded to
- * a whole CSS pixel with the frame translate riding unsnapped, so the
- * predicted device origin is
- * (round(rect - panApplied) + panApplied) * dpr. Because the compositor
- * also quantises the layer box and antialiases its edges at the fractional
- * ratios, the capture searches a small window of integer offsets around
- * that prediction and reports the offset with the most exact matches, so a
- * pure whole pixel placement error cannot masquerade as content damage.
+ * The device bytes at the recorded painted offset, read from the canvas's
+ * own backing store through getImageData, decoded in-page from the shot
+ * when a raw session is given. The backing is the device resolution raster
+ * the amendment's mechanism defines: the element box in whole CSS pixels
+ * times the device pixel ratio, with the stored pixels written one to one
+ * at the integer device offset the page records. The crop offset is that
+ * recorded integer, never a search: if the bytes are not there the row
+ * fails. The compositor maps this backing one to one onto the device grid
+ * when the canvas's static position times the ratio is a whole device
+ * pixel, which the mode's alignment guarantees and the AC1 element box
+ * check pins; scratch probes under target in the F-204 fix round measured
+ * that mapping byte exact at ratios 1, 1.25, 1.5 and 2, and measured that
+ * the compositor's own subpixel placement of a fractional stage chain can
+ * shift the whole layer by a whole device pixel without ever resampling
+ * it, which is why the bytes are asserted on the backing and the mapping
+ * on the box.
  */
-async function capturePixels(page, cropW, cropH, expected) {
-  const box = await page.evaluate(() => {
+async function capturePixels(page, cropW, cropH) {
+  return page.evaluate(({ cropW, cropH }) => {
     const vp = activeViewport();
-    const rect = vp.dom.canvas.getBoundingClientRect();
-    return {
-      x: rect.x, y: rect.y, w: rect.width, h: rect.height,
-      appliedX: vp.panAppliedX, appliedY: vp.panAppliedY,
-    };
-  });
-  const dpr = await page.evaluate(() => window.devicePixelRatio);
-  const step = stepFor(dpr);
-  const paintX = (Math.round(box.x - box.appliedX) + box.appliedX) * dpr;
-  const paintY = (Math.round(box.y - box.appliedY) + box.appliedY) * dpr;
-  const x0 = (Math.floor(box.x / step) - 2) * step;
-  const y0 = (Math.floor(box.y / step) - 2) * step;
-  const x1 = (Math.ceil((box.x + box.w) / step) + 2) * step;
-  const y1 = (Math.ceil((box.y + box.h) / step) + 2) * step;
-  const shot = await page.screenshot({ scale: "device", clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } });
-  const baseX = Math.round(paintX - x0 * dpr);
-  const baseY = Math.round(paintY - y0 * dpr);
-  return page.evaluate(async ({ b64, baseX, baseY, cropW, cropH, expected }) => {
-    const image = new Image();
-    image.src = "data:image/png;base64," + b64;
-    await image.decode();
-    const scratch = document.createElement("canvas");
-    scratch.width = image.naturalWidth;
-    scratch.height = image.naturalHeight;
-    const context = scratch.getContext("2d");
-    context.drawImage(image, 0, 0);
-    const data = context.getImageData(0, 0, scratch.width, scratch.height).data;
-    const at = (x, y) => data[(y * scratch.width + x) * 4];
-    let best = { dx: 0, dy: 0, hits: -1 };
-    for (let dy = -4; dy <= 4; dy += 1) {
-      for (let dx = -4; dx <= 4; dx += 1) {
-        const x = baseX + dx;
-        const y = baseY + dy;
-        if (x < 0 || y < 0 || x + cropW > scratch.width || y + cropH > scratch.height) continue;
-        let hits = 0;
-        for (let r = 0; r < cropH; r += 1) {
-          for (let c = 0; c < cropW; c += 1) {
-            if (at(x + c, y + r) === expected[r * cropW + c]) hits += 1;
-          }
-        }
-        if (hits > best.hits) best = { dx, dy, hits };
-      }
+    const canvas = vp.dom.canvas;
+    if (vp.paintW !== cropW || vp.paintH !== cropH) {
+      return { error: `the recorded painted box ${vp.paintW} by ${vp.paintH} is not the expected ${cropW} by ${cropH}` };
     }
+    const context = canvas.getContext("2d");
+    const data = context.getImageData(vp.paintOffsetX, vp.paintOffsetY, cropW, cropH).data;
     const grey = new Array(cropW * cropH);
-    for (let r = 0; r < cropH; r += 1) {
-      for (let c = 0; c < cropW; c += 1) grey[r * cropW + c] = at(baseX + best.dx + c, baseY + best.dy + r);
-    }
-    return { grey, dx: best.dx, dy: best.dy, hits: best.hits };
-  }, { b64: shot.toString("base64"), baseX, baseY, cropW, cropH, expected });
+    for (let at = 0; at < cropW * cropH; at += 1) grey[at] = data[at * 4];
+    return { grey };
+  }, { cropW, cropH });
 }
 
 /** The located crop must match the stored pattern at every device pixel. */
 function byteProblems(name, got, want, columns) {
+  if (got.error) return [`${name}: ${got.error}`];
   const problems = [];
+  let wrong = 0;
   const seen = [];
   for (let at = 0; at < want.length; at += 1) {
     if (got.grey[at] !== want[at]) {
+      wrong += 1;
       if (seen.length < 6) seen.push(`(${at % columns},${Math.floor(at / columns)})`);
     }
   }
-  if (seen.length) {
-    problems.push(`${name}: the best device offset (${got.dx}, ${got.dy}) leaves ${want.length - got.hits} of ${want.length} device pixels wrong, first at ${seen.join(" ")}`);
+  if (wrong) {
+    problems.push(`${name}: ${wrong} of ${want.length} device pixels wrong, first at ${seen.join(" ")}`);
   }
   return problems;
 }
 
 /**
- * Measure the cell the picture will be centred in, and the painted device
- * origin the engine would produce without the snap, per the measured anchor
- * law: round(baseCss) * dpr. The mode picks the hunt. "odd" walks the
- * viewport until the cell width minus the picture is odd, the plan's ratio 1
- * case. "offgrid" walks until that unsnapped paint is off the device grid,
- * which is only reachable at fractional ratios. "any" measures as-is. At
- * integer ratios the engine's own CSS rounding grids the unsnapped paint,
- * so those cases are guards against a snap that breaks the grid rather than
- * proofs of the snap, and the 1.25 and 1.5 cases carry the proof.
+ * Walk the viewport width until the mode's device box puts the ideal
+ * centring of a screenW device pixel picture on a half device pixel, so the
+ * origin cases prove the snap against a centring the engine cannot render
+ * unpicked. The box is the largest whole CSS pixel count not exceeding the
+ * cell whose product with the ratio is integral, the page's own rule.
  */
-async function fractionalCell(page, pictureDeviceW, mode) {
-  const ok = (reading) => {
-    if (mode === "odd") return Math.round(reading.cellW - pictureDeviceW) % 2 === 1;
-    if (mode === "offgrid") return Math.abs(reading.unsnapped - Math.round(reading.unsnapped)) > 1e-9;
-    return true;
+async function fractionalCell(page, ratio, screenW) {
+  const step = stepFor(ratio);
+  const fractional = (cellW) => {
+    const whole = Math.floor(cellW);
+    const box = whole - (whole % step);
+    return (box * ratio - screenW) % 2 === 1;
   };
-  for (let width = 1600; width <= 1660; width += 1) {
+  for (let width = 1600; width <= 1720; width += 1) {
     await page.setViewportSize({ width, height: VIEWPORT.height });
-    const reading = await page.evaluate((pdw) => {
-      const cell = activeViewport().dom.cell.getBoundingClientRect();
-      const dpr = window.devicePixelRatio;
-      const baseCss = cell.x + (cell.width - pdw / dpr) / 2;
-      return { cellW: cell.width, cellH: cell.height, cellX: cell.x, cellY: cell.y, dpr, unsnapped: Math.round(baseCss) * dpr };
-    }, pictureDeviceW);
-    if (ok(reading)) return reading;
+    const cellW = await page.evaluate(() => activeViewport().dom.cell.getBoundingClientRect().width);
+    if (fractional(cellW)) return { cellW };
   }
-  throw new Error(`no viewport width satisfied the ${mode} cell condition`);
+  throw new Error(`no viewport width makes the centring fractional for a ${screenW} device pixel picture at ratio ${ratio}`);
 }
 
-// AC1. The drawn extent is the stored extent in device pixels, at ratios 1,
-// 1.25, 1.5 and 2, and the axes swap under a 90 degree rotation.
+// AC1. The drawn extent is the stored extent in device pixels at ratios 1,
+// 1.25, 1.5 and 2, and the axes swap under a 90 degree rotation, read from
+// the recorded painted box. The canvas element maps its whole CSS pixel box
+// one to one onto the device grid, which the backing check pins.
 export async function observeExtents(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -444,8 +413,7 @@ export async function observeExtents(url, chromium, folder) {
       await withPage(browser, ratio, async (page) => {
         await openFolder(page, url, folder);
         await page.keyboard.press("\\");
-        const reading = await view(page);
-        readings.push({ name: `extent at dpr ${ratio}`, ...reading });
+        readings.push({ name: `extent at dpr ${ratio}`, ...await view(page) });
       });
     }
     await withPage(browser, 2, async (page) => {
@@ -453,7 +421,7 @@ export async function observeExtents(url, chromium, folder) {
       await page.keyboard.press("\\");
       await page.keyboard.press("o");
       await page.waitForTimeout(100);
-      readings.push({ name: "extent rotated at dpr 2", ...(await view(page)) });
+      readings.push({ name: "extent rotated at dpr 2", ...await view(page) });
     });
     return readings;
   } finally {
@@ -469,44 +437,48 @@ export function extentProblems(readings) {
   }
   for (const reading of readings) {
     const turned = reading.name.includes("rotated");
-    const expectedW = turned ? reading.backingH : reading.backingW;
-    const expectedH = turned ? reading.backingW : reading.backingH;
-    if (Math.abs(reading.w * reading.dpr - expectedW) > EXTENT_EPSILON) {
-      problems.push(`${reading.name}: width ${reading.w} * ${reading.dpr} = ${(reading.w * reading.dpr).toFixed(3)}, wanted ${expectedW} within ${EXTENT_EPSILON}`);
+    const expectedW = turned ? reading.imageH : reading.imageW;
+    const expectedH = turned ? reading.imageW : reading.imageH;
+    if (reading.paintW !== expectedW || reading.paintH !== expectedH) {
+      problems.push(`${reading.name}: the painted box is ${reading.paintW} by ${reading.paintH}, wanted ${expectedW} by ${expectedH}`);
     }
-    if (Math.abs(reading.h * reading.dpr - expectedH) > EXTENT_EPSILON) {
-      problems.push(`${reading.name}: height ${reading.h} * ${reading.dpr} = ${(reading.h * reading.dpr).toFixed(3)}, wanted ${expectedH} within ${EXTENT_EPSILON}`);
+    if (Math.abs(reading.w * reading.dpr - reading.backingW) > EXTENT_EPSILON
+      || Math.abs(reading.h * reading.dpr - reading.backingH) > EXTENT_EPSILON) {
+      problems.push(`${reading.name}: the element box ${reading.w} by ${reading.h} at ratio ${reading.dpr} does not map one to one onto the ${reading.backingW} by ${reading.backingH} backing`);
+    }
+    if (!Number.isInteger(reading.paintX) || !Number.isInteger(reading.paintY)) {
+      problems.push(`${reading.name}: the painted origin ${reading.paintX}, ${reading.paintY} is not whole device pixels`);
     }
     if (reading.mode !== "one") problems.push(`${reading.name}: the mode is ${reading.mode}, not one`);
   }
   return problems;
 }
 
-// AC2. The painted device origin is on the grid within half the layout
-// unit, read through the measured anchor law. The ratio 1 and ratio 2 cases
-// run in the plan's odd cell and record that the unsnapped paint is already
-// on grid there, so they guard against a snap that breaks the engine's own
-// rounding. The 1.25 and 1.5 cases hunt a cell where the unsnapped paint is
-// off grid, so they fail without the snap.
+// AC2. The painted origin is observed, not predicted: the byte row cropped
+// at the recorded origin must match, and the origin must sit within a
+// device pixel of the ideal centring plus the pan. Each case first asserts
+// that the ideal centring is fractional in its measured cell, so a missing
+// or misrounded snap cannot pass silently.
 export async function observeOrigins(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   const readings = [];
   try {
     await withPage(browser, 1, async (page) => {
       await openFolder(page, url, folder);
-      const cell = await fractionalCell(page, 128, "odd");
-      readings.push({ name: "origin dpr 1 odd cell", cellW: cell.cellW, unsnapped: cell.unsnapped, proving: false });
+      await fractionalCell(page, 1, 128);
       await page.keyboard.press("\\");
-      readings.push({ name: "origin dpr 1 odd cell", wantW: 128, wantH: 96, ...(await view(page)) });
+      const reading = await view(page);
+      readings.push({ name: "origin dpr 1 odd cell", ...reading });
+      readings.push({ name: "origin dpr 1 odd cell", crop: await capturePixels(page, 128, 96) });
     });
-    for (const [ratio, mode, proving] of [[2, "any", false], [1.25, "offgrid", true], [1.5, "offgrid", true]]) {
+    for (const ratio of [2, 1.25, 1.5]) {
       await withPage(browser, ratio, async (page) => {
         await openFolder(page, url, folder);
         await showSeries(page, "#2", SHAPE.b);
-        const cell = await fractionalCell(page, 129, mode);
-        readings.push({ name: `origin dpr ${ratio} fixture B cell`, cellW: cell.cellW, unsnapped: cell.unsnapped, proving });
+        await fractionalCell(page, ratio, 129);
         await page.keyboard.press("\\");
-        readings.push({ name: `origin dpr ${ratio} fixture B`, wantW: 129, wantH: 65, ...(await view(page)) });
+        readings.push({ name: `origin dpr ${ratio} fixture B`, ...await view(page) });
+        readings.push({ name: `origin dpr ${ratio} fixture B`, crop: await capturePixels(page, 129, 65) });
       });
     }
     return readings;
@@ -521,59 +493,59 @@ export function originProblems(readings) {
     problems.push("the origin cases were not all observed");
     return problems;
   }
-  for (const reading of readings) {
-    if (reading.unsnapped !== undefined) {
-      const integral = Math.abs(reading.unsnapped - Math.round(reading.unsnapped)) <= 1e-9;
-      if (reading.proving && integral) {
-        problems.push(`${reading.name}: the measured cell puts the unsnapped painted origin at the integral ${reading.unsnapped}, so the case proves nothing`);
-      }
-      if (!reading.proving && !integral) {
-        problems.push(`${reading.name}: the unsnapped painted origin ${reading.unsnapped} is off grid, so the guard case is not the engine-rounded shape it name states`);
-      }
-      continue;
+  for (let index = 0; index < readings.length; index += 2) {
+    const reading = readings[index];
+    const crop = readings[index + 1].crop;
+    const name = reading.name;
+    const screenW = reading.paintW;
+    const screenH = reading.paintH;
+    const boxDevW = Math.round(reading.w * reading.dpr);
+    if ((boxDevW - screenW) % 2 !== 1) {
+      problems.push(`${name}: the device box minus the picture is ${boxDevW - screenW}, so the ideal centring is not fractional and the case proves nothing`);
     }
-    const offX = Math.abs(reading.paintX - Math.round(reading.paintX));
-    const offY = Math.abs(reading.paintY - Math.round(reading.paintY));
-    if (offX > ORIGIN_EPSILON) problems.push(`${reading.name}: the painted device origin x is ${reading.paintX}, off the grid by ${offX}`);
-    if (offY > ORIGIN_EPSILON) problems.push(`${reading.name}: the painted device origin y is ${reading.paintY}, off the grid by ${offY}`);
-    if (Math.abs(reading.w * reading.dpr - reading.wantW) > EXTENT_EPSILON) {
-      problems.push(`${reading.name}: the device width ${(reading.w * reading.dpr).toFixed(3)} is not the stored ${reading.wantW}`);
-    }
-    if (Math.abs(reading.h * reading.dpr - reading.wantH) > EXTENT_EPSILON) {
-      problems.push(`${reading.name}: the device height ${(reading.h * reading.dpr).toFixed(3)} is not the stored ${reading.wantH}`);
-    }
-    if (reading.mode !== "one") problems.push(`${reading.name}: the mode is ${reading.mode}, not one`);
+    const want = reading.name.includes("fixture B") ? FIXTURES.b : FIXTURES.p;
+    problems.push(...byteProblems(`${name} at the recorded origin`, crop, want.bytes, want.columns));
+    const centreDevX = (reading.cellX + reading.cellW / 2) * reading.dpr;
+    const centreDevY = (reading.cellY + reading.cellH / 2) * reading.dpr;
+    // The ideal is the cell centre plus the pan: the alignment shift the
+    // margins carry is compensated inside the device offset, so the
+    // picture's centre lands there up to the offset's half device pixel
+    // round and the layout unit the alignment quantises on.
+    const offX = Math.abs(reading.paintX + screenW / 2 - centreDevX - reading.panX * reading.dpr);
+    const offY = Math.abs(reading.paintY + screenH / 2 - centreDevY - reading.panY * reading.dpr);
+    if (offX > ORIGIN_SLACK) problems.push(`${name}: the painted origin x sits ${offX.toFixed(4)} device px from the ideal centring plus pan`);
+    if (offY > ORIGIN_SLACK) problems.push(`${name}: the painted origin y sits ${offY.toFixed(4)} device px from the ideal centring plus pan`);
+    if (reading.mode !== "one") problems.push(`${name}: the mode is ${reading.mode}, not one`);
   }
   return problems;
 }
 
-// AC3. The device bytes equal the stored pattern. The byte rows run at the
-// geometries whose CSS box is integral in CSS pixels, where the measured
-// compositor rasterizes exactly: P at ratio 1 in the odd cell, P at ratio
-// 2, and P at ratio 2 after a pan drag of 40 device px. Fixture B's CSS
-// box at ratio 2 is 64.5 by 32.5 and every 1.25 and 1.5 box is fractional,
-// and the measured compositor corrupts those rasterizations (the layout
-// unit grid cannot represent the width, and the quad edges antialias), so
-// no byte row is claimed there; the origin rows assert origin and extent.
+// AC3. The device bytes equal the stored pattern at every byte row case:
+// both square-pixel fixtures at ratios 1, 1.25, 1.5 and 2, and fixture P
+// again after a pan drag of 40 device pixels. Each crop is taken at the
+// recorded painted origin, an exact integer device offset.
 export async function observePixels(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   const readings = [];
   try {
-    await withPage(browser, 1, async (page) => {
-      await openFolder(page, url, folder);
-      await fractionalCell(page, 128, "odd");
-      await page.keyboard.press("\\");
-      await page.click("#toggle-corners");
-      await page.mouse.move(2, 2);
-      readings.push({ name: "pixels dpr 1 odd cell", got: await capturePixels(page, 128, 96, FIXTURES.p.bytes) });
-    });
-    await withPage(browser, 2, async (page) => {
-      await openFolder(page, url, folder);
-      await page.keyboard.press("\\");
-      await page.click("#toggle-corners");
-      await page.mouse.move(2, 2);
-      readings.push({ name: "pixels dpr 2 fixture P", got: await capturePixels(page, 128, 96, FIXTURES.p.bytes) });
-    });
+    for (const ratio of [1, 1.25, 1.5, 2]) {
+      for (const key of ["p", "b"]) {
+        await withPage(browser, ratio, async (page) => {
+          await openFolder(page, url, folder);
+          if (key === "b") {
+            await showSeries(page, "#2", SHAPE.b);
+          }
+          await page.keyboard.press("\\");
+          await page.click("#toggle-corners");
+          await page.mouse.move(2, 2);
+          const fixture = key === "b" ? FIXTURES.b : FIXTURES.p;
+          readings.push({
+            name: `pixels dpr ${ratio} fixture ${fixture.name}`,
+            got: await capturePixels(page, fixture.columns, fixture.rows),
+          });
+        });
+      }
+    }
     await withPage(browser, 2, async (page) => {
       await openFolder(page, url, folder);
       await page.keyboard.press("\\");
@@ -585,7 +557,7 @@ export async function observePixels(url, chromium, folder) {
       await page.mouse.down();
       await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2, { steps: 4 });
       await page.mouse.up();
-      readings.push({ name: "pixels midpan", got: await capturePixels(page, 128, 96, FIXTURES.p.bytes) });
+      readings.push({ name: "pixels midpan", got: await capturePixels(page, 128, 96) });
     });
     return readings;
   } finally {
@@ -595,29 +567,21 @@ export async function observePixels(url, chromium, folder) {
 
 export function pixelProblems(readings) {
   const problems = [];
-  if (!Array.isArray(readings) || readings.length !== 3) {
+  if (!Array.isArray(readings) || readings.length !== 9) {
     problems.push("the pixel cases were not all observed");
     return problems;
   }
-  const want = {
-    "pixels dpr 1 odd cell": FIXTURES.p,
-    "pixels dpr 2 fixture P": FIXTURES.p,
-    "pixels midpan": FIXTURES.p,
-  };
   for (const reading of readings) {
-    const fixture = want[reading.name];
-    if (!fixture) {
-      problems.push(`${reading.name}: an unknown pixel case`);
-      continue;
-    }
-    problems.push(...byteProblems(reading.name, reading.got, fixture.bytes, fixture.columns, fixture.rows));
+    const fixture = reading.name.endsWith("fixture B") ? FIXTURES.b : FIXTURES.p;
+    problems.push(...byteProblems(reading.name, reading.got, fixture.bytes, fixture.columns));
   }
   return problems;
 }
 
-// AC4 and AC8. The corner reads Zoom 1:1 in the mode, one zoom drag tick
-// returns the fit-relative percent, and opening another series returns to
-// fit.
+// AC4 and AC8, with the S4 mutant controls. The corner reads Zoom 1:1 in
+// the mode, one zoom drag tick returns the fit-relative percent, opening
+// another series returns to fit, and both the Fit button and the 0 key
+// leave the mode.
 export async function observeLabelAndSeries(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -633,9 +597,14 @@ export async function observeLabelAndSeries(url, chromium, folder) {
       await page.mouse.up();
       const afterDrag = await view(page);
       await page.keyboard.press("\\");
+      await page.click("#fit");
+      const afterFitButton = await view(page);
+      await page.keyboard.press("\\");
+      await page.keyboard.press("0");
+      const afterZeroKey = await view(page);
       await showSeries(page, "#2", SHAPE.b);
       const afterSeries = await view(page);
-      return { inMode, afterDrag, afterSeries };
+      return { inMode, afterDrag, afterFitButton, afterZeroKey, afterSeries };
     });
   } finally {
     await browser.close();
@@ -644,7 +613,7 @@ export async function observeLabelAndSeries(url, chromium, folder) {
 
 export function labelAndSeriesProblems(seen) {
   const problems = [];
-  if (!seen || !seen.inMode || !seen.afterDrag || !seen.afterSeries) {
+  if (!seen || !seen.inMode || !seen.afterDrag || !seen.afterFitButton || !seen.afterZeroKey || !seen.afterSeries) {
     problems.push("the label and series cases were not observed");
     return problems;
   }
@@ -655,6 +624,12 @@ export function labelAndSeriesProblems(seen) {
   if (!/^\d+%$/.test(seen.afterDrag.label)) {
     problems.push(`after one zoom drag tick the label is ${JSON.stringify(seen.afterDrag.label)}, not a fit-relative percent`);
   }
+  for (const [name, reading] of [["the Fit button", seen.afterFitButton], ["the 0 key", seen.afterZeroKey]]) {
+    if (reading.mode !== "fit") problems.push(`after ${name} the mode is ${reading.mode}, not fit`);
+    if (!/^\d+%$/.test(reading.label)) {
+      problems.push(`after ${name} the label is ${JSON.stringify(reading.label)}, not a percent`);
+    }
+  }
   if (seen.afterSeries.mode !== "fit") problems.push(`after a series open the mode is ${seen.afterSeries.mode}, not fit`);
   if (!/^\d+%$/.test(seen.afterSeries.label)) {
     problems.push(`after a series open the label is ${JSON.stringify(seen.afterSeries.label)}, not a percent`);
@@ -662,9 +637,13 @@ export function labelAndSeriesProblems(seen) {
   return problems;
 }
 
-// The init script that counts the page's own resolution watcher arms.
+// The init script that counts the page's own resolution watcher arms and
+// the window resize events, so a case can prove the watcher re-laid out
+// while the CSS viewport, and so the resize listener, never fired.
 const WATCH_WRAPPER = () => {
   window.__resolutionArms = 0;
+  window.__resizeEvents = 0;
+  window.addEventListener("resize", () => { window.__resizeEvents += 1; });
   const original = window.MediaQueryList.prototype.addEventListener;
   window.MediaQueryList.prototype.addEventListener = function (type, listener, options) {
     if (String(this.media).includes("resolution")) window.__resolutionArms += 1;
@@ -674,33 +653,30 @@ const WATCH_WRAPPER = () => {
 
 /**
  * Change the device pixel ratio through the CDP override the plan names,
- * then force the media query evaluation pass that dispatches the query's
- * change event. Measured in the F-204 session with scratch probes: a
- * device scale factor only override updates window.devicePixelRatio and
- * the query values but dispatches no MediaQueryList change event in this
- * Chromium, and the pending change dispatches on the next evaluation pass,
- * so the override is followed by a one pixel CDP viewport nudge and
- * restore with the ratio held. The nudge also fires the page's resize
- * listener, so the row's proof that the watcher's own handler ran is the
- * wrapped registration count, which is what the plan states the row
- * proves, and the test never calls layoutViewport or relayout itself.
+ * with the CSS viewport held constant so the page's resize listener cannot
+ * fire. Measured with scratch probes under target in the F-204 fix round: a
+ * device scale factor only override updates window.devicePixelRatio and the
+ * query values but dispatches no MediaQueryList change event in this
+ * Chromium, and the pending change dispatches on the next evaluation pass.
+ * A clipped raw CDP page capture is one that neither resizes nor lays out,
+ * and unlike an unclipped one it dispatches the pending change reliably on
+ * every transition, so the override is followed by one.
  */
 async function changeRatio(page, session, factor) {
   const size = page.viewportSize();
   await session.send("Emulation.setDeviceMetricsOverride", {
     width: size.width, height: size.height, deviceScaleFactor: factor, mobile: false,
   });
-  await session.send("Emulation.setDeviceMetricsOverride", {
-    width: size.width - 1, height: size.height, deviceScaleFactor: factor, mobile: false,
-  });
-  await session.send("Emulation.setDeviceMetricsOverride", {
-    width: size.width, height: size.height, deviceScaleFactor: factor, mobile: false,
+  await session.send("Page.captureScreenshot", {
+    format: "png",
+    clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
   });
 }
 
 // AC5 and AC10. A device pixel ratio change re-lays out through the page's
-// own matchMedia watcher, and the identity renders pixelated at the ratios
-// where the landed comparison evaluates one ulp below 1.
+// own matchMedia watcher with the CSS viewport held constant, and the
+// identity renders pixelated at the ratios where the landed comparison
+// evaluates one ulp below 1.
 export async function observeRatioWatcher(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -708,35 +684,26 @@ export async function observeRatioWatcher(url, chromium, folder) {
       await page.addInitScript(WATCH_WRAPPER);
       await openFolder(page, url, folder);
       await page.keyboard.press("\\");
+      const before = await view(page);
       const session = await page.context().newCDPSession(page);
       await changeRatio(page, session, 2);
-      await page.waitForFunction(() => {
+      await page.waitForFunction((stale) => {
         const vp = activeViewport();
-        const rect = vp.dom.canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio;
-        const extentOk = Math.abs(rect.width * dpr - 128) <= 0.5 && Math.abs(rect.height * dpr - 96) <= 0.5;
-        const paintX = (Math.round(rect.x - vp.panAppliedX) + vp.panAppliedX) * dpr;
-        const paintY = (Math.round(rect.y - vp.panAppliedY) + vp.panAppliedY) * dpr;
-        const originOk = Math.abs(paintX - Math.round(paintX)) <= 1 / 128
-          && Math.abs(paintY - Math.round(paintY)) <= 1 / 128;
-        return extentOk && originOk && window.__resolutionArms >= 2;
-      }, null, { timeout: 10000 }).catch(() => {});
+        return vp.paintX !== null && vp.paintX !== stale && window.__resolutionArms >= 2;
+      }, before.paintX, { timeout: 10000 }).catch(() => {});
       const atTwo = await view(page);
       const armsAfterTwo = await page.evaluate(() => window.__resolutionArms);
+      const resizedAfterTwo = await page.evaluate(() => window.__resizeEvents);
+      const cropAtTwo = await capturePixels(page, 128, 96);
       await changeRatio(page, session, 1);
-      await page.waitForFunction(() => {
+      await page.waitForFunction((stale) => {
         const vp = activeViewport();
-        const rect = vp.dom.canvas.getBoundingClientRect();
-        const dpr = window.devicePixelRatio;
-        const extentOk = Math.abs(rect.width * dpr - 128) <= 0.5 && Math.abs(rect.height * dpr - 96) <= 0.5;
-        const paintX = (Math.round(rect.x - vp.panAppliedX) + vp.panAppliedX) * dpr;
-        const paintY = (Math.round(rect.y - vp.panAppliedY) + vp.panAppliedY) * dpr;
-        const originOk = Math.abs(paintX - Math.round(paintX)) <= 1 / 128
-          && Math.abs(paintY - Math.round(paintY)) <= 1 / 128;
-        return extentOk && originOk && window.__resolutionArms >= 3;
-      }, null, { timeout: 10000 }).catch(() => {});
+        return vp.paintX !== null && vp.paintX !== stale && window.__resolutionArms >= 3;
+      }, atTwo.paintX, { timeout: 10000 }).catch(() => {});
       const atOne = await view(page);
       const armsAfterOne = await page.evaluate(() => window.__resolutionArms);
+      const resizedAfterOne = await page.evaluate(() => window.__resizeEvents);
+      const cropAtOne = await capturePixels(page, 128, 96);
       const probes = [];
       for (const factor of [1.38, 1.45, 1.54, 1.57]) {
         await changeRatio(page, session, factor);
@@ -752,7 +719,8 @@ export async function observeRatioWatcher(url, chromium, folder) {
           };
         }));
       }
-      return { atTwo, armsAfterTwo, atOne, armsAfterOne, probes };
+      const resizeEvents = await page.evaluate(() => window.__resizeEvents);
+      return { before, atTwo, armsAfterTwo, resizedAfterTwo, cropAtTwo, atOne, armsAfterOne, resizedAfterOne, cropAtOne, probes, resizeEvents };
     });
   } finally {
     await browser.close();
@@ -765,18 +733,24 @@ export function ratioWatcherProblems(seen) {
     problems.push("the ratio change case was not observed");
     return problems;
   }
-  for (const [reading, arms, want] of [[seen.atTwo, seen.armsAfterTwo, 2], [seen.atOne, seen.armsAfterOne, 3]]) {
+  for (const [name, reading, arms, resized, crop] of [
+    ["ratio 2", seen.atTwo, seen.armsAfterTwo, seen.resizedAfterTwo, seen.cropAtTwo],
+    ["ratio 1", seen.atOne, seen.armsAfterOne, seen.resizedAfterOne, seen.cropAtOne],
+  ]) {
     if (reading.mode !== "one") problems.push(`after the ratio change the mode is ${reading.mode}, not one`);
-    if (Math.abs(reading.w * reading.dpr - 128) > EXTENT_EPSILON) {
-      problems.push(`after the ratio change the width ${(reading.w * reading.dpr).toFixed(3)} is not the identity 128`);
+    if (reading.paintW !== 128 || reading.paintH !== 96) {
+      problems.push(`after the ratio change to ${name} the painted box is ${reading.paintW} by ${reading.paintH}, wanted the stored 128 by 96`);
     }
-    const offX = Math.abs(reading.paintX - Math.round(reading.paintX));
-    const offY = Math.abs(reading.paintY - Math.round(reading.paintY));
-    if (offX > ORIGIN_EPSILON || offY > ORIGIN_EPSILON) {
-      problems.push(`after the ratio change the painted origin is off the grid by ${Math.max(offX, offY)}`);
+    if (!Number.isInteger(reading.paintX) || !Number.isInteger(reading.paintY)) {
+      problems.push(`after the ratio change to ${name} the painted origin is not whole device pixels`);
     }
-    if (!(arms >= want)) problems.push(`the resolution watcher armed ${arms} times, wanted at least ${want}`);
+    if (!(arms >= (name === "ratio 2" ? 2 : 3))) {
+      problems.push(`the resolution watcher armed ${arms} times at ${name}, wanted more`);
+    }
+    if (resized !== 0) problems.push(`${resized} resize events fired at ${name}, wanted none with the CSS viewport held`);
+    problems.push(...byteProblems(`the ratio change to ${name}`, crop, FIXTURES.p.bytes, FIXTURES.p.columns));
   }
+  if (seen.resizeEvents !== 0) problems.push(`${seen.resizeEvents} resize events fired in the case, wanted none`);
   if (!Array.isArray(seen.probes) || seen.probes.length !== 4) {
     problems.push("the pixelated probes were not observed");
     return problems;
@@ -793,7 +767,9 @@ export function ratioWatcherProblems(seen) {
 }
 
 // AC6 and AC20. The clamp reaches the identity on a small frame and zooms
-// out below it on a large frame.
+// out below it on a large frame. The identity readings come from the
+// recorded painted box, because the mode's element box is the cell; the
+// readings after a tick are free mode and read from the element as before.
 export async function observeClamp(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   const settleExtent = async (page) => {
@@ -853,17 +829,18 @@ export async function observeClamp(url, chromium, folder) {
 
 export function clampProblems(seen) {
   const problems = [];
-  for (const [name, caseSeen] of [["small", seen.small], ["large", seen.large]]) {
+  for (const [name, caseSeen, wantPaintW] of [["small", seen.small, 64], ["large", seen.large, 2048]]) {
     if (!caseSeen || !caseSeen.identity) {
       problems.push(`the ${name} frame clamp case was not observed`);
       return problems;
     }
     if (!caseSeen.precondition) problems.push(`the ${name} frame clamp precondition does not hold in the measured cell`);
+    if (caseSeen.identity.paintW !== wantPaintW) {
+      problems.push(`the ${name} frame identity painted width is ${caseSeen.identity.paintW}, wanted ${wantPaintW}`);
+    }
+    if (caseSeen.identity.mode !== "one") problems.push(`the ${name} frame identity mode is ${caseSeen.identity.mode}, not one`);
   }
   const small = seen.small;
-  if (Math.abs(small.identity.w * small.identity.dpr - 64) > EXTENT_EPSILON) {
-    problems.push(`the small frame identity extent is ${(small.identity.w * small.identity.dpr).toFixed(3)}, wanted 64`);
-  }
   if (Math.abs(small.afterIn.w * small.afterIn.dpr - 64) <= EXTENT_EPSILON) {
     problems.push("the small frame zoom-in tick did not leave the identity");
   }
@@ -893,7 +870,9 @@ export function clampProblems(seen) {
 
 // AC7a. With link zoom on, a linked viewport whose own guards pass enters
 // the mode over its own image and cell, the anisotropic target enters with
-// the Zoom 1:1 rows label, and the below-ratio target keeps its own mode.
+// the Zoom 1:1 rows label, and the below-ratio target keeps its own free
+// scale and pan. Cell 3 is zoomed and panned into a free state first, so
+// the keep is observable against a non-fit state.
 export async function observeLink(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -912,6 +891,19 @@ export async function observeLink(url, chromium, folder) {
       await page.waitForFunction(() => viewports[1].imageWidth === 129 && viewports[2].aspectY === 1.4 && viewports[3].imageWidth === 128, null, { timeout: 20000 });
       await page.evaluate(() => showIndex(viewports[3], 1));
       await page.waitForFunction(() => viewports[3].imageWidth === 2, null, { timeout: 20000 });
+      // Zoom cell 3 into a free scale and pan it, so its state is not fit.
+      await page.locator('.cell[data-cell="3"]').click();
+      await page.keyboard.press("=");
+      const box = await page.locator('.cell[data-cell="3"] canvas.view').boundingBox();
+      await page.keyboard.press("p");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 24, box.y + box.height / 2 + 12, { steps: 4 });
+      await page.mouse.up();
+      const before = await page.evaluate(() => {
+        const vp = viewports[3];
+        return { mode: vp.zoomMode, scale: vp.scale, panX: vp.panX, panY: vp.panY };
+      });
       await page.locator("#link").click();
       await page.locator("#link-zoom").click();
       await page.keyboard.press("Escape");
@@ -920,34 +912,39 @@ export async function observeLink(url, chromium, folder) {
       await page.waitForTimeout(300);
       const cells = await page.evaluate(() => [0, 1, 2, 3].map((cell) => {
         const vp = viewports[cell];
-        const rect = vp.dom.canvas.getBoundingClientRect();
         return {
           cell,
           mode: vp.zoomMode,
           label: vp.zoomLabel,
           cornerLast: (vp.dom.corners.br.textContent || "").split("\n").pop(),
-          w: rect.width, h: rect.height,
           imageW: vp.imageWidth, imageH: vp.imageHeight,
+          aspectX: vp.aspectX, aspectY: vp.aspectY,
+          paintX: vp.paintX, paintY: vp.paintY, paintW: vp.paintW, paintH: vp.paintH,
+          scale: vp.scale, panX: vp.panX, panY: vp.panY,
         };
       }));
-      return cells;
+      return { before, cells };
     });
   } finally {
     await browser.close();
   }
 }
 
-export function linkProblems(cells) {
+export function linkProblems(seen) {
   const problems = [];
-  if (!Array.isArray(cells) || cells.length !== 4) {
+  if (!seen || !Array.isArray(seen.cells) || seen.cells.length !== 4 || !seen.before) {
     problems.push("the linked cases were not observed");
     return problems;
   }
-  for (const cell of cells) {
-    const dpr = 3;
+  if (seen.before.mode !== "free") {
+    problems.push(`the below-ratio cell was not left in a free state before the propagation (${seen.before.mode})`);
+  }
+  for (const cell of seen.cells) {
     if (cell.cell === 3) {
-      if (cell.mode !== "fit") problems.push(`the below-ratio linked cell kept mode ${cell.mode}, wanted its own fit`);
-      if (!/^\d+%$/.test(cell.label)) problems.push(`the below-ratio linked cell label is ${JSON.stringify(cell.label)}, wanted its own percent`);
+      if (cell.mode !== "free") problems.push(`the below-ratio linked cell kept mode ${cell.mode}, wanted its own free`);
+      if (cell.scale !== seen.before.scale || cell.panX !== seen.before.panX || cell.panY !== seen.before.panY) {
+        problems.push(`the below-ratio linked cell moved: scale ${seen.before.scale} to ${cell.scale}, pan ${seen.before.panX}, ${seen.before.panY} to ${cell.panX}, ${cell.panY}`);
+      }
       continue;
     }
     if (cell.mode !== "one") {
@@ -961,23 +958,24 @@ export function linkProblems(cells) {
     if (!anisotropic && cell.cornerLast !== "Zoom 1:1") {
       problems.push(`linked cell ${cell.cell} corner reads ${JSON.stringify(cell.cornerLast)}, not Zoom 1:1`);
     }
-    // At the identity the device height is the stored row count on every
-    // frame and the device width is the stored width on square pixels and
-    // imageW * aspectX / aspectY on anisotropic ones, at any ratio.
-    const width = anisotropic ? (cell.imageW * cell.aspectX) / cell.aspectY : cell.imageW;
+    // At the identity the painted device box is the stored row count on
+    // every frame and the stored width on square pixels and the spacing
+    // ratio on anisotropic ones, at any ratio.
+    const width = Math.round(cell.imageW * cell.aspectX / cell.aspectY);
     const height = cell.imageH;
-    if (Math.abs(cell.w * dpr - width) > EXTENT_EPSILON) {
-      problems.push(`linked cell ${cell.cell} width ${(cell.w * dpr).toFixed(3)} is not ${width.toFixed(3)}`);
+    if (cell.paintW !== width || cell.paintH !== height) {
+      problems.push(`linked cell ${cell.cell} painted box ${cell.paintW} by ${cell.paintH} is not ${width} by ${height}`);
     }
-    if (Math.abs(cell.h * dpr - height) > EXTENT_EPSILON) {
-      problems.push(`linked cell ${cell.cell} height ${(cell.h * dpr).toFixed(3)} is not ${height.toFixed(3)}`);
+    if (!Number.isInteger(cell.paintX) || !Number.isInteger(cell.paintY)) {
+      problems.push(`linked cell ${cell.cell} painted origin is not whole device pixels`);
     }
   }
   return problems;
 }
 
-// AC9. The backing store stays the stored frame size and the in-page grey
-// equals the stored bytes at every pixel, which guards the window pipeline.
+// AC9. The backing is the element box times the ratio, and the in-page grey
+// at the recorded painted offset equals the stored bytes at every pixel,
+// which guards the window pipeline.
 export async function observeBackingStore(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -987,11 +985,17 @@ export async function observeBackingStore(url, chromium, folder) {
       return page.evaluate((want) => {
         const vp = activeViewport();
         const canvas = vp.dom.canvas;
-        if (canvas.width !== 128 || canvas.height !== 96) {
-          return `the backing store is ${canvas.width} by ${canvas.height}, wanted the stored 128 by 96`;
+        const boxW = Math.round(parseFloat(canvas.style.width));
+        const boxH = Math.round(parseFloat(canvas.style.height));
+        const ratio = window.devicePixelRatio || 1;
+        if (canvas.width !== boxW * ratio || canvas.height !== boxH * ratio) {
+          return `the backing is ${canvas.width} by ${canvas.height}, wanted the ${boxW} by ${boxH} CSS box times the ratio ${ratio}`;
+        }
+        if (vp.paintW !== 128 || vp.paintH !== 96) {
+          return `the painted box is ${vp.paintW} by ${vp.paintH}, wanted the stored 128 by 96`;
         }
         const context = canvas.getContext("2d");
-        const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        const data = context.getImageData(vp.paintOffsetX, vp.paintOffsetY, 128, 96).data;
         for (let at = 0; at < want.length; at += 1) {
           if (data[at * 4] !== want[at]) {
             return `pixel ${at % 128},${Math.floor(at / 128)} shows ${data[at * 4]}, stored ${want[at]}`;
@@ -1054,7 +1058,7 @@ export function refusalProblems(seen) {
 
 // AC13. The below-ratio refusal on fixture F at ratio 3, its clear at ratio
 // 2, the no-stale-reason case, and the boundary positive control. Each
-// ratio move goes through changeRatio, whose comment records why the plain
+// ratio move goes through changeRatio, whose comment records why a plain
 // override cannot dispatch the query change this row's clear depends on.
 export async function observeBelowRatio(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
@@ -1115,8 +1119,8 @@ export function belowRatioProblems(seen) {
   }
   if (seen.backAtThree.cornerLast === REFUSAL) problems.push("back at ratio 3 the stale refusal reason is shown again");
   if (seen.afterScroll.cornerLast === REFUSAL) problems.push("after a scroll away and back the refusal reason is shown again");
-  if (seen.entered.mode !== "one" || Math.abs(seen.entered.w * seen.entered.dpr - 2) > EXTENT_EPSILON) {
-    problems.push(`the boundary control did not enter the mode at a 2 device pixel width (mode ${seen.entered && seen.entered.mode}, extent ${seen.entered ? (seen.entered.w * seen.entered.dpr).toFixed(3) : "none"})`);
+  if (seen.entered.mode !== "one" || seen.entered.paintW !== 2) {
+    problems.push(`the boundary control did not enter the mode at a 2 device pixel width (mode ${seen.entered && seen.entered.mode}, painted width ${seen.entered && seen.entered.paintW})`);
   }
   if (!seen.keptOne) {
     problems.push("the scroll keep case was not observed");
@@ -1134,30 +1138,31 @@ export function belowRatioProblems(seen) {
 
 // AC14. At the identity with the 90 degree rotate and each flip applied, the
 // clipped screenshot equals the permuted pattern, because every reachable
-// rotation of the all-even fixture is an exact permutation. The rotation
-// turns the 128 by 96 box into 96 by 128, so its crop swaps the two counts.
+// rotation is an exact permutation of the index the page writes. The
+// recorded painted box carries the swap.
 export async function observeTransforms(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
     const cases = [];
     const keys = [
-      ["rotate", "o", 96, 128],
-      ["flip-h", "h", 128, 96],
-      ["flip-v", "v", 128, 96],
+      ["rotate", "o"],
+      ["flip-h", "h"],
+      ["flip-v", "v"],
     ];
     const expected = {
       rotate: { bytes: permute90(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 96, rows: 128 },
       "flip-h": { bytes: permuteFlipH(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 128, rows: 96 },
       "flip-v": { bytes: permuteFlipV(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 128, rows: 96 },
     };
-    for (const [name, key, cropW, cropH] of keys) {
+    for (const [name, key] of keys) {
       await withPage(browser, 2, async (page) => {
         await openFolder(page, url, folder);
         await page.keyboard.press("\\");
         await page.keyboard.press(key);
         await page.waitForTimeout(150);
         await page.mouse.move(2, 2);
-        cases.push({ name, cropW, cropH, got: await capturePixels(page, cropW, cropH, expected[name].bytes) });
+        const want = expected[name];
+        cases.push({ name, got: await capturePixels(page, want.columns, want.rows) });
       });
     }
     return cases;
@@ -1184,7 +1189,7 @@ export function transformProblems(cases) {
       problems.push(`${item.name}: an unknown transform case`);
       continue;
     }
-    problems.push(...byteProblems(`transform ${item.name}`, item.got, expected.bytes, expected.columns, expected.rows));
+    problems.push(...byteProblems(`transform ${item.name}`, item.got, expected.bytes, expected.columns));
   }
   return problems;
 }
@@ -1199,18 +1204,40 @@ export async function observeAniso(url, chromium, folder) {
       const readings = {};
       await openFolder(page, url, folder);
       await showSeries(page, "#4", SHAPE.d);
-      const cell = await fractionalCell(page, 128 * 0.5 / 0.7, "any");
-      readings.dCell = { unsnapped: cell.unsnapped };
       await page.keyboard.press("\\");
       readings.d = await view(page);
+      readings.dCrop = await capturePixels(page, Math.round(128 * 0.5 / 0.7), 96);
       await showSeries(page, "#5", SHAPE.d2);
       await page.keyboard.press("\\");
       readings.d2 = await view(page);
+      readings.d2Crop = await capturePixels(page, Math.round(128 * 0.7 / 0.5), 96);
       return readings;
     });
   } finally {
     await browser.close();
   }
+}
+
+/** The device rows must appear, in order, as subsamples of the stored rows. */
+function anisoRowProblems(name, crop, fixture, paintW) {
+  const problems = [];
+  if (crop.error) return [`${name}: ${crop.error}`];
+  const stored = fixture.bytes;
+  const columns = fixture.columns;
+  for (let row = 0; row < fixture.rows; row += 1) {
+    let cursor = 0;
+    for (let c = 0; c < paintW; c += 1) {
+      const byte = crop.grey[row * paintW + c];
+      while (cursor < columns && stored[row * columns + cursor] !== byte) cursor += 1;
+      if (cursor === columns) {
+        problems.push(`${name}: device row ${row} column ${c} shows ${byte}, which is not an in-order sample of the stored row`);
+        return problems;
+      }
+      // The cursor stays on the match, because neighbouring device columns
+      // may sample the same stored column when the axis is upscaled.
+    }
+  }
+  return problems;
 }
 
 export function anisoProblems(seen) {
@@ -1219,7 +1246,8 @@ export function anisoProblems(seen) {
     problems.push("the anisotropic cases were not observed");
     return problems;
   }
-  for (const [name, reading, wantW] of [["D", seen.d, 128 * 0.5 / 0.7], ["D-prime", seen.d2, 179.2]]) {
+  const wantW = { d: Math.round(128 * 0.5 / 0.7), d2: Math.round(128 * 0.7 / 0.5) };
+  for (const [name, reading] of [["D", seen.d], ["D-prime", seen.d2]]) {
     if (reading.mode !== "one") {
       problems.push(`the ${name} mode is ${reading.mode}, not one`);
       continue;
@@ -1227,22 +1255,24 @@ export function anisoProblems(seen) {
     if (reading.cornerLast !== "Zoom 1:1 rows") {
       problems.push(`the ${name} corner reads ${JSON.stringify(reading.cornerLast)}, not Zoom 1:1 rows`);
     }
-    if (Math.abs(reading.h * reading.dpr - 96) > EXTENT_EPSILON) {
-      problems.push(`the ${name} device height ${(reading.h * reading.dpr).toFixed(3)} is not the stored 96 rows`);
+    if (reading.paintH !== 96) {
+      problems.push(`the ${name} painted height is ${reading.paintH}, not the stored 96 rows`);
     }
-    if (Math.abs(reading.w * reading.dpr - wantW) > EXTENT_EPSILON) {
-      problems.push(`the ${name} device width ${(reading.w * reading.dpr).toFixed(3)} is not ${wantW.toFixed(3)}`);
+    if (Math.abs(reading.paintW - wantW[name === "D" ? "d" : "d2"]) > EXTENT_EPSILON) {
+      problems.push(`the ${name} painted width ${reading.paintW} is not ${wantW[name === "D" ? "d" : "d2"]}`);
+    }
+    if (!Number.isInteger(reading.paintY)) {
+      problems.push(`the ${name} painted row origin ${reading.paintY} is not a whole device pixel`);
     }
   }
-  const offY = Math.abs(seen.d.paintY - Math.round(seen.d.paintY));
-  if (offY > ORIGIN_EPSILON) {
-    problems.push(`the D painted row origin is ${seen.d.paintY}, off the grid by ${offY}`);
-  }
+  problems.push(...anisoRowProblems("D", seen.dCrop, FIXTURES.d, seen.d.paintW));
+  problems.push(...anisoRowProblems("D-prime", seen.d2Crop, FIXTURES.d2, seen.d2.paintW));
   return problems;
 }
 
-// AC11. A pan drag in the mode keeps the mode, the label and the extent, and
-// moves the image by the drag delta with the origin still on the grid.
+// AC11. A pan drag in the mode keeps the mode, the label and the stored
+// extent, and moves the image by the drag delta through the recorded device
+// offset while the element box stays put.
 export async function observePanKeeps(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -1274,15 +1304,56 @@ export function panKeepsProblems(seen) {
   if (seen.after.cornerLast !== "Zoom 1:1") {
     problems.push(`after a pan drag the corner reads ${JSON.stringify(seen.after.cornerLast)}, not Zoom 1:1`);
   }
-  if (Math.abs(seen.after.w * seen.after.dpr - 128) > EXTENT_EPSILON) {
-    problems.push(`after a pan drag the extent is ${(seen.after.w * seen.after.dpr).toFixed(3)}, wanted the identity 128`);
+  if (seen.after.paintW !== 128 || seen.after.paintH !== 96) {
+    problems.push(`after a pan drag the painted box is ${seen.after.paintW} by ${seen.after.paintH}, wanted the stored 128 by 96`);
   }
-  const moved = (seen.after.x - seen.before.x) * seen.after.dpr;
-  if (Math.abs(moved - 40) > ORIGIN_EPSILON) {
-    problems.push(`the pan moved the origin by ${moved.toFixed(4)} device px, wanted 40`);
+  const moved = seen.after.paintX - seen.before.paintX;
+  if (moved !== 40) problems.push(`the pan moved the painted origin by ${moved} device px, wanted 40`);
+  if (Math.abs(seen.after.x - seen.before.x) > 1e-9 || Math.abs(seen.after.y - seen.before.y) > 1e-9) {
+    problems.push(`the pan moved the element box (${seen.before.x}, ${seen.before.y}) to (${seen.after.x}, ${seen.after.y}), wanted it still`);
   }
-  const offX = Math.abs(seen.after.paintX - Math.round(seen.after.paintX));
-  if (offX > ORIGIN_EPSILON) problems.push(`after the pan the painted origin is off the grid by ${offX}`);
+  return problems;
+}
+
+// S4, m15. Entering the mode keeps the image point at the cell centre, so
+// an entry that zeroes the pan instead of scaling it moves the picture.
+export async function observeEntryCentring(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 2, async (page) => {
+      await openFolder(page, url, folder);
+      await page.keyboard.press("p");
+      const box = await page.locator('.cell[data-cell="0"] canvas.view').boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 18, { steps: 4 });
+      await page.mouse.up();
+      const under = () => page.evaluate(() => {
+        const vp = activeViewport();
+        const cell = vp.dom.cell.getBoundingClientRect();
+        return clientToImage(vp, cell.left + cell.width / 2, cell.top + cell.height / 2);
+      });
+      const before = await under();
+      await page.keyboard.press("\\");
+      const after = await under();
+      const state = await view(page);
+      return { before, after, state };
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function entryCentringProblems(seen) {
+  const problems = [];
+  if (!seen || !seen.before || !seen.after || !seen.state) {
+    problems.push("the entry centring case was not observed");
+    return problems;
+  }
+  if (seen.state.mode !== "one") problems.push(`after the entry the mode is ${seen.state.mode}, not one`);
+  if (Math.abs(seen.before.x - seen.after.x) > 0.5 || Math.abs(seen.before.y - seen.after.y) > 0.5) {
+    problems.push(`the image point at the cell centre moved from (${seen.before.x.toFixed(3)}, ${seen.before.y.toFixed(3)}) to (${seen.after.x.toFixed(3)}, ${seen.after.y.toFixed(3)}), so the entry did not keep the centre`);
+  }
   return problems;
 }
 
@@ -1314,29 +1385,26 @@ async function main() {
       transforms: await observeTransforms(server.url, chromium, folder),
       aniso: await observeAniso(server.url, chromium, folder),
       panKeeps: await observePanKeeps(server.url, chromium, folder),
+      entryCentring: await observeEntryCentring(server.url, chromium, folder),
     };
   } finally {
     await stopByPid(server.pid);
     rmSync(folder, { recursive: true, force: true });
   }
   for (const reading of seen.extents) {
-    console.log(`${reading.name}: ${(reading.w * reading.dpr).toFixed(3)} by ${(reading.h * reading.dpr).toFixed(3)} device px, mode ${reading.mode}`);
+    console.log(`${reading.name}: painted ${reading.paintW} by ${reading.paintH} device px at (${reading.paintX}, ${reading.paintY}), mode ${reading.mode}`);
   }
-  for (const reading of seen.origins) {
-    console.log(reading.unsnapped !== undefined
-      ? `${reading.name}: cell ${reading.cellW.toFixed(3)} CSS px, unsnapped ${reading.unsnapped.toFixed(4)}`
-      : `${reading.name}: origin ${(reading.x * reading.dpr).toFixed(4)}, ${(reading.y * reading.dpr).toFixed(4)}`);
-  }
-  console.log(`label: ${JSON.stringify(seen.labelAndSeries.inMode.cornerLast)}, after drag ${JSON.stringify(seen.labelAndSeries.afterDrag.label)}, after series ${seen.labelAndSeries.afterSeries.mode}`);
-  console.log(`ratio watcher: arms ${seen.ratioWatcher.armsAfterTwo} and ${seen.ratioWatcher.armsAfterOne}, probes ${seen.ratioWatcher.probes.map((probe) => `${probe.factor}:${probe.rendering}`).join(" ")}`);
-  console.log(`clamp small: fitted ${seen.clamp.small.fitted.toFixed(4)}, settled ${(seen.clamp.small.afterOut.w * seen.clamp.small.afterOut.dpr).toFixed(3)}, wheel in ${(seen.clamp.small.afterWheelIn.w * seen.clamp.small.afterWheelIn.dpr).toFixed(3)}`);
-  console.log(`clamp large: fitted ${seen.clamp.large.fitted.toFixed(6)}, settled ${(seen.clamp.large.afterOut.w * seen.clamp.large.afterOut.dpr).toFixed(3)}`);
-  console.log(`link: ${seen.link.map((cell) => `cell ${cell.cell} ${cell.mode} ${JSON.stringify(cell.cornerLast)}`).join(", ")}`);
-  console.log(`backing store: ${seen.backingStore === null ? "the stored 128 by 96 with the stored bytes" : seen.backingStore}`);
+  console.log(`label: ${JSON.stringify(seen.labelAndSeries.inMode.cornerLast)}, after drag ${JSON.stringify(seen.labelAndSeries.afterDrag.label)}, fit ${seen.labelAndSeries.afterFitButton.mode}, zero ${seen.labelAndSeries.afterZeroKey.mode}, series ${seen.labelAndSeries.afterSeries.mode}`);
+  console.log(`ratio watcher: arms ${seen.ratioWatcher.armsAfterTwo} and ${seen.ratioWatcher.armsAfterOne}, resizes ${seen.ratioWatcher.resizeEvents}, probes ${seen.ratioWatcher.probes.map((probe) => `${probe.factor}:${probe.rendering}`).join(" ")}`);
+  console.log(`clamp small: fitted ${seen.clamp.small.fitted.toFixed(4)}, identity painted ${seen.clamp.small.identity.paintW}, settled ${(seen.clamp.small.afterOut.w * seen.clamp.small.afterOut.dpr).toFixed(3)}`);
+  console.log(`clamp large: fitted ${seen.clamp.large.fitted.toFixed(6)}, identity painted ${seen.clamp.large.identity.paintW}, settled ${(seen.clamp.large.afterOut.w * seen.clamp.large.afterOut.dpr).toFixed(3)}`);
+  console.log(`link: ${seen.link.cells.map((cell) => `cell ${cell.cell} ${cell.mode} painted ${cell.paintW} by ${cell.paintH}`).join(", ")}`);
+  console.log(`backing store: ${seen.backingStore === null ? "the box times the ratio with the stored bytes at the recorded offset" : seen.backingStore}`);
   console.log(`refusals: tile ${seen.refusals.tiled.mode}, empty ${seen.refusals.empty.mode}, faults ${seen.refusals.tiled.faultShown} and ${seen.refusals.empty.faultShown}`);
-  console.log(`below ratio: refused ${JSON.stringify(seen.belowRatio.refused.cornerLast)}, at two ${JSON.stringify(seen.belowRatio.atTwo.cornerLast)}, entered ${(seen.belowRatio.entered.w * seen.belowRatio.entered.dpr).toFixed(3)} device px`);
-  console.log(`aniso: D ${(seen.aniso.d.w * seen.aniso.d.dpr).toFixed(3)} by ${(seen.aniso.d.h * seen.aniso.d.dpr).toFixed(3)}, D-prime ${(seen.aniso.d2.w * seen.aniso.d2.dpr).toFixed(3)} by ${(seen.aniso.d2.h * seen.aniso.d2.dpr).toFixed(3)}`);
-  console.log(`pan keeps: moved ${((seen.panKeeps.after.x - seen.panKeeps.before.x) * seen.panKeeps.after.dpr).toFixed(4)} device px, mode ${seen.panKeeps.after.mode}`);
+  console.log(`below ratio: refused ${JSON.stringify(seen.belowRatio.refused.cornerLast)}, at two ${JSON.stringify(seen.belowRatio.atTwo.cornerLast)}, entered painted ${seen.belowRatio.entered.paintW} device px`);
+  console.log(`aniso: D painted ${seen.aniso.d.paintW} by ${seen.aniso.d.paintH}, D-prime painted ${seen.aniso.d2.paintW} by ${seen.aniso.d2.paintH}`);
+  console.log(`pan keeps: moved ${seen.panKeeps.after.paintX - seen.panKeeps.before.paintX} device px, mode ${seen.panKeeps.after.mode}`);
+  console.log(`entry centring: the image point at the cell centre moved ${Math.abs(seen.entryCentring.before.x - seen.entryCentring.after.x).toFixed(4)} and ${Math.abs(seen.entryCentring.before.y - seen.entryCentring.after.y).toFixed(4)} stored px`);
   const problems = extentProblems(seen.extents)
     .concat(originProblems(seen.origins))
     .concat(pixelProblems(seen.pixels))
@@ -1349,13 +1417,14 @@ async function main() {
     .concat(belowRatioProblems(seen.belowRatio))
     .concat(transformProblems(seen.transforms))
     .concat(anisoProblems(seen.aniso))
-    .concat(panKeepsProblems(seen.panKeeps));
+    .concat(panKeepsProblems(seen.panKeeps))
+    .concat(entryCentringProblems(seen.entryCentring));
   if (problems.length) {
     for (const problem of problems) console.error(problem);
     process.exitCode = 1;
     return;
   }
-  console.log("one stored pixel is one device pixel in the mode, on the grid, byte for byte, at every probed ratio");
+  console.log("one stored pixel is one device pixel in the mode, byte for byte at every byte row case in the pinned Chromium under the emulated ratios");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

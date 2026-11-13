@@ -401,10 +401,11 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    display (Pointer cross, Magnifier, Corners, Orientation letters), the
    layout (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
    which shows four neighbouring images in the outlined viewport, Link and
-   Reference lines, which have no key), and Key image, Headers, Fit, One to
-   one, Reset and Full screen. Key image flags the image, and Save marks writes the
-   flags as a Key Object Selection. The view, window, Fit, Reset, Key image
-   and Headers act on the outlined viewport. The mouse profile picks the
+   Reference lines, which have no key), and Key image, Headers, Fit,
+   One to one, Reset and Full screen. Key image flags the image, and Save
+   marks writes the flags as a Key Object Selection. The view, window, Fit,
+   Reset, Key image and Headers act on the outlined viewport. The mouse
+   profile picks the
    tool that starts active, Scroll or W/L, and choosing a profile also
    switches the current tool to that one, from a drawing tool too. The right
    column holds the window list, the marks and the mouse and key lists. The
@@ -462,7 +463,9 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    device pixel for the local images the page draws, with the factor
    computed in the page from the device pixel ratio and the corner line
    reading Zoom 1:1, or Zoom 1:1 rows on a frame whose pixels are not
-   square, where the rows are exact and the columns are resampled. Pan
+   square, where the rows are exact and the columns are resampled. The
+   mode is verified byte for byte under the emulated ratios 1, 1.25, 1.5
+   and 2 in the pinned Chromium. Pan
    keeps the mode, and zooming reaches the scale and leaves it like any
    other, so on a frame wider than its cell zooming out from one to one
    goes below it. A stored frame smaller than the device pixel ratio keeps
