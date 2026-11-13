@@ -875,7 +875,7 @@ export function ratioWatcherProblems(seen) {
 
 // AC6 and AC20. The clamp reaches the identity on a small frame and zooms
 // out below it on a large frame. The identity readings come from the
-// recorded painted box, because the mode's element box is the cell; the
+// observed painted box, because the mode's element box is the cell. The
 // readings after a tick are free mode and read from the element as before.
 export async function observeClamp(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
@@ -1071,10 +1071,10 @@ export function linkProblems(seen) {
 
 // AC9, under the lead amendment after implementation pass 1, which
 // replaces its stored-size backing. In the mode the backing is the
-// element's whole CSS pixel box times the ratio, and the in-page grey reply equals the stored bytes at every pixel,
-// which guards the window pipeline. Leaving the mode by Fit returns the
-// backing to the stored frame size holding the stored bytes, so the path
-// outside the mode is the one it was.
+// element's whole CSS pixel box times the ratio, and the in-page grey reply
+// equals the stored bytes at every pixel, which guards the window pipeline.
+// Leaving the mode by Fit returns the backing to the stored frame size
+// holding the stored bytes, so the path outside the mode is the one it was.
 export async function observeBackingStore(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -1122,9 +1122,10 @@ export function backingStoreProblems(seen) {
 
 // The device backing is repainted on a frame change that leaves the
 // layout stamp alone. Invert redraws the same frame at the same size, and
-// the page flips the monochrome display byte after the chain, PS3.3
-// C.11.6.1's INVERSE shape, so over the identity window the expected byte
-// is 255 minus the stored value, hand-derived: (0, 0) shows 255 and the
+// the page flips the monochrome display byte after the chain (preview.rs,
+// its module comment), the inversion PS3.3 C.11.6.1 defines for the
+// INVERSE shape, so over the identity window the expected byte is 255
+// minus the stored value, hand-derived: (0, 0) shows 255 and the
 // override at (127, 95) shows 0. A stale backing would still show the
 // stored pattern, and a backing resized to the stored frame would show it
 // stretched over the whole cell.
@@ -1390,32 +1391,36 @@ export function magnifierProblems(cases) {
   return problems;
 }
 
-// AC14. At the identity with the 90 degree rotate and each flip applied, the
+// AC14. At the identity with each rotation and each flip applied, the
 // clipped screenshot equals the permuted pattern, because every reachable
-// rotation is an exact permutation of the index the page writes. The
-// recorded painted box carries the swap.
+// rotation is an exact permutation of the index the page writes. The 180
+// and 270 degree tables are the 90 degree permutation applied two and
+// three times, and the observed painted box carries the swap.
+function transformTables() {
+  const { bytes, columns, rows } = FIXTURES.p;
+  const quarter = permute90(bytes, columns, rows);
+  const half = permute90(quarter, rows, columns);
+  const threeQuarter = permute90(half, columns, rows);
+  return {
+    rotate: { keys: ["o"], bytes: quarter, columns: rows, rows: columns },
+    "rotate-180": { keys: ["o", "o"], bytes: half, columns, rows },
+    "rotate-270": { keys: ["o", "o", "o"], bytes: threeQuarter, columns: rows, rows: columns },
+    "flip-h": { keys: ["h"], bytes: permuteFlipH(bytes, columns, rows), columns, rows },
+    "flip-v": { keys: ["v"], bytes: permuteFlipV(bytes, columns, rows), columns, rows },
+  };
+}
+
 export async function observeTransforms(url, chromium, folder) {
   const browser = await chromium.launch({ headless: true });
   try {
     const cases = [];
-    const keys = [
-      ["rotate", "o"],
-      ["flip-h", "h"],
-      ["flip-v", "v"],
-    ];
-    const expected = {
-      rotate: { bytes: permute90(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 96, rows: 128 },
-      "flip-h": { bytes: permuteFlipH(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 128, rows: 96 },
-      "flip-v": { bytes: permuteFlipV(FIXTURES.p.bytes, FIXTURES.p.columns, FIXTURES.p.rows), columns: 128, rows: 96 },
-    };
-    for (const [name, key] of keys) {
+    for (const [name, want] of Object.entries(transformTables())) {
       await withPage(browser, 2, async (page) => {
         await openFolder(page, url, folder);
         await page.keyboard.press("\\");
-        await page.keyboard.press(key);
+        for (const key of want.keys) await page.keyboard.press(key);
         await page.waitForTimeout(150);
         await page.mouse.move(2, 2);
-        const want = expected[name];
         cases.push({ name, got: await capturePixels(page, want.columns, want.rows) });
       });
     }
@@ -1426,23 +1431,13 @@ export async function observeTransforms(url, chromium, folder) {
 }
 
 export function transformProblems(cases) {
-  const problems = [];
-  if (!Array.isArray(cases) || cases.length !== 3) {
-    problems.push("the transform cases were not observed");
-    return problems;
+  const tables = transformTables();
+  if (!Array.isArray(cases) || cases.length !== Object.keys(tables).length) {
+    return ["the transform cases were not observed"];
   }
-  const fixture = FIXTURES.p;
-  const want = {
-    rotate: { bytes: permute90(fixture.bytes, fixture.columns, fixture.rows), columns: 96, rows: 128 },
-    "flip-h": { bytes: permuteFlipH(fixture.bytes, fixture.columns, fixture.rows), columns: 128, rows: 96 },
-    "flip-v": { bytes: permuteFlipV(fixture.bytes, fixture.columns, fixture.rows), columns: 128, rows: 96 },
-  };
+  const problems = [];
   for (const item of cases) {
-    const expected = want[item.name];
-    if (!expected) {
-      problems.push(`${item.name}: an unknown transform case`);
-      continue;
-    }
+    const expected = tables[item.name];
     problems.push(...byteProblems(`transform ${item.name}`, item.got, expected.bytes, expected.columns));
   }
   return problems;

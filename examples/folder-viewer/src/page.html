@@ -3657,7 +3657,8 @@ function oneToOneBox(side, ratio) {
 // The displayed device extents along the stored column and row axes. Rows
 // are one device row per stored row. Columns draw at aspectX over aspectY
 // device pixels per stored column, PS3.3 10.7.1.3's spacing order through
-// greyAspect, so a 0.7\0.5 frame draws 128 * 0.5 / 0.7 device columns.
+// greyAspect, so a 128 column 0.7\0.5 frame draws round(128 * 0.5 / 0.7),
+// 91 device columns.
 function oneToOneExtents(vp) {
   const turned = vp.rotation % 180 !== 0;
   const alongColumns = Math.round(vp.imageWidth * vp.aspectX / vp.aspectY);
