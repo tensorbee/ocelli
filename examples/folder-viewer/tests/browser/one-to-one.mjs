@@ -79,6 +79,7 @@ const ORIGIN_EPSILON = 1 / 128;
 const CENTRING_SLACK = 0.5 + 1 / 64;
 const SERIES_COUNT = 6;
 const REFUSAL = "1:1 needs a frame at least the device pixel ratio big";
+const SMALL_VIEW = "1:1 needs a larger view";
 
 /** The stored value rule of the fixtures, from the pattern above. */
 function stored(x, y) {
@@ -1277,6 +1278,115 @@ export function belowRatioProblems(seen) {
   return problems;
 }
 
+// The box rule's refusal. At ratio 1.57 the whole CSS pixel step is 100,
+// because 100 * 1.57 is the first whole product (stepFor), so a cell under
+// 100 CSS px on either side holds no box whose size times the ratio is
+// whole. The request shows the named reason and changes nothing, the
+// reason goes once the cell is large enough again, and the retry enters.
+export async function observeSmallView(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 1.57, async (page) => {
+      await openFolder(page, url, folder);
+      await page.locator("#layout").click();
+      await page.locator('#layout-picker [data-columns="3"][data-rows="3"]').click();
+      await page.keyboard.press("Escape");
+      let height = VIEWPORT.height;
+      let cell = await view(page);
+      while (cell.cellH >= 100 && height > 200) {
+        height -= 20;
+        await page.setViewportSize({ width: VIEWPORT.width, height });
+        await page.waitForTimeout(50);
+        cell = await view(page);
+      }
+      await page.locator('.cell[data-cell="0"]').click();
+      const before = await view(page);
+      await page.keyboard.press("\\");
+      const refused = await view(page);
+      await page.setViewportSize(VIEWPORT);
+      await page.waitForTimeout(300);
+      const grown = await view(page);
+      await page.keyboard.press("\\");
+      await page.waitForTimeout(150);
+      const entered = await view(page);
+      return { before, refused, grown, entered, step: stepFor(refused.dpr) };
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function smallViewProblems(seen) {
+  const problems = [];
+  if (!seen || !seen.refused || !seen.entered) return ["the small view case was not observed"];
+  const { before, refused, grown, entered, step } = seen;
+  if (step !== 100) problems.push(`the step at ratio ${refused.dpr} is ${step}, not the 100 the case assumes`);
+  if (!(refused.cellH < step)) {
+    problems.push(`the cell is ${refused.cellW} by ${refused.cellH} CSS px, not under the ${step} px step, so the case proves nothing`);
+  }
+  if (refused.cornerLast !== SMALL_VIEW) {
+    problems.push(`in the small view the corner reads ${JSON.stringify(refused.cornerLast)}, not ${JSON.stringify(SMALL_VIEW)}`);
+  }
+  if (refused.mode !== before.mode || refused.scale !== before.scale || refused.label !== before.label) {
+    problems.push(`the small view refusal changed the view: mode ${before.mode} to ${refused.mode}, scale ${before.scale} to ${refused.scale}`);
+  }
+  if (grown.cornerLast === SMALL_VIEW) problems.push("after the cell grew the small view reason is still shown");
+  if (entered.mode !== "one" || entered.paintW !== 128 || entered.paintH !== 96) {
+    problems.push(`the retry in the grown cell did not enter the mode with the stored 128 by 96 box (mode ${entered.mode}, ${entered.paintW} by ${entered.paintH})`);
+  }
+  return problems;
+}
+
+// The magnifier reads the device backing in the mode. With the pointer on
+// the centre of stored pixel (40, 30) of fixture P, the magnifier's centre
+// pixel shows that pixel, stored (40 * 29 + 30 * 57) mod 251 = 2870 mod 251
+// = 109, hand-computed, outside the mode, in the mode, and in the mode with
+// the 90 degree rotation and the horizontal flip written into the backing.
+const MAG_POINT = { x: 40, y: 30, value: 109 };
+
+export async function observeMagnifier(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const cases = [];
+    for (const [name, keys] of [["fit", []], ["one", ["\\"]], ["one turned and flipped", ["\\", "o", "h"]]]) {
+      await withPage(browser, 2, async (page) => {
+        await openFolder(page, url, folder);
+        for (const key of keys) await page.keyboard.press(key);
+        await page.click("#toggle-mag");
+        const at = await page.evaluate((point) => imageToClient(activeViewport(), { x: point.x + 0.5, y: point.y + 0.5 }), MAG_POINT);
+        await page.mouse.move(at.x - 3, at.y - 3);
+        await page.mouse.move(at.x, at.y);
+        await page.waitForTimeout(100);
+        cases.push({
+          name,
+          mode: (await view(page)).mode,
+          ...await page.evaluate(() => {
+            const node = document.getElementById("mag");
+            const pixel = node.getContext("2d").getImageData(Math.floor(node.width / 2), Math.floor(node.height / 2), 1, 1).data;
+            return { hidden: node.hidden, value: pixel[0] };
+          }),
+        });
+      });
+    }
+    return cases;
+  } finally {
+    await browser.close();
+  }
+}
+
+export function magnifierProblems(cases) {
+  if (!Array.isArray(cases) || cases.length !== 3) return ["the magnifier cases were not observed"];
+  const problems = [];
+  for (const item of cases) {
+    if (item.mode !== (item.name === "fit" ? "fit" : "one")) problems.push(`magnifier ${item.name}: the mode is ${item.mode}`);
+    if (item.hidden) problems.push(`magnifier ${item.name}: the magnifier is hidden over the picture`);
+    if (item.value !== MAG_POINT.value) {
+      problems.push(`magnifier ${item.name}: the centre shows ${item.value}, not stored (${MAG_POINT.x}, ${MAG_POINT.y}) = ${MAG_POINT.value}`);
+    }
+  }
+  return problems;
+}
+
 // AC14. At the identity with the 90 degree rotate and each flip applied, the
 // clipped screenshot equals the permuted pattern, because every reachable
 // rotation is an exact permutation of the index the page writes. The
@@ -1527,7 +1637,9 @@ async function main() {
       sameSize: await observeSameSizeRedraw(server.url, chromium, folder),
       refusals: await observeRefusals(server.url, chromium, folder),
       belowRatio: await observeBelowRatio(server.url, chromium, folder),
+      smallView: await observeSmallView(server.url, chromium, folder),
       transforms: await observeTransforms(server.url, chromium, folder),
+      magnifier: await observeMagnifier(server.url, chromium, folder),
       aniso: await observeAniso(server.url, chromium, folder),
       panKeeps: await observePanKeeps(server.url, chromium, folder),
       entryCentring: await observeEntryCentring(server.url, chromium, folder),
@@ -1547,6 +1659,7 @@ async function main() {
   console.log(`backing store: ${seen.backingStore.inMode.backingW} by ${seen.backingStore.inMode.backingH} in the mode, ${seen.backingStore.afterFit.backingW} by ${seen.backingStore.afterFit.backingH} after Fit`);
   console.log(`refusals: tile ${seen.refusals.tiled.mode}, empty ${seen.refusals.empty.mode}, faults ${seen.refusals.tiled.faultShown} and ${seen.refusals.empty.faultShown}`);
   console.log(`below ratio: refused ${JSON.stringify(seen.belowRatio.refused.cornerLast)}, at two ${JSON.stringify(seen.belowRatio.atTwo.cornerLast)}, entered painted ${seen.belowRatio.entered.paintW} device px`);
+  console.log(`small view: ${seen.smallView.refused.cellW} by ${seen.smallView.refused.cellH} CSS px refused ${JSON.stringify(seen.smallView.refused.cornerLast)}, grown entered ${seen.smallView.entered.mode}`);
   console.log(`aniso: D painted ${seen.aniso.d.paintW} by ${seen.aniso.d.paintH}, D-prime painted ${seen.aniso.d2.paintW} by ${seen.aniso.d2.paintH}`);
   console.log(`pan keeps: moved ${seen.panKeeps.after.paintX - seen.panKeeps.before.paintX} device px, mode ${seen.panKeeps.after.mode}`);
   console.log(`entry centring: the image point at the cell centre moved ${Math.abs(seen.entryCentring.before.x - seen.entryCentring.after.x).toFixed(4)} and ${Math.abs(seen.entryCentring.before.y - seen.entryCentring.after.y).toFixed(4)} stored px`);
@@ -1561,7 +1674,9 @@ async function main() {
     .concat(sameSizeRedrawProblems(seen.sameSize))
     .concat(refusalProblems(seen.refusals))
     .concat(belowRatioProblems(seen.belowRatio))
+    .concat(smallViewProblems(seen.smallView))
     .concat(transformProblems(seen.transforms))
+    .concat(magnifierProblems(seen.magnifier))
     .concat(anisoProblems(seen.aniso))
     .concat(panKeepsProblems(seen.panKeeps))
     .concat(entryCentringProblems(seen.entryCentring));
