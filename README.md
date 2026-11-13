@@ -402,11 +402,11 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    display (Pointer cross, Magnifier, Corners, Orientation letters), the
    layout (Layout `G`, which opens a 3 by 3 picker, Four images `Shift G`,
    which shows four neighbouring images in the outlined viewport, Link and
-   Reference lines, which have no key), and Key image, Headers, Fit, Reset
-   and Full screen. Key image flags the image, and Save marks writes the
-   flags as a Key Object Selection. The view, window, Fit, Reset, Key image
-   and Headers act on the outlined viewport. The mouse profile picks the
-   tool that starts active, Scroll or W/L, and choosing a profile also
+   Reference lines, which have no key), and Key image, Headers, Fit, One to
+   one, Reset and Full screen. Key image flags the image, and Save marks
+   writes the flags as a Key Object Selection. The view, window, Fit, Reset,
+   Key image and Headers act on the outlined viewport. The mouse profile picks
+   the tool that starts active, Scroll or W/L, and choosing a profile also
    switches the current tool to that one, from a drawing tool too. The right
    column holds the window list, the marks and the mouse and key lists. The
    icons at either end of the top bar, or the `[` and `]` keys, hide and show
@@ -415,10 +415,12 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    in file order, each named by its Window Center & Width Explanation, or
    `Window n` when it has none. On any other image it lists the file's windows
    only. A monochrome image that stores no window lists one row, `Auto window`,
-   after the presets on a CT, and it chooses the series' automatic window. The keys `1` to `9` choose rows 1 to 9, and `0` stays Fit. Each VOI
-   LUT Sequence item is listed as a row that cannot be chosen, because this
-   preview does not apply one, and while a file has one its other rows cannot
-   be chosen either. A multiframe whose windows change per frame lists the
+   after the presets on a CT, and it chooses the series' automatic window. The
+   keys `1` to `9` choose rows 1 to 9, `0` stays Fit and `\` shows one stored
+   pixel on one device pixel. Each VOI LUT Sequence item is listed as a row
+   that cannot be chosen, because this preview does not apply one, and while a
+   file has one its other rows cannot be chosen either. A multiframe whose
+   windows change per frame lists the
    shown frame's own, asked for by file id, which the process answers from the
    replies it keeps for such a file after the posted bytes are dropped. Until
    that list arrives the frame is drawn at its own first usable window, then at
@@ -475,7 +477,27 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    between two runs of the new one is lost, because the document wins on
    the next load and the two stores give no order to detect that. A pinch, or
    Ctrl with the wheel, zooms at the pointer. A sideways
-   swipe does not change the image. Zoom keeps the image aspect ratio. The
+   swipe does not change the image. Zoom keeps the image aspect ratio. One to
+   one, the `\` key or its toolbar button, shows one stored pixel on one
+   device pixel for the local images the page draws, with the factor computed
+   in the page from the device pixel ratio and the corner line reading Zoom
+   1:1, or Zoom 1:1 rows on a frame whose pixels are not square, where the
+   rows are exact and the columns are resampled. In the mode the canvas is a
+   whole CSS pixel box sized up past its cell, the smallest whole multiple of
+   the ratio's whole CSS pixel step that covers the cell plus one step for
+   the alignment shift, so its size times the device pixel ratio is whole,
+   its backing has that many device pixels, and the stored pixels are
+   written into the backing one to one, as cornerstone3D 5.8.2 sizes its
+   backing at the device resolution. The cell's own clipping cuts the box's
+   excess, so no part of the cell inside the frame is left unpainted. On
+   square pixels the mode is verified byte for byte in screenshots under the
+   emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is
+   DevTools device scale emulation and not a physical display. Pan keeps the
+   mode, and zooming reaches the scale and leaves it like any other, so on a
+   frame wider than its cell zooming out from one to one goes below it. A
+   stored frame smaller than the device pixel ratio keeps its view, and the
+   corner line shows the reason while that holds. Opening another series and
+   Reset return to fit. The
    viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. A count on the Headers button is the
    number of findings in the shown file's conformance report, whether the file

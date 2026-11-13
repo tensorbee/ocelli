@@ -1,7 +1,7 @@
 # Build targets
 
-**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266, F-245
-**Last updated:** 2026-11-11
+**F-IDs that contributed:** F-002, F-004, F-005, F-007, F-008, F-016, F-017, F-021, F-022, F-023, F-026, F-039, F-050, F-101, F-X003, F-X008, F-110, F-198, F-233, F-231, F-239, F-240, F-238, F-244, F-268, F-266, F-245, F-204
+**Last updated:** 2026-11-13
 
 The wasm build pipeline, the size budget, and the invariants that keep the
 core target-agnostic. This describes what the code does today.
@@ -957,6 +957,23 @@ the `viewer-browser` gate's module list last, after `dicomweb.mjs`.
 suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
 `remoteProvider`, added where the browser context requires them, with no rule
 disabled and no allowlist widened. `fetch` was already a browser global there.
+
+`examples/folder-viewer/tests/browser/one-to-one.mjs` is the F-204 browser
+suite. It writes seven wholly synthetic identity fixtures into a temporary
+folder, plus an eighth leave restore fixture written after the default cell
+is measured, sized so the mode's box there times the ratio is its stored
+frame on both axes. It starts the release viewer with `OCELLI_PORT=0` and
+stops it by its PID, and drives the one-to-one mode in headless Chromium at
+device pixel ratios 1, 1.25, 1.5, 2, 3 and the four ulp probes. It observes
+the painted box as the opaque box in the canvas backing and reads device
+pixels through a screenshot clip on the device-aligned grid decoded in-page,
+cropped at that observed origin, and for the rows whose picture exceeds the
+cell cropped to the opaque box's visible part inside the cell. It is
+registered in the `viewer-browser` gate's module list immediately before
+`launcher.mjs`, which stays last. `eslint.config.js`
+gains `fitScale`, `clientToImage`, `Image` and `MediaQueryList` in that
+suite's existing browser context, with no rule disabled and no allowlist
+widened.
 `scripts/guards/catalogue.py` gains the `folder-viewer-dev` guard for
 `bin/folder-viewer-dev.mjs`, and `ci/guard-probe-budget.json` budgets that
 guard at six probes. Each probe drives the launcher's own refusal through a

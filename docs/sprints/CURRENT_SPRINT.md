@@ -8,7 +8,7 @@
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
 | F-202 | E38.12 | Worker decode and owned frame render in the single showcase viewer | All | 6w | pending |
-| F-204 | E38.14 | One stored pixel per device pixel in the single showcase viewer | All | 2w | pending |
+| F-204 | E38.14 | One stored pixel per device pixel in the single showcase viewer | All | 2w | done |
 | F-205 | E38.15 | Validated shared preferences in the single showcase viewer | All | 3w | done |
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier | Rust | 2w | done |
 | F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | pending |

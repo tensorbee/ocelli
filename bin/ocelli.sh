@@ -67,7 +67,7 @@ GATES=(
   "errors|no|error codes agree across Rust, TypeScript and the registry (HLD 23)"
   "panic|no|the wasm panic record survives the trap and needs no export (HLD 23)"
   "bench|no|the benchmark harness's registry, refusals and pins (E1.6, HLD 26)"
-  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs, preferences.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245, F-205)"
+  "viewer-browser|no|the folder viewer in headless Chromium: aspect.mjs, readout.mjs, link.mjs, forget.mjs, window.mjs, corners.mjs, changed.mjs, marks.mjs, conformance.mjs, colour.mjs, auto.mjs, dicomweb.mjs, one-to-one.mjs, preferences.mjs and launcher.mjs (F-208, F-209, F-226, F-213, F-267, F-224, F-215, F-225, F-239, F-227, F-245, F-204, F-205)"
   "provenance|no|source-provenance policy, read-blocked projects (HLD C.2.1)"
   "licences|no|one allowlist over Rust, npm and Python manifests"
   "licences-wheels|no|installed Python wheels and the libraries they bundle"
@@ -209,8 +209,19 @@ run_gate() {
     # from the page, a refused and a validated instance leave the local image
     # untouched, a pending fetch that a local source change cancels never
     # labels that changed image, and the served More row states the partial
-    # status. F-205's preferences.mjs check follows: the five validated
-    # choices migrate and win, every refused shape and field names its
+    # status. F-204's one-to-one.mjs check follows: in the one-to-one mode the
+    # painted box observed in the canvas backing is the stored count of device
+    # pixels at ratios 1, 1.25, 1.5 and 2, and at 3 for the linked square
+    # pixel cells, its observed origin is a whole device pixel, and the
+    # screenshot bytes at that origin equal the stored pattern on square
+    # pixels at every byte row case, after the mid pan and at the four probe
+    # ratios too, its inverse after an invert redraws the same frame, and its
+    # permutation under each rotation and flip. The anisotropic rows draw one
+    # device row per stored row with the columns an in-order subsample, the
+    # magnifier shows the stored pixel under the pointer, and the clamp, the
+    # below-ratio refusal reason, the link and the ratio watcher behave as
+    # the design states. F-205's preferences.mjs check follows: the five
+    # validated choices migrate and win, every refused shape and field names its
     # sentence, the stored default applies once per series load behind the
     # first-paint hold, a second port is a different origin, and the origin
     # holds only the five allowed keys beside dcmjs's own loglevel write.
@@ -239,6 +250,7 @@ run_gate() {
                  node examples/folder-viewer/tests/browser/colour.mjs &&
                  node examples/folder-viewer/tests/browser/auto.mjs &&
                  node examples/folder-viewer/tests/browser/dicomweb.mjs &&
+                 node examples/folder-viewer/tests/browser/one-to-one.mjs &&
                  node examples/folder-viewer/tests/browser/preferences.mjs &&
                  node examples/folder-viewer/tests/browser/launcher.mjs ;;
     bench)       python3 scripts/bench_check.py &&

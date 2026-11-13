@@ -737,6 +737,7 @@
   <symbol id="i-key" viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z"/></symbol>
   <symbol id="i-headers" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="2.6"/></symbol>
   <symbol id="i-fit" viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1"/><path d="M3 3l3.5 3.5M21 3l-3.5 3.5M3 21l3.5-3.5M21 21l-3.5-3.5"/></symbol>
+  <symbol id="i-one" viewBox="0 0 24 24"><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M3 3h4M3 3v4M21 3h-4M21 3v4M3 21h4M3 21v-4M21 21h-4M21 21v-4"/></symbol>
   <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/></symbol>
   <symbol id="i-full" viewBox="0 0 24 24"><path d="M3.5 8.5v-5h5M15.5 3.5h5v5M20.5 15.5v5h-5M8.5 20.5h-5v-5"/></symbol>
   <symbol id="i-left" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15"/></symbol>
@@ -807,6 +808,7 @@
   <button type="button" class="icon" id="headers" aria-label="Headers" data-key="D"><svg class="i"><use href="#i-headers"/></svg><span class="sr">Headers</span><span class="badge" id="headers-badge" hidden></span></button>
   <span class="sep"></span>
   <button type="button" class="icon" id="fit" aria-label="Fit" data-key="0"><svg class="i"><use href="#i-fit"/></svg><span class="sr">Fit</span></button>
+  <button type="button" class="icon" id="one-to-one" aria-label="One to one" data-key="\"><svg class="i"><use href="#i-one"/></svg><span class="sr">One to one</span></button>
   <button type="button" class="icon" id="reset" aria-label="Reset" data-key="Shift R"><svg class="i"><use href="#i-reset"/></svg><span class="sr">Reset</span></button>
   <button type="button" class="icon" id="fullscreen" aria-label="Full screen" data-key="Shift F"><svg class="i"><use href="#i-full"/></svg><span class="sr">Full screen</span></button>
 </div>
@@ -945,6 +947,7 @@
       <kbd>= −</kbd><span>Zoom in or out</span>
       <kbd>1 to 9</kbd><span>Window row</span>
       <kbd>0</kbd><span>Fit</span>
+      <kbd>\</kbd><span>One to one</span>
       <kbd>Del</kbd><span>Remove the selected mark</span>
       <kbd>Esc</kbd><span>Clear the selection</span>
       <kbd>[ ]</kbd><span>Hide or show a side panel</span>
@@ -1073,6 +1076,7 @@ const SENTENCE = {
   "tool-arrow": "Drag from the tail to the head, then type an optional note and press Enter. It has no number and it is not saved.",
   "tool-probe": "Click a pixel. The local process reports its modality value with its unit. It is not saved.",
   fit: "Fit the image in the view.",
+  "one-to-one": "Show one stored pixel on one device pixel. A stored frame smaller than the device pixel ratio keeps its view and the corner says so.",
   reset: "Put the image back to the first usable window in the file, or to the automatic window when it stores none, and the fitted view.",
   fullscreen: "The viewport fills the screen. Escape leaves full screen.",
   invert: "Reverse the display, each channel on a colour image. The pixels in the file are not changed.",
@@ -1426,12 +1430,26 @@ function blankViewport(cell) {
     cell,
     seriesKey: "",
     viewIndex: 0,
-    fitMode: true, scale: 1, panX: 0, panY: 0,
+    zoomMode: "fit", scale: 1, panX: 0, panY: 0,
     rotation: 0, flipH: false, flipV: false,
     overrideWindow: null, draftWindow: null, activePreset: null, windowIndex: 0, invert: false,
     tileMode: false,
     imageWidth: 0, imageHeight: 0, aspectX: 1, aspectY: 1,
     shownWindow: null, shownFacts: null, zoomLabel: "100%",
+    // F-204. The translate last written by the layout, and the refusal
+    // reason a named refusal shows in the corner line until its condition
+    // clears.
+    panAppliedX: 0, panAppliedY: 0, zoomRefusal: "",
+    // F-204. The one-to-one paint state: the last grey reply, the displayed
+    // buffer cached against the frame and transform state, the integer
+    // device offset in the backing the buffer was written at while the
+    // mode holds, which the magnifier reads, the whole CSS pixel
+    // alignment shift the stage margins carry, and whether the backing
+    // still holds the mode's buffer, which the restore outside the mode
+    // reads when the sizes match.
+    grey: null, oneBuf: null, oneBufGrey: null, oneBufKey: "",
+    paintOffsetX: 0, paintOffsetY: 0,
+    oneShiftX: 0, oneShiftY: 0, oneBacking: false,
     // F-225. The file of the last image this viewport drew.
     paintedFile: null,
     // F-205. The load whose stored-default trial holds the first paint, and
@@ -1704,6 +1722,7 @@ for (const name of TOOLS) {
 }
 document.getElementById("reset").addEventListener("click", () => resetView(activeViewport()));
 document.getElementById("fit").addEventListener("click", () => fitView(activeViewport()));
+document.getElementById("one-to-one").addEventListener("click", () => oneToOneView(activeViewport()));
 document.getElementById("fullscreen").addEventListener("click", toggleFull);
 document.getElementById("invert").addEventListener("click", () => {
   const vp = activeViewport();
@@ -1908,6 +1927,19 @@ function relayout() {
     for (const node of vp.dom.tiles.querySelectorAll("canvas")) sizeTile(node);
   }
 }
+
+// F-204. A device pixel ratio change with an unchanged CSS viewport fires
+// neither existing listener, so the page arms a resolution query for the
+// live ratio and re-arms it inside its own handler. Each change re-lays out
+// through relayout, which sets layoutDirty and bypasses the stamp.
+function armRatioWatcher() {
+  const query = window.matchMedia("(resolution:" + window.devicePixelRatio + "dppx)");
+  query.addEventListener("change", () => {
+    armRatioWatcher();
+    relayout();
+  }, { once: true });
+}
+armRatioWatcher();
 document.addEventListener("pointerover", (event) => {
   const node = event.target.closest("[data-sentence], [id]");
   if (!node) return;
@@ -2843,7 +2875,7 @@ function loadSeries(vp, key) {
   vp.seriesKey = key;
   vp.shownWindow = null;
   vp.paletteFallback = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.layoutDirty = true;
   vp.overrideWindow = null;
   vp.draftWindow = null;
@@ -3836,6 +3868,14 @@ function drawGrey(vp, grey) {
   const aspect = greyAspect(grey.facts);
   vp.aspectX = aspect.x;
   vp.aspectY = aspect.y;
+  // F-204. The mode repaints from this reply on every layout, and the
+  // non-mode path repaints it when the backing returns to the stored size,
+  // so the viewport holds it until the next frame replaces it. This is the
+  // only assignment of `vp.grey`, and every caller of drawGrey honours
+  // F-205's first-paint hold, so the two F-204 repaints that skip the hold,
+  // `paintOneToOne` and the backing restore in layoutViewport, only ever
+  // redraw the frame already on screen.
+  vp.grey = grey;
   const dom = vp.dom;
   if (!vp.viewContext) vp.viewContext = dom.canvas.getContext("2d");
   if (!vp.viewContext) {
@@ -3851,6 +3891,13 @@ function drawGrey(vp, grey) {
   }
   syncStage(vp);
   if (!vp.tileMode) {
+    // F-204. A frame change clears the refusal reason before the layout, so
+    // a reason can never outlive the frame it was refused on.
+    vp.zoomRefusal = "";
+    // The paint above sized the backing to the stored frame, and in the
+    // mode the backing is the device-sized box, so the layout must repaint
+    // it even when the new frame leaves the stamp unchanged.
+    if (vp.zoomMode === "one") vp.layoutDirty = true;
     layoutViewport(vp);
     const drawn = notes.get(noteKey(currentImage(vp)));
     const mine = vp.cell === activeCell && (draft || selected != null);
@@ -3966,12 +4013,167 @@ function fitScale(vp) {
   return Math.min(rect.width / width, rect.height / height);
 }
 
+// F-204. The whole CSS pixel step whose multiples land on a whole number
+// of device pixels at this ratio: 1 at ratios 1 and 2, 4 at 1.25 and 2 at
+// 1.5. The ratio the page reads is the engine's f32 widened to a double,
+// 1.38 reads as 1.3799999952316284, so a product is taken as whole within
+// 1e-4. That is far above the representation error at the step such a
+// ratio needs, 2.4e-7 for 1.38 at step 50, and far below a near miss such
+// as 7 times 1.57, which is 0.01 short of 11. 0 when no step up to the
+// limit exists.
+function deviceStep(ratio, limit) {
+  for (let step = 1; step <= limit; step += 1) {
+    const scaled = ratio * step;
+    if (Math.abs(scaled - Math.round(scaled)) <= 1e-4) return step;
+  }
+  return 0;
+}
+
+// The search cap for the ratio's whole CSS pixel step, the same bound the
+// one-to-one suite's stepFor uses. A ratio with no step under it has no
+// device-aligned box under the cap.
+const STEP_LIMIT = 2000;
+
+// The box the mode draws into, sized up, never down: the smallest whole
+// multiple of the ratio's step that covers the cell side, plus one step so
+// the alignment shift still covers it, clipped by the cell's own overflow
+// hidden. No part of the cell inside the drawn frame is left unpainted,
+// which the reach rows of one-to-one.mjs check. 0 when
+// no step exists up to the cap.
+function oneToOneBox(side, ratio) {
+  const whole = Math.ceil(side);
+  const step = deviceStep(ratio, STEP_LIMIT);
+  if (!step) return 0;
+  return Math.ceil(whole / step) * step + step;
+}
+
+// The displayed device extents along the stored column and row axes. Rows
+// are one device row per stored row. Columns draw at aspectX over aspectY
+// device pixels per stored column, PS3.3 10.7.1.3's spacing order through
+// greyAspect, so a 128 column 0.7\0.5 frame draws round(128 * 0.5 / 0.7),
+// 91 device columns.
+function oneToOneExtents(vp) {
+  const turned = vp.rotation % 180 !== 0;
+  const alongColumns = Math.round(vp.imageWidth * vp.aspectX / vp.aspectY);
+  const alongRows = vp.imageHeight;
+  return { alongColumns, alongRows, screenW: turned ? alongRows : alongColumns, screenH: turned ? alongColumns : alongRows };
+}
+
+// The stored pixel a displayed device pixel draws, nearest centre: with the
+// device count equal to the stored count this is the exact identity, and on
+// the resampled column axis it is an order-preserving nearest choice.
+function oneToOneSource(deviceAt, storedCount, deviceCount) {
+  return Math.min(storedCount - 1, Math.max(0, Math.floor((deviceAt + 0.5) * storedCount / deviceCount)));
+}
+
+// The mode's displayed buffer: the grey bytes gathered through the inverse
+// of the rotate and flip the stage used to carry, addressed in device
+// pixels. Cached against the frame and transform state, so a pan or a ratio
+// change repositions the same buffer instead of refilling it.
+function oneToOneBuffer(vp, screenW, screenH) {
+  const grey = vp.grey;
+  const key = grey.width + "x" + grey.height + ":" + screenW + "x" + screenH
+    + ":" + vp.rotation + ":" + (vp.flipH ? 1 : 0) + (vp.flipV ? 1 : 0);
+  if (vp.oneBuf && vp.oneBufGrey === grey && vp.oneBufKey === key) return vp.oneBuf;
+  const buffer = new ImageData(screenW, screenH);
+  const data = buffer.data;
+  const bytes = grey.bytes;
+  const channels = grey.channels;
+  const storedW = grey.width;
+  const storedH = grey.height;
+  const turned = vp.rotation % 180 !== 0;
+  const bufU = turned ? screenH : screenW;
+  const bufV = turned ? screenW : screenH;
+  const fx = vp.flipH ? -1 : 1;
+  const fy = vp.flipV ? -1 : 1;
+  for (let dy = 0; dy < screenH; dy += 1) {
+    for (let dx = 0; dx < screenW; dx += 1) {
+      // Undo the rotation to the stored axes, resample the column axis,
+      // then undo the flip. Rotate 90 degrees clockwise maps displayed
+      // (dx, dy) to stored (dy, rows - 1 - dx).
+      let u;
+      let v;
+      if (vp.rotation === 90) {
+        u = dy;
+        v = bufV - 1 - dx;
+      } else if (vp.rotation === 180) {
+        u = bufU - 1 - dx;
+        v = bufV - 1 - dy;
+      } else if (vp.rotation === 270) {
+        u = bufU - 1 - dy;
+        v = dx;
+      } else {
+        u = dx;
+        v = dy;
+      }
+      const su = oneToOneSource(u, storedW, bufU);
+      const sv = oneToOneSource(v, storedH, bufV);
+      const sx = fx === -1 ? storedW - 1 - su : su;
+      const sy = fy === -1 ? storedH - 1 - sv : sv;
+      const source = (sy * storedW + sx) * channels;
+      const at = (dy * screenW + dx) * 4;
+      if (channels === 3) {
+        data[at] = bytes[source];
+        data[at + 1] = bytes[source + 1];
+        data[at + 2] = bytes[source + 2];
+      } else {
+        const value = bytes[source];
+        data[at] = value;
+        data[at + 1] = value;
+        data[at + 2] = value;
+      }
+      data[at + 3] = 255;
+    }
+  }
+  vp.oneBuf = buffer;
+  vp.oneBufGrey = grey;
+  vp.oneBufKey = key;
+  return buffer;
+}
+
+// The mode's paint: the backing is the element box times the ratio, and the
+// displayed buffer is written one to one at the integer device offset. The
+// oneBacking flag records that the backing holds this buffer, so leaving
+// the mode restores the stored bytes even when the sizes happen to match.
+function paintOneToOne(vp, boxW, boxH, screenW, screenH, ox, oy) {
+  const ratio = window.devicePixelRatio || 1;
+  const backingW = Math.round(boxW * ratio);
+  const backingH = Math.round(boxH * ratio);
+  if (vp.dom.canvas.width !== backingW || vp.dom.canvas.height !== backingH) {
+    vp.dom.canvas.width = backingW;
+    vp.dom.canvas.height = backingH;
+  }
+  vp.oneBacking = true;
+  const context = vp.viewContext;
+  if (!context || !vp.grey) return;
+  context.clearRect(0, 0, backingW, backingH);
+  context.putImageData(oneToOneBuffer(vp, screenW, screenH), ox, oy);
+}
+
 function layoutViewport(vp) {
   const { imageWidth, imageHeight, aspectX, aspectY, dom } = vp;
   if (!imageWidth || dom.stage.hidden) return;
+  const ratio = window.devicePixelRatio || 1;
+  // F-204. The one-to-one guards re-run on every layout of a held mode, so
+  // a frame change or a ratio change that leaves the stored frame smaller
+  // than the device pixel ratio drops to fit before any style write, and
+  // so does a ratio whose whole CSS pixel step is past the search cap,
+  // where the box rule finds no step. The drop shows no reason, because
+  // nothing claims 1:1 any more. The cell size itself is no guard: the box
+  // is sized up past the cell and the cell's overflow hidden clips it,
+  // matching cornerstone3D 5.8.2, which never refuses for cell size.
+  if (vp.zoomMode === "one") {
+    const cellBox = dom.cell.getBoundingClientRect();
+    if (vp.imageWidth < ratio || vp.imageHeight < ratio
+      || !oneToOneBox(cellBox.width, ratio) || !oneToOneBox(cellBox.height, ratio)) {
+      vp.zoomMode = "fit";
+    }
+  }
   const stamp = imageWidth + "x" + imageHeight
     + ":" + aspectX + ":" + aspectY
-    + ":" + (vp.fitMode ? "fit" : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
+    + ":" + (vp.zoomMode === "fit" ? "fit"
+      : vp.zoomMode === "one" ? "one:" + vp.panX + ":" + vp.panY
+      : String(vp.scale) + ":" + vp.panX + ":" + vp.panY)
     + ":" + vp.rotation
     + ":" + (vp.flipH ? 1 : 0)
     + ":" + (vp.flipV ? 1 : 0)
@@ -3980,35 +4182,160 @@ function layoutViewport(vp) {
   // Zoom, pan, fit, rotation, a flip or a new image size moves this cell's
   // picture, so a readout placed over it for the old geometry goes.
   leavePointerFor(vp);
-  if (vp.fitMode) {
+  if (vp.zoomMode === "fit") {
     vp.scale = fitScale(vp);
     vp.panX = 0;
     vp.panY = 0;
+  } else if (vp.zoomMode === "one") {
+    // F-204. One stored pixel per device pixel is the scale 1 / ratio on a
+    // square-pixel frame and (1 / ratio) / aspectY on an anisotropic one,
+    // where the rows are exact and the columns are resampled. The scale is
+    // recomputed from the live ratio on every layout, and the pan rides the
+    // change as zoomAt's arithmetic does with the zoom centre at the cell
+    // centre, where the offset under the centre is minus the pan.
+    const identity = (1 / ratio) / vp.aspectY;
+    const factor = identity / vp.scale;
+    vp.panX += -vp.panX * (1 - factor);
+    vp.panY += -vp.panY * (1 - factor);
+    vp.scale = identity;
   }
   const scale = vp.scale;
   const pictureW = Math.max(1, imageWidth * scale * aspectX);
   const pictureH = Math.max(1, imageHeight * scale * aspectY);
-  dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  const one = vp.zoomMode === "one";
+  const extents = one ? oneToOneExtents(vp) : null;
+  const cellBox = one ? dom.cell.getBoundingClientRect() : null;
+  const boxW = one ? oneToOneBox(cellBox.width, ratio) : 0;
+  const boxH = one ? oneToOneBox(cellBox.height, ratio) : 0;
+  if (one) {
+    // The identity renders pixelated at every ratio. The comparison below
+    // evaluates one ulp below 1 at some ratios and would select auto.
+    dom.canvas.style.imageRendering = "pixelated";
+  } else {
+    dom.canvas.style.imageRendering = scale * Math.min(aspectX, aspectY) * window.devicePixelRatio < 1 ? "auto" : "pixelated";
+  }
   const turned = vp.rotation % 180 !== 0;
-  dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
-  dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
-  dom.frame.style.transform = "translate(" + vp.panX + "px, " + vp.panY + "px)";
-  dom.stage.style.width = pictureW + "px";
-  dom.stage.style.height = pictureH + "px";
-  dom.stage.style.marginLeft = (-pictureW / 2) + "px";
-  dom.stage.style.marginTop = (-pictureH / 2) + "px";
   const fx = vp.flipH ? -1 : 1;
   const fy = vp.flipV ? -1 : 1;
-  dom.stage.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
-  dom.stage.style.transformOrigin = "center center";
-  dom.canvas.style.width = pictureW + "px";
-  dom.canvas.style.height = pictureH + "px";
-  dom.ink.style.width = pictureW + "px";
-  dom.ink.style.height = pictureH + "px";
-  dom.refs.style.width = pictureW + "px";
-  dom.refs.style.height = pictureH + "px";
+  let translateX = vp.panX;
+  let translateY = vp.panY;
+  if (one) {
+    // F-204, the lead amendments after implementation passes 1 and 2. While
+    // the mode holds, the canvas element is sized in whole CSS pixels up
+    // past its cell, the smallest whole multiple of the ratio's step that
+    // covers the cell plus one step for the alignment shift, and the cell's
+    // overflow hidden clips the excess. Its backing store is that box times
+    // the ratio, and the stored pixels are written one to one at an integer
+    // device offset that carries the centring, the pan and the snap.
+    // Rotation and flips ride the index in that write, never a CSS
+    // transform. The margins carry the last written alignment shift until
+    // the snap below recomputes it.
+    dom.frame.style.width = boxW + "px";
+    dom.frame.style.height = boxH + "px";
+    dom.stage.style.width = boxW + "px";
+    dom.stage.style.height = boxH + "px";
+    dom.stage.style.marginLeft = (-boxW / 2 + vp.oneShiftX) + "px";
+    dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
+    // The mode writes no transform on the frame or the stage, so the
+    // canvas's device position is its laid-out position alone.
+    dom.stage.style.transform = "none";
+    dom.stage.style.transformOrigin = "center center";
+    dom.canvas.style.width = boxW + "px";
+    dom.canvas.style.height = boxH + "px";
+    // The marks and reference lines keep the unrotated picture size and
+    // take the rotation and flips as their own transform below, as they
+    // did on the stage, so their turned box covers the drawn device box.
+    dom.ink.style.width = (extents.alongColumns / ratio) + "px";
+    dom.ink.style.height = (extents.alongRows / ratio) + "px";
+    dom.refs.style.width = (extents.alongColumns / ratio) + "px";
+    dom.refs.style.height = (extents.alongRows / ratio) + "px";
+  } else {
+    dom.frame.style.width = (turned ? pictureH : pictureW) + "px";
+    dom.frame.style.height = (turned ? pictureW : pictureH) + "px";
+    dom.stage.style.width = pictureW + "px";
+    dom.stage.style.height = pictureH + "px";
+    dom.stage.style.marginLeft = (-pictureW / 2) + "px";
+    dom.stage.style.marginTop = (-pictureH / 2) + "px";
+    dom.stage.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
+    dom.stage.style.transformOrigin = "center center";
+    dom.canvas.style.width = pictureW + "px";
+    dom.canvas.style.height = pictureH + "px";
+    dom.ink.style.width = pictureW + "px";
+    dom.ink.style.height = pictureH + "px";
+    dom.refs.style.width = pictureW + "px";
+    dom.refs.style.height = pictureH + "px";
+  }
+  // F-204. The translate is written after the size writes, so the mode can
+  // measure the laid-out canvas with the translate last written still
+  // applied and subtract it. The mode moves the canvas's position to the
+  // nearest multiple of the ratio's whole CSS pixel step through the
+  // stage's margins, so the position times the ratio is a whole device
+  // pixel, and writes no frame translate. The alignment shift is taken
+  // back inside the device offset, so the picture stays centred in the
+  // cell, and the backing then maps one to one onto the device grid, which
+  // the byte rows of one-to-one.mjs check in screenshots.
+  if (one) {
+    // The box rule above passed, so the step is no larger than the box.
+    const step = deviceStep(ratio, boxW);
+    const laid = dom.canvas.getBoundingClientRect();
+    const baseX = laid.left - vp.panAppliedX - vp.oneShiftX;
+    const baseY = laid.top - vp.panAppliedY - vp.oneShiftY;
+    const alignX = Math.round(baseX / step) * step;
+    const alignY = Math.round(baseY / step) * step;
+    vp.oneShiftX = alignX - baseX;
+    vp.oneShiftY = alignY - baseY;
+    dom.stage.style.marginLeft = (-boxW / 2 + vp.oneShiftX) + "px";
+    dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
+    translateX = 0;
+    translateY = 0;
+    // The device offset: the centring plus the pan minus the alignment
+    // shift the margins introduced, snapped to a whole device pixel.
+    const ox = Math.round((boxW * ratio - extents.screenW) / 2 + (vp.panX - vp.oneShiftX) * ratio);
+    const oy = Math.round((boxH * ratio - extents.screenH) / 2 + (vp.panY - vp.oneShiftY) * ratio);
+    paintOneToOne(vp, boxW, boxH, extents.screenW, extents.screenH, ox, oy);
+    const inkLeft = (ox + (extents.screenW - extents.alongColumns) / 2) / ratio;
+    const inkTop = (oy + (extents.screenH - extents.alongRows) / 2) / ratio;
+    dom.ink.style.left = inkLeft + "px";
+    dom.ink.style.top = inkTop + "px";
+    dom.refs.style.left = inkLeft + "px";
+    dom.refs.style.top = inkTop + "px";
+    dom.ink.style.transform = "rotate(" + vp.rotation + "deg) scale(" + fx + ", " + fy + ")";
+    dom.refs.style.transform = dom.ink.style.transform;
+    dom.ink.style.transformOrigin = "center center";
+    dom.refs.style.transformOrigin = "center center";
+    vp.paintOffsetX = ox;
+    vp.paintOffsetY = oy;
+  } else {
+    if (dom.ink.style.left !== "0px") dom.ink.style.left = "0px";
+    if (dom.ink.style.top !== "0px") dom.ink.style.top = "0px";
+    if (dom.refs.style.left !== "0px") dom.refs.style.left = "0px";
+    if (dom.refs.style.top !== "0px") dom.refs.style.top = "0px";
+    if (dom.ink.style.transform) dom.ink.style.transform = "";
+    if (dom.refs.style.transform) dom.refs.style.transform = "";
+    // Outside the mode the backing returns to the stored frame size and
+    // the paint restores the stored bytes, whenever the mode resized the
+    // backing away or the backing still holds the mode's own buffer at the
+    // stored size.
+    if (vp.grey && (vp.oneBacking || dom.canvas.width !== vp.grey.width || dom.canvas.height !== vp.grey.height)) {
+      dom.canvas.width = vp.grey.width;
+      dom.canvas.height = vp.grey.height;
+      paintGrey(vp.viewContext, dom.canvas, vp.grey);
+    }
+    vp.oneBacking = false;
+    vp.paintOffsetX = 0;
+    vp.paintOffsetY = 0;
+    vp.oneShiftX = 0;
+    vp.oneShiftY = 0;
+  }
+  dom.frame.style.transform = one ? "none" : "translate(" + translateX + "px, " + translateY + "px)";
+  vp.panAppliedX = translateX;
+  vp.panAppliedY = translateY;
   const fitted = fitScale(vp);
-  vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  if (one) {
+    vp.zoomLabel = vp.aspectX === 1 && vp.aspectY === 1 ? "1:1" : "1:1 rows";
+  } else {
+    vp.zoomLabel = (fitted > 0 ? Math.round((scale / fitted) * 100) : 100) + "%";
+  }
   paintOverlays(vp);
   syncTextScale(vp);
   paintSelection(vp);
@@ -4094,7 +4421,17 @@ function paintOverlays(vp) {
   const warning = iccWarning(info);
   if (warning) windowLine += "\n" + warning;
   if (info.colour && vp.paletteFallback) windowLine += "\nThis palette was read as 8-bit because all its entries fit in 8 bits.";
-  assignText(corners.br, windowLine + "\nZoom " + vp.zoomLabel);
+  // F-204. A refusal reason shows in place of the Zoom suffix only while
+  // the condition that produced the stored string is the one that holds,
+  // re-checked from the predicate the guard evaluated, and is written empty
+  // at the first paint where it does not, so no later paint shows a stale
+  // reason.
+  let zoomLine = "Zoom " + vp.zoomLabel;
+  if (vp.zoomRefusal) {
+    if (zoomRefusalReason(vp) === vp.zoomRefusal) zoomLine = vp.zoomRefusal;
+    else vp.zoomRefusal = "";
+  }
+  assignText(corners.br, windowLine + "\n" + zoomLine);
   paintScale(vp);
 }
 
@@ -4243,8 +4580,59 @@ function nextUnshownKey() {
 }
 
 function fitView(vp) {
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   layoutViewport(vp);
+  copyZoom(vp);
+}
+
+// F-204. The refusal condition, re-checked from the same predicate the
+// guard evaluated: a stored frame below the device pixel ratio. The corner
+// line shows the reason only while it holds, so no stale reason survives.
+function zoomRefusalReason(vp) {
+  if (!vp.imageWidth) return "";
+  const ratio = window.devicePixelRatio || 1;
+  if (vp.imageWidth < ratio || vp.imageHeight < ratio) {
+    return "1:1 needs a frame at least the device pixel ratio big";
+  }
+  return "";
+}
+
+// F-204. Entering the one-to-one mode keeps the image centre as zoomCentre
+// does: zoomAt's pan arithmetic at the cell centre, where the offset under
+// the centre is minus the pan, moves the pan by the same factor as the
+// scale. The frame's identity scale is 1 / ratio on a square-pixel frame
+// and (1 / ratio) / aspectY on an anisotropic one, where the rows are
+// exact and the columns are resampled. `request` is false from copyZoom,
+// where an unsuitable target keeps its own mode and shows no reason.
+function enterOneToOne(vp, request) {
+  if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden || vp.tileMode) return false;
+  const reason = zoomRefusalReason(vp);
+  if (reason) {
+    if (request) {
+      vp.zoomRefusal = reason;
+      // The refusal writes this string and no layout state, and the corner
+      // is the surface that shows it, so the paint runs without a layout.
+      paintOverlays(vp);
+    }
+    return false;
+  }
+  const ratio = window.devicePixelRatio || 1;
+  // A ratio whose whole CSS pixel step is past the search cap has no
+  // device-aligned box, so the entry refuses silently and changes nothing,
+  // the same check the held-mode guard in layoutViewport applies.
+  if (!deviceStep(ratio, STEP_LIMIT)) return false;
+  const identity = (1 / ratio) / vp.aspectY;
+  const factor = identity / vp.scale;
+  vp.panX += -vp.panX * (1 - factor);
+  vp.panY += -vp.panY * (1 - factor);
+  vp.scale = identity;
+  vp.zoomMode = "one";
+  layoutViewport(vp);
+  return true;
+}
+
+function oneToOneView(vp) {
+  if (!enterOneToOne(vp, true)) return;
   copyZoom(vp);
 }
 
@@ -4258,7 +4646,7 @@ function resetView(vp) {
   vp.rotation = 0;
   vp.flipH = false;
   vp.flipV = false;
-  vp.fitMode = true;
+  vp.zoomMode = "fit";
   vp.panX = 0;
   vp.panY = 0;
   if (vp.cell === activeCell) syncControls();
@@ -4692,12 +5080,12 @@ async function scheduleLive(vp) {
   try {
     const grey = await requestGrey(image, { view: vp, window: win });
     if (token === vp.liveToken && vp.draftWindow && image === currentImage(vp)) {
-      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, fitMode: vp.fitMode };
+      const keep = { scale: vp.scale, panX: vp.panX, panY: vp.panY, zoomMode: vp.zoomMode };
       drawGrey(vp, grey);
       vp.scale = keep.scale;
       vp.panX = keep.panX;
       vp.panY = keep.panY;
-      vp.fitMode = keep.fitMode;
+      vp.zoomMode = keep.zoomMode;
       layoutViewport(vp);
     }
   } catch {}
@@ -4720,7 +5108,12 @@ function queueSlice(delta) {
 function zoomAt(vp, clientX, clientY, factor) {
   if (!vp.imageWidth || !vp.scale || vp.dom.stage.hidden) return;
   const fitted = fitScale(vp);
-  const next = clamp(vp.scale * factor, fitted * 0.05, fitted * 40);
+  // F-204. The clamp range extends to include the frame's own identity
+  // scale, so the identity is reachable by the same gestures that reach
+  // every other scale, and zooming out below it stays possible on a frame
+  // wider than its cell.
+  const identity = (1 / (window.devicePixelRatio || 1)) / vp.aspectY;
+  const next = clamp(vp.scale * factor, Math.min(fitted * 0.05, identity), Math.max(fitted * 40, identity));
   if (next === vp.scale) return;
   const rect = vp.dom.cell.getBoundingClientRect();
   const qx = clientX - (rect.left + rect.width / 2) - vp.panX;
@@ -4729,7 +5122,7 @@ function zoomAt(vp, clientX, clientY, factor) {
   vp.panX += qx * (1 - ratio);
   vp.panY += qy * (1 - ratio);
   vp.scale = next;
-  vp.fitMode = false;
+  vp.zoomMode = "free";
   layoutViewport(vp);
 }
 
@@ -4833,7 +5226,10 @@ function onPointerMove(event) {
   if (drag.markId && travel >= 5) drag.markId = "";
   const mode = drag.mode;
   if (mode === "pan") {
-    vp.fitMode = false;
+    // F-204. Pan keeps a held one-to-one mode, because the one-to-one scale
+    // does not depend on the cell size. No rounding is added to the deltas,
+    // the origin snap rounds the total laid-out position each layout.
+    vp.zoomMode = vp.zoomMode === "one" ? "one" : "free";
     vp.panX += event.clientX - drag.x;
     vp.panY += event.clientY - drag.y;
     drag.x = event.clientX;
@@ -5277,6 +5673,46 @@ function updateMag(vp, event, tile, point) {
   const shownY = tile ? tile.getBoundingClientRect().height / height : vp.scale * vp.aspectY;
   const power = 2 * ratio;
   context.translate(mag.width / 2, mag.height / 2);
+  if (!tile && vp.zoomMode === "one") {
+    // F-204. The mode's backing holds the displayed image, one device pixel
+    // per stored row and per displayed column, written at the recorded
+    // device offset, so the source is addressed in backing pixels at the
+    // displayed position of the stored point, and the rotation and flips
+    // are already in the bytes. Two magnifier pixels per backing pixel is
+    // the power the path below uses, 2 * ratio per CSS pixel.
+    const extents = oneToOneExtents(vp);
+    const turned = vp.rotation % 180 !== 0;
+    const bufU = turned ? extents.screenH : extents.screenW;
+    const bufV = turned ? extents.screenW : extents.screenH;
+    // The point is continuous, so the reflections are about the far edge,
+    // not the last pixel centre.
+    const su = vp.flipH ? vp.imageWidth - point.x : point.x;
+    const sv = vp.flipV ? vp.imageHeight - point.y : point.y;
+    const u = su * bufU / vp.imageWidth;
+    const v = sv;
+    const dx = vp.rotation === 90 ? bufV - v
+      : vp.rotation === 180 ? bufU - u
+      : vp.rotation === 270 ? v
+      : u;
+    const dy = vp.rotation === 90 ? u
+      : vp.rotation === 180 ? bufV - v
+      : vp.rotation === 270 ? bufU - u
+      : v;
+    context.scale(2, 2);
+    context.drawImage(source, -(vp.paintOffsetX + dx), -(vp.paintOffsetY + dy));
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    const local = wrap.getBoundingClientRect();
+    let left = event.clientX - local.left + 20;
+    let top = event.clientY - local.top - side - 20;
+    if (left + side > local.width) left = event.clientX - local.left - side - 20;
+    if (top < 0) top = event.clientY - local.top + 20;
+    mag.style.left = left + "px";
+    mag.style.top = top + "px";
+    mag.hidden = false;
+    mag.dataset.cell = String(vp.cell);
+    if (point.x < 0 || point.y < 0 || point.x > width || point.y > height) mag.hidden = true;
+    return;
+  }
   if (!tile) {
     context.rotate(vp.rotation * Math.PI / 180);
     context.scale(vp.flipH ? -1 : 1, vp.flipV ? -1 : 1);
@@ -6442,6 +6878,9 @@ function onKey(event) {
   } else if (event.key === "0") {
     event.preventDefault();
     fitView(vp);
+  } else if (event.key === "\\") {
+    event.preventDefault();
+    oneToOneView(vp);
   } else if (event.key === "[") {
     togglePanel("no-series");
   } else if (event.key === "]") {
@@ -7412,10 +7851,17 @@ function copyZoom(source) {
   for (const vp of shownViewports()) {
     if (vp === source || !currentImage(vp) || !vp.imageWidth) continue;
     if (vp.tileMode || vp.dom.stage.hidden) continue;
-    if (source.fitMode) {
-      vp.fitMode = true;
+    if (source.zoomMode === "one") {
+      // F-204. The source's mode propagates, and each target's own guards
+      // run against its own frame, cell and ratio. An unsuitable target
+      // keeps its own mode and scale.
+      enterOneToOne(vp, false);
+      continue;
+    }
+    if (source.zoomMode === "fit") {
+      vp.zoomMode = "fit";
     } else {
-      vp.fitMode = false;
+      vp.zoomMode = "free";
       vp.scale = fitScale(vp) * source.scale / fitted;
     }
     layoutViewport(vp);

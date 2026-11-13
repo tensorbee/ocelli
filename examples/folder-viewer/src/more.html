@@ -153,7 +153,7 @@
     <tr><th scope="row">Several series and linked scroll, window and zoom</th><td>Supported APIs and synchronizers</td><td>Built</td><td><span class="viewer-state part">Partial</span>Available on Images</td><td class="delivery">S46 preview</td></tr>
     <tr><th scope="row">RGB, YBR and palette colour</th><td>Supported, format-dependent</td><td>Built</td><td><span class="viewer-state done">Implemented</span>Supported colour shapes draw in the S46 preview</td><td class="delivery">S46 preview</td></tr>
     <tr data-features="F-263"><th scope="row">Measurements and ROI statistics</th><td>Tools supported</td><td>Built</td><td><span class="viewer-state part">Partial</span>Current tools work. Remaining tool families need viewer controls</td><td class="delivery">S48: F-263</td></tr>
-    <tr data-features="F-204"><th scope="row">One stored pixel to one device pixel</th><td>Display-area scale API</td><td>Zoom building blocks</td><td><span class="viewer-state none">Not yet</span>A dedicated one-to-one mode is missing</td><td class="delivery">S47: F-204</td></tr>
+    <tr data-features="F-204"><th scope="row">One stored pixel to one device pixel</th><td>Display-area scale API</td><td>Zoom building blocks</td><td><span class="viewer-state done">Implemented</span>Local images on Images. The core factor stays explicit</td><td class="delivery">S47: F-204</td></tr>
     <tr data-features="F-246"><th scope="row">Nearest and linear interpolation selector</th><td>Supported</td><td>Built on A, B and C</td><td><span class="viewer-state part">Partial</span>Nearest display works. No mode selector</td><td class="delivery">S48: F-246</td></tr>
     <tr data-features="F-261"><th scope="row">Between-slice stack blending</th><td>Volume resampling exists. Separate stack mode not verified</td><td>Volume resampling built</td><td><span class="viewer-state none">Not yet</span>A distinct stack-blend workflow is planned</td><td class="delivery">S49: F-261</td></tr>
     <tr data-features="F-247"><th scope="row">DICOM overlay planes and shutters</th><td>Dedicated plane and shutter parity needs verification</td><td>Reader built</td><td><span class="viewer-state none">Not yet</span>Image drawing and controls are missing</td><td class="delivery">S48: F-247</td></tr>
@@ -233,7 +233,7 @@
     <li><a href="#auto-window">Automatic window</a><span class="mark">implemented</span></li>
     <li><a href="#metadata">Metadata browser</a><span class="mark">partial</span></li>
     <li><a href="#conformance">Conformance report</a><span class="mark">implemented</span></li>
-    <li><a href="#one">One to one</a><span class="mark">not yet</span></li>
+    <li><a href="#one">One to one</a><span class="mark">implemented</span></li>
     <li><a href="#preferences">Preferences</a><span class="mark">partial</span></li>
     <li><a href="#jpegxl">JPEG XL</a><span class="mark">partial</span></li>
     <li><a href="#worker">Browser worker decode</a><span class="mark">not yet</span></li>
@@ -523,16 +523,17 @@ let json = report.to_json();               // read by readConformanceReport</cod
 
   <section class="feature" id="one">
     <h2>One to one</h2>
-    <span class="status none">Not yet in the viewer.</span>
-    <p>One to one shows each stored pixel as exactly one screen pixel, so nothing is resampled and fine texture is seen as acquired.</p>
-    <p class="where">There is no code for it. A <code>Zoom</code> command in <code>@ocelli/core</code> scales the camera by a factor, and nothing computes the factor that maps one stored pixel to one device pixel.</p>
+    <span class="status done">Implemented on Images.</span>
+    <p>One to one shows each stored pixel on one device pixel, so on a frame with square pixels nothing is resampled and fine texture is seen as acquired. On a frame whose pixels are not square the rows are one device row each and the columns are resampled, which the corner line says. It covers the local images the page draws from files and folders.</p>
+    <p class="where">The factor is computed in the page from the device pixel ratio. In the mode the canvas is a whole CSS pixel box sized up past its cell, the smallest whole multiple of the ratio's whole CSS pixel step that covers the cell plus one step for the alignment shift, so its size times the ratio is whole, its backing has that many device pixels, and the stored pixels are written into the backing one to one, as cornerstone3D 5.8.2 sizes its backing at the device resolution. The cell's own clipping cuts the box's excess, so no part of the cell inside the frame is left unpainted. A <code>Zoom</code> command in <code>@ocelli/core</code> keeps taking an explicit factor and no core command names the device grid. The mode is entered with the toolbar button beside Fit or the <code>\</code> key, and the corner line reads Zoom 1:1. On a frame whose pixels are not square the rows are one device row each and the columns are resampled by nearest sampling, and the corner line reads Zoom 1:1 rows. Pan keeps the mode, and the wheel, the zoom keys and a zoom drag reach the scale and leave it like any other. On a frame wider than its cell, zooming out from one to one goes below it. A stored frame smaller than the device pixel ratio keeps its view, and the corner line shows the reason while that holds. Opening another series and Reset return to fit.</p>
 <details class="api-details"><summary>Library API details</summary>
 <pre><code>import { packCommands, viewportId } from "@ocelli/core";
 
-// What exists: an explicit zoom factor. It is not a one to one mode.
+// The core keeps an explicit zoom factor. The page computes the factor that
+// maps one stored pixel to one device pixel and no core command names it.
 packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 </details>
-    <p class="tiers">The example page reads One to one unavailable.</p>
+    <p class="tiers">Tiers A, B and C are not applicable, because the mode is the page's own write of the decoded display bytes into its canvas and the render path is unchanged on every tier. The example page shows One to one on the Images page, with the button beside Fit and the <code>\</code> key. On a frame with square pixels the mode is verified byte for byte in screenshots under the emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is DevTools device scale emulation and not a physical display.</p>
   </section>
 
   <section class="feature" id="preferences">
