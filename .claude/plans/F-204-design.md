@@ -1709,3 +1709,16 @@ Departures (a) to (c) of the implementation report are withdrawn.
 README and More say the mode is verified byte for byte under emulated
 ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, and the More row moves to
 Implemented only when every restored byte row passes.
+
+## Lead amendment after implementation review pass 2, 2026-11-13
+
+The mode's box is sized up, never down: on each axis the smallest whole
+multiple of the ratio's step that covers the cell, plus one step so the
+alignment shift still covers it, clipped by the cell's existing
+`overflow: hidden`. No part of the cell inside the drawn frame is left
+unpainted, and the `1:1 needs a larger view` refusal, its case and its README
+and More sentences are removed, matching cornerstone3D 5.8.2, which never
+refuses for cell size. A flag records that the backing holds the mode buffer,
+and leaving the mode by any path restores the stored-size backing whenever
+that flag is set. The corner shows a refusal reason only while the condition
+that produced it still holds.
