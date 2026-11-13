@@ -4,7 +4,9 @@
 // fixtures, all 8-bit explicit VR little endian MONOCHROME2, no Modality LUT
 // and no rescale, Window Center 128, Window Width 256, VOI LUT Function
 // LINEAR, written like window.mjs's MR file so the non-CT window list has
-// the file window as its one row.
+// the file window as its one row. An eighth, the leave restore fixture, is
+// written after the default cell is measured, sized so the mode's box there
+// times the ratio is its stored frame on both axes.
 //
 //   P    128 by 96, no Pixel Spacing. Stored (x, y) is
 //        (x * 29 + y * 57) mod 251, except (127, 95) which stores 255 so the
@@ -52,17 +54,20 @@
 // same values on every host. It is registered in the viewer-browser gate
 // before launcher.mjs, which stays last.
 //
-// The mode draws into a device-sized backing, per the lead amendment after
-// implementation pass 1: the canvas element is sized in whole CSS pixels to
-// its cell, the backing is that box times the device pixel ratio, and the
-// page writes the stored pixels one to one at an integer device offset that
-// carries the centring, the pan and the snap, with rotation and flips by
-// index. The suite never reads the page's own record of where it painted.
-// Every painted box and origin is observed: the opaque box in the backing,
-// placed by the canvas element's laid-out position. Every byte row crops a
-// device scale screenshot at that observed origin, an exact integer offset,
-// never by a search, so a compositor that moved or resampled the backing
-// fails the row.
+// The mode draws into a device-sized backing, per the lead amendments after
+// implementation passes 1 and 2: the canvas element is sized in whole CSS
+// pixels up past its cell, the smallest whole multiple of the ratio's step
+// that covers the cell plus one step for the alignment shift, the backing is
+// that box times the device pixel ratio, and the page writes the stored
+// pixels one to one at an integer device offset that carries the centring,
+// the pan and the snap, with rotation and flips by index. The suite never
+// reads the page's own record of where it painted. Every painted box and
+// origin is observed: the opaque box in the backing, placed by the canvas
+// element's laid-out position. Every byte row crops a device scale
+// screenshot at an exact integer offset, never by a search, so a compositor
+// that moved or resampled the backing fails the row. The box's excess is
+// clipped by the cell, so the coverage and panned edge rows crop the opaque
+// box's visible part, inset one device pixel from the cell edges.
 
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";

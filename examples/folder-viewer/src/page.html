@@ -3647,15 +3647,15 @@ function deviceStep(ratio, limit) {
 
 // The search cap for the ratio's whole CSS pixel step, the same bound the
 // one-to-one suite's stepFor uses. A ratio with no step under it has no
-// device-aligned box at any cell size.
+// device-aligned box under the cap.
 const STEP_LIMIT = 2000;
 
 // The box the mode draws into, sized up, never down: the smallest whole
 // multiple of the ratio's step that covers the cell side, plus one step so
 // the alignment shift still covers it, clipped by the cell's own overflow
 // hidden. No part of the cell inside the drawn frame is left unpainted,
-// which the byte rows of one-to-one.mjs check. 0 when no step exists up to
-// the cap, the one case where no device-aligned box exists at all.
+// which the coverage and panned edge rows of one-to-one.mjs check. 0 when
+// no step exists up to the cap.
 function oneToOneBox(side, ratio) {
   const whole = Math.floor(side);
   const step = deviceStep(ratio, STEP_LIMIT);
@@ -3774,11 +3774,10 @@ function layoutViewport(vp) {
   // a frame change or a ratio change that leaves the stored frame smaller
   // than the device pixel ratio drops to fit before any style write, and
   // so does a ratio whose whole CSS pixel step is past the search cap,
-  // where no device-aligned box exists at any cell size. The drop shows no
-  // reason, because nothing claims 1:1 any more. The cell size itself is no
-  // guard: the box is sized up past the cell and the cell's overflow
-  // hidden clips it, matching cornerstone3D 5.8.2, which never refuses for
-  // cell size.
+  // where the box rule finds no step. The drop shows no reason, because
+  // nothing claims 1:1 any more. The cell size itself is no guard: the box
+  // is sized up past the cell and the cell's overflow hidden clips it,
+  // matching cornerstone3D 5.8.2, which never refuses for cell size.
   if (vp.zoomMode === "one") {
     const cellBox = dom.cell.getBoundingClientRect();
     if (vp.imageWidth < ratio || vp.imageHeight < ratio
