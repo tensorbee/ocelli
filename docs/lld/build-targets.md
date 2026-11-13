@@ -967,10 +967,10 @@ stops it by its PID, and drives the one-to-one mode in headless Chromium at
 device pixel ratios 1, 1.25, 1.5, 2, 3 and the four ulp probes. It observes
 the painted box as the opaque box in the canvas backing and reads device
 pixels through a screenshot clip on the device-aligned grid decoded in-page,
-cropped at that observed origin, and for the rows whose box exceeds the cell
-cropped to the opaque box's visible part inside the cell. It is registered
-in the `viewer-browser` gate's module
-list immediately before `launcher.mjs`, which stays last. `eslint.config.js`
+cropped at that observed origin, and for the rows whose picture exceeds the
+cell cropped to the opaque box's visible part inside the cell. It is
+registered in the `viewer-browser` gate's module list immediately before
+`launcher.mjs`, which stays last. `eslint.config.js`
 gains `fitScale`, `clientToImage`, `Image` and `MediaQueryList` in that
 suite's existing browser context, with no rule disabled and no allowlist
 widened.

@@ -3654,10 +3654,10 @@ const STEP_LIMIT = 2000;
 // multiple of the ratio's step that covers the cell side, plus one step so
 // the alignment shift still covers it, clipped by the cell's own overflow
 // hidden. No part of the cell inside the drawn frame is left unpainted,
-// which the coverage and panned edge rows of one-to-one.mjs check. 0 when
+// which the reach rows of one-to-one.mjs check. 0 when
 // no step exists up to the cap.
 function oneToOneBox(side, ratio) {
-  const whole = Math.floor(side);
+  const whole = Math.ceil(side);
   const step = deviceStep(ratio, STEP_LIMIT);
   if (!step) return 0;
   return Math.ceil(whole / step) * step + step;
@@ -4233,6 +4233,10 @@ function enterOneToOne(vp, request) {
     return false;
   }
   const ratio = window.devicePixelRatio || 1;
+  // A ratio whose whole CSS pixel step is past the search cap has no
+  // device-aligned box, so the entry refuses silently and changes nothing,
+  // the same check the held-mode guard in layoutViewport applies.
+  if (!deviceStep(ratio, STEP_LIMIT)) return false;
   const identity = (1 / ratio) / vp.aspectY;
   const factor = identity / vp.scale;
   vp.panX += -vp.panX * (1 - factor);

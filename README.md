@@ -477,8 +477,8 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    mode, and zooming reaches the scale and leaves it like any other, so on a
    frame wider than its cell zooming out from one to one goes below it. A
    stored frame smaller than the device pixel ratio keeps its view, and the
-   corner line shows the reason while that holds, until the frame or the
-   ratio changes. Opening another series and Reset return to fit. The
+   corner line shows the reason while that holds. Opening another series and
+   Reset return to fit. The
    viewport clips an image that is larger than the pane.
 8. Headers shows the data set as stored. A count on the Headers button is the
    number of findings in the shown file's conformance report, whether the file

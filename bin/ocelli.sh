@@ -218,9 +218,10 @@ run_gate() {
     # ratios too, its inverse after an invert redraws the same frame, and its
     # permutation under each rotation and flip. The anisotropic rows draw one
     # device row per stored row with the columns an in-order subsample, the
-    # magnifier shows the stored pixel under the pointer, and the clamp, both
-    # refusal reasons, the link and the ratio watcher behave as the design
-    # states. F-245's launcher.mjs check is last: the page is served through
+    # magnifier shows the stored pixel under the pointer, and the clamp, the
+    # below-ratio refusal reason, the link and the ratio watcher behave as
+    # the design states. F-245's launcher.mjs check is last: the page is
+    # served through
     # the real npm launcher under a custom CARGO_TARGET_DIR, boots in
     # Chromium, is byte-identical to the native start, and the owned stop
     # leaves the port closed. Chained on `&&` because a case arm returns the

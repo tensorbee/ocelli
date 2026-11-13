@@ -753,6 +753,71 @@ async function floorMissCell(page, edge) {
 }
 
 /**
+ * Walk the viewport width down from the default until the box a floored
+ * cell side produces, centred in the measured cell and snapped to the step
+ * grid the way the mode's alignment lands, would leave a horizontal cell
+ * edge unpainted by more than the reach epsilon, while the sized up box
+ * covers that edge. The centred position is first quantised to the engine's
+ * 1/64 CSS pixel layout grid, which is what the frame's flex position gets.
+ * The middle cell of a three by three layout has fractional edges that
+ * cycle with the viewport width, so the walk finds one. Returns the
+ * measured cell.
+ */
+async function flooredSideMissCell(page) {
+  for (let width = 1600; width >= 1440; width -= 1) {
+    await page.setViewportSize({ width, height: VIEWPORT.height });
+    const cell = await page.evaluate(() => {
+      const box = activeViewport().dom.cell.getBoundingClientRect();
+      return { x: box.x, y: box.y, w: box.width, h: box.height, dpr: window.devicePixelRatio };
+    });
+    const step = stepFor(cell.dpr);
+    const laid = (value) => Math.round(value * 64) / 64;
+    const floored = Math.ceil(Math.floor(cell.w) / step) * step + step;
+    const sized = Math.ceil(Math.ceil(cell.w) / step) * step + step;
+    const flooredLeft = Math.round(laid(cell.x + cell.w / 2 - floored / 2) / step) * step;
+    const sizedLeft = Math.round(laid(cell.x + cell.w / 2 - sized / 2) / step) * step;
+    const flooredLeftMiss = (flooredLeft - cell.x) * cell.dpr;
+    const flooredRightMiss = (cell.x + cell.w - (flooredLeft + floored)) * cell.dpr;
+    const sizedLeftCover = (cell.x - sizedLeft) * cell.dpr;
+    const sizedRightCover = (sizedLeft + sized - (cell.x + cell.w)) * cell.dpr;
+    const leftMisses = flooredLeftMiss > EDGE_EPSILON && sizedLeftCover > -EDGE_EPSILON;
+    const rightMisses = flooredRightMiss > EDGE_EPSILON && sizedRightCover > -EDGE_EPSILON;
+    if (leftMisses || rightMisses) return cell;
+  }
+  throw new Error("no viewport width makes a floored side box miss a horizontal cell edge while the sized up box covers it");
+}
+
+/**
+ * Walk the viewport height down from the default until a box drawn without
+ * the extra alignment step, centred in the measured cell and snapped to the
+ * step grid the way the mode's alignment lands, would leave the cell's
+ * bottom edge unpainted by more than the reach epsilon, while the sized up
+ * box covers it. The centred position is first quantised to the engine's
+ * 1/64 CSS pixel layout grid, which is what the frame's flex position gets.
+ * The middle cell of a three by three layout has a fractional top and
+ * height that cycle with the viewport height, so the walk finds one.
+ * Returns the measured cell.
+ */
+async function extraStepMissCell(page) {
+  for (let height = 1000; height >= 900; height -= 1) {
+    await page.setViewportSize({ width: VIEWPORT.width, height });
+    const cell = await page.evaluate(() => {
+      const box = activeViewport().dom.cell.getBoundingClientRect();
+      return { x: box.x, y: box.y, w: box.width, h: box.height, dpr: window.devicePixelRatio };
+    });
+    const step = stepFor(cell.dpr);
+    const laid = (value) => Math.round(value * 64) / 64;
+    const shortBox = Math.ceil(Math.ceil(cell.h) / step) * step;
+    const sized = shortBox + step;
+    const shortBottom = Math.round(laid(cell.y + cell.h / 2 - shortBox / 2) / step) * step + shortBox;
+    const sizedBottom = Math.round(laid(cell.y + cell.h / 2 - sized / 2) / step) * step + sized;
+    if ((cell.y + cell.h - shortBottom) * cell.dpr > EDGE_EPSILON
+      && (sizedBottom - (cell.y + cell.h)) * cell.dpr > -EDGE_EPSILON) return cell;
+  }
+  throw new Error("no viewport height makes a box without the extra step miss the cell's bottom edge while the sized up box covers it");
+}
+
+/**
  * The device bytes of the opaque box's visible part: the box's own opaque
  * extent intersected with the cell's device extent, inset one device pixel
  * from the cell edges, because the cell's overflow hidden clips the box and
@@ -974,6 +1039,116 @@ export function pannedEdgeProblems(readings) {
       }
     }
     problems.push(...byteProblems(name, { grey: crop.grey }, want, crop.width));
+  }
+  return problems;
+}
+
+// The sized-up box reaches a fractional middle cell edge. In a three by
+// three layout the middle cell's edges are fractional, and a rule that
+// floors the cell side before taking the step multiple loses the extra
+// alignment step there. The walk finds a viewport width where the floored
+// side rule provably misses a horizontal cell edge by more than the reach
+// epsilon while the sized up rule covers it, then the row asserts the sized
+// up box on both axes: fixture E's 2048 columns are wider than the cell, so
+// the opaque box in the backing spans the cell's width, and the canvas
+// element's own box pins the cell's height.
+export async function observeMiddleCell(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 2, async (page) => {
+      await openFolder(page, url, folder);
+      await page.locator("#layout").click();
+      await page.locator('#layout-picker [data-columns="3"][data-rows="3"]').click();
+      await page.locator("#series-list button", { hasText: "#6" }).first().dragTo(page.locator('.cell[data-cell="4"]'));
+      await page.waitForFunction(() => viewports[4].imageWidth === 2048, null, { timeout: 20000 });
+      await page.locator('.cell[data-cell="4"]').click();
+      await flooredSideMissCell(page);
+      await page.keyboard.press("\\");
+      return view(page, 4);
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function middleCellProblems(seen) {
+  const problems = [];
+  if (!seen) {
+    problems.push("the middle cell case was not observed");
+    return problems;
+  }
+  if (seen.mode !== "one") {
+    problems.push(`the middle cell mode is ${seen.mode}, not one`);
+    return problems;
+  }
+  if (seen.paintX === null) {
+    problems.push("the middle cell backing holds no opaque pixels");
+    return problems;
+  }
+  const left = seen.cellX * seen.dpr;
+  const right = (seen.cellX + seen.cellW) * seen.dpr;
+  if (seen.paintX > left + EDGE_EPSILON || seen.paintX + seen.paintW < right - EDGE_EPSILON) {
+    problems.push(`the middle cell opaque box ${seen.paintX} to ${seen.paintX + seen.paintW} device px does not reach the cell edges ${left.toFixed(3)} to ${right.toFixed(3)}`);
+  }
+  const top = seen.cellY * seen.dpr;
+  const bottom = (seen.cellY + seen.cellH) * seen.dpr;
+  if (seen.y * seen.dpr > top + EDGE_EPSILON || (seen.y + seen.h) * seen.dpr < bottom - EDGE_EPSILON) {
+    problems.push(`the middle cell box ${(seen.y * seen.dpr).toFixed(3)} to ${((seen.y + seen.h) * seen.dpr).toFixed(3)} device px does not reach the cell edges ${top.toFixed(3)} to ${bottom.toFixed(3)}`);
+  }
+  return problems;
+}
+
+// The sized-up box reaches a panned bottom edge. The picture is dragged
+// down by half the cell plus 10 CSS pixels, which puts its bottom edge past
+// the backing's bottom while its top stays inside the backing, so the
+// observed opaque box reaches the cell's bottom device edge only when the
+// box itself covers the cell. The walk finds a viewport height where a box
+// drawn without the extra alignment step provably misses that edge by more
+// than the reach epsilon while the sized up box covers it.
+export async function observeBottomEdge(url, chromium, folder) {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    return await withPage(browser, 1.25, async (page) => {
+      await openFolder(page, url, folder);
+      await page.locator("#layout").click();
+      await page.locator('#layout-picker [data-columns="3"][data-rows="3"]').click();
+      await page.locator("#series-list button", { hasText: "#1" }).first().dragTo(page.locator('.cell[data-cell="4"]'));
+      await page.waitForFunction(() => viewports[4].imageWidth === 128, null, { timeout: 20000 });
+      await page.locator('.cell[data-cell="4"]').click();
+      await extraStepMissCell(page);
+      await page.keyboard.press("\\");
+      await page.keyboard.press("p");
+      const box = await page.locator('.cell[data-cell="4"] canvas.view').boundingBox();
+      const cell = await page.evaluate(() => activeViewport().dom.cell.getBoundingClientRect());
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + cell.height / 2 + 10, { steps: 8 });
+      await page.mouse.up();
+      await page.mouse.move(2, 2);
+      return view(page, 4);
+    });
+  } finally {
+    await browser.close();
+  }
+}
+
+export function bottomEdgeProblems(seen) {
+  const problems = [];
+  if (!seen) {
+    problems.push("the bottom edge case was not observed");
+    return problems;
+  }
+  if (seen.mode !== "one") {
+    problems.push(`the bottom edge mode is ${seen.mode}, not one`);
+    return problems;
+  }
+  if (seen.paintY === null) {
+    problems.push("the bottom edge backing holds no opaque pixels");
+    return problems;
+  }
+  const bottom = (seen.cellY + seen.cellH) * seen.dpr;
+  if (seen.paintY + seen.paintH < bottom - EDGE_EPSILON) {
+    problems.push(`the bottom edge opaque box ends at ${seen.paintY + seen.paintH} device px, short of the cell's bottom edge ${bottom.toFixed(3)}`);
   }
   return problems;
 }
@@ -1542,7 +1717,18 @@ export async function observeRefusals(url, chromium, folder) {
         };
       });
     });
-    return { tiled, empty };
+    // The silent refusal when the ratio's whole CSS pixel step is past the
+    // search cap: the key changes nothing, so the mode, the scale and the
+    // label are read before and after at a ratio that has no step under it.
+    const noStep = await withPage(browser, 1.0001, async (page) => {
+      await openFolder(page, url, folder);
+      await page.keyboard.press("=");
+      const before = await view(page);
+      await page.keyboard.press("\\");
+      const after = await view(page);
+      return { before, after };
+    });
+    return { tiled, empty, noStep };
   } finally {
     await browser.close();
   }
@@ -1558,6 +1744,19 @@ export function refusalProblems(seen) {
   if (seen.tiled.mode !== "fit") problems.push(`the tile mode control left the mode ${seen.tiled.mode}`);
   if (seen.empty.faultShown) problems.push("the control showed a fault with no image drawn");
   if (seen.empty.mode !== "fit") problems.push(`the control with no image drawn left the mode ${seen.empty.mode}`);
+  if (!seen.noStep) {
+    problems.push("the no step case was not observed");
+  } else {
+    if (seen.noStep.after.mode !== seen.noStep.before.mode) {
+      problems.push(`the no step control moved the mode from ${seen.noStep.before.mode} to ${seen.noStep.after.mode}`);
+    }
+    if (seen.noStep.after.scale !== seen.noStep.before.scale) {
+      problems.push(`the no step control moved the scale from ${seen.noStep.before.scale} to ${seen.noStep.after.scale}`);
+    }
+    if (seen.noStep.after.label !== seen.noStep.before.label) {
+      problems.push(`the no step control moved the label from ${JSON.stringify(seen.noStep.before.label)} to ${JSON.stringify(seen.noStep.after.label)}`);
+    }
+  }
   return problems;
 }
 
@@ -1952,6 +2151,8 @@ async function main() {
       pixels: await observePixels(server.url, chromium, folder),
       coverage: await observeCoverage(server.url, chromium, folder),
       pannedEdge: await observePannedEdge(server.url, chromium, folder),
+      middleCell: await observeMiddleCell(server.url, chromium, folder),
+      bottomEdge: await observeBottomEdge(server.url, chromium, folder),
       labelAndSeries: await observeLabelAndSeries(server.url, chromium, folder),
       ratioWatcher: await observeRatioWatcher(server.url, chromium, folder),
       clamp: await observeClamp(server.url, chromium, folder),
@@ -1977,6 +2178,8 @@ async function main() {
   console.log(`label: ${JSON.stringify(seen.labelAndSeries.inMode.cornerLast)}, after drag ${JSON.stringify(seen.labelAndSeries.afterDrag.label)}, fit ${seen.labelAndSeries.afterFitButton.mode}, zero ${seen.labelAndSeries.afterZeroKey.mode}, series ${seen.labelAndSeries.afterSeries.mode}`);
   console.log(`coverage: ${seen.coverage.map((reading) => `${reading.name} opaque ${reading.paintW} device px`).join(", ")}`);
   console.log(`panned edge: ${seen.pannedEdge.map((reading) => `${reading.name} opaque ends ${reading.paintX + reading.paintW}`).join(", ")}`);
+  console.log(`middle cell: painted ${seen.middleCell.paintW} by ${seen.middleCell.paintH} device px at (${seen.middleCell.paintX}, ${seen.middleCell.paintY})`);
+  console.log(`bottom edge: opaque ends ${(seen.bottomEdge.paintY + seen.bottomEdge.paintH).toFixed(3)} device px, mode ${seen.bottomEdge.mode}`);
   console.log(`ratio watcher: arms ${seen.ratioWatcher.armsAfterTwo} and ${seen.ratioWatcher.armsAfterOne}, resizes ${seen.ratioWatcher.resizeEvents}, probes ${seen.ratioWatcher.probes.map((probe) => `${probe.factor}:${probe.rendering}`).join(" ")}`);
   console.log(`clamp small: fitted ${seen.clamp.small.fitted.toFixed(4)}, identity painted ${seen.clamp.small.identity.paintW}, settled ${(seen.clamp.small.afterOut.w * seen.clamp.small.afterOut.dpr).toFixed(3)}`);
   console.log(`clamp large: fitted ${seen.clamp.large.fitted.toFixed(6)}, identity painted ${seen.clamp.large.identity.paintW}, settled ${(seen.clamp.large.afterOut.w * seen.clamp.large.afterOut.dpr).toFixed(3)}`);
@@ -1992,6 +2195,8 @@ async function main() {
     .concat(pixelProblems(seen.pixels))
     .concat(coverageProblems(seen.coverage))
     .concat(pannedEdgeProblems(seen.pannedEdge))
+    .concat(middleCellProblems(seen.middleCell))
+    .concat(bottomEdgeProblems(seen.bottomEdge))
     .concat(labelAndSeriesProblems(seen.labelAndSeries))
     .concat(ratioWatcherProblems(seen.ratioWatcher))
     .concat(clampProblems(seen.clamp))
