@@ -138,7 +138,7 @@ bin/ocelli.sh gate --sprint        # sprint verification, every gate, no excepti
 bin/ocelli.sh gate --all           # everything, including oracle and corpus
 bin/ocelli.sh wasm                 # wasm-pack build + size budget
 bin/ocelli.sh oracle               # the differential harness (needs a GPU)
-npm run dev                        # the example viewer
+npm run dev                        # the folder viewer, the showcase
 ```
 
 Everything runs natively. There is no container path, because a container has

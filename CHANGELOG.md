@@ -18,7 +18,9 @@ Repository bootstrap. Nothing is published.
 - The local viewer shows scoped DICOM conformance findings without exposing file values in findings or stopping display.
 - The local folder viewer has a one-to-one zoom mode, the `\` key or the One to one button, in which one stored pixel is one device pixel: it draws into a backing sized to the cell in device pixels, as cornerstone3D 5.8.2 does, verified byte for byte in screenshots under emulated device pixel ratios 1, 1.25, 1.5 and 2, labels non-square pixels `Zoom 1:1 rows`, and refuses a frame smaller than the device pixel ratio by name.
 - The local folder viewer keeps its mouse profile, play rate, side columns and a default CT window preset in one versioned, validated browser record for the same address, names every stored value it refuses and every choice it could not keep, applies a default preset once per series load with no second window drawn, and stores nothing about a patient or a folder.
-- The GPU window stage now draws the same display values as the CPU LUT chain on a backend that fuses multiply and add: integer frames read a folded modality table computed by `ocelli-pixel`, and other frames pre-apply the rescale before upload.
+- The GPU's modality stage, stage 1, now gives the bits of `ocelli_pixel::modality` on a backend that fuses multiply and add: integer frames read a folded modality table it computes, and other frames pre-apply the rescale before upload. The window functions keep their measured divergence from the CPU chain, at most two f32 ULP at 255 in one recorded sweep on a Metal tier A adapter, recorded in `docs/lld/pixel-pipeline.md`.
+- The folder viewer has a DICOMweb source that browses studies, series and instances through a configured service, and `@ocelli/core` exports `DicomwebProvider` and its types for it. Remote images are not displayed yet.
+
 - On an enhanced multiframe CT or MR the local folder viewer's corners show the shown frame's own slice thickness, kVp, mAs, TR and TE from its functional groups, with the top-level attribute first when it carries a usable value.
 - Compressed DICOM files with an empty Basic Offset Table open, including frames spanning fragments when their JPEG or JPEG 2000 markers prove the boundaries.
 
@@ -727,6 +729,7 @@ Repository bootstrap. Nothing is published.
 
 ### Changed
 
+- `npm run dev` now starts the folder viewer, the showcase. The React boundary demo moved to `npm run dev:boundary-demo`.
 - Shipped native builds now compile no Metal backend and no objc2 crate, proven per Apple target by the resolved dependency graph, and the desktop reports an explicit no-backend result instead of panicking when no backend is compiled. Development builds keep Metal for the tier A gate.
 - Every public options and request object in `@ocelli/core` now refuses an
   unknown key with `OcelliError` code `UnknownOption`, naming the key, before

@@ -204,8 +204,9 @@ run_gate() {
     # its own TR and TE from its reply headers. F-224's
     # changed-file check follows: a file rewritten on disk after the folder
     # was opened is refused rather than shown, choosing the folder again
-    # shows the new bytes, and the probe reads one byte a file. F-245's
-    # dicomweb.mjs check follows: a synthetic DICOMweb upstream is browsed
+    # shows the new bytes, and the probe reads one byte a file. After the
+    # marks, conformance, colour and auto checks, F-245's dicomweb.mjs
+    # check follows: a synthetic DICOMweb upstream is browsed
     # from the page, a refused and a validated instance leave the local image
     # untouched, a pending fetch that a local source change cancels never
     # labels that changed image, and the served More row states the partial

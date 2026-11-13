@@ -931,7 +931,7 @@ script, starts the release viewer with `OCELLI_PORT` and stops it by its PID.
 The suite picks its own port, so the gate command is plain
 `node examples/folder-viewer/tests/browser/dicomweb.mjs` with no port in the
 environment. It is registered in the `viewer-browser` gate's module list in
-`bin/ocelli.sh`, and the ten modules before it are unchanged.
+`bin/ocelli.sh` after `auto.mjs` and before `one-to-one.mjs`.
 
 `examples/folder-viewer/tests/browser/launcher.mjs` is the launcher's browser
 control. It starts the viewer the way a user does, through `npm run dev`, with
@@ -951,7 +951,7 @@ status and source chooser, fetches the same page from a plain native start of
 the release binary, and asserts the two bodies are identical. It signals the
 npm process group by the npm PID and asserts the port stops serving, so a
 backend orphaned by an unhandled signal fails the suite. It is registered in
-the `viewer-browser` gate's module list last, after `dicomweb.mjs`.
+the `viewer-browser` gate's module list last, after `preferences.mjs`.
 
 `eslint.config.js` gains one comment-conditional globals entry for that
 suite's in-page globals, `crypto`, `sessionDocuments`, `cacheGeneration` and
@@ -969,8 +969,8 @@ the painted box as the opaque box in the canvas backing and reads device
 pixels through a screenshot clip on the device-aligned grid decoded in-page,
 cropped at that observed origin, and for the rows whose picture exceeds the
 cell cropped to the opaque box's visible part inside the cell. It is
-registered in the `viewer-browser` gate's module list immediately before
-`launcher.mjs`, which stays last. `eslint.config.js`
+registered in the `viewer-browser` gate's module list after `dicomweb.mjs` and
+before `preferences.mjs` and `launcher.mjs`, which stays last. `eslint.config.js`
 gains `fitScale`, `clientToImage`, `Image` and `MediaQueryList` in that
 suite's existing browser context, with no rule disabled and no allowlist
 widened.

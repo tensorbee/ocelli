@@ -7,19 +7,19 @@
 
 | F-ID | Epic ref | Story | Layer | Est | Status |
 |------|----------|-------|-------|-----|--------|
-| F-202 | E38.12 | Worker decode and owned frame render in the single showcase viewer | All | 6w | pending |
+| F-202 | E38.12 | Worker decode and owned frame render in the single showcase viewer | All | 6w | carried |
 | F-204 | E38.14 | One stored pixel per device pixel in the single showcase viewer | All | 2w | done |
 | F-205 | E38.15 | Validated shared preferences in the single showcase viewer | All | 3w | done |
 | F-235 | E6.9 | VOI shader stage 1 matches LutChain on every tier | Rust | 2w | done |
-| F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | pending |
-| F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | integrated, AC8 owed |
+| F-241 | E4.11 | DICOM video in the folder viewer and @ocelli/core | All | 12w | carried |
+| F-245 | E38.40 | One showcase viewer for local, DICOMweb and future user-facing workflows | All | 4w | carried |
 | F-266 | E38.61 | Built example viewer loads its core from its own output | TS | 1w | done |
 | F-267 | E38.62 | Folder viewer corners on enhanced multiframe CT and MR | Rust | 2w | done |
 | F-268 | E19.8 | Rustdoc links resolve | Build | 1w | done |
 | F-269 | E4.14 | Vendored ritk-codecs JPEG-LS comments audited against ITU-T T.87 | Rust | 1w | done |
 | F-272 | E2.8 | Oracle tests write nothing into the checkout | Test | 1w | done |
-| F-273 | E38.64 | Reference scalar normalization for the equipped comparison | All | 3w | in-progress |
-| F-278 | E38.68 | Comparison page states what it is | TS | 1w | pending |
+| F-273 | E38.64 | Reference scalar normalization for the equipped comparison | All | 3w | carried |
+| F-278 | E38.68 | Comparison page states what it is | TS | 1w | carried |
 
 **The Status column above is hand-typed from run state at the S47 sync and
 nothing derives it, so it goes stale.** `docs/sprints/BACKLOG.md` is the
@@ -111,4 +111,9 @@ C.7.6.3.1.2 gives partial range.
 - **F-241** carried to S48: phases 1 and 2, the library extraction, demux, stream interface, 4:2:0 conversion and the WebCodecs bridge in a third wasm module, are on `work/f-241-glm` under review, and Approach items 6 to 9 (the `@ocelli/core` video source, the folder viewer part, the synthetic corpus rows and the bench subject) and the browser and equipped-host rows AC10 to AC13, AC16 and AC22 to AC26 remain.
 - **F-273** carried to S48: the equipped reference scalar normalization stays on the bounded-packet path under the real-study hold, and nothing in S47 could complete its acceptance.
 - **F-278** carried to S48: its approved plan depends on F-273, which carries.
-- **F-245** carried to S48 with AC8 owed: the story is integrated at `ac962c64`, and its AC8 performance acquisition ran on 2026-11-13 with the host not established idle, by the operator's choice, so under the plan's lead amendment it is a disclosed observation and not AC8 evidence. Before at `1f2809c0` and after at `ac962c64`, same instrument and host class, every subject within its band except viewer.open moving 6.7 percent better before: open 950 and 963 ms, first image 10.3 and 10.1 ms, window step 2.7 and 2.3 ms, scroll 109.09 and 109.09 fps, resident memory 474841088 and 458735616 bytes, with the one-minute load between 6.1 and 8.2 and a GLM build and three McAfee scanners running. AC8 is taken again on an idle host.
+- **F-245** carried to S48 with AC8 owed: the story is integrated at `ac962c64`, and its AC8 performance acquisition ran on 2026-11-13 with the host not established idle, by the operator's choice, so under the plan's lead amendment it is a disclosed observation and not AC8 evidence. Before at `1f2809c0` and after at `ac962c64`, same instrument and host class, every subject within its band except viewer.open moving 6.7 percent better before: open 950 and 963 ms, first image 10.3 and 10.1 ms, window step 2.7 and 2.3 ms, scroll 109.09 and 109.09 fps, resident memory 474841088 and 458735616 bytes, with the one-minute load between 6.1 and 8.2 and a GLM build and three McAfee scanners running. AC8 is taken again on an idle host, and the in-source vitest blocks its `dicomweb-viewer.ts` leaves in `packages/core/dist` are removed from the built package.
+
+The carried rows stay allocated to S47 until the close, because the close preflight requires the run's story set to equal the S47 allocation. `/sync-sprint S48` moves F-202, F-241, F-245, F-273 and F-278 to S48 in `docs/sprints/allocation.json`, BACKLOG, `SPRINT_PLAN.md` and the More page's schedule before it builds S48's story table.
+
+Whole-sprint review pass 1 dispositions: the six defects and nitpicks 1 to 5 are corrected in the tree. Nitpick 6, the guard catalogue docstring, is kept, because it states what F-191's plan said, which stays true. Nitpick 7, the vitest blocks left in `packages/core/dist` by `includeSource`, are F-245's in-source tests, so they are removed under F-245, which carries to S48 and is named for it in its carried reason, and publication stays blocked by D-22 meanwhile.
+

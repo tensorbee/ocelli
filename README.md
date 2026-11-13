@@ -393,7 +393,7 @@ OCELLI_PORT=8742 cargo run --release -p ocelli-folder-viewer
    Recommended Display Frame Rate or Cine Rate the local process refuses, or a file
    whose frames this page could not read. A step that takes longer than the
    interval is not skipped, so play can run slower than the file asks, and the
-   line says so. The FPS control runs from 1 to 30 and starts at 10.
+   line says so. The FPS control runs from 1 to 30 and starts at 10 by default.
 6. The toolbar is a row of icons. Point at one to see its name, its key and
    what it does. The groups are the navigation tools (Scroll, Pan, Zoom,
    W/L, Region window `Y`), the drawing tools (Length, Angle `Q`, Cobb `J`,

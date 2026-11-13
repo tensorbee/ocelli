@@ -134,7 +134,7 @@
   <h1>Features and the road ahead</h1>
   <p class="lede">The viewer is Ocelli's showcase. A feature is implemented here only when it has a usable workflow on Images. Library code without that workflow is shown separately.</p>
   <div class="note">
-    <p><strong>This is the S46 integration preview.</strong> Sprint acceptance and performance measurements are still in progress. Another running build can show an older feature list.</p>
+    <p><strong>This is the S47 integration preview.</strong> Sprint acceptance and performance measurements are still in progress. Another running build can show an older feature list.</p>
     <p><strong>Implemented</strong> means usable in this viewer, with the limits named. <strong>Partial</strong> means a working part exists and the missing part is stated. <strong>Not yet</strong> means the viewer workflow is absent, even when its library is built. <strong>Planned</strong> is future work and is never presented as an implemented advantage.</p>
   </div>
   <p>The comparison uses the inspected Cornerstone3D <strong>5.8.2</strong> core, tools and DICOM loader as the tested baseline, checked 8 November 2026. Cornerstone supplies library APIs. A host application still supplies workflows such as prior-study search and saved preferences. Current ecosystem capabilities are identified explicitly.</p>
@@ -177,7 +177,7 @@
     <tr data-features="F-245"><th scope="row">DICOMweb sources</th><td>Loaders and metadata APIs</td><td>Client APIs built</td><td><span class="viewer-state part">Partial</span>The viewer searches studies, series and instances over DICOMweb and fetches one instance the native backend validates, remote image display is not available yet, and local folders open as before</td><td class="delivery">S47: F-245</td></tr>
     <tr data-features="F-249"><th scope="row">Metadata browser</th><td>Metadata APIs. Browser UI belongs to the host</td><td>Typed metadata built</td><td><span class="viewer-state part">Partial</span>Headers are browsable and filterable</td><td class="delivery">S48: F-249</td></tr>
     <tr data-features="F-250"><th scope="row">Metadata compare and copy</th><td>Host application workflow</td><td>Metadata foundations built</td><td><span class="viewer-state none">Not yet</span>No compare or copy workflow</td><td class="delivery">S48: F-250</td></tr>
-    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>Five validated choices saved, with named refusals</td><td><span class="viewer-state part">Partial</span>Per-key tool bindings and hanging layouts remain</td><td class="delivery">S47: F-205</td></tr>
+    <tr data-features="F-205"><th scope="row">Preferences</th><td>Configurable APIs. Persistence belongs to the host</td><td>No preference API. The folder viewer keeps five validated choices, with named refusals</td><td><span class="viewer-state part">Partial</span>Per-key tool bindings and hanging layouts remain</td><td class="delivery">S47: F-205</td></tr>
     <tr><th scope="row">SR measurements and key images</th><td>Adapters and host workflow</td><td>Read and write built</td><td><span class="viewer-state done">Implemented</span>Save marks and reopen SR/KOS in the viewer</td><td class="delivery">S46 preview</td></tr>
     <tr data-features="F-258"><th scope="row">Rendered capture and further document exports</th><td>Adapters and host workflow, format-dependent</td><td>Document APIs built</td><td><span class="viewer-state part">Partial</span>SR/KOS work. Other export actions remain</td><td class="delivery">S50: F-258</td></tr>
     <tr data-features="F-202"><th scope="row">Browser worker decode and render</th><td>DICOM worker decode supported</td><td>Fetch, hand-off and pool built</td><td><span class="viewer-state none">Not yet</span>Local native decoding works. Browser decode is unfinished</td><td class="delivery">S47: F-202</td></tr>
@@ -272,7 +272,7 @@ if let Some(shutter) = set.shutter() {
 }
 let grey = set.presentation_value();             // Shutter Presentation Value, when present</code></pre>
 </details>
-    <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The example page posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
+    <p class="tiers">Tiers A, B and C do not draw this module. The reader does not decode Pixel Data. The boundary demo posts a synthetic object and prints whether one pixel is set and whether the shutter hides it.</p>
   </section>
 
   <section class="feature" id="interpolation">
@@ -460,7 +460,7 @@ let (low, high, bin) = (range.min, range.max, range.width);
 
 let stats = roi_statistics(&amp;region, area_mm2)?;   // count, mean, sd, min, max, area</code></pre>
 </details>
-    <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The example page reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
+    <p class="tiers">This is plain arithmetic and runs anywhere. A value on an interior edge belongs to the higher bin. No viewport or shell control draws a histogram. The boundary demo reads Histogram unavailable, and the HLD's GPU histogram pass is tier A only.</p>
   </section>
 
   <section class="feature" id="auto-window">
@@ -533,7 +533,7 @@ let json = report.to_json();               // read by readConformanceReport</cod
 // maps one stored pixel to one device pixel and no core command names it.
 packCommands(viewportId(1), [{ kind: "Zoom", factor: 2 }]);</code></pre>
 </details>
-    <p class="tiers">Tiers A, B and C are not applicable, because the mode is the page's own write of the decoded display bytes into its canvas and the render path is unchanged on every tier. The example page shows One to one on the Images page, with the button beside Fit and the <code>\</code> key. On a frame with square pixels the mode is verified byte for byte in screenshots under the emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is DevTools device scale emulation and not a physical display.</p>
+    <p class="tiers">Tiers A, B and C are not applicable, because the mode is the page's own write of the decoded display bytes into its canvas and the render path is unchanged on every tier. The folder viewer shows One to one on the Images page, with the button beside Fit and the <code>\</code> key, while the boundary demo still reads One to one unavailable. On a frame with square pixels the mode is verified byte for byte in screenshots under the emulated ratios 1, 1.25, 1.5 and 2 in the pinned Chromium, which is DevTools device scale emulation and not a physical display.</p>
   </section>
 
   <section class="feature" id="preferences">
