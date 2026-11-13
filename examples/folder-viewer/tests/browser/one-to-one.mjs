@@ -739,6 +739,13 @@ export function labelAndSeriesProblems(seen) {
 // the window resize events, so a case can prove the watcher re-laid out
 // while the CSS viewport, and so the resize listener, never fired.
 const WATCH_WRAPPER = () => {
+  // The wait condition for a re-layout: the backing is the element box
+  // times the live ratio. A timeout leaves the rows to report the failure.
+  window.backingFollowsRatio = () => {
+    const canvas = activeViewport().dom.canvas;
+    const box = canvas.getBoundingClientRect();
+    return canvas.width === Math.round(box.width * window.devicePixelRatio);
+  };
   window.__resolutionArms = 0;
   window.__resizeEvents = 0;
   window.addEventListener("resize", () => { window.__resizeEvents += 1; });
@@ -785,19 +792,15 @@ export async function observeRatioWatcher(url, chromium, folder) {
       const before = await view(page);
       const session = await page.context().newCDPSession(page);
       await changeRatio(page, session, 2);
-      await page.waitForFunction((stale) => {
-        const vp = activeViewport();
-        return vp.paintX !== null && vp.paintX !== stale && window.__resolutionArms >= 2;
-      }, before.paintX, { timeout: 10000 }).catch(() => {});
+      await page.waitForFunction(() => window.__resolutionArms >= 2 && window.backingFollowsRatio(), null, { timeout: 10000 })
+        .catch(() => {});
       const atTwo = await view(page);
       const armsAfterTwo = await page.evaluate(() => window.__resolutionArms);
       const resizedAfterTwo = await page.evaluate(() => window.__resizeEvents);
       const cropAtTwo = await capturePixels(page, 128, 96, session);
       await changeRatio(page, session, 1);
-      await page.waitForFunction((stale) => {
-        const vp = activeViewport();
-        return vp.paintX !== null && vp.paintX !== stale && window.__resolutionArms >= 3;
-      }, atTwo.paintX, { timeout: 10000 }).catch(() => {});
+      await page.waitForFunction(() => window.__resolutionArms >= 3 && window.backingFollowsRatio(), null, { timeout: 10000 })
+        .catch(() => {});
       const atOne = await view(page);
       const armsAfterOne = await page.evaluate(() => window.__resolutionArms);
       const resizedAfterOne = await page.evaluate(() => window.__resizeEvents);
@@ -1066,9 +1069,9 @@ export function linkProblems(seen) {
   return problems;
 }
 
-// AC9, as the lead amendment after implementation pass 1 restates it. In
-// the mode the backing is the element's whole CSS pixel box times the
-// ratio, and the in-page grey reply equals the stored bytes at every pixel,
+// AC9, under the lead amendment after implementation pass 1, which
+// replaces its stored-size backing. In the mode the backing is the
+// element's whole CSS pixel box times the ratio, and the in-page grey reply equals the stored bytes at every pixel,
 // which guards the window pipeline. Leaving the mode by Fit returns the
 // backing to the stored frame size holding the stored bytes, so the path
 // outside the mode is the one it was.

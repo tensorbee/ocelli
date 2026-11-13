@@ -1379,12 +1379,11 @@ function blankViewport(cell) {
     // clears.
     panAppliedX: 0, panAppliedY: 0, zoomRefusal: "",
     // F-204. The one-to-one paint state: the last grey reply, the displayed
-    // buffer cached against the frame and transform state, the painted
-    // device box within the backing while the mode holds, the integer
-    // device offset the buffer was written at, and the whole CSS pixel
+    // buffer cached against the frame and transform state, the integer
+    // device offset in the backing the buffer was written at while the
+    // mode holds, which the magnifier reads, and the whole CSS pixel
     // alignment shift the stage margins carry.
     grey: null, oneBuf: null, oneBufGrey: null, oneBufKey: "",
-    paintX: null, paintY: null, paintW: 0, paintH: 0,
     paintOffsetX: 0, paintOffsetY: 0,
     oneShiftX: 0, oneShiftY: 0,
     // F-225. The file of the last image this viewport drew.
@@ -3886,8 +3885,6 @@ function layoutViewport(vp) {
     dom.stage.style.marginTop = (-boxH / 2 + vp.oneShiftY) + "px";
     translateX = 0;
     translateY = 0;
-    const layerX = Math.round(alignX * ratio);
-    const layerY = Math.round(alignY * ratio);
     // The device offset: the centring plus the pan minus the alignment
     // shift the margins introduced, snapped to a whole device pixel.
     const ox = Math.round((boxW * ratio - extents.screenW) / 2 + (vp.panX - vp.oneShiftX) * ratio);
@@ -3903,10 +3900,6 @@ function layoutViewport(vp) {
     dom.refs.style.transform = dom.ink.style.transform;
     dom.ink.style.transformOrigin = "center center";
     dom.refs.style.transformOrigin = "center center";
-    vp.paintX = layerX + ox;
-    vp.paintY = layerY + oy;
-    vp.paintW = extents.screenW;
-    vp.paintH = extents.screenH;
     vp.paintOffsetX = ox;
     vp.paintOffsetY = oy;
   } else {
@@ -3923,10 +3916,6 @@ function layoutViewport(vp) {
       dom.canvas.height = vp.grey.height;
       paintGrey(vp.viewContext, dom.canvas, vp.grey);
     }
-    vp.paintX = null;
-    vp.paintY = null;
-    vp.paintW = 0;
-    vp.paintH = 0;
     vp.paintOffsetX = 0;
     vp.paintOffsetY = 0;
     vp.oneShiftX = 0;
